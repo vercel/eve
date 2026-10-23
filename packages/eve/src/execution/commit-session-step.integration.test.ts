@@ -8,6 +8,8 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
+const remembered = { interactionId: "approval-1", outcome: "accepted" as const };
+
 const serializedContext = {
   "eve.auth": null,
   "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
@@ -30,7 +32,7 @@ it("keeps what the sandbox provider commits when a session step saves a transiti
         (view) => [
           {
             events: [],
-            turn: { ...view.turn, grants: [{ toolName: "deploy", interactionId: "approval-1" }] },
+            turn: { ...view.turn, remembered: { deploy: remembered } },
           },
         ],
         { origin: "relayed" },
@@ -38,9 +40,9 @@ it("keeps what the sandbox provider commits when a session step saves a transiti
     );
     expect(commit).toHaveBeenCalled();
     expect(published.sessionState.snapshot.session.sandboxState).toEqual(captured);
-    expect(readTurnState(readDurableSession(published.sessionState).state).grants).toEqual([
-      { toolName: "deploy", interactionId: "approval-1" },
-    ]);
+    expect(readTurnState(readDurableSession(published.sessionState).state).remembered).toEqual({
+      deploy: remembered,
+    });
   } finally {
     commit.mockRestore();
   }

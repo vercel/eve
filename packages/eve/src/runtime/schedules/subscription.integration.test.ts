@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
-import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/definition.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalConfiguration,
+  type ApprovalPolicy,
+} from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -11,7 +15,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
-import { withApprovalGrants } from "#approval/evaluation.js";
+import { evaluateApproval } from "#approval/evaluation.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
@@ -177,19 +181,24 @@ describe("schedule creation and invocation", () => {
       expect(updateWrite.mock.calls[1]![2].payload).toBeUndefined();
       const invoke = tools.schedule__requests__invoke!;
       const invoked = { name: created.name };
-      const invokeContext = withApprovalGrants(
-        {
-          toolName: "schedule__requests__invoke",
-          toolInput: invoked,
-        } as never,
-        [{ toolName: "schedule__requests__invoke", interactionId: "approval-1" }],
-      );
-      expect(await resolveApprovalPolicy(invoke.approval!)(invokeContext)).toEqual({
-        type: "not-applicable",
+      const invokeContext = { toolName: "schedule__requests__invoke", toolInput: invoked } as never;
+      const invokePolicy = resolveApprovalPolicy(invoke.approval!) as ApprovalPolicy;
+      const asked = await evaluateApproval(invokePolicy, invokeContext);
+      const memory = {
+        pending: [],
+        remembered: { [asked.remember!.key]: { interactionId: "approval-1", outcome: "accepted" } },
+      } as const;
+      expect(await evaluateApproval(invokePolicy, invokeContext, { memory })).toEqual({
+        denied: false,
+        clearedBy: { policy: "approval" },
       });
       expect(
-        await resolveApprovalPolicy(tools.schedule__requests__delete!.approval!)(invokeContext),
-      ).toBe("user-approval");
+        await evaluateApproval(
+          resolveApprovalPolicy(tools.schedule__requests__delete!.approval!) as ApprovalPolicy,
+          invokeContext,
+          { memory },
+        ),
+      ).toEqual({ denied: false, awaitsPerson: true });
       await invoke.execute(invoked, {} as never);
       expect(dispatched).toHaveBeenCalledOnce();
       await tools.schedule__requests__delete!.execute(invoked, {} as never);

@@ -32,7 +32,7 @@ it.each([
   const results = await contextStorage.run(ctx, () =>
     executeInlineCalls({
       abortSignal: undefined,
-      approvalGrants: [],
+      approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
@@ -81,7 +81,7 @@ it.each([null, "allow", { type: "approved", reason: 123 }])(
     const result = await contextStorage.run(ctx, () =>
       executeInlineCalls({
         abortSignal: undefined,
-        approvalGrants: [],
+        approvalMemory: { pending: [], remembered: {} },
         beforeExecute: () => {},
         excludedCallIds: new Set(),
         messages: [],
@@ -127,7 +127,7 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   const results = await contextStorage.run(ctx, () =>
     executeInlineCalls({
       abortSignal: undefined,
-      approvalGrants: [],
+      approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
@@ -151,7 +151,7 @@ it("keeps a thrown tool error's name in the durable call ending", async () => {
   const events: import("#protocol/session-event.js").SessionEvent[] = [];
   await executeInlineCalls({
     abortSignal: undefined,
-    approvalGrants: [],
+    approvalMemory: { pending: [], remembered: {} },
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],
@@ -202,7 +202,7 @@ it.each(["policy", "prompt"] as const)(
     };
     const result = await executeInlineCalls({
       abortSignal: undefined,
-      approvalGrants: [],
+      approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
@@ -250,7 +250,7 @@ it("closes a streaming tool when progress publication fails", async () => {
   let closed = false;
   const result = await executeInlineCalls({
     abortSignal: undefined,
-    approvalGrants: [],
+    approvalMemory: { pending: [], remembered: {} },
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],

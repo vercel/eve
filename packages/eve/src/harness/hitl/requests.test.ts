@@ -80,7 +80,10 @@ describe("holdsHitlRequests", () => {
   ])("keeps unreadable records blocking handoff even after cleanup: %j", (raw) => {
     const state = { "eve.runtime.hitl.requests": raw };
     expect(holdsHitlRequests(state)).toBe(true);
-    const saved = saveTransition({ state }, { events: [], turn: { grants: [], suspended: [] } });
+    const saved = saveTransition(
+      { state },
+      { events: [], turn: { remembered: {}, suspended: [] } },
+    );
     const cleaned = writeHitlState(saved, {}, emptySessionView());
     expect(holdsHitlRequests(cleaned.state)).toBe(true);
   });

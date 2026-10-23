@@ -86,9 +86,9 @@ export async function runModelStep(
   });
   recordOfferedCatalogTools(step.ctx, catalog);
   step.frameworkToolNames = frameworkToolNames(catalog);
-  const { approvalGrants, pendingApprovalsNote } = humanInputContext(step);
+  const { approvalMemory, pendingApprovalsNote } = humanInputContext(step);
   const caller = new ModelCaller(step, prompt, {
-    approvalGrants,
+    approvalMemory,
     catalog,
     generation,
     model: run.model,

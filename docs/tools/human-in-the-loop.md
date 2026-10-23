@@ -64,7 +64,7 @@ approval: auto({
 
 Dynamic tools rebuild their policies when evaluated. Use [`ctx.memo()`](/docs/guides/dynamic-capabilities) to keep external JSON observations used to configure a policy.
 
-Each pending approval needs its own answer. A `once()` grant applies to later calls, not other already-open prompts.
+Each pending approval needs its own answer. A `once()` approval applies to later calls, not other already-open prompts.
 
 Use the object form of `approval` to replace the default `Approve <tool label>?` text with a tool-specific summary. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
 
@@ -102,13 +102,13 @@ approval: ({ session, toolInput }) => {
 
 For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
 
-Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by `once()` records `{ grant: { interactionId } }`, identifying the approval it remembered; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by an approval `once()` remembered records the same `{ policy: "approval" }`; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
 Approval is not an exactly-once guarantee for a charge or email. Give non-idempotent side effects their own idempotency keys.
 
 ### Remember approval for a tool
 
-`once()` remembers approval for the resolved tool name across turns and context clears, until the session ends. The grant covers later calls to that tool regardless of their input; it does not clear a different tool. A denial creates no grant, and approving a prompt asked by `always()` or a policy that does not return `once()`'s decision creates no grant. Consulting `once()` and then choosing another branch neither uses nor records its grant. Existing pending prompts still need their own answers.
+`once()` remembers the latest decision people gave its prompts for the resolved tool name, across turns and context clears, until the session ends. A remembered approval covers later calls to that tool regardless of their input; it does not clear a different tool. A later denial of a `once()` prompt for the tool replaces it, so the next call asks again. Approving a prompt asked by `always()` or by a policy that does not return `once()`'s decision remembers nothing, and consulting `once()` before choosing another branch records nothing. Existing pending prompts still need their own answers.
 
 A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions. When wrapping `once()` in another policy, forward the policy context and return its status object unchanged.
 

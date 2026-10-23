@@ -22,7 +22,7 @@ import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
   admitAnswers,
   dispatch,
-  grantedApprovals,
+  approvalMemory,
   openLimit,
   queueInput,
   requireSignIn,
@@ -232,7 +232,7 @@ async function runApproved(
       const recheck = await decideApproval(tool, {
         recheck: true,
         abortSignal: step.config.abortSignal,
-        approvalGrants: grantedApprovals(step.view()),
+        approvalMemory: approvalMemory(step.view()),
         callId: approval.call.callId,
         input: approval.call.input,
       });
@@ -312,7 +312,7 @@ async function runApproved(
             });
       return await runApprovedCalls({
         abortSignal: step.config.abortSignal,
-        approvalGrants: grantedApprovals(step.view()),
+        approvalMemory: approvalMemory(step.view()),
         approvals,
         messages: step.session.history,
         publish: step.publish,

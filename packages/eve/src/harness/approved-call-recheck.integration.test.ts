@@ -127,7 +127,7 @@ describe("approved call recheck (real AI SDK)", () => {
       fixture.events.filter((event) => event.type === "call.started").map((event) => event.data),
     ).toMatchObject([
       { callId: "first", clearedBy: { interactionId: first.data.interactionId } },
-      { callId: "remembered", clearedBy: { grant: { interactionId: first.data.interactionId } } },
+      { callId: "remembered", clearedBy: { policy: "approval" } },
     ]);
     expect(fixture.events.filter((event) => event.type === "interaction.opened")).toHaveLength(2);
     expect(
@@ -187,97 +187,59 @@ describe("approved call recheck (real AI SDK)", () => {
     },
   );
 
-  it("credits a remembered approval only when once() decides the call", async () => {
-    const perTool = once();
-    const execute = vi.fn(() => "deployed");
-    const fixture = setup(
-      {
-        name: "deploy",
-        description: "Deploy Alice's release",
-        inputSchema: jsonSchema({ type: "object" }),
-        execute,
-        approval: async (context) => {
-          const remembered = await perTool({ ...context });
-          return context.callId === "unrelated" ? "not-applicable" : remembered;
-        },
-      },
-      {
-        calls: [
-          [{ input: "{}", toolCallId: "first", toolName: "deploy" }],
-          [
-            { input: "{}", toolCallId: "unrelated", toolName: "deploy" },
-            { input: "{}", toolCallId: "remembered", toolName: "deploy" },
-          ],
-        ],
-      },
-    );
-    const initial = await fixture.step(fixture.session, {
-      message: "Help Alice deploy her release.",
-    });
-    const request = fixture.events.find((event) => event.type === "interaction.opened")!;
-    await fixture.step(initial.session, {
-      answers: [
+  it.each([
+    ["both approve", ["left", "approve"], ["right", "approve"], true],
+    ["the later answer declines", ["left", "approve"], ["right", "deny"], false],
+    [
+      "the later answer, to the earlier prompt, declines",
+      ["right", "approve"],
+      ["left", "deny"],
+      false,
+    ],
+    ["the later answer approves", ["left", "deny"], ["right", "approve"], true],
+  ] as const)(
+    "keeps simultaneous once prompts independent, then remembers the latest decision (%s)",
+    async (_name, firstAnswer, secondAnswer, remembered) => {
+      const execute = vi.fn(() => "deployed");
+      const call = (toolCallId: string) => ({ input: "{}", toolCallId, toolName: "deploy" });
+      const fixture = setup(
         {
-          interactionId: request.data.interactionId,
-          optionId: "approve",
-          deliveryId: "answer-first",
-          responseId: "response-first",
+          name: "deploy",
+          description: "Deploy Alice's release",
+          inputSchema: jsonSchema({ type: "object" }),
+          execute,
+          approval: once(),
         },
-      ],
-    });
-    const started = fixture.events
-      .filter((event) => event.type === "call.started")
-      .map((event) => event.data);
-    expect(started.find((data) => data.callId === "unrelated")?.clearedBy).toBeUndefined();
-    expect(started.find((data) => data.callId === "remembered")?.clearedBy).toEqual({
-      grant: { interactionId: request.data.interactionId },
-    });
-    expect(execute).toHaveBeenCalledTimes(3);
-  });
-
-  it("keeps simultaneous once prompts independent before reusing their approval", async () => {
-    const execute = vi.fn(() => "deployed");
-    const call = (toolCallId: string) => ({ input: "{}", toolCallId, toolName: "deploy" });
-    const fixture = setup(
-      {
-        name: "deploy",
-        description: "Deploy Alice's release",
-        inputSchema: jsonSchema({ type: "object" }),
-        execute,
-        approval: once(),
-      },
-      { calls: [[call("left"), call("right")], [call("later")]] },
-    );
-    const initial = await fixture.step(fixture.session, {
-      message: "Help Alice deploy her releases.",
-    });
-    const requests = fixture.events.filter((event) => event.type === "interaction.opened");
-    expect(requests).toHaveLength(2);
-    const partial = await fixture.step(initial.session, {
-      answers: [
-        {
-          interactionId: requests[0]!.data.interactionId,
-          optionId: "approve",
-          deliveryId: "answer-left",
-          responseId: "response-left",
-        },
-      ],
-    });
-    expect(execute).not.toHaveBeenCalled();
-    expect(fixture.events.filter((event) => event.type === "interaction.settled")).toHaveLength(0);
-    await fixture.step(JSON.parse(JSON.stringify(partial.session)) as HarnessSession, {
-      answers: [
-        {
-          interactionId: requests[1]!.data.interactionId,
-          optionId: "approve",
-          deliveryId: "answer-right",
-          responseId: "response-right",
-        },
-      ],
-    });
-    expect(execute).toHaveBeenCalledTimes(3);
-    expect(fixture.events.filter((event) => event.type === "interaction.opened")).toHaveLength(2);
-  });
+        { calls: [[call("left"), call("right")], [call("later")]] },
+      );
+      const initial = await fixture.step(fixture.session, {
+        message: "Help Alice deploy her releases.",
+      });
+      const requests = fixture.events.filter((event) => event.type === "interaction.opened");
+      expect(requests).toHaveLength(2);
+      const answer = ([prompt, optionId]: readonly [string, string]) => ({
+        interactionId: requests[prompt === "left" ? 0 : 1]!.data.interactionId,
+        optionId,
+        deliveryId: `answer-${prompt}`,
+        responseId: `response-${prompt}`,
+      });
+      const partial = await fixture.step(initial.session, { answers: [answer(firstAnswer)] });
+      expect(execute).not.toHaveBeenCalled();
+      expect(fixture.events.filter((event) => event.type === "interaction.settled")).toHaveLength(
+        0,
+      );
+      await fixture.step(JSON.parse(JSON.stringify(partial.session)) as HarnessSession, {
+        answers: [answer(secondAnswer)],
+      });
+      const approvals = [firstAnswer, secondAnswer].filter(
+        ([, optionId]) => optionId === "approve",
+      );
+      expect(execute).toHaveBeenCalledTimes(approvals.length + (remembered ? 1 : 0));
+      const prompts = fixture.events.filter((event) => event.type === "interaction.opened");
+      expect(prompts).toHaveLength(remembered ? 2 : 3);
+      if (!remembered) expect(prompts.at(-1)?.data.subject).toEqual({ callId: "later" });
+    },
+  );
 
   it("keeps a human-approved call's model output unchanged when its recheck returns a reason", async () => {
     let approved = false;

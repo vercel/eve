@@ -51,10 +51,7 @@ export interface CallRequestedData {
 }
 
 /** What cleared a call to run. Absent when it needed no approval. */
-export type ClearedBy =
-  | { readonly policy: string }
-  | { readonly grant: { readonly interactionId: string } }
-  | { readonly interactionId: string };
+export type ClearedBy = { readonly policy: string } | { readonly interactionId: string };
 
 export interface CallStartedData {
   readonly callId: string;
@@ -100,11 +97,7 @@ export type CallProgressRecord = CallInput | CallProgress;
 const owner = conforming<CallOwner>()(z.union([z.object({ runId: id }), z.object({ callId: id })]));
 
 export const clearedBySchema = conforming<ClearedBy>()(
-  z.union([
-    z.object({ policy: z.string() }),
-    z.object({ grant: z.object({ interactionId: id }) }),
-    z.object({ interactionId: id }),
-  ]),
+  z.union([z.object({ policy: z.string() }), z.object({ interactionId: id })]),
 );
 
 export const callSchemas = {

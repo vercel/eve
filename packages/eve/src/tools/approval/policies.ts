@@ -1,7 +1,7 @@
 import type { DecisionModel } from "#ai/decision-types.js";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
-import { evaluateOnce } from "#approval/evaluation.js";
+import { approvalEvaluation } from "#approval/evaluation.js";
 import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
@@ -89,5 +89,12 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
       "once() does not accept options. Use a custom approval policy for input-dependent decisions.",
     );
   }
-  return (context) => evaluateOnce(context as ApprovalContext);
+  return (context) => {
+    const evaluation = approvalEvaluation(context as ApprovalContext);
+    if (evaluation === undefined) return "user-approval";
+    const key = JSON.stringify(["once", evaluation.toolName]);
+    const { entry, pending } = evaluation.read(key);
+    // An approval still waiting on its own answer stays a separate question.
+    return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key });
+  };
 }

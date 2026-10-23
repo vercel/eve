@@ -199,7 +199,7 @@ export async function recoverInterruptedStep(input: {
         clearsHistory: true,
         events: [],
         signIns: [],
-        turn: { grants: view().turn.grants, suspended: [] },
+        turn: { remembered: view().turn.remembered, suspended: [] },
       });
       session = replaceSessionHistory(cleared, []);
     }

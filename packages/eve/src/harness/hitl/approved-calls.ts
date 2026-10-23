@@ -1,4 +1,4 @@
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage, TelemetryOptions } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -36,7 +36,7 @@ export async function runApprovedCalls(input: {
   readonly approvals: readonly ApprovedCall[];
   /** The entries of the step that asked, which the approved calls run. */
   readonly tools: HarnessToolLookup;
-  readonly approvalGrants?: readonly ApprovalGrant[];
+  readonly approvalMemory?: ApprovalMemory;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
   readonly publish: HandleEventFn;

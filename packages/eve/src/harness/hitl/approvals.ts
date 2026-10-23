@@ -1,9 +1,9 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 import {
-  type ApprovalGrant,
-  availableApprovalGrants,
-  rememberAcceptedApproval,
+  type ApprovalMemory,
+  type RememberedApproval,
+  rememberDecision,
 } from "#approval/evaluation.js";
 
 import type { ResponderCheck } from "./responders.js";
@@ -241,8 +241,8 @@ export interface RunnableCall {
  * A step's approvals settle together, once each has a standing answer. A message steers past
  * them instead: the answers given stand, and the approvals nobody answered are withdrawn.
  * Approved calls are returned to run; denied ones get their denial as a result.
- * Accepted answers establish any requested grants. `answered` says a step settled on its answers
- * rather than a message.
+ * A request that asked to be remembered records the decision. `answered` says a step settled on
+ * its answers rather than a message.
  */
 export function settleApprovals(
   view: SessionView,
@@ -255,13 +255,19 @@ export function settleApprovals(
   const answerOf = (request: ApprovalAsk) =>
     responseOf(request.interactionId, standing.get(request.interactionId));
   const responses = responseLedger(tables);
-  let grants = view.turn.grants;
   const approved: RunnableCall[] = [];
   let answered = false;
   const events: SessionEvent[] = [];
+  const decisions: {
+    readonly at: number;
+    readonly request: ApprovalAsk;
+    readonly outcome: RememberedApproval["outcome"];
+  }[] = [];
   const decide = (request: ApprovalAsk, outcome: InteractionOutcome, reason?: string) => {
     const answer = outcome === "withdrawn" ? undefined : standing.get(request.interactionId);
     if (answer !== undefined) responses.settle(answer.responseId, "applied");
+    if (answer !== undefined && (outcome === "accepted" || outcome === "declined"))
+      decisions.push({ at: answer.introducedAt, outcome, request });
     responses.closeOthers(request.interactionId, answer?.responseId);
     events.push(
       interactionSettled(request.interactionId, outcome, {
@@ -284,7 +290,6 @@ export function settleApprovals(
       const { callId, toolName } = request.call;
       const { approved: approves, reason, status } = resolveApprovalOutcome(answerOf(request));
       if (approves) {
-        grants = rememberAcceptedApproval(grants, request);
         const responder = view.responders[standing.get(request.interactionId)?.responseId ?? ""];
         approved.push({
           approval: {
@@ -327,11 +332,18 @@ export function settleApprovals(
     }
     return { ...step, messages };
   });
+  // Decisions settled together apply in the order people gave them; the latest one stands.
+  const remembered = decisions
+    .sort((a, b) => a.at - b.at)
+    .reduce(
+      (memory, decision) => rememberDecision(memory, decision.request, decision.outcome),
+      view.turn.remembered,
+    );
   return {
     answered,
     approved,
     events: [...responses.facts(), ...events],
-    turn: { ...view.turn, grants, suspended },
+    turn: { ...view.turn, remembered, suspended },
   };
 }
 
@@ -369,11 +381,15 @@ export function withdrawUnavailable(
   return { events: [...responses.facts(), ...events], turn: { ...view.turn, suspended } };
 }
 
-export function grantedApprovals(view: SessionView): readonly ApprovalGrant[] {
-  return availableApprovalGrants(
-    view.turn.grants,
-    view.turn.suspended.flatMap((step) => pendingApprovals(view, step)),
-  );
+export function approvalMemory(view: SessionView): ApprovalMemory {
+  return {
+    pending: view.turn.suspended.flatMap((step) =>
+      pendingApprovals(view, step).flatMap((request) =>
+        request.remember === undefined ? [] : [request.remember.key],
+      ),
+    ),
+    remembered: view.turn.remembered,
+  };
 }
 
 // ---------------------------------------------------------------------------

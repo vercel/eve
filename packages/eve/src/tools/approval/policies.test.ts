@@ -28,7 +28,7 @@ describe("dynamic tool approval helpers", () => {
   it.each([
     ["always", always(), "user-approval"],
     ["never", never(), "not-applicable"],
-    ["once", once(), { type: "user-approval" }],
+    ["once", once(), "user-approval"],
   ] as const)("%s returns its fixed decision", async (_name, policy, expected) => {
     expect(await policy(approvalContext())).toEqual(expected);
   });

@@ -8,7 +8,7 @@ import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
-import { type ApprovalGrant, evaluateApproval } from "#approval/evaluation.js";
+import { type ApprovalMemory, evaluateApproval } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
@@ -170,7 +170,7 @@ interface ApprovalCall {
   readonly callId: string;
   readonly input: unknown;
   readonly abortSignal?: AbortSignal;
-  readonly approvalGrants?: readonly ApprovalGrant[];
+  readonly approvalMemory?: ApprovalMemory;
   readonly recheck?: boolean;
 }
 
@@ -189,7 +189,6 @@ export async function decideApproval(
       toolInput: isObject(call.input) ? call.input : undefined,
       toolName: definition.name,
     },
-    call.approvalGrants ?? [],
-    call.recheck === true,
+    { memory: call.approvalMemory, recheck: call.recheck },
   );
 }

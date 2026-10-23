@@ -983,7 +983,7 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
       contextStarted({ cause: input.cause, changeId, kind: "clear" }),
       fact("context.settled", { changeId, kind: "clear", outcome: "completed", selects: null }),
     ],
-    turn: { grants: view.turn.grants, suspended: [] } satisfies TurnState,
+    turn: { remembered: view.turn.remembered, suspended: [] } satisfies TurnState,
   };
 }
 

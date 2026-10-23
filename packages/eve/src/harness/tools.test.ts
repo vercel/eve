@@ -30,6 +30,8 @@ import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#tools/provided/bash.js";
@@ -58,7 +60,7 @@ async function resolveApproval(
   session?: Session,
   options: {
     readonly abortSignal?: AbortSignal;
-    readonly approvalGrants?: readonly import("#approval/evaluation.js").ApprovalGrant[];
+    readonly approvalMemory?: ApprovalMemory;
   } = {},
 ): Promise<unknown> {
   const definition = tools.get(toolName);
@@ -73,7 +75,7 @@ async function resolveApproval(
   return contextStorage.run(ctx, () =>
     decideApproval(definition, {
       abortSignal: options.abortSignal,
-      approvalGrants: options.approvalGrants,
+      approvalMemory: options.approvalMemory,
       callId: "call_1",
       input,
     }),
@@ -919,7 +921,6 @@ describe("buildToolSet", () => {
       });
     });
 
-    const grants = [{ toolName: "bash", interactionId: "approval-1" }];
     const bashWith = (approval: ApprovalPolicy): HarnessToolMap =>
       new Map<string, HarnessToolDefinition>([
         [
@@ -934,58 +935,62 @@ describe("buildToolSet", () => {
         ],
       ]);
     const perTool = once();
+    /** What the session remembers once Alice accepts the prompt `once()` asked for bash. */
+    const acceptedOnce = async (pending = false): Promise<ApprovalMemory> => {
+      const asked = (await resolveApproval(bashWith(perTool), "bash", {})) as ApprovalDecision;
+      const key = asked.remember!.key;
+      return {
+        pending: pending ? [key] : [],
+        remembered: { [key]: { interactionId: "approval-1", outcome: "accepted" } },
+      };
+    };
 
     it.each([
       ["returned directly", perTool],
       ["returned through a context spread", (context: ApprovalContext) => perTool({ ...context })],
-    ] as const)("credits the grant when once() is %s", async (_name, approval) => {
+    ] as const)(
+      "asks to remember, then uses, an approval when once() is %s",
+      async (_name, approval) => {
+        await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toMatchObject({
+          awaitsPerson: true,
+          remember: { key: expect.any(String) },
+        });
+        await expect(
+          resolveApproval(bashWith(approval), "bash", {}, undefined, {
+            approvalMemory: await acceptedOnce(),
+          }),
+        ).resolves.toEqual({ denied: false, clearedBy: { policy: "approval" } });
+      },
+    );
+
+    it("asks again while another remembering prompt for the tool is open", async () => {
       await expect(
-        resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants }),
-      ).resolves.toEqual({ denied: false, clearedBy: { grant: { interactionId: "approval-1" } } });
-      await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toEqual({
-        denied: false,
-        awaitsPerson: true,
-        grantOnAcceptance: { toolName: "bash" },
-      });
+        resolveApproval(bashWith(perTool), "bash", {}, undefined, {
+          approvalMemory: await acceptedOnce(true),
+        }),
+      ).resolves.toMatchObject({ awaitsPerson: true, remember: { key: expect.any(String) } });
     });
 
-    it("credits once() imported from a separate copy of eve's modules", async () => {
+    it("reads once() imported from a separate copy of eve's modules", async () => {
       // Bundled authored tools can load eve/tools/approval apart from the harness's copy.
+      const approvalMemory = await acceptedOnce();
       vi.resetModules();
       const copy = await import("#tools/approval/policies.js");
       vi.resetModules();
       await expect(
-        resolveApproval(bashWith(copy.once()), "bash", {}, undefined, { approvalGrants: grants }),
-      ).resolves.toEqual({ denied: false, clearedBy: { grant: { interactionId: "approval-1" } } });
-      await expect(resolveApproval(bashWith(copy.once()), "bash", {})).resolves.toEqual({
-        denied: false,
+        resolveApproval(bashWith(copy.once()), "bash", {}, undefined, { approvalMemory }),
+      ).resolves.toEqual({ denied: false, clearedBy: { policy: "approval" } });
+      await expect(resolveApproval(bashWith(copy.once()), "bash", {})).resolves.toMatchObject({
         awaitsPerson: true,
-        grantOnAcceptance: { toolName: "bash" },
+        remember: { key: expect.any(String) },
       });
     });
-
-    it.each([
-      ["not-applicable", "not-applicable"],
-      ["an equal status object", { type: "not-applicable" }],
-      ["a boolean", false],
-    ] as const)(
-      "does not credit a grant when a policy consults once() but returns %s",
-      async (_name, result) => {
-        const approval = async (context: ApprovalContext) => {
-          await perTool(context);
-          return result;
-        };
-        await expect(
-          resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants }),
-        ).resolves.toEqual({ denied: false });
-      },
-    );
 
     it.each([
       ["user-approval", "user-approval"],
       ["an equal status object", { type: "user-approval" }],
     ] as const)(
-      "does not offer a once() grant when a policy consults once() but returns %s",
+      "remembers nothing when a policy consults once() but returns %s",
       async (_name, result) => {
         const approval = async (context: ApprovalContext) => {
           await perTool(context);
@@ -998,42 +1003,34 @@ describe("buildToolSet", () => {
       },
     );
 
-    it.each([
-      ["approved", { denied: false, clearedBy: { policy: "approval" } }],
-      ["denied", { denied: true, reason: undefined }],
-    ] as const)("keeps a final %s verdict over a remembered grant", async (status, expected) => {
-      const approval = async (context: ApprovalContext) => {
-        await perTool(context);
-        return status;
-      };
-      await expect(
-        resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants }),
-      ).resolves.toEqual(expected);
-    });
-
-    it("gives policies a frozen evaluation without leaking grants into JSON", async () => {
+    it("gives policies a frozen evaluation without leaking memory into JSON", async () => {
       let seen: ApprovalContext | undefined;
       const approval = (context: ApprovalContext) => {
         seen = context;
         return perTool(context);
       };
-      await resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants });
+      await resolveApproval(bashWith(approval), "bash", {}, undefined, {
+        approvalMemory: await acceptedOnce(),
+      });
       const evaluation = Reflect.get(seen!, Symbol.for("eve.approval-evaluation"));
       expect(Object.isFrozen(evaluation)).toBe(true);
       expect(JSON.stringify(seen)).not.toContain("approval-1");
     });
 
-    it("credits only the grant the harness was given, not a renamed policy context", async () => {
-      const approval = (context: ApprovalContext) => perTool({ ...context, toolName: "other" });
+    it("reads the tool the harness resolved, not a renamed policy context", async () => {
+      const other = (await resolveApproval(
+        new Map([["other", { ...bashWith(perTool).get("bash")!, name: "other" }]]),
+        "other",
+        {},
+      )) as ApprovalDecision;
+      const approvalMemory: ApprovalMemory = {
+        pending: [],
+        remembered: { [other.remember!.key]: { interactionId: "approval-1", outcome: "accepted" } },
+      };
+      const renamed = bashWith((context) => perTool({ ...context, toolName: "other" }));
       await expect(
-        resolveApproval(bashWith(approval), "bash", {}, undefined, {
-          approvalGrants: [{ toolName: "other", interactionId: "approval-1" }],
-        }),
-      ).resolves.toEqual({
-        denied: false,
-        awaitsPerson: true,
-        grantOnAcceptance: { toolName: "bash" },
-      });
+        resolveApproval(renamed, "bash", {}, undefined, { approvalMemory }),
+      ).resolves.toMatchObject({ awaitsPerson: true });
     });
 
     it("tool without approval defaults to false when another tool has an override", async () => {

@@ -1,4 +1,4 @@
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -20,7 +20,7 @@ import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
 import {
   askApprovals,
-  grantedApprovals,
+  approvalMemory,
   pendingApprovals,
   openLimit,
   requestLimit,
@@ -128,16 +128,16 @@ export async function enforceBudget(
 }
 
 /**
- * What a model call needs from the approvals: available remembered grants, and
+ * What a model call needs from the approvals: what their policies remember, and
  * a note on the calls still awaiting approval, which a message may revise.
  */
 export function humanInputContext(step: Step): {
-  readonly approvalGrants: readonly ApprovalGrant[];
+  readonly approvalMemory: ApprovalMemory;
   readonly pendingApprovalsNote?: string;
 } {
   const view = step.view();
   return {
-    approvalGrants: grantedApprovals(view),
+    approvalMemory: approvalMemory(view),
     pendingApprovalsNote: renderPendingApprovalsInstruction(
       view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
     ),

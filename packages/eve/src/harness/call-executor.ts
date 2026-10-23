@@ -1,4 +1,4 @@
-import type { ApprovalGrant, ApprovalGrantRequest } from "#approval/evaluation.js";
+import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
@@ -69,7 +69,7 @@ export interface ToolSignIn {
 
 /** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
-  readonly grantOnAcceptance?: ApprovalGrantRequest;
+  readonly remember?: RememberRequest;
   readonly clearedBy?: ClearedBy;
   readonly settled: readonly CallResult[];
   /** What `execute` returned, for `endsTurn`. */
@@ -86,7 +86,7 @@ export async function executeToolCall(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
     readonly abortSignal: AbortSignal | undefined;
-    readonly approvalGrants?: readonly ApprovalGrant[];
+    readonly approvalMemory?: ApprovalMemory;
     readonly definition: RunnableTool;
     readonly messages: readonly ModelMessage[];
     readonly publish: HandleEventFn;
@@ -150,16 +150,11 @@ export async function executeToolCall(
       abortSignal: input.abortSignal,
       callId,
       input: args,
-      approvalGrants: input.approvalGrants,
+      approvalMemory: input.approvalMemory,
       recheck: approval === "recheck",
     });
     if (decision.awaitsPerson === true)
-      return {
-        awaitsApproval: true,
-        grantOnAcceptance: decision.grantOnAcceptance,
-        settled,
-        toolResults,
-      };
+      return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
@@ -456,7 +451,7 @@ export async function executeInlineCalls(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   /** The step's entries: each call already names the entry it runs. */
   readonly tools: HarnessToolLookup;
-  readonly approvalGrants: readonly ApprovalGrant[];
+  readonly approvalMemory: ApprovalMemory;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
   readonly publish: HandleEventFn;
@@ -491,10 +486,7 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? {
-                  ...approvalRequest(call, definition),
-                  grantOnAcceptance: executed.grantOnAcceptance,
-                }
+              ? { ...approvalRequest(call, definition), remember: executed.remember }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -530,24 +522,19 @@ async function decideDeferredCall(
   definition: HarnessToolDefinition,
   input: {
     readonly abortSignal: AbortSignal | undefined;
-    readonly approvalGrants: readonly ApprovalGrant[];
+    readonly approvalMemory: ApprovalMemory;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
   if (definition.approval === undefined) return { settled: [], toolResults: [] };
   const decision = await decideApproval(definition, {
     abortSignal: input.abortSignal,
-    approvalGrants: input.approvalGrants,
+    approvalMemory: input.approvalMemory,
     callId: call.callId,
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return {
-      awaitsApproval: true,
-      grantOnAcceptance: decision.grantOnAcceptance,
-      settled: [],
-      toolResults: [],
-    };
+    return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
   if (!decision.denied)
     return {
       settled: [],

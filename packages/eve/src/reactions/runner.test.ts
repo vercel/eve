@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ChannelInstrumentationKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
-import { withApprovalGrants } from "#approval/evaluation.js";
+import { evaluateApproval, type ApprovalMemory } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
 import { session as publicSession } from "#protocol/session-projection/public-view.js";
 import { once } from "#tools/approval/policies.js";
 import { z } from "#compiled/zod/index.js";
@@ -276,14 +277,17 @@ describe("evaluateValues", () => {
       toolInput: { scope: "dev" },
       toolName: tool.name,
     };
-    const grants = [{ interactionId: "approval-1", toolName: tool.name }];
-    expect(await policy(context)).toEqual({ type: "user-approval" });
-    expect(await policy(withApprovalGrants({ ...context }, grants))).toEqual({
-      type: "not-applicable",
-    });
+    const asked = await evaluateApproval(policy, context);
+    expect(asked).toMatchObject({ awaitsPerson: true, remember: { key: expect.any(String) } });
+    const memory: ApprovalMemory = {
+      pending: [],
+      remembered: { [asked.remember!.key]: { interactionId: "approval-1", outcome: "accepted" } },
+    };
+    const approved: ApprovalDecision = { denied: false, clearedBy: { policy: "approval" } };
+    expect(await evaluateApproval(policy, { ...context }, { memory })).toEqual(approved);
     expect(
-      await policy(withApprovalGrants({ ...context, toolInput: { scope: "prod" } }, grants)),
-    ).toEqual({ type: "not-applicable" });
+      await evaluateApproval(policy, { ...context, toolInput: { scope: "prod" } }, { memory }),
+    ).toEqual(approved);
   });
 
   it("installs the code each evaluation builds, even when what the model is offered is unchanged", async () => {

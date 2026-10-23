@@ -1,5 +1,5 @@
 import type { ModelMessage } from "ai";
-import type { ApprovalGrant, ApprovalGrantRequest } from "#approval/evaluation.js";
+import type { RememberedApproval, RememberRequest } from "#approval/evaluation.js";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -23,7 +23,7 @@ export interface StepCoordinates {
 
 /** A call that needs a person's approval, and what they're asked. */
 export interface ApprovalAsk {
-  readonly grantOnAcceptance?: ApprovalGrantRequest;
+  readonly remember?: RememberRequest;
   readonly interactionId: string;
   readonly call: {
     readonly callId: string;
@@ -86,11 +86,11 @@ export interface TurnState {
    */
   readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
-  /** Human approvals remembered for the rest of the session. */
-  readonly grants: readonly ApprovalGrant[];
+  /** People's approval decisions, under the keys their requests named, for the session. */
+  readonly remembered: Readonly<Record<string, RememberedApproval>>;
 }
 
-export const EMPTY_TURN_STATE: TurnState = { grants: [], suspended: [] };
+export const EMPTY_TURN_STATE: TurnState = { remembered: {}, suspended: [] };
 
 export function readTurnState(state: SessionStateMap | undefined): TurnState {
   return (state?.[TURN_STATE_KEY] as TurnState | undefined) ?? EMPTY_TURN_STATE;
@@ -101,7 +101,11 @@ export function writeTurnState<T extends { readonly state?: SessionStateMap }>(
   turn: TurnState,
 ): T {
   const state = { ...session.state };
-  if (turn.suspended.length === 0 && turn.queued === undefined && turn.grants.length === 0) {
+  if (
+    turn.suspended.length === 0 &&
+    turn.queued === undefined &&
+    Object.keys(turn.remembered).length === 0
+  ) {
     delete state[TURN_STATE_KEY];
   } else {
     state[TURN_STATE_KEY] = turn;

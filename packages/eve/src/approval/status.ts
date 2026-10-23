@@ -1,6 +1,6 @@
 import type { ApprovalStatus } from "#approval/definition.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
-import type { ApprovalGrantRequest } from "#approval/evaluation.js";
+import type { RememberRequest } from "#approval/evaluation.js";
 
 export type NormalizedApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -34,7 +34,7 @@ export function normalizeApprovalStatus(value: unknown): NormalizedApprovalStatu
 }
 
 export interface ApprovalDecision {
-  readonly grantOnAcceptance?: ApprovalGrantRequest;
+  readonly remember?: RememberRequest;
   readonly clearedBy?: ClearedBy;
   readonly denied: boolean;
   readonly awaitsPerson?: true;
