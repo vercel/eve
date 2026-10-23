@@ -3,12 +3,16 @@ import type {
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 import type { ToolApproval } from "#approval/definition.js";
+import type { ChannelReference } from "#channel/compiled-channel.js";
+import type { InferReceiveTarget } from "#channel/receive-target.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { MessageResult, SendTurnOptions } from "#client/types.js";
 import type {
   AgentModelOptionsDefinition,
   AgentReasoningDefinition,
 } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import {
   stampToolDefinition,
   type PublicToolDefinition,
@@ -107,6 +111,31 @@ export interface AgentSession {
   ): Promise<AgentResponse<TOutput>>;
 }
 
+/** The channel that serves a workflow tool's calling session, as `ctx.channel` holds it. */
+export interface WorkflowToolChannel {
+  /**
+   * The channel's path-derived name, such as `"slack"` for
+   * `agent/channels/slack.ts`: what `sendToChannel()` takes.
+   */
+  readonly name?: string;
+  /** The channel's identity, as hooks and dynamic resolvers see it. */
+  readonly kind?: string;
+  /** What the channel's `metadata(state)` hook projects for the session. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/** Options for {@link WorkflowSharedContext.sendToChannel}. */
+export interface WorkflowChannelSendOptions<TTarget = Record<string, unknown>> {
+  /** Where on the channel the message goes, as the channel's `receive()` hook accepts it. */
+  readonly target: TTarget;
+  /** Who the session runs as. Pass `ctx.session.auth.current` to act as the caller. */
+  readonly auth: SessionAuthContext | null;
+  /** Prior conversation added before the message. */
+  readonly history?: readonly SessionHistoryMessage[];
+  /** How the message treats a running turn, as on route `to().send()`. Defaults to the channel's. */
+  readonly turnPolicy?: TurnPolicy;
+}
+
 /**
  * Members the context of every workflow tool entry point shares.
  * `getSandbox`, `getToken`, and `requireAuth` work only after `ctx` is passed
@@ -123,12 +152,33 @@ export type WorkflowSharedContext = Pick<
   agent(name: string, options?: AgentSessionOptions): AgentSession;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
+  /** The channel that serves the calling session, as hooks and dynamic resolvers see it. */
+  readonly channel: WorkflowToolChannel;
   /**
    * Ask the human on the session's channel; awaiting the answer suspends the
    * run. The request is withdrawn, resolving as `cancelled`, when
    * `options.signal` or the call's `abortSignal` aborts.
    */
   ask(request: ToolInputRequest, options?: ToolInputRequestOptions): PromiseLike<ToolInputResponse>;
+  /**
+   * Sends a message to one of the agent's channels, named by its path
+   * (`agent/channels/slack.ts` is `"slack"`). It runs as a step through the
+   * channel's `receive()` hook, which starts a session at `target` or continues
+   * the one that owns it. The session belongs to the channel: it has no parent
+   * and outlives the workflow run. Each call resolves `target` on its own. A
+   * retried step reuses its delivery key, so the session that owns an address
+   * gets the message once; a target the channel gives a new address each time
+   * can start a second session on retry.
+   *
+   * Type the target with a type-only import:
+   * `ctx.sendToChannel<typeof slack>("slack", message, { target, auth })`.
+   * Only tools on the root agent can call it; it throws in a subagent's tool.
+   */
+  sendToChannel<TChannel extends ChannelReference<unknown> = ChannelReference>(
+    name: string,
+    message: string,
+    options: WorkflowChannelSendOptions<InferReceiveTarget<TChannel>>,
+  ): Promise<{ readonly sessionId: string }>;
 };
 
 /**

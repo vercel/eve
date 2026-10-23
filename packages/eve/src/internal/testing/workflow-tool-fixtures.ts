@@ -13,6 +13,9 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowStepToolContext, WorkflowToolContext } from "#tools/workflow-definition.js";
+import { transcriptReducer } from "#client/transcript-reducer.js";
+import { callSlackApi } from "#public/channels/slack/index.js";
+import { sessions } from "#public/server/index.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
@@ -328,4 +331,88 @@ export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolCon
 export async function failingServeWorkflow(): Promise<never> {
   "use workflow";
   throw new Error("Live serve workflow must not execute.");
+}
+
+async function readTranscript(sessionId: string) {
+  "use step";
+  const reducer = transcriptReducer();
+  let transcript = reducer.initial();
+  for await (const event of sessions.attach(sessionId).stream({ follow: false })) {
+    transcript = reducer.reduce(transcript, event);
+  }
+  return transcript.messages;
+}
+
+/** Sends once, then waits durably, so the body replays past the recorded send. */
+export async function sendThenSleepWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const delivered = await ctx.sendToChannel("dm", "Here is the summary.", {
+    auth: ctx.session.auth.current,
+    target: { userId: input.service },
+  });
+  await workflowSleep(1);
+  return delivered;
+}
+
+/** The DM variant from docs/patterns/fork-conversations-into-new-threads.md, with test import paths. */
+export async function forkToSlackDmWorkflow(
+  _input: Record<string, never>,
+  ctx: WorkflowToolContext,
+) {
+  "use workflow";
+  const auth = ctx.session.auth.current;
+  const userId = auth?.attributes.user_id;
+  if (auth?.authenticator !== "slack-webhook" || typeof userId !== "string")
+    return { forked: false, reason: "No Slack user to message." };
+
+  const channelId = await openDirectMessage(userId);
+  const history = await readTranscript(ctx.session.id);
+  const { sessionId } = await ctx.sendToChannel("slack", "Continue this conversation here.", {
+    auth,
+    history,
+    target: { channelId },
+  });
+  return { forked: true, sessionId };
+}
+
+async function openDirectMessage(userId: string) {
+  "use step";
+  const response = await callSlackApi({
+    botToken: process.env.SLACK_BOT_TOKEN,
+    operation: "conversations.open",
+    body: { users: userId },
+  });
+  if (!response.ok) throw new Error(`conversations.open failed: ${String(response.error)}`);
+  return (response.channel as { id: string }).id;
+}
+
+/** The Teams tool from docs/patterns/fork-conversations-into-new-threads.md, with test import paths. */
+export async function forkToTeamsThreadWorkflow(
+  _input: Record<string, never>,
+  ctx: WorkflowToolContext,
+) {
+  "use workflow";
+  const auth = ctx.session.auth.current;
+  const { conversation_id, scope, service_url, tenant_id } = auth?.attributes ?? {};
+  if (
+    auth?.authenticator !== "teams-activity" ||
+    scope !== "channel" ||
+    typeof conversation_id !== "string" ||
+    typeof service_url !== "string"
+  )
+    return { forked: false, reason: "This conversation is not in a Teams channel." };
+
+  const history = await readTranscript(ctx.session.id);
+  const { sessionId } = await ctx.sendToChannel("teams", "Continue this conversation here.", {
+    auth,
+    history,
+    target: {
+      conversationId: conversation_id.split(";messageid=")[0],
+      conversationType: "channel",
+      initialMessage: "Continuing this conversation in a new thread.",
+      serviceUrl: service_url,
+      tenantId: typeof tenant_id === "string" ? tenant_id : undefined,
+    },
+  });
+  return { forked: true, sessionId };
 }

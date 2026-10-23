@@ -1,7 +1,10 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { createChannelOperations } from "#channel/channel-operations.js";
+import {
+  type ChannelReceiveContext,
+  createChannelOperations,
+} from "#channel/channel-operations.js";
 import {
   isCompiledChannel,
   type ChannelReference,
@@ -11,17 +14,21 @@ import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
  * Options for sending a message to a channel selected with `ctx.to(...)`.
  */
-interface CrossChannelSendOptions {
+export interface CrossChannelSendOptions {
   readonly auth: SessionAuthContext | null;
+  /** Prior conversation added before the message, as on `send()`. */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly turnPolicy?: TurnPolicy;
 }
 
 /** Message delivery bound to one channel-specific proactive target. */
 export interface CrossChannelTargetHandle {
+  /** Starts a session at the target, or continues the one that owns it. */
   send(message: string | UserContent, options: CrossChannelSendOptions): Promise<Session>;
 }
 
@@ -76,60 +83,149 @@ export function createCrossChannelToFn(
   runtime: Runtime,
   channels: readonly CrossChannelTarget[],
 ): CrossChannelToFn {
-  return (channel, target) => {
-    const targetChannel = resolveTargetByReference(channel, channels);
-    return {
-      async send(message, options) {
-        return await invokeChannelReceive({
-          runtime,
-          target: targetChannel,
-          input: {
-            message,
-            target: target as Readonly<Record<string, unknown>>,
-            auth: options.auth,
-          },
-          turnPolicy: options.turnPolicy,
-          describeMissingReceive: () =>
-            `ctx.to(): channel "${targetChannel.name}" does not implement receive(). ` +
-            `Declare a receive hook on the channel to accept cross-channel sessions.`,
-          describeMissingAdapter: () =>
-            `ctx.to(): channel "${targetChannel.name}" has no adapter — cannot build ctx.from().`,
-        });
-      },
-    };
+  return (channel, target) =>
+    createCrossChannelTargetHandle(runtime, resolveTargetByReference(channel, channels), target);
+}
+
+/**
+ * Sends to a channel found by its path-derived name, as workflow tool bodies
+ * address channels with `ctx.sendToChannel()`.
+ */
+export async function sendToNamedChannel(
+  runtime: Runtime,
+  channels: readonly CrossChannelTarget[],
+  name: string,
+  input: InvokeChannelReceiveInput["input"],
+  options: Pick<InvokeChannelReceiveInput, "idempotencyKey" | "turnPolicy"> = {},
+): Promise<Session> {
+  const channel = channels.find((candidate) => candidate.name === name);
+  if (channel === undefined) {
+    const available = channels.map((candidate) => `"${candidate.name}"`).join(", ");
+    throw new Error(
+      `ctx.sendToChannel(): no channel named "${name}". Pass the path-derived name of a file in agent/channels/` +
+        (available === "" ? "; this agent has no channels." : `: ${available}.`),
+    );
+  }
+  return await invokeChannelReceive({
+    caller: "ctx.sendToChannel()",
+    idempotencyKey: options.idempotencyKey,
+    input,
+    runtime,
+    target: channel,
+    turnPolicy: options.turnPolicy,
+  });
+}
+
+function createCrossChannelTargetHandle(
+  runtime: Runtime,
+  channel: CrossChannelTarget,
+  target: unknown,
+): CrossChannelTargetHandle {
+  return {
+    async send(message, options) {
+      return await invokeChannelReceive({
+        caller: "ctx.to()",
+        runtime,
+        target: channel,
+        input: {
+          auth: options.auth,
+          history: options.history,
+          message,
+          target: target as Readonly<Record<string, unknown>>,
+        },
+        turnPolicy: options.turnPolicy,
+      });
+    },
   };
 }
 
 interface InvokeChannelReceiveInput {
+  /** The API the author called, named in errors. */
+  readonly caller: string;
+  /**
+   * Stable identity for this handoff. Each `from().send()` the channel makes
+   * without its own key derives one from it, so a retried handoff to an address
+   * that already has a session is deduplicated there.
+   */
+  readonly idempotencyKey?: string;
   readonly runtime: Runtime;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: {
+    readonly auth: SessionAuthContext | null;
+    readonly caller?: { readonly sessionId: string };
+    readonly history?: readonly SessionHistoryMessage[];
     readonly message: string | UserContent;
     readonly target: Readonly<Record<string, unknown>>;
-    readonly auth: SessionAuthContext | null;
   };
   readonly turnPolicy?: TurnPolicy;
-  readonly describeMissingReceive: () => string;
-  readonly describeMissingAdapter: () => string;
 }
 
 /**
- * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
+ * Shared authored `receive(input, ctx)` invocation used by route, schedule,
+ * and workflow tool delivery.
  */
 async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
+  const { name } = args.target;
   if (!args.target.receive) {
-    throw new Error(args.describeMissingReceive());
+    throw new Error(
+      `${args.caller}: channel "${name}" does not implement receive(). ` +
+        `Declare a receive hook on the channel to accept cross-channel sessions.`,
+    );
   }
   if (!args.target.adapter) {
-    throw new Error(args.describeMissingAdapter());
+    throw new Error(`${args.caller}: channel "${name}" has no adapter — cannot build ctx.from().`);
   }
   const channelOperations = createChannelOperations({
     adapter: args.target.adapter,
-    channelName: args.target.name,
+    channelName: name,
     runtime: args.runtime,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
   });
-  return await args.target.receive(args.input, channelOperations);
+  return await args.target.receive(
+    args.input,
+    withHandoffDefaults(channelOperations, {
+      history: args.input.history,
+      idempotencyKey: args.idempotencyKey,
+    }),
+  );
+}
+
+/**
+ * The handoff's `history` and idempotency key join the channel's `send()`
+ * calls unless the channel passed its own.
+ */
+function withHandoffDefaults(
+  operations: ChannelReceiveContext,
+  defaults: {
+    readonly history: readonly SessionHistoryMessage[] | undefined;
+    readonly idempotencyKey: string | undefined;
+  },
+): ChannelReceiveContext {
+  if (defaults.history === undefined && defaults.idempotencyKey === undefined) return operations;
+  // Numbering keeps two sends from one `receive()` distinct; a deterministic
+  // `receive()` numbers them the same on retry.
+  let sends = 0;
+  return {
+    ...operations,
+    from(address) {
+      const source = operations.from(address);
+      return {
+        ...source,
+        async send(message, options) {
+          const sendIndex = sends++;
+          return await source.send(message, {
+            ...options,
+            history: options.history ?? defaults.history,
+            idempotencyKey:
+              options.idempotencyKey ??
+              (defaults.idempotencyKey === undefined
+                ? undefined
+                : `${defaults.idempotencyKey}:${sendIndex}`),
+          });
+        },
+      };
+    },
+  };
 }
 
 function resolveTargetByReference(

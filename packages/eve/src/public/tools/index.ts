@@ -46,6 +46,7 @@ export {
   type WorkflowServeToolDefinition,
   type WorkflowStepToolContext,
   type WorkflowTaskToolDefinition,
+  type WorkflowToolChannel,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentMessageResult,

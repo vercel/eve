@@ -19,7 +19,7 @@ between them and for what the model sees while tasks work.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for sessions with other agents. Use `yield` to report
+the session's channel, `ctx.agents` for effective callable-agent descriptions, `ctx.agent` for sessions with other agents, and `ctx.sendToChannel` for sessions on the agent's channels. Use `yield` to report
 progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
 stay in local variables in the workflow body.
 
@@ -85,18 +85,18 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In an `execute` or `task` body, `ctx` is a `WorkflowToolContext` with `session`, `callId`,
-  `toolName`, `abortSignal`, `agent`, `agents`, and `ask`. A `serve` body gets a
+  `toolName`, `abortSignal`, `agent`, `agents`, `ask`, and `to`. A `serve` body gets a
   `WorkflowServeContext` with `session`, `toolName`,
-  `agent`, `agents`, `ask`, and `reply`; each call it receives carries its own `callId` and
+  `agent`, `agents`, `ask`, `to`, and `reply`; each call it receives carries its own `callId` and
   `abortSignal`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `getSandbox`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
-  `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
+  `session`, `callId`, `toolName`, `abortSignal`, `getSandbox`, `getToken`, and `requireAuth`. Read `ctx.agents`, and call
+  `ctx.agent()`, `ctx.ask()`, and `ctx.sendToChannel()` in the workflow body; pass only the serializable values the step needs.
   Call `getSandbox`, `getToken`, and `requireAuth` in a step: the workflow body throws when it calls them.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
-`ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext` and
+`ctx.agent`, `ctx.agents`, `ctx.ask`, and `ctx.sendToChannel` are available only on `WorkflowToolContext` and
 `WorkflowServeContext` in the workflow body.
 Ordinary tools, channel handlers, schedule handlers, and workflow steps do not receive these methods. Type
 step helpers with `WorkflowStepToolContext` from `eve/tools` when they need step-safe context capabilities.
@@ -766,6 +766,77 @@ runs as a [task](#run-calls-as-tasks-task), so the reply reaches the model as th
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
+
+## Start channel sessions: `ctx.sendToChannel`
+
+`ctx.sendToChannel(name, message, { target, auth })` reaches a session on one of the agent's
+channels through the same `receive` hook as a route handler's
+[`ctx.to(...)`](/docs/channels/custom#cross-channel-hand-off). Use it when the model decides that
+work should continue somewhere people can follow it, such as a new Slack channel. Name the channel
+by its path, `agent/channels/slack.ts` as `"slack"`, the way `ctx.agent()` names agents:
+
+```ts title="agent/tools/open_incident_channel.ts"
+import { defineWorkflowTool } from "eve/tools";
+import type slack from "../channels/slack";
+import { z } from "zod";
+import { createIncidentChannel } from "../lib/incidents";
+
+export default defineWorkflowTool({
+  description: "Open a Slack channel for an incident and continue the investigation there.",
+  inputSchema: z.object({ title: z.string(), summary: z.string() }),
+  async task({ title, summary }, ctx) {
+    "use workflow";
+    const channelId = await openChannel(title);
+    const { sessionId } = await ctx.sendToChannel<typeof slack>(
+      "slack",
+      "Continue the investigation in this channel.",
+      {
+        target: { channelId },
+        auth: ctx.session.auth.current,
+        history: [{ role: "user", text: summary }],
+      },
+    );
+    return { channelId, sessionId };
+  },
+});
+
+async function openChannel(title: string) {
+  "use step";
+  return await createIncidentChannel(title);
+}
+```
+
+The workflow body can't import the channel module, because the body runs in the workflow
+sandbox. The `import type` above only types the target.
+
+Each call runs as a step through the channel's `receive` hook, which maps the target to the
+channel's session address. When no session owns that address, the call starts one from `history`
+and runs the turn. When a session owns it, the call adds `history` and the message to that session,
+following `turnPolicy` (`"steer"` or `"queue"`, defaulting to the channel's) if a turn is running.
+It returns `{ sessionId }`.
+
+Each call resolves its target on its own. On a target the channel gives a new address each time,
+such as a Slack target with only a `channelId`, two calls start two sessions.
+
+A step that fails after delivering retries the delivery with the same idempotency key. When the
+target maps to the same address again, the session there gets the message and `history` once. On
+a target the channel gives a new address each time, the retry starts a second session instead.
+
+To reach the channel that serves the calling session, read `ctx.channel`. `name` is that channel's path-derived name, the one `sendToChannel()` takes, so a tool can reply where it was called from without hard-coding a channel. `kind` and `metadata` are what [hooks](/docs/guides/hooks) and [dynamic resolvers](/docs/guides/dynamic-capabilities) see: `metadata` is what the channel's `metadata(state)` hook projects for the session, such as a Slack thread's `channelId` and `threadTs`. The channel's `receive` hook gets the calling session as `input.caller`.
+
+`ctx.sendToChannel` differs from `ctx.agent`:
+
+- The session belongs to the channel. People on that channel continue it, and it has no parent.
+- It keeps running after the workflow run finishes. The run never sees its replies.
+- It runs the root agent, because channels belong to the root agent. Only workflow tools on the
+  root agent can call `ctx.sendToChannel`; in a subagent's tool it throws.
+- `auth` is required. Pass `ctx.session.auth.current` to start the session as the caller.
+
+An unknown channel name, or a channel without a `receive` hook, fails the step with an error that
+lists the channel names.
+
+See [Fork conversations into a new thread](/docs/patterns/fork-conversations-into-new-threads)
+for a tool that copies the current conversation into a new Slack or Teams thread with `ctx.sendToChannel`.
 
 ## Report progress: `yield`
 

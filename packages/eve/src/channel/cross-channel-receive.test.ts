@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
+import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import {
   createCrossChannelToFn,
   type CrossChannelTarget,
   type CrossChannelToFn,
+  sendToNamedChannel,
 } from "#channel/cross-channel-receive.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
@@ -203,5 +205,96 @@ describe("createCrossChannelToFn", () => {
     await fn(slack.definition, {}).send("go", { auth });
 
     expect(slack.receive.mock.calls[0]![0]).toEqual(expect.objectContaining({ auth }));
+  });
+});
+
+describe("cross-channel handoff delivery", () => {
+  const history = [{ role: "user" as const, text: "Alice asked for the rollout plan." }];
+
+  /** A channel whose receive() resolves the target to an address, as built-in channels do. */
+  function inboxChannel(): CrossChannelTarget {
+    const definition: CompiledChannel = {
+      __kind: CHANNEL_SENTINEL,
+      routes: [{ method: "POST", path: "/inbox", handler: async () => new Response("ok") }],
+      adapter: { kind: "channel:inbox" },
+      async receive(input, { from }: ChannelReceiveContext) {
+        return await from(`inbox:${String(input.target.ref)}`).send(input.message, {
+          auth: input.auth,
+        });
+      },
+    };
+    return { name: "inbox", definition, receive: definition.receive, adapter: definition.adapter };
+  }
+
+  it("adds the handoff's history to a channel send() that passes none", async () => {
+    const runtime = makeRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({
+      sessionId: "sess_owner",
+      status: "accepted",
+    });
+    await sendToNamedChannel(runtime, [inboxChannel()], "inbox", {
+      auth: null,
+      history,
+      message: "Continue.",
+      target: { ref: 1 },
+    });
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ payload: expect.objectContaining({ history }) }),
+      }),
+    );
+  });
+
+  it("delivers with the sender's turnPolicy over the channel's default", async () => {
+    const runtime = makeRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({
+      sessionId: "sess_owner",
+      status: "accepted",
+    });
+    await sendToNamedChannel(
+      runtime,
+      [inboxChannel()],
+      "inbox",
+      { auth: null, message: "Continue.", target: { ref: 1 } },
+      { turnPolicy: "queue" },
+    );
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({ command: expect.objectContaining({ turnPolicy: "queue" }) }),
+    );
+  });
+
+  it("numbers the handoff's idempotency key per channel send()", async () => {
+    const runtime = makeRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({
+      sessionId: "sess_owner",
+      status: "accepted",
+    });
+    await sendToNamedChannel(
+      runtime,
+      [inboxChannel()],
+      "inbox",
+      { auth: null, message: "Continue.", target: { ref: 1 } },
+      { idempotencyKey: "handoff" },
+    );
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ idempotencyKey: "handoff:0" }),
+      }),
+    );
+  });
+
+  it("names the available channels when a name matches none", async () => {
+    await expect(
+      sendToNamedChannel(makeRuntime(), [inboxChannel()], "slack", {
+        auth: null,
+        message: "Continue.",
+        target: {},
+      }),
+    ).rejects.toThrow(
+      'no channel named "slack". Pass the path-derived name of a file in agent/channels/: "inbox".',
+    );
   });
 });

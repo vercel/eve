@@ -412,7 +412,11 @@ The supplied `auth` identifies who started the session, available to tools and e
 
 The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
 
-`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`.
+`send` accepts `history`, prior conversation added before the message, in the same shape as [`history` on the eve channel](./eve#start-from-prior-history). eve passes it to the destination's `receive` hook as `input.history` and adds it to the session unless the hook's own `from(...).send(...)` passes `history`.
+
+When a workflow tool sends with [`ctx.sendToChannel()`](/docs/tools/workflows#start-channel-sessions-ctxsendtochannel), `receive` also gets `input.caller`, the calling session's `{ sessionId }`. eve sets it, so the tool can't change it; a route, schedule, or event handler has no calling session and leaves it out. A channel can use it to tie what a tool asks for to the tool's own conversation.
+
+`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`, and [workflow tools](../tools/workflows#start-channel-sessions-ctxsendtochannel) reach channels by name with `ctx.sendToChannel(...)`.
 
 For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
 
