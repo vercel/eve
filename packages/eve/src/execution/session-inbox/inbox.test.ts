@@ -606,6 +606,27 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("creates a hook at once and confirms it only after confirmAfter settles, even on failure", async () => {
+    const stable = createMockHook({
+      reads: [Promise.resolve(resolved(send("early")))],
+      token: "stable",
+    });
+    installHooks(stable);
+    const inbox = createSessionInbox("session-1");
+    const sessionCreation = Promise.withResolvers<never>();
+
+    const claim = inbox.claimSessionHook("stable", { confirmAfter: sessionCreation.promise });
+    expect(createHookMock).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(stable.getConflict).not.toHaveBeenCalled();
+    sessionCreation.reject(new Error("session creation failed"));
+
+    await expect(claim).resolves.toBeUndefined();
+    expect(stable.getConflict).toHaveBeenCalledOnce();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("early")));
+    await inbox.dispose();
+  });
+
   it("rejects empty tokens", async () => {
     installHooks(createMockHook({ token: "stable" }), createMockHook({ token: "auth" }));
     const inbox = createSessionInbox("session-1");
@@ -673,6 +694,7 @@ function authCallback(connectionName: string): SessionInboxPayload {
 
 interface MockHook {
   readonly dispose: ReturnType<typeof vi.fn>;
+  readonly getConflict: ReturnType<typeof vi.fn>;
   readonly hook: unknown;
   readonly return: ReturnType<typeof vi.fn>;
   readonly token: string;
@@ -686,6 +708,7 @@ function createMockHook(input: {
 }): MockHook {
   const reads = [...(input.reads ?? [])];
   const dispose = vi.fn();
+  const getConflict = vi.fn(async () => input.registration ?? input.conflict ?? null);
   const iteratorReturn = vi.fn(async () => ({ done: true, value: undefined }) as const);
   const hook = Object.assign(new Promise<SessionInboxPayload>(() => {}), {
     [Symbol.asyncIterator]() {
@@ -701,10 +724,10 @@ function createMockHook(input: {
       };
     },
     dispose,
-    getConflict: vi.fn(async () => input.registration ?? input.conflict ?? null),
+    getConflict,
     token: input.token,
   });
-  return { dispose, hook, return: iteratorReturn, token: input.token };
+  return { dispose, getConflict, hook, return: iteratorReturn, token: input.token };
 }
 
 function installHooks(...hooks: readonly MockHook[]): void {

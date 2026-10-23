@@ -16,11 +16,6 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { deriveToolSessionId, validateToolSessionKey } from "#execution/tool-session/id.js";
-import {
-  assertToolSessionSandboxSupport,
-  releaseToolSessionHandle,
-  ToolSessionSandboxUnsupportedError,
-} from "#execution/tool-session/sandbox.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   AuthorizationHookKey,
@@ -40,6 +35,7 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SandboxAccess } from "#sandbox/state.js";
+import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   type InvokeToolObserver,
@@ -212,39 +208,31 @@ interface CallSandbox {
 
 /**
  * A keyed session's sandbox: found or created on the first `ctx.getSandbox()`
- * through the provider's `start`, which reopens it by session id, and kept
- * after the call. Concurrent first calls in this process share one start.
- * The call does not own the sandbox, so a failed start never deletes it, and
- * release only lets go of this call's handle: an overlapping call keeps its
- * own.
+ * through the provider's `start`, an upsert on the session id, and kept after
+ * the call. Concurrent first calls in this process share one start. The call
+ * does not own the sandbox, so a failed start never deletes it, and release
+ * only closes this call's connection: an overlapping call keeps its own.
  */
 async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
-  const inner = await ensureSandboxAccess({
+  const access = await ensureSandboxAccess({
     compiledArtifactsSource: runtime.compiledArtifactsSource,
     nodeId: runtime.nodeId,
     ownsSandbox: false,
     registry: runtime.sandboxRegistry,
     sessionId,
+    shutdownTracking: "call",
     state: null,
   });
-  return {
-    access: {
-      ...inner,
-      async get() {
-        assertToolSessionSandboxSupport(runtime.sandboxRegistry);
-        return await inner.get();
-      },
-    },
-    async release() {
-      const handle = await inner.detach();
-      if (handle !== undefined) await releaseToolSessionHandle(runtime.sandboxRegistry, handle);
-    },
-  };
+  return { access, release: () => access.release() };
 }
 
-/** The call's sandbox: opened on the first `ctx.getSandbox()`, deleted after the call. */
+/**
+ * The call's sandbox: opened on the first `ctx.getSandbox()`, removed after
+ * the call through the provider's session-end cleanup, which also reaches a
+ * start still in flight or one whose initialization failed.
+ */
 async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
-  const inner = await ensureSandboxAccess({
+  const access = await ensureSandboxAccess({
     compiledArtifactsSource: runtime.compiledArtifactsSource,
     nodeId: runtime.nodeId,
     ownsSandbox: true,
@@ -252,24 +240,19 @@ async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promi
     sessionId,
     state: null,
   });
-  // The latest requested open, kept before it settles: `execute` can finish
-  // (say, by losing a race against cancellation) while the provider is still
-  // starting, and release must still delete what that start creates.
-  let requested: Promise<unknown> | undefined;
+  // This unkeyed access has no other opener or checkpoint: no request means no
+  // sandbox. Once requested, cleanup must cover failed or still-running starts.
+  let requested = false;
   return {
     access: {
-      ...inner,
+      ...access,
       get() {
-        const opening = inner.get();
-        requested = opening;
-        return opening;
+        requested = true;
+        return access.get();
       },
     },
     async release() {
-      if (requested === undefined) return;
-      // A failed open left nothing behind; deleting would open one just to delete it.
-      const sandbox = await requested.catch(() => null);
-      if (sandbox !== null) await inner.delete?.();
+      if (requested) await access.end("completed");
     },
   };
 }

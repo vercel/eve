@@ -23,6 +23,7 @@ import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
+import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
 /** The run's own failure never carries internals; the terminal event already logged them. */
@@ -49,7 +50,10 @@ export type SessionAnchor =
 export type SessionStart =
   /** Runs a turn first; `input` is absent for a session started without a message. */
   | { readonly kind: "turn"; readonly input: DeliverHookPayload | undefined }
-  /** A prewarmed session parks on the inbox before any session-scoped lifecycle work. */
+  /**
+   * A prewarmed session parks on the inbox before any turn, session event, or
+   * session hook, while its session prewarmers run beside the wait.
+   */
   | { readonly kind: "first-message" }
   /** A successor that received a settled session waits for its next input. */
   | { readonly kind: "parked" };
@@ -223,9 +227,15 @@ async function runSessionLoop(
     sessionId: boot.sessionId,
   });
   const sessionTimeout = boot.sessionTimeoutControl;
+  // A prewarmed session's prewarm step, which runs beside the session's own steps.
+  let prewarming: Promise<void> = Promise.resolve();
+  let prewarmSettled = true;
+  // What it prepared is kept only while the owner still waits for its first input.
+  let awaitingFirstInput = false;
 
   const nextParkedActivity = async (): Promise<
-    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
+    | Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "prewarm" }>
+    | { readonly kind: "transferred" }
   > => {
     while (true) {
       const next = await nextTurnDelivery({
@@ -234,6 +244,26 @@ async function runSessionLoop(
         inbox,
         queue,
       });
+      if (next.kind === "prewarm") {
+        // A prewarm step still starting a sandbox keeps the session here: a
+        // successor could end the session and clean up before that start lands.
+        if (
+          prewarmSettled &&
+          progress.caller === undefined &&
+          workingTasks(sessionTaskTable(cursor)).length === 0 &&
+          queue.pendingCount === 0 &&
+          !inbox.hasPending()
+        ) {
+          const deadline = sessionTimeout?.getDeadline();
+          const result = await handoff.tryPrewarmTransfer(
+            transferState(),
+            next.targetDeploymentId,
+            deadline,
+          );
+          if (result.kind === "transferred") return result;
+        }
+        continue;
+      }
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
         continue;
@@ -307,11 +337,15 @@ async function runSessionLoop(
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
       const next = await nextParkedActivity();
+      // A transfer or turn may start next, and neither must see the session change under it.
+      awaitingFirstInput = false;
       switch (next.kind) {
         case "closed":
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
+        case "transferred":
+          return next;
         case "expired":
         case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };
@@ -328,6 +362,24 @@ async function runSessionLoop(
   const runInitialAction = async (): Promise<SessionActionResult> => {
     switch (boot.start.kind) {
       case "first-message":
+        // Beside the wait, so a first message starts its turn without waiting
+        // for it. Provider `start()` upserts by session id, so a turn that
+        // opens the sandbox meanwhile reaches the one being prewarmed.
+        awaitingFirstInput = true;
+        prewarmSettled = false;
+        prewarming = cursor
+          .advanceBeside(
+            ({ serializedContext, sessionState }) =>
+              prewarmSessionStep({ serializedContext, sessionState }),
+            () => awaitingFirstInput,
+          )
+          .then(
+            () => undefined,
+            () => undefined,
+          )
+          .finally(() => {
+            prewarmSettled = true;
+          });
         return await awaitPrewarmedAction();
       case "parked":
         return { action: { kind: "park" }, kind: "action" };
@@ -379,6 +431,9 @@ async function runSessionLoop(
       const transferred = await tryCompactionHandoff();
       if (transferred !== undefined) return transferred;
 
+      // Registered while parked, so the next turn's first step is not held
+      // behind its abort hooks.
+      turnControl ??= createTurnControl();
       const next = await nextParkedActivity();
 
       switch (next.kind) {
@@ -386,6 +441,8 @@ async function runSessionLoop(
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
+        case "transferred":
+          return next;
         case "expired":
         case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };
@@ -409,7 +466,9 @@ async function runSessionLoop(
       }
     }
   } finally {
-    turnControl?.dispose();
+    awaitingFirstInput = false;
+    // Session end must not clean up before a sandbox the prewarm step is still starting.
+    await prewarming;
     await sessionTimeout?.dispose();
   }
 }

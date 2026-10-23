@@ -79,7 +79,7 @@ async function dispatchCoordination(
   }
 
   const { batch, session } = prepared;
-  let nextSession = session;
+  let nextSession: HarnessSessionBase = session;
   const results: RuntimeActionResult[] = [];
   const started: TaskStartedStreamEvent["data"][] = [];
   const starts = withPrestartedRuns(

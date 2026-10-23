@@ -1,3 +1,4 @@
+import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
@@ -43,6 +44,7 @@ export interface SessionHandoverPayload {
 }
 
 export type SessionInboxPayload =
+  | SessionPrewarmPayload
   | SessionFailurePayload
   | SessionHandoverPayload
   | HookPayload
@@ -105,6 +107,13 @@ export interface SessionHookClaimOptions {
    * token this inbox already holds is claimed again on a fresh hook.
    */
   readonly force?: boolean;
+  /**
+   * Creates the hook at once but confirms its registration only after this
+   * settles. While a registration is awaited, Workflow queues every step
+   * started beside it instead of running it inline, so a claim made next to a
+   * step confirms after that step; the hook still commits alongside it.
+   */
+  readonly confirmAfter?: Promise<unknown>;
 }
 
 export interface SessionHookBatchClaimOptions extends SessionHookClaimOptions {
@@ -346,7 +355,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     }
     stopped = false;
     try {
-      source.registered = claimHookOwnership(source.hook);
+      const confirm = () => claimHookOwnership(source.hook);
+      source.registered = options.confirmAfter?.then(confirm, confirm) ?? confirm();
       await source.registered;
       // A takeover this run has reclaimed from no longer counts toward the next one.
       takenOver = false;

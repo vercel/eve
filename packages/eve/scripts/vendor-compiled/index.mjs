@@ -5,7 +5,6 @@
  */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
-import codeMode from "./@ai-sdk/code-mode.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
@@ -55,6 +54,7 @@ import jsonSchema from "./json-schema.mjs";
 import justSecrets from "./just-secrets.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
+import run from "./run.mjs";
 import semver from "./semver.mjs";
 import shadcnRegistry from "./shadcn-registry.mjs";
 import turndown from "./turndown.mjs";
@@ -65,7 +65,6 @@ export const MODULES = [
   acpSdk,
   anthropic,
   cfworkerJsonSchema,
-  codeMode,
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
@@ -94,6 +93,7 @@ export const MODULES = [
   picocolors,
   provider,
   providerUtils,
+  run,
   semver,
   shadcnRegistry,
   standardSchemaSpec,

@@ -44,7 +44,7 @@
     "drizzle-orm": "0.45.2",
     "eve": "^0.73.0",
     "lucide-react": "1.33.0",
-    "next": "16.3.4",
+    "next": "16.3.8",
     "radix-ui": "1.6.7",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -61,7 +61,6 @@
     "@types/react-dom": "19.2.4",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "drizzle-kit": "0.31.10",
-    "microsandbox": "^0.5.10",
     "typescript": "7.0.2"
   },
   "packageManager": "pnpm@11.25.0"

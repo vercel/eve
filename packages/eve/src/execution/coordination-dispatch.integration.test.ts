@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { workflowEntry } from "#execution/session/entry.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
+import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { deployServiceWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
@@ -98,7 +98,58 @@ describe("coordination dispatch", () => {
       }
     });
   }, 60_000);
+
+  it("cleans up the sandbox key of a session that started a run, though it never opened a sandbox", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "task-dispatch-sandbox-cleanup" },
+      modules: [
+        {
+          logicalPath: "tools/deploy_service.ts",
+          loadNamespace: async () => ({
+            default: defineWorkflowTool({
+              description: "Deploy a service.",
+              inputSchema: {
+                type: "object",
+                properties: { service: { type: "string" } },
+                required: ["service"],
+              },
+              task: deployServiceWorkflow,
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      // An agent the run opens can share the session's sandbox and create it
+      // under the session's key, which the session's own state never records.
+      const dispatching = await runUntilSessionEnds('Run deploy_service with service "api"');
+      const plain = await runUntilSessionEnds("hello there");
+
+      expect(runtime.sandboxCleanups).toEqual([dispatching, plain]);
+    });
+  }, 60_000);
 });
+
+async function runUntilSessionEnds(message: string): Promise<string> {
+  const run = await startSessionOwner(workflowEntry, [
+    {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message },
+      serializedContext: buildSerializedContext({ channelKind: "http" }),
+      sessionTimeoutMs: 25,
+    },
+  ]);
+  const stream = captureEvents(run);
+  try {
+    await stream.nextUntil("session completion", (event) => event.type === "session.completed");
+    await run.returnValue;
+    return run.runId;
+  } finally {
+    stream.dispose();
+  }
+}
 
 async function listWorkflowToolRunIds(): Promise<Set<string>> {
   const world = await getWorld();

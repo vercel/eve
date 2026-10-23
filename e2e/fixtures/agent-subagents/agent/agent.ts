@@ -1,8 +1,13 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { latestTaskResult } from "@eve-e2e/config/mock-script";
 import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
-import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
+import {
+  MODEL_AGENT_SELECTED_MODEL,
+  WORKSPACE_FORWARDING_MARKER,
+  WORKSPACE_LOOKUP_MESSAGE,
+} from "../constants";
 import {
   REMOTE_QUESTION_DIRECTIVE,
   respondToRemoteQuestion,
@@ -27,6 +32,7 @@ if (process.env.EVE_E2E_MODEL === "mock") {
 }
 
 const TOOL_FALSE_PROBE = "E2E_TOOL_FALSE_SUBAGENT";
+const MODEL_AGENT_PROBE = "E2E_MODEL_SELECTING_AGENT_TOOL";
 const DISABLED_TOOL_PROBE = "E2E_DISABLED_SUBAGENT";
 const hiddenSubagentProbe = mockModel({
   modelId: "hidden-subagent-probe",
@@ -53,6 +59,42 @@ const hiddenSubagentProbe = mockModel({
 const base = e2eAgentConfig();
 const { model, modelContextWindowTokens, ...agentConfig } = base;
 const defaultModel = typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
+const modelSelectingParent = mockModel({
+  modelId: "model-selecting-agent-parent",
+  respond(request) {
+    if (hasInputProperty(request.tools, "agent", "model")) {
+      throw new Error("The default agent tool exposed a model input.");
+    }
+    if (!hasInputProperty(request.tools, "model_agent", "model")) {
+      throw new Error("The custom model_agent tool did not expose its model input.");
+    }
+    const defaultResult = latestTaskResult(request, "agent");
+    const selectedResult = latestTaskResult(request, "model_agent");
+    if (defaultResult !== undefined && selectedResult !== undefined) {
+      return `${defaultResult}\n${selectedResult}`;
+    }
+    if (request.toolResults.some((result) => ["agent", "model_agent"].includes(result.name))) {
+      return { toolCalls: [{ name: "eve__task_wait", input: {} }] };
+    }
+    return {
+      toolCalls: [
+        {
+          id: "default-agent-call",
+          name: "agent",
+          input: { message: "Reply with exactly DEFAULT_AGENT_MODEL_OK" },
+        },
+        {
+          id: "model-agent-call",
+          name: "model_agent",
+          input: {
+            message: "Reply with exactly SELECTED_AGENT_MODEL_OK",
+            model: MODEL_AGENT_SELECTED_MODEL,
+          },
+        },
+      ],
+    };
+  },
+});
 const workspaceReader = mockModel({
   modelId: "principal-forwarding-workspace-reader",
   respond: ({ messages }) => {
@@ -116,6 +158,17 @@ const surveyToolParent = mockModel({
 });
 // The remote keeper is a root session of this deployment, reached through remote-loopback.
 const notebookKeeper = mockModel({ modelId: "notebook-keeper", respond: respondAsNotebookKeeper });
+function hasInputProperty(
+  tools: readonly { readonly inputSchema?: unknown; readonly name: string }[],
+  toolName: string,
+  property: string,
+): boolean {
+  const schema = tools.find((tool) => tool.name === toolName)?.inputSchema;
+  if (typeof schema !== "object" || schema === null) return false;
+  const properties = Reflect.get(schema, "properties");
+  return typeof properties === "object" && properties !== null && property in properties;
+}
+
 /** Reads the id of a tool's task from the latest framework-injected `[Tasks]` note. */
 function findListedTaskId(
   messages: readonly { readonly role: string; readonly text: string }[],
@@ -141,6 +194,9 @@ export default defineAgent({
               : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
           ];
         });
+        if (messages.some((message) => message.includes(MODEL_AGENT_PROBE))) {
+          return { model: modelSelectingParent, modelContextWindowTokens: 1_000_000 };
+        }
         if (
           messages.some(
             (message) =>

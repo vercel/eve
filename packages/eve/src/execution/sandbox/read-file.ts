@@ -77,7 +77,7 @@ export async function executeReadFileOnSandbox(
   const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
   if (bytes === null) {
     throw new Error(
-      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
+      `File not found: ${normalizedPath}. Verify the path exists and is accessible in the sandbox.`,
     );
   }
 
@@ -94,7 +94,7 @@ export async function executeReadFileOnSandbox(
       return buildFileReadResult(bytes, normalizedPath, imageMediaType);
     }
     throw new Error(
-      `File "${filePath}" appears to be a binary file. ` +
+      `File "${normalizedPath}" appears to be a binary file. ` +
         "read_file only supports text files, PNG, JPEG, GIF, or WebP images, and PDFs.",
     );
   }

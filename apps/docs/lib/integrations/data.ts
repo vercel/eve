@@ -8,6 +8,7 @@ import {
   instrumentationEntries,
   memoryEntries,
 } from "@eve/catalog";
+import { compareByName } from "./gallery";
 import type { LogoKey } from "./logos";
 
 /**
@@ -1631,6 +1632,36 @@ export default githubExtension({
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
     relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
+  nimble: {
+    logo: "nimble",
+    docsHref: "https://docs.nimbleway.com/integrations/connectors/vercel-eve",
+    keywords: ["web search", "web extraction", "research", "citations", "Nimble"],
+    install: `Install the Nimble extension for eve:
+
+\`\`\`bash
+eve add extension/nimble
+\`\`\`
+
+The extension requires Node.js 24 or later and a Nimble API key. It adds web search, page extraction, and long-running research tools.`,
+    quickStart: `Add your Nimble API key to the agent's environment:
+
+\`\`\`bash title=".env.local"
+NIMBLE_API_KEY=your_api_key
+\`\`\`
+
+The registry mounts Nimble as a directory under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/nimble/extension.ts"
+import nimble from "@nimble-way/eve";
+
+export default nimble({});
+\`\`\`
+
+The directory name supplies the \`nimble\` namespace. The extension adds \`nimble__search\`, \`nimble__extract\`, \`nimble__agent_start\`, and \`nimble__agent_result\`, plus the \`nimble__web-research\` skill. The registry overrides \`nimble__agent_start\` to require approval for every Agent API run.`,
+    configure: `Keep \`NIMBLE_API_KEY\` in the environment rather than prompts or source control. Search queries, URLs, and Agent API inputs are sent to Nimble. Search results and extracted pages are untrusted third-party content, not instructions for the agent.
+
+\`nimble__agent_start\` creates a billable, non-idempotent Agent API run. The registry requires approval for every call. Retain the returned identifiers for \`nimble__agent_result\` instead of starting a replacement run. See the [Nimble eve guide](https://docs.nimbleway.com/integrations/connectors/vercel-eve) for built-in tool overrides, configuration, data handling, and the complete tool reference.`,
+  },
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {
@@ -1874,6 +1905,60 @@ Supermemory automatically recalls relevant context before a turn and captures co
 
 Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
   },
+  memanto: {
+    logo: "memanto",
+    docsHref: "https://docs.memanto.ai/integrations/eve",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "automatic recall",
+      "user profile",
+      "Memanto",
+      "Moorcheh",
+    ],
+    install: `Install Memanto memory for eve:
+
+\`\`\`bash
+eve add memory/memanto
+\`\`\`
+
+This installs \`@moorcheh-ai/memanto\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.60.0 or later.`,
+    quickStart: `Set a Moorcheh API key in the agent environment. Deployments also need the URL of a Memanto server that you run:
+
+\`\`\`bash title=".env.local"
+MOORCHEH_API_KEY=...
+# Deployments only
+MEMANTO_BASE_URL=https://...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/memanto.ts"
+import { memantoMemory } from "@moorcheh-ai/memanto/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: memantoMemory({
+    apiKey: process.env.MOORCHEH_API_KEY,
+    baseUrl: process.env.MEMANTO_BASE_URL,
+    capture: false,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`memanto\` slot. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+All eve scopes share one Memanto agent. The provider tags each memory with a digest of eve's opaque scope key and filters recalls by that tag. Its tools are bound to the current scope, so the model cannot read or write another scope's memories.
+
+Automatic capture is unsupported in this reviewed configuration. The published adapter does not make completed-turn capture idempotent across eve operation replays. The registry explicitly sets \`capture: false\`; leave it disabled until the provider supports replay-safe idempotency. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. Those are model-invoked writes, not user-approved writes. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
+
+The reviewed configuration expects a running Memanto server at \`MEMANTO_BASE_URL\`. If you omit it during \`eve dev\`, the adapter starts a local server with the unpinned default \`memanto\` package through \`uvx\`. That local-server path is outside the reviewed compatibility boundary. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
@@ -1900,7 +1985,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
 eve add extension/agent-browser
 \`\`\`
 
-The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,
+The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox or Docker.`,
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"
@@ -1987,6 +2072,87 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  waydock: {
+    logo: "waydock",
+    docsHref: "https://waydock.ai/docs/quickstart",
+    keywords: ["mcp", "mail", "calendar", "meetings", "tasks", "api key"],
+    authModes: [],
+    quickStart: `Create \`agent/connections/waydock.ts\`:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const READ_ONLY_TOOLS = new Set([
+  "waydock_accounts",
+  "waydock_action_items_list",
+  "waydock_action_items_search",
+  "waydock_agent_activity",
+  "waydock_briefing",
+  "waydock_calendar",
+  "waydock_capabilities",
+  "waydock_card_get",
+  "waydock_follow_up_snoozes_list",
+  "waydock_follow_ups_list",
+  "waydock_health",
+  "waydock_inbox",
+  "waydock_key_info",
+  "waydock_mail_accounts",
+  "waydock_mail_attachments",
+  "waydock_mail_count",
+  "waydock_mail_get",
+  "waydock_mail_list",
+  "waydock_mail_search",
+  "waydock_meeting_get",
+  "waydock_meeting_transcript",
+  "waydock_meetings_list",
+  "waydock_morning_brief_compose",
+  "waydock_morning_context",
+  "waydock_outbound_audit",
+  "waydock_preferences_get",
+  "waydock_projects_list",
+  "waydock_pulse_incidents",
+  "waydock_pulse_keys_list",
+  "waydock_pulse_status",
+  "waydock_quota",
+  "waydock_search",
+  "waydock_suppressions_list",
+  "waydock_sync_history",
+  "waydock_tasks_list",
+  "waydock_teams_get_messages",
+  "waydock_teams_list_chats",
+  "waydock_telemetry",
+  "waydock_version",
+  "waydock_whoami",
+  "waydock_whoop_summary",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://mcp.waydock.ai/mcp",
+  description:
+    "Waydock: access the user's mail, calendar, meetings, tasks, and follow-ups through its MCP server.",
+  auth: {
+    getToken: async () => {
+      const token = process.env.WAYDOCK_MCP_KEY;
+      if (!token) throw new Error("WAYDOCK_MCP_KEY is not set.");
+      return { token };
+    },
+  },
+  approval: ({ toolName }) =>
+    READ_ONLY_TOOLS.has(toolName.split("__").pop() ?? toolName)
+      ? "not-applicable"
+      : "user-approval",
+});
+\`\`\`
+
+The filename supplies the \`waydock\` connection name. Known read-only tools run without an approval prompt. Every other tool, including unknown and future tools, requires user approval.`,
+    configure: `Create a scoped MCP key in [Waydock's MCP settings](https://waydock.ai/settings/account/mcp), then set it as a server-side environment variable:
+
+\`\`\`bash
+WAYDOCK_MCP_KEY=wdmcp_your_key_here
+\`\`\`
+
+The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
   agentcard: {
     logo: "agentcard",
     docsHref: "/docs/connections/mcp",
@@ -2023,6 +2189,74 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
     relatedResources: [softwareFactoryGuide],
+  },
+  sent: {
+    logo: "sent",
+    docsHref: "https://docs.sent.dm/start/llm-docs/mcp-server",
+    keywords: [
+      "mcp",
+      "sms",
+      "whatsapp",
+      "rcs",
+      "business messaging",
+      "deliverability",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+    connectors: { user: { service: "mcp.sent.dm", name: "sent" } },
+    quickStart: `Create \`agent/connections/sent.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/sent.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+const APPROVAL_REQUIRED = new Set([
+  "messages.send",
+  "contacts.create_many",
+  "contacts.delete",
+  "templates.delete",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://mcp.sent.dm/mcp",
+  description:
+    "Sent business messaging: send and track SMS, WhatsApp, and RCS; manage contacts and templates; inspect analytics, balance, and account readiness.",
+  auth: connect("sent"),
+  tools: {
+    allow: [
+      "account.get",
+      "balance.get",
+      "contacts.create_many",
+      "contacts.delete",
+      "contacts.get",
+      "contacts.list",
+      "contacts.message_summary",
+      "dashboard.contacts",
+      "dashboard.deliverability",
+      "dashboard.messages_sent",
+      "messages.activities.list",
+      "messages.get",
+      "messages.send",
+      "numbers.lookup",
+      "onboarding.status",
+      "templates.delete",
+      "templates.get",
+      "templates.get_by_name",
+      "templates.list",
+    ],
+  },
+  approval: ({ toolName }) =>
+    APPROVAL_REQUIRED.has(toolName.split("__").pop() ?? toolName)
+      ? "user-approval"
+      : "not-applicable",
+});
+\`\`\`
+
+The allowlist limits the connection to the reviewed Sent tools. eve requires user approval before sending a message, creating or deleting contacts, or deleting a template.`,
+    configureNote:
+      "Sends real SMS, WhatsApp, and RCS messages. Sending messages, creating or deleting contacts, and deleting templates require approval; Sender Profile, compliance, and feedback tools aren't exposed. Revoke access by deactivating the connection key in Sent Dashboard → API Keys.",
   },
   notion: {
     logo: "notion",
@@ -2084,6 +2318,38 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "images", "videos", "assets", "media", "oauth", "connect"],
     authModes: ["user"],
   },
+  flora: {
+    logo: "flora",
+    docsHref: "https://flora.ai/mcp",
+    keywords: ["mcp", "image", "video", "audio", "3d", "creative", "generation"],
+    authModes: ["user"],
+    connectors: {
+      user: {
+        uid: "agents.flora.ai/flora",
+        service: "agents.flora.ai/mcp",
+        name: "flora",
+      },
+    },
+    quickStart: `Create \`agent/connections/flora.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/flora.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://agents.flora.ai/mcp",
+  description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+  auth: connect("agents.flora.ai/flora"),
+  approval: always(),
+});
+\`\`\`
+
+Connect owns the OAuth flow, and each end-user authorizes in their own browser before their first tool call.`,
+    configureNote:
+      "Each user signs in to their own FLORA account when they first use a tool. Every FLORA MCP call requires approval, so confirm the quoted cost before approving a generation or technique.",
+  },
   coda: {
     logo: "coda",
     docsHref: "/docs/connections/mcp",
@@ -2120,6 +2386,35 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "treasury", "cash", "payments", "accounting", "oauth", "connect"],
     authModes: ["user"],
+  },
+  firecrawl: {
+    logo: "firecrawl",
+    docsHref: "https://docs.firecrawl.dev/mcp-server",
+    keywords: ["mcp", "web search", "web scraping", "crawl", "parse", "monitoring"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "FIRECRAWL_API_KEY",
+      header: "Authorization",
+    },
+    quickStart: `Create \`agent/connections/firecrawl.ts\`. The filename creates the \`firecrawl\` connection. Firecrawl calls can consume usage or create persistent work, so this connection requires approval for every call:
+
+\`\`\`ts
+import { always } from "eve/tools/approval";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.firecrawl.dev/v2/mcp",
+  description: "Firecrawl: search, scrape, map, crawl, parse, and monitor web content.",
+  headers: () => ({
+    Authorization: \`Bearer \${process.env.FIRECRAWL_API_KEY!}\`,
+  }),
+  approval: always(),
+});
+\`\`\`
+
+Keep the API key in a server-side environment variable. eve sends it directly to Firecrawl and does not expose it to the model.`,
+    configureNote:
+      "An API key enables Firecrawl's full tool surface, subject to the plan and team policy. Keep approval enabled, or use tool filters and approval rules that prevent unattended cost-sensitive or persistent actions.",
   },
   "hugging-face": {
     logo: "hugging-face",
@@ -2590,6 +2885,38 @@ export default otelIntegration({
 \`\`\``,
     configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
+  oodle: {
+    logo: "oodle",
+    docsHref: "https://docs.oodle.ai/integrations/agent-observability/eve",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "agent observability", "otlp"],
+    install: `Add Oodle instrumentation from eve's registry. Oodle ingests OTLP directly:
+
+\`\`\`bash
+eve add instrumentation/oodle
+\`\`\``,
+
+    quickStart: `Create \`agent/instrumentation/oodle.ts\` and send traces to Oodle's OTLP endpoint with your API key and instance ID:
+
+\`\`\`ts
+// agent/instrumentation/oodle.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: \`https://\${process.env.OODLE_OTLP_ENDPOINT}/v1/traces\`,
+    headers: {
+      "X-API-KEY": process.env.OODLE_API_KEY!,
+      "X-OODLE-INSTANCE": process.env.OODLE_INSTANCE!,
+    },
+  }),
+});
+\`\`\``,
+    configure: `Open Oodle’s eve integration tile to get your OTLP collector domain, API key, and instance ID. Set \`OODLE_OTLP_ENDPOINT\` to the domain only, without a scheme or path; the template adds \`https://\` and \`/v1/traces\`. Set \`OODLE_API_KEY\` and \`OODLE_INSTANCE\` to the supplied values. The registry template redacts inputs and outputs before export. See [Oodle’s eve guide](https://docs.oodle.ai/integrations/agent-observability/eve) for Oodle setup and the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+  },
   jaeger: {
     logo: "jaeger",
     docsHref: "/docs/observability/otel",
@@ -2748,23 +3075,28 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
 
 const channels: Integration[] = channelEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildChannel);
+  .map(buildChannel)
+  .sort(compareByName);
 
 const connections: Integration[] = connectionEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildConnection);
+  .map(buildConnection)
+  .sort(compareByName);
 
 const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildExtension);
+  .map(buildExtension)
+  .sort(compareByName);
 
 const memory: Integration[] = memoryEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildMemory);
+  .map(buildMemory)
+  .sort(compareByName);
 
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildInstrumentation);
+  .map(buildInstrumentation)
+  .sort(compareByName);
 
 /** Display label for each connection protocol. */
 export const protocolLabel: Record<ConnectionProtocol, string> = {

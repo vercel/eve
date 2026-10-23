@@ -1,4 +1,4 @@
-import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
+import type { Context, SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import {
   type InstrumentationSessionStartedEvent,
@@ -28,14 +28,12 @@ import type { AgentTurnTraceState } from "#tracing/eve/agent-trace-state.js";
 import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
-import { traceSessionIdOf } from "#tracing/eve/operation-input.js";
 import { ROOT_CONTEXT } from "#compiled/@opentelemetry/api/index.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
-import { withOperationConversation } from "#tracing/eve/conversation-context.js";
+import { traceSessionIdOf, withOperationTraceContext } from "#tracing/eve/conversation-context.js";
 import type {
   AgentSpanIdGenerator,
   AgentRun,
-  ExecutionContext,
   TraceLink,
   TurnOperation,
 } from "#compiled/@vercel/agent-runs/index.js";
@@ -61,11 +59,7 @@ interface EveSessionTracing {
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
   /** Hydrates a turn this process or an earlier one started. */
-  turnFor(
-    sessionId: string,
-    turnId: string,
-    context?: ExecutionContext,
-  ): Promise<TurnOperation | undefined>;
+  turnFor(sessionId: string, turnId: string, context?: Context): Promise<TurnOperation | undefined>;
   /** Whether the trace policy dropped this turn, so its work must not record spans. */
   dropped(sessionId: string, turnId: string): Promise<boolean>;
   turnTerminal(event: InstrumentationTurnTerminalEvent): Promise<void>;
@@ -110,13 +104,16 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
 
   const turnKey = (sessionId: string, turnId: string) => JSON.stringify([sessionId, turnId]);
 
-  async function turnFor(sessionId: string, turnId: string, context?: ExecutionContext) {
+  async function turnFor(sessionId: string, turnId: string, context?: Context) {
     const turn = await input.stateStore.get("turn", turnKey(sessionId, turnId));
     if (turn === undefined || !isSampledTrace(turn.context)) return undefined;
     const session = await input.stateStore.get("session", sessionId);
     return input.tracing.resume({
       identity: eveTurnIdentity({ sessionId, rootSessionId: turn.rootSessionId, turnId }),
-      context: context ?? hostContext(session?.channelAudience, { sessionId, ...turn }),
+      context: withOperationTraceContext(
+        context ?? withChannelAudience(ROOT_CONTEXT, session?.channelAudience),
+        { sessionId, ...turn },
+      ),
     });
   }
 
@@ -257,12 +254,16 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
   };
 }
 
-/** Spans this process starts inherit the channel audience and the operation's conversation. */
+/** Spans this process starts inherit the operation's audience and trace correlation. */
 function hostContext(
   audience: ChannelAudience | undefined,
-  operation: { readonly sessionId: string; readonly rootSessionId?: string },
+  operation: {
+    readonly sessionId: string;
+    readonly rootSessionId?: string;
+    readonly traceSessionId?: string;
+  },
 ) {
-  return withOperationConversation(withChannelAudience(ROOT_CONTEXT, audience), operation);
+  return withOperationTraceContext(withChannelAudience(ROOT_CONTEXT, audience), operation);
 }
 
 function activationLinks(turn: AgentTurnTraceState): TraceLink[] | undefined {

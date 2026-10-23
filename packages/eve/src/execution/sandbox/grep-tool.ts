@@ -11,7 +11,6 @@ import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-out
 
 const DEFAULT_GREP_LIMIT = 100;
 const MAX_GREP_LIMIT = 1000;
-const DEFAULT_PATH = "/workspace";
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -51,9 +50,7 @@ export async function executeGrepOnSandbox(
   sandbox: SandboxSession,
   args: GrepInput,
 ): Promise<GrepResult> {
-  const effectivePath = args.path ?? DEFAULT_PATH;
-
-  const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
+  const resolvedPath = await resolveAbsoluteFilePath(sandbox, args.path ?? ".");
   const normalizedPath = normalizeModelPath(resolvedPath);
   const effectiveLimit = Math.min(Math.max(1, args.limit ?? DEFAULT_GREP_LIMIT), MAX_GREP_LIMIT);
   const contextLines = args.context !== undefined && args.context > 0 ? args.context : 0;

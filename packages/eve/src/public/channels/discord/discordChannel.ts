@@ -1,6 +1,6 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-import type { ChannelFrom } from "#channel/channel-operations.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
@@ -39,6 +39,11 @@ import {
   isDiscordFreeformComponent,
 } from "#public/channels/discord/hitl.js";
 import {
+  answerDiscordAuthorizationReveal,
+  readDiscordAuthorizationReveal,
+  type DiscordAuthorizationReveal,
+} from "#public/channels/discord/authorization.js";
+import {
   commandInteractionMessage,
   DISCORD_EPHEMERAL_MESSAGE_FLAG,
   DISCORD_INTERACTION_RESPONSE_TYPE,
@@ -56,6 +61,10 @@ import {
   discordJsonBody,
   readMessageContent,
 } from "#public/channels/discord/responses.js";
+import {
+  createDiscordGatewayRoute,
+  type DiscordGatewayConfig,
+} from "#public/channels/discord/messages.js";
 import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js";
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
 import { readNonEmptyString } from "#shared/guards.js";
@@ -110,6 +119,10 @@ export interface DiscordChannelState {
   hasMessageAnchor: boolean;
   /** Posted prompts with components, keyed by requestId, until eve resolves them. */
   hitlPrompts?: Record<string, DiscordHitlPrompt>;
+  /** Each pending sign-in's message, keyed by sign-in attempt, until the sign-in settles. */
+  pendingAuthMessageIds?: Record<string, string>;
+  /** Whether the conversation is a 1:1 DM with the bot, where nobody else can see a sign-in. */
+  directMessage?: boolean;
 }
 
 /** What a posted prompt needs so its message can be edited once eve resolves it. */
@@ -219,6 +232,13 @@ export interface DiscordChannelConfig {
     interaction: DiscordInputResponseInteraction,
   ): DiscordInputResponseResult | Promise<DiscordInputResponseResult>;
 
+  /**
+   * Accepts ordinary messages (DMs, mentions, and thread follow-ups) that a
+   * relay forwards from the Discord Gateway, such as `experimental_runDiscordGatewayRelay`
+   * from `eve/channels/discord/gateway`. Mounts `POST /eve/v1/discord/gateway`.
+   */
+  readonly gateway?: DiscordGatewayConfig;
+
   readonly events?: DiscordChannelEvents;
 }
 
@@ -267,7 +287,10 @@ export interface DiscordChannel extends Channel<
   DiscordReceiveTarget,
   DiscordInstrumentationMetadata
 > {}
-/** Discord channel factory for HTTP Interactions and proactive channel messages. */
+/**
+ * Discord channel factory for HTTP Interactions, proactive channel messages,
+ * and, with `gateway`, ordinary messages forwarded from the Discord Gateway.
+ */
 export function discordChannel(config: DiscordChannelConfig = {}): DiscordChannel {
   const onCommand = config.onCommand ?? defaultOnCommand;
   const onInputResponse =
@@ -295,7 +318,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     routes: [
       POST<DiscordChannelState>(
         config.route ?? "/eve/v1/discord",
-        async (req, { from, waitUntil }) => {
+        async (req, { from, resolveSession, waitUntil }) => {
           const body = await verifyDiscordInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -322,10 +345,20 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
             onCommand,
             onInputResponse,
             from,
+            resolveSession,
             waitUntil,
           });
         },
       ),
+      ...(config.gateway === undefined
+        ? []
+        : [
+            createDiscordGatewayRoute({
+              buildContext: (state) => ({ discord: buildDiscordHandle({ config, state }) }),
+              config,
+              gateway: config.gateway,
+            }),
+          ]),
     ],
 
     async receive(input, { from }) {
@@ -396,13 +429,12 @@ function buildDiscordHandle(input: {
   const credentials = mergeCredentials(input.config.credentials, state);
 
   /**
-   * The first posted message anchors the conversation. A press finds its
-   * session by the id of the message it is on, so every later message with
-   * components, such as a second pending question, is aliased too.
+   * The first posted message anchors the conversation. Every posted message
+   * is aliased too: a press finds its session by the id of the message it is
+   * on, and a Gateway reply by the id of the message it replies to.
    */
-  function anchor(posted: DiscordPostedMessage, body: DiscordMessageBody): void {
+  function anchor(posted: DiscordPostedMessage): void {
     if (!posted.id) return;
-    if (state.hasMessageAnchor && body.components === undefined) return;
     if (!state.hasMessageAnchor) {
       state.conversationId = posted.id;
       state.hasMessageAnchor = true;
@@ -425,7 +457,7 @@ function buildDiscordHandle(input: {
       fetch: api?.fetch,
       channelId,
     });
-    anchor(posted, body);
+    anchor(posted);
     return posted;
   }
 
@@ -443,7 +475,7 @@ function buildDiscordHandle(input: {
       interactionToken,
     });
     state.initialResponseSent = true;
-    anchor(posted, body);
+    anchor(posted);
     return posted;
   }
 
@@ -460,7 +492,7 @@ function buildDiscordHandle(input: {
       fetch: api?.fetch,
       interactionToken,
     });
-    anchor(posted, body);
+    anchor(posted);
     return posted;
   }
 
@@ -545,8 +577,15 @@ async function handleInteraction(input: {
   readonly onCommand: NonNullable<DiscordChannelConfig["onCommand"]>;
   readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
   readonly from: ChannelFrom<DiscordChannelState>;
+  readonly resolveSession: ChannelResolveSession;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
+  if (input.interaction.type === DISCORD_INTERACTION_TYPE.MESSAGE_COMPONENT) {
+    const reveal = readDiscordAuthorizationReveal(input.interaction.customId);
+    if (reveal !== null) {
+      return revealAuthorization({ ...input, interaction: input.interaction, reveal });
+    }
+  }
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND) {
     return handleCommandInteraction({
       config: input.config,
@@ -610,6 +649,63 @@ async function handleCommandInteraction(input: {
     }),
   );
   return discordDeferredJson(result.ephemeral === true);
+}
+
+/**
+ * Answers a sign-in button press with an ephemeral message, identifying the
+ * presser the same way a HITL press does. Finding the sign-in reads the
+ * session's stream, so the press is acknowledged first, as an ephemeral
+ * deferred response, to stay inside Discord's 3-second deadline.
+ */
+function revealAuthorization(input: {
+  readonly config: DiscordChannelConfig;
+  readonly interaction: DiscordComponentInteraction;
+  readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
+  readonly resolveSession: ChannelResolveSession;
+  readonly reveal: DiscordAuthorizationReveal;
+  readonly waitUntil: (task: Promise<unknown>) => void;
+}): Response {
+  input.waitUntil(answerRevealedAuthorization(input));
+  return discordDeferredJson(true);
+}
+
+async function answerRevealedAuthorization(input: {
+  readonly config: DiscordChannelConfig;
+  readonly interaction: DiscordComponentInteraction;
+  readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
+  readonly resolveSession: ChannelResolveSession;
+  readonly reveal: DiscordAuthorizationReveal;
+}): Promise<void> {
+  const { interaction } = input;
+  const state = stateFromInteraction(interaction, {
+    conversationId: interaction.messageId,
+    hasMessageAnchor: true,
+    initialResponseSent: false,
+  });
+  const discord = buildDiscordHandle({ config: input.config, state });
+  let auth: SessionAuthContext | null = null;
+  try {
+    const result = await input.onInputResponse(
+      { defaultAuth: defaultDiscordAuth(interaction), discord },
+      interaction,
+    );
+    auth = result?.auth ?? null;
+  } catch (error) {
+    log.error("Discord sign-in press authorization failed", { error });
+  }
+  const body = await answerDiscordAuthorizationReveal({
+    auth,
+    // The sign-in message is one of the session's addresses, as every bot post is.
+    resolveSession: () =>
+      input.resolveSession(discordContinuationToken(interaction.channelId, interaction.messageId)),
+    reveal: input.reveal,
+  });
+  try {
+    // Fills in the ephemeral deferred response, so only the presser sees it.
+    await discord.editOriginalResponse(body);
+  } catch (error) {
+    log.error("Discord sign-in reply failed", { error });
+  }
 }
 
 function handleComponentInteraction(input: {
@@ -793,6 +889,7 @@ function stateFromInteraction(
 ): DiscordChannelState {
   return {
     audience: discordAudience(interaction.channelType),
+    directMessage: interaction.channelType === 1,
     applicationId: interaction.applicationId,
     channelId: interaction.channelId,
     conversationId: options.conversationId,

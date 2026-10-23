@@ -58,8 +58,8 @@ Paths below are relative to the agent directory. Root agents can use every path;
 | `skills/`                                               | On-demand procedures and capability packs | Yes                    | Flat Markdown, module-backed skills, or packaged skills.                                                                                |
 | `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not copied into the sandbox.                                                                                               |
 | `memory.ts` or `memory/<name>.ts`                       | Cross-session memory                      | Yes                    | Provider-backed slots. See [Memory](/docs/memory).                                                                                      |
-| `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's sandbox                       | Yes                    | The framework default applies when neither is authored.                                                                                 |
-| `sandbox/workspace/**`                                  | Files seeded into the sandbox             | Yes                    | Mirrored into `/workspace/` when a session starts.                                                                                      |
+| `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's sandbox                       | Yes                    | The framework default applies when neither is authored. When `sandbox/` exists, only `sandbox/sandbox.ts` is read.                      |
+| `sandbox/workspace/**`                                  | Files seeded into the sandbox             | Yes                    | Copied into the prepared environment; each new session sandbox starts with them in the workspace root.                                  |
 | `tools/`                                                | Typed executable integrations             | Yes                    | Module-backed only.                                                                                                                     |
 | `schedules/`                                            | Recurring jobs                            | No                     | `defineSchedule` modules or Markdown prompts with `cron` frontmatter; recursive nesting is supported.                                   |
 | `subagents/`                                            | Specialist child agents                   | Yes                    | Local directories or remote-agent definitions; nested subagents are supported.                                                          |
@@ -82,7 +82,7 @@ Explicit imports, sandbox workspace files, and packaged skill resources are unaf
 
 ## Files available in the sandbox
 
-Agent source files are not automatically available to shell commands. Put files to copy into the sandbox's `/workspace/` under `agent/sandbox/workspace/`. Skill runtime files are seeded separately under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback. See [Sandboxes](/docs/sandbox) and [Skills](/docs/skills).
+Agent source files are not automatically available to shell commands. Put files to copy into the sandbox's workspace root (`/workspace/` on built-in providers) under `agent/sandbox/workspace/`. Skill runtime files are seeded separately under `$HOME/.agents/skills/`, with `skills/` under the workspace root as the fallback when the sandbox has no usable `$HOME`. See [Sandboxes](/docs/sandbox) and [Skills](/docs/skills).
 
 ## Local subagents
 

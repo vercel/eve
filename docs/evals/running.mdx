@@ -58,7 +58,7 @@ Attempts share the `--max-concurrency` pool with every other eval, so attempts o
 
 ## Artifacts
 
-Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, start and completion times, captured event streams, and `t.log` lines under `evals/`. In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
 
 ## CI
 

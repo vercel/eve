@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileAgentInWorkspace } from "#compiler/compile-agent.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import type { SandboxProviderPrepareContext } from "#shared/sandbox-provider.js";
+import { populatedPaths } from "#internal/testing/sandbox-provider-harness.js";
+import type { SandboxPrepareContext } from "#sandbox/provider.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -33,8 +34,8 @@ describe("prewarmAppSandboxes", () => {
       join(agentRoot, "sandbox", "sandbox.ts"),
       [
         'import { defineSandbox } from "eve/sandbox";',
-        'import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";',
-        "export const environment = MicrosandboxSandbox.dockerfile();",
+        'import { DockerSandbox } from "eve/sandbox/docker";',
+        "export const environment = DockerSandbox.dockerfile();",
         "export default defineSandbox(() => environment.open());",
       ].join("\n"),
     );
@@ -75,7 +76,7 @@ describe("prewarmAppSandboxes", () => {
         {
           artifact: { imageReference: "registry.example/eve@sha256:test" },
           nodeId: "__root__",
-          providerName: "microsandbox",
+          providerName: "docker",
         },
       ],
       kind: "eve-sandbox-prepared-artifacts",
@@ -111,8 +112,8 @@ describe("prewarmAppSandboxes", () => {
 
     expect(events.seededTemplateCount).toBe(2);
     expect([...events.seededFilePaths].sort()).toEqual([
-      "$HOME/.agents/skills/research/SKILL.md",
-      "$HOME/.agents/skills/route-weather/SKILL.md",
+      "/home/agent/.agents/skills/research/SKILL.md",
+      "/home/agent/.agents/skills/route-weather/SKILL.md",
     ]);
   });
 });
@@ -193,23 +194,14 @@ async function createScenarioAppRoot(): Promise<string> {
 }
 
 function createRecordingDispatch(events: ReturnType<typeof createPrewarmEvents>) {
-  return async ({ context }: { context: SandboxProviderPrepareContext }) => {
+  return async ({ context }: { context: SandboxPrepareContext }) => {
     events.templateKeys.push(context.storagePath);
     events.runtimeContextAppRoots.push(context.storagePath);
 
-    const resourceFiles = [
-      ...(context.resources.workspace?.files.map((file) => ({
-        ...file,
-        path: `${context.resources.workspace?.targetPath}/${file.relativePath}`,
-      })) ?? []),
-      ...(context.resources.skills?.files.map((file) => ({
-        ...file,
-        path: `${context.resources.skills?.targetPath}/${file.relativePath}`,
-      })) ?? []),
-    ];
-    if (resourceFiles.length > 0) {
+    const paths = await populatedPaths(context);
+    if (paths.length > 0) {
       events.seededTemplateCount += 1;
-      events.seededFilePaths.push(...resourceFiles.map((file) => file.path));
+      events.seededFilePaths.push(...paths);
     }
 
     return { storagePath: context.storagePath };

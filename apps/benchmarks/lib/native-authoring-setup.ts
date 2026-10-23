@@ -56,7 +56,7 @@ export function createNativeAuthoringSetup(options: {
     }
 
     // DefaultSandbox selects just-bash inside the Linux eval container, where Docker
-    // and microsandbox are unavailable. Supply its optional peer before the model runs.
+    // is unavailable. Supply its optional peer before the model runs.
     await run(
       sandbox,
       "npm install --save-dev --save-exact just-bash@3.1.0",

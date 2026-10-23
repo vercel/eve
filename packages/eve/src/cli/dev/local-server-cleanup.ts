@@ -45,7 +45,7 @@ export async function reconcileCleanupIntents(appRoot: string): Promise<void> {
           ) {
             return;
           }
-          await stopDevelopmentSandboxResources({ appRoot, devRunId: value.runId });
+          await stopDevelopmentSandboxResources({ devRunId: value.runId });
           await rm(path, { force: true });
         } catch {}
       }),

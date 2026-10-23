@@ -20,6 +20,13 @@ const response = await worker.send("Review the migration plan.");
 
 The option binds to the session, not an individual message. Every turn sent through the returned handle uses the selected model. Omitting it preserves the target agent's configured model behavior.
 
+A root can also opt into a model-facing `agent` variant whose input includes the model:
+
+```ts
+// agent/tools/agent.ts
+export { agentWithModel as default } from "eve/tools/agent";
+```
+
 ## Semantics
 
 - The override applies to local targets, including the built-in root copy and declared or dynamic subagents.
@@ -42,6 +49,8 @@ compiled target configuration
 The override is separate from `DynamicSubagentAgentConfig`. Dynamic subagent configuration selects the target's complete runtime definition and controls its availability. Reusing that object for an invocation override would accidentally replace unrelated limits, reasoning, compaction, and description fields. A narrow runtime override composes after either the compiled or dynamic target configuration and changes only the model.
 
 The child workflow persists the normalized reference in its context before session creation. Workflow replay therefore opens the same child model even if catalog metadata or the target's authored dynamic model changes later.
+
+`agentWithModel` is a separate authored workflow tool; the default agent tool keeps its existing schema. Its model-visible schema is `{ message, model, taskId? }`, and its serve body opens the root-copy session through `ctx.agent("agent", { model })`. It shares the default agent tool's task lifecycle; a continuation must repeat the original model because the child session keeps that model for its lifetime.
 
 ## Validation
 

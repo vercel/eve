@@ -328,17 +328,24 @@ function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
     const deliveryTimeoutsImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-timeouts.ts"),
     );
+    const deliveryAuthImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-auth.ts"),
+    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const importLines = `
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from ${deliveryTimeoutsImportSpecifier};
+import { authenticateLocalWorkflowDeliveries } from ${deliveryAuthImportSpecifier};
 import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
     const createWorldSource = `
 applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-const workflowWorld = await workflowWorldModule.createWorld({
-  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
-});`.trimStart();
+const workflowWorld = authenticateLocalWorkflowDeliveries(
+  await workflowWorldModule.createWorld({
+    dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
+    recoverActiveRuns: false,
+  }),
+);`.trimStart();
     return {
       moduleImportSpecifier,
       extraImportLines: importLines.split("\n"),

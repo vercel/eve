@@ -52,8 +52,8 @@ export interface DeployedSelfModificationConfig {
     | GitHubCredentialProvider
     | {
         /**
-         * Self-hosted exception. Reads `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from
-         * the trusted deployment environment; never injects it into the sandbox.
+         * Reads `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from the trusted deployment
+         * environment; never injects it into the sandbox.
          */
         readonly pat: true;
       };
@@ -116,7 +116,7 @@ export function resolveDeployedSelfModificationConfig(
 function parseCredentials(value: unknown): ResolvedGitHubCredentials {
   if (!isRecord(value)) {
     throw new Error(
-      "Deployed self-modification credentials must explicitly configure a credential provider or the self-hosted PAT exception.",
+      "Deployed self-modification credentials must explicitly configure a credential provider or `{ pat: true }`.",
     );
   }
   const hasProvider = value.resolve !== undefined;

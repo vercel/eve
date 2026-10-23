@@ -1,3 +1,4 @@
+import { PrewarmResponseSchema, type PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import { createClientError } from "#client/client-error.js";
 import type {
   CancelSessionResult,
@@ -16,12 +17,29 @@ import {
   createEveSessionClearRoutePath,
   createEveSessionCompactRoutePath,
   createEveSessionResetRoutePath,
+  createEveSessionRoutePath,
 } from "#protocol/routes.js";
 
 interface SessionControlContext {
   readonly host: string;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(): Promise<Headers>;
+}
+
+export async function prewarmClientSession(input: {
+  readonly context: SessionControlContext;
+  readonly sessionId: string;
+  readonly signal?: AbortSignal;
+}): Promise<PrewarmSessionResult> {
+  const { payload } = await postJson({
+    context: input.context,
+    operation: "Prewarm",
+    path: createEveSessionRoutePath(input.sessionId),
+    signal: input.signal,
+  });
+  const result = PrewarmResponseSchema.safeParse(payload);
+  if (!result.success) throw new Error("Prewarm route returned an invalid response.");
+  return { status: result.data.status };
 }
 
 export async function cancelClientSession(input: {

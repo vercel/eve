@@ -1,6 +1,6 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-import { vercelOidc } from "#public/channels/auth.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   chatSdkChannel,
   type ChatSdkChannelBridge,
@@ -63,7 +63,10 @@ export interface LinqChannelCredentials {
   readonly apiKey?: LinqCredentialValue;
   /** Signing secret for direct Linq webhook delivery. */
   readonly signingSecret?: LinqCredentialValue;
-  /** Trusted verifier for webhooks forwarded by a provider such as Vercel Connect. */
+  /**
+   * Trusted verifier for webhooks forwarded by a provider such as Vercel Connect.
+   * Return a falsy value or throw to reject the request.
+   */
   readonly webhookVerifier?: LinqWebhookVerifier;
 }
 
@@ -169,12 +172,17 @@ function normalizeCredentials(
   if (apiKey !== undefined) {
     config.credentials = createCredentialProvider(apiKey, signingSecret);
   }
-  if (webhookVerifier !== undefined) {
-    config.webhookVerifier = webhookVerifier;
-  } else if (signingSecret === undefined) {
-    config.webhookVerifier = vercelOidc();
-  }
+  const verifier =
+    webhookVerifier ?? (signingSecret === undefined ? sameEnvironmentVercelOidc() : undefined);
+  if (verifier !== undefined) config.webhookVerifier = rejectFalsyResults(verifier);
   return config;
+}
+
+// The Linq adapter rejects only a strict `false`, but eve verifiers such as
+// vercelOidc() reject with `null`, which the adapter would otherwise accept.
+function rejectFalsyResults(verifier: LinqWebhookVerifier): LinqWebhookVerifier {
+  return async (request: Request, rawBody: Uint8Array) =>
+    (await verifier(request, rawBody)) || false;
 }
 
 function createCredentialProvider(

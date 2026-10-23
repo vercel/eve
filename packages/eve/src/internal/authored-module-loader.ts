@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
@@ -8,8 +8,10 @@ import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
   createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
   resolveAuthoredTsConfigPath,
 } from "#internal/authored-module-build-options.js";
+import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import {
   createExtensionMountPlugin,
@@ -211,7 +213,7 @@ export async function bundleAuthoredModuleCode(
       createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
-    sourcemap: "inline",
+    sourcemap: evaluatedBundleSourcemap(),
   });
 }
 
@@ -225,7 +227,7 @@ export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
-  const code = await buildAuthoredModuleBundle(modulePath, options, {
+  return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
@@ -233,8 +235,6 @@ export async function bundleAuthoredModuleForGeneration(
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
   });
-
-  return removeRolldownModuleRegionComments(code);
 }
 
 /** One path-preserving entry in an extension distribution graph. */
@@ -298,7 +298,7 @@ export async function bundleExtensionDistributionGraph(input: {
     const imports = new Set<string>();
     for (const item of result.output) {
       if (item.type === "chunk") {
-        files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+        files.set(item.fileName, item.code);
         for (const specifier of [...item.imports, ...item.dynamicImports]) imports.add(specifier);
       }
     }
@@ -411,7 +411,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     });
     return {
       authoredWorkflowModules: workflowSources.modules(),
-      code: removeRolldownModuleRegionComments(chunk.code),
+      code: chunk.code,
       sourceModules: workflowSources.sourceModules().filter((id) => id !== input.moduleMapPath),
       workflowSourceFingerprint: workflowSources.fingerprint(),
     };
@@ -616,13 +616,6 @@ export function createAuthoredWorkflowDirectivePlugin(input: {
   };
 }
 
-function removeRolldownModuleRegionComments(code: string): string {
-  return code
-    .split("\n")
-    .filter((line) => !line.startsWith("//#region ") && line !== "//#endregion")
-    .join("\n");
-}
-
 async function loadBundledAuthoredModule(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
@@ -662,13 +655,7 @@ async function writeAuthoredModuleBundle(
     resolveAuthoredPackageRoot(modulePath),
     AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
   );
-  const bundlePath = join(bundleDirectoryPath, `${bundleHash}.mjs`);
-
-  if (!existsSync(bundlePath)) {
-    mkdirSync(bundleDirectoryPath, { recursive: true });
-    writeFileSync(bundlePath, code);
-  }
-
+  const bundlePath = writeAuthoredModuleCacheFile(bundleDirectoryPath, `${bundleHash}.mjs`, code);
   const instance = options.extension?.evaluationId ?? "";
   return `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`;
 }

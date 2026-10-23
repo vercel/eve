@@ -7,6 +7,7 @@ import {
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { hasUnansweredToolCall } from "#harness/model-call/response.js";
+import { repairToolHistory } from "#harness/tool-history-repair.js";
 import {
   getTurnClientContextState,
   setTurnClientContextState,
@@ -28,7 +29,20 @@ export interface Prompt {
 }
 
 export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
-  const messages = validateHarnessModelMessages([...step.session.history]);
+  const repaired = repairToolHistory({
+    messages: step.session.history,
+    insertionIndex: turn.storedClientContext?.insertionIndex,
+  });
+  const messages = validateHarnessModelMessages(repaired.messages);
+  step.session = { ...step.session, history: [...messages] };
+  if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
+    const storedClientContext = {
+      ...turn.storedClientContext,
+      insertionIndex: repaired.insertionIndex,
+    };
+    turn = { ...turn, storedClientContext };
+    step.session = setTurnClientContextState(step.session, storedClientContext);
+  }
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,

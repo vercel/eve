@@ -116,6 +116,8 @@ const CHECKPOINT_UPGRADES: Readonly<
   },
   // Older owners have never admitted keyed deliveries.
   15: (checkpoint) => ({ ...checkpoint, admittedDeliveryKeys: [] }),
+  // Older targets cannot preserve an idle deadline during proactive preparation.
+  16: (checkpoint) => checkpoint,
 };
 
 /**

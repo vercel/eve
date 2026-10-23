@@ -1,11 +1,11 @@
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES,
   parseWorkflowProgramOptions,
-  readWorkflowProgramAgentCall,
-  readWorkflowProgramCallInterrupt,
   type WorkflowProgramAgentCall,
   type WorkflowProgramInput,
+  type WorkflowProgramResolution,
 } from "#execution/dynamic-workflow/schema.js";
 import {
   runWorkflowProgramStep,
@@ -42,28 +42,29 @@ export async function runJsProgram(
   while (outcome.status === "interrupted") {
     ctx.abortSignal.throwIfAborted();
     const resolutions = await Promise.all(
-      outcome.pending.map(async (pending) => {
-        const interrupt = readWorkflowProgramCallInterrupt(pending);
-        const call = readWorkflowProgramAgentCall(interrupt.toolInput);
+      outcome.pending.map(async ({ call, id }): Promise<WorkflowProgramResolution> => {
         const invocationIndex = calls++;
         if (invocationIndex >= program.maxSubagents) {
           return {
-            status: "failed" as const,
-            error: `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most ${String(program.maxSubagents)} agents; "${call.target}" was not called.`,
+            interruptionId: id,
+            value: {
+              status: "failed",
+              error: `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most ${String(program.maxSubagents)} agents; "${call.target}" was not called.`,
+            },
           };
         }
         try {
           const output = await callProgramAgent(ctx, call);
-          return { status: "completed" as const, output };
+          return { interruptionId: id, value: { status: "completed", output } };
         } catch (error) {
           ctx.abortSignal.throwIfAborted();
-          return { status: "failed" as const, error: toErrorMessage(error) };
+          return { interruptionId: id, value: { status: "failed", error: toErrorMessage(error) } };
         }
       }),
     );
     outcome = await runWorkflowProgramStep({
       ...base,
-      resume: { interrupt: outcome.interrupt, resolutions },
+      resume: { continuation: outcome.continuation, resolutions },
     });
   }
   return outcome.output;
@@ -84,8 +85,15 @@ async function callProgramAgent(
       `Agent "${call.target}" failed to handle the message: ${result.error?.message ?? "no reason given"}`,
     );
   }
-  if (outputSchema !== undefined) return result.data ?? null;
-  return result.message ?? null;
+  const output = outputSchema !== undefined ? (result.data ?? null) : (result.message ?? null);
+  // Checked here so the program can catch an oversized reply; run would fail the whole workflow.
+  const bytes = new TextEncoder().encode(JSON.stringify(output)).byteLength;
+  if (bytes > WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES) {
+    throw new Error(
+      `Agent "${call.target}" replied with ${String(bytes)} bytes of JSON, over the ${String(WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES)} byte limit for a ctx.agent() result.`,
+    );
+  }
+  return output;
 }
 
 export { MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS };

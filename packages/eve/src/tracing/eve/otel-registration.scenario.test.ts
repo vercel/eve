@@ -15,7 +15,7 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { registerOtelPipeline } from "./otel-registration.js";
-import { withConversationId } from "./conversation-context.js";
+import { withConversationId, withOperationTraceContext } from "./conversation-context.js";
 
 const require = createRequire(import.meta.url);
 const authoredApi = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
@@ -91,6 +91,7 @@ describe("OTel registration", () => {
   );
 
   it("delegates an authored tracer cached before registration", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
     const authoredTracer = authoredApi.trace.getTracer("authored");
     expect(authoredTracer.startSpan("before-registration").isRecording()).toBe(false);
 
@@ -103,7 +104,11 @@ describe("OTel registration", () => {
     const parent = runtimeTrace.getTracer("eve").startSpan("eve.parent");
     const parentContext = parent.spanContext();
     const activeContext = withConversationId(
-      runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, parent),
+      withOperationTraceContext(runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, parent), {
+        rootSessionId: "root-session",
+        sessionId: "child-run",
+        traceSessionId: "trace-session",
+      }),
       "caller-conversation",
     );
     const child = await runtimeContext.with(activeContext, async () => {
@@ -128,6 +133,7 @@ describe("OTel registration", () => {
       .find((span) => span.name === "authored.child");
     expect(exportedChild?.parentSpanContext?.spanId).toBe(parentContext.spanId);
     expect(exportedChild?.attributes["gen_ai.conversation.id"]).toBe("caller-conversation");
+    expect(exportedChild?.attributes["vercel.session_id"]).toBe("trace-session");
     expect(
       exporter.getFinishedSpans().find((span) => span.name === "authored.conversation")?.attributes[
         "gen_ai.conversation.id"

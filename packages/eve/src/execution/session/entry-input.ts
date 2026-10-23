@@ -35,17 +35,18 @@ export type SessionHandoffStart =
     }
   | {
       /**
-       * The previous owner compacted the session and moved it to a fresh run on
-       * its own deployment, so no single run's event log grows with the
-       * session.
+       * The previous owner rotated an idle session after compaction or prepared
+       * it on the deployment accepting the next interaction.
        */
-      readonly reason: "compaction";
+      readonly reason: "compaction" | "prewarm";
       /**
        * Only sources older than version 3 send one: the lone delivery that
        * arrived before they could move, processed first. Without one, the
        * successor parks until the next input arrives.
        */
       readonly delivery?: DeliverHookPayload;
+      /** Proactive preparation preserves the current idle deadline. */
+      readonly sessionTimeoutDeadline?: Date;
     };
 
 /** A successor owner started by a previous owner during a handoff. */

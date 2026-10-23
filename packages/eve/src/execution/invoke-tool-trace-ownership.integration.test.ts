@@ -17,6 +17,7 @@ import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { defineJsonSchema } from "#tools/schema.js";
 import { AgentTraceSpanProcessor } from "#tracing/local/agent-trace-span-processor.js";
+import { traceSessionIdFromContext } from "#tracing/eve/conversation-context.js";
 
 const CLIENT_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const alice: SessionAuthContext = {
@@ -35,6 +36,7 @@ const inputSchema = defineJsonSchema({
 let openGate: () => void = () => undefined;
 let gate: Promise<void> = Promise.resolve();
 const seenActive: boolean[] = [];
+const seenTraceSessionIds: Array<string | undefined> = [];
 
 function tool(name: string, execute: (input: { text?: string }) => unknown): HarnessToolDefinition {
   return {
@@ -49,6 +51,7 @@ const tools = [
   tool("lookup", async () => {
     const traceId = apiTrace.getActiveSpan()?.spanContext().traceId;
     seenActive.push(traceId !== undefined && processor.activeTraceIds().has(traceId));
+    seenTraceSessionIds.push(traceSessionIdFromContext(apiContext.active()));
     await apiTrace.getTracer("test.tool").startActiveSpan("nested lookup", async (span) => {
       span.end();
     });
@@ -82,6 +85,7 @@ let provider: BasicTracerProvider;
 
 beforeEach(() => {
   seenActive.length = 0;
+  seenTraceSessionIds.length = 0;
   exporter = new InMemorySpanExporter();
   // The production local-trace processor: it claims traces and releases completed ones on flush.
   processor = new AgentTraceSpanProcessor([new SimpleSpanProcessor(exporter)]);
@@ -133,6 +137,7 @@ describe("invokeTool trace ownership", () => {
   it("holds the trace while the call runs and releases it when the call ends", async () => {
     await invokeTool(runtime, "lookup", {}, { auth: alice });
     expect(seenActive).toEqual([true]);
+    expect(seenTraceSessionIds[0]).toMatch(/^call_session_/u);
     expect(names()).toEqual(["execute_tool lookup", "nested lookup"]);
     expect(processor.activeTraceIds().size).toBe(0);
   });

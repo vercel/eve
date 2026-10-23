@@ -81,7 +81,7 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths and paths beginning with `$HOME/`.
+`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`. Results and errors name the resolved absolute path.
 
 ```sh
 eve add tool/read_file
@@ -113,7 +113,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
 
 ```sh
 eve add tool/write_file
@@ -131,10 +131,15 @@ import { writeFile } from "eve/tools/write_file";
 
 export default defineTool({
   ...writeFile,
-  description: "Write approved project files in the sandbox.",
+  description: "Write notes in the sandbox's notes directory.",
   async execute(input, ctx) {
-    if (!input.filePath.startsWith("/workspace/")) {
-      throw new Error("write_file is limited to /workspace");
+    const sandbox = await ctx.getSandbox();
+    const notes = `${sandbox.resolvePath("notes")}/`;
+    if (
+      input.filePath.startsWith("$HOME") ||
+      !sandbox.resolvePath(input.filePath).startsWith(notes)
+    ) {
+      throw new Error("write_file is limited to the notes directory");
     }
     return writeFile.execute(input, ctx);
   },
@@ -291,7 +296,25 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
+To let the model choose an AI Gateway model for each root-copy task, export `agentWithModel` from the same slot:
+
+```ts title="agent/tools/agent.ts"
+export { agentWithModel as default } from "eve/tools/agent";
+```
+
+This is a separate workflow tool that calls `ctx.agent("agent", { model })`. The default `agent` tool remains unchanged and does not gain a `model` parameter. The opt-in definition accepts:
+
+```ts
+{
+  message: string;
+  model: string; // AI Gateway model id for the child session
+  taskId?: string;
+}
+```
+
+It otherwise has the default tool's task behavior: a call returns a receipt, the result arrives later, and `taskId` continues the same root-copy session. The selected model applies to every turn in that session. A continuation must repeat the original model; start a new task to use another one. Because the parent model controls this value, use this tool only when it may choose among every model your AI Gateway credentials and policies allow.
+
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the default definition above to restore direct root-copy delegation, export `agentWithModel` to expose model selection, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -356,7 +379,7 @@ export default askQuestion();
 
 ### `glob`
 
-`glob` finds sandbox files by glob pattern. Add it:
+`glob` finds sandbox files by glob pattern. It searches the workspace root unless the model passes a directory, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/glob
@@ -382,7 +405,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `glob
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. Add it:
+`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/grep

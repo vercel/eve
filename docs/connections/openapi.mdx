@@ -39,6 +39,8 @@ Use `baseUrl` when the spec is missing server data, points at the wrong environm
 
 The resolved base URL must use `https` too (loopback hosts may use `http` for local development), since operation calls carry the connection's credentials.
 
+For the same reason, operation calls follow redirects only within the base URL's origin, up to 10 hops; a longer chain fails the call as a redirect loop. A redirect to another origin is not followed. The tool returns the redirect response with its absolute target in `location`, such as `{ status: 302, statusText, body, location: "https://storage.example.com/..." }`, and the connection's credentials never reach the other host. Endpoints that hand downloads off to a storage host return that `location`, which the agent can fetch without the connection's credentials. If an API has moved to a new domain, point `baseUrl` at the new domain.
+
 ```ts title="agent/connections/crm.ts"
 import { defineOpenAPIConnection } from "eve/connections";
 

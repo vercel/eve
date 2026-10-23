@@ -2,6 +2,7 @@
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
+import type { SandboxState } from "#sandbox/state.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -78,6 +79,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
   readonly sandboxSessionId: string;
+  /** The state of that sandbox: this session's own, or else its owner's when it shares it. */
+  readonly sandboxState?: SandboxState;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
@@ -158,6 +161,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  const sandboxState = session.sandboxState ?? resolveOwnerSandboxState(adapter.state);
 
   return {
     adapter,
@@ -174,6 +178,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     parentSession: ctx.get(ParentSessionKey),
     plan,
     sandboxSessionId,
+    sandboxState,
     serializedContext: input.serializedContext,
     session,
     traceRoot: childTraceRoot(ctx, session.sessionId),
@@ -189,6 +194,12 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot | undefined {
   if (ctx.get(TraceRootKey) === undefined) return undefined;
   return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
+}
+
+/** A child that shares its owner's sandbox uses the owner's state until it records its own. */
+function resolveOwnerSandboxState(adapterState: unknown): SandboxState | undefined {
+  if (typeof adapterState !== "object" || adapterState === null) return undefined;
+  return (adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined;
 }
 
 function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {

@@ -7,14 +7,6 @@ import {
   type TraceCheckpointer,
 } from "#compiled/@vercel/agent-runs/index.js";
 
-export function traceSessionIdOf(scope: {
-  readonly traceSessionId?: string;
-  readonly rootSessionId?: string;
-  readonly sessionId: string;
-}): string {
-  return scope.traceSessionId ?? scope.rootSessionId ?? scope.sessionId;
-}
-
 export function checkpointContent(value: string | undefined): unknown {
   if (value === undefined) return undefined;
   // Historical checkpoints contain truncated JSON; omit payloads, not the operation.

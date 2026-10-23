@@ -59,8 +59,8 @@ export default defineEval({
   },
 });
 
-/** Where eve stages a tool-result file: its content hash and filename. */
+/** Where eve stages a tool-result file, relative to the workspace root: its content hash and filename. */
 function stagedImagePath(base64: string): string {
   const sha = createHash("sha256").update(Buffer.from(base64, "base64")).digest("hex");
-  return `/workspace/.eve/attachments/${sha.slice(0, 16)}/stripes.png`;
+  return `.eve/attachments/${sha.slice(0, 16)}/stripes.png`;
 }

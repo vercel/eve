@@ -6,6 +6,7 @@ export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing
 export type TemplateIntegration =
   | "Contentful"
   | "Datadog"
+  | "Discord"
   | "dbt"
   | "GitHub"
   | "HTTP API"
@@ -162,6 +163,32 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/instructions.md",
       "agent/skills/plan_a_trip.md",
       "agent/tools/get_weather.ts",
+    ],
+  },
+  {
+    slug: "eve-discord-agent",
+    title: "Discord Agent",
+    setupPrompt:
+      "Set up the eve Discord agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the Discord bot, Vercel Connect, and Vercel Daemon setup steps.",
+    description:
+      "A Discord community agent that answers questions in threads, catches people up on what they missed, and stays quiet while they talk, through a Discord Gateway relay on Vercel Daemons.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Discord", "Vercel"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-discord-agent-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/discord.ts",
+      "agent/instructions.md",
+      "agent/skills/catch_up.md",
+      "agent/tools/read_recent_messages.ts",
     ],
   },
   {
@@ -438,11 +465,11 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/channels/resend.ts",
       "agent/connections/linear.ts",
       "agent/connections/resend.ts",
+      "agent/extensions/github.ts",
       "agent/instructions.ts",
       "agent/schedules/weekly-digest.ts",
       "agent/skills/triaging-issues/SKILL.md",
       "agent/subagents/researcher/agent.ts",
-      "agent/tools/github.ts",
     ],
   },
   {
@@ -467,8 +494,8 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/sandbox.ts",
       "agent/schedules/weekly-analytics.ts",
       "agent/skills/x-style/SKILL.md",
-      "agent/subagents/researcher/agent.ts",
-      "agent/subagents/reviewer/agent.ts",
+      "agent/subagents/draft-reviewer/agent.ts",
+      "agent/subagents/web-researcher/agent.ts",
       "agent/tools/lint_against_style.ts",
     ],
   },

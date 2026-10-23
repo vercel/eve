@@ -40,6 +40,22 @@ Tracing starts as soon as you save the rule. You can also manage sampling
 rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
 The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
 
+## Trace selected paths
+
+If you prefer path-scoped sampling, replace the all-path rule with 100% rules
+for each required **Request Path Prefix**. For a single agent at the default
+mount, start with:
+
+- `/eve/v1`: eve's HTTP API and default channel endpoints.
+- `/.well-known/workflow`: workflow execution and webhooks.
+
+For named agents, use their deployed prefixes, such as `/eve/support/v1`,
+instead of `/eve/v1`. Include custom channel routes and, for Vercel-backed
+schedule collections,
+`/.well-known/eve/v1/schedules/consumer`. Missing paths can leave traces
+incomplete. The workflow prefix also includes non-eve workflows in the same
+project.
+
 ## Configure Agent Runs
 
 Preview and production deployments export to Vercel Agent Runs by default.

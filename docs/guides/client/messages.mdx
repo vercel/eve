@@ -41,7 +41,7 @@ seconds when a durable run has been accepted but its command inbox is still star
 abort signal cancels the wait. Other errors, `session.respond()`, control methods, and raw HTTP
 requests do not use this retry. An unknown
 or terminal session throws `ClientError` immediately with `session_not_active`. A
-[stranded](../../concepts/execution-model-and-durability#stranded-sessions) session throws
+[stranded](../deployment/self-hosting#recover-a-stranded-session) session throws
 `ClientSessionStrandedError`, a `ClientError` with `code: "session_stranded"` and the
 `eveVersion` that built the session when it recorded one. It is never retried automatically. Call
 `session.reset()` and create a new session.

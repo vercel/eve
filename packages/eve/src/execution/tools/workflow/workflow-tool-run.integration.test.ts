@@ -22,6 +22,9 @@ import {
   failingDeployWorkflow,
   reportingDeployWorkflow,
   returnAskAnswerWorkflow,
+  sandboxParallelPrepareWorkflow,
+  sandboxStepRuns,
+  sandboxPrepareWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
@@ -138,6 +141,187 @@ describe("workflow tools", () => {
       expect.stringContaining(workflowSdkNotice.fatalStep),
     );
     expect(consoleOutput.unexpected(workflowSdkNotice.fatalStep)).toEqual([]);
+  });
+
+  it("opens the session's sandbox from steps before the session does, and the session's end removes it", async () => {
+    const readBySession: (string | null)[] = [];
+    let reply = "";
+    sandboxStepRuns().clear();
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-sandbox-first",
+      execute: sandboxParallelPrepareWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/sandbox.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                // The session's turn uses its sandbox after the steps wrote to it.
+                async "action.result"(_event, ctx) {
+                  const sandbox = await ctx.getSandbox();
+                  readBySession.push(await sandbox.readTextFile({ path: "/workspace/plan.txt" }));
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "deploy_service",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "schedule:workflow-step-sandbox-first",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const turn = await stream.nextTurn();
+        reply = String(filterEventsByType(turn, "message.completed").at(-1)?.data.message);
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), { kind: "reset" });
+        const terminal = await stream.nextTurn();
+        expect(filterEventsByType(terminal, "session.completed")).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+
+    // Two concurrent steps opened the sandbox first, each running once, and a third read both
+    // files. The session's turn saw the same sandbox, and its end removed it by key.
+    expect(reply).toContain('"config":"config:api"');
+    expect(reply).toContain('"plan":"plan:api"');
+    expect(Object.fromEntries(sandboxStepRuns())).toEqual({ config: 1, plan: 1 });
+    expect(readBySession).toEqual(["plan:api"]);
+    const keys = new Set(runtime.sandboxEvents.map((event) => event.split(":")[1]));
+    expect(keys.size).toBe(1);
+    expect(runtime.sandboxCleanups).toEqual([...keys]);
+  });
+
+  it("resumes from a step the sandbox the session opened before the call", async () => {
+    const readBySession: (string | null)[] = [];
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-sandbox",
+      execute: sandboxPrepareWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/sandbox.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "message.received"(_event, ctx) {
+                  const sandbox = await ctx.getSandbox();
+                  await sandbox.writeTextFile({
+                    content: "from-session",
+                    path: "/workspace/seed.txt",
+                  });
+                },
+                async "action.result"(_event, ctx) {
+                  const sandbox = await ctx.getSandbox();
+                  readBySession.push(
+                    await sandbox.readTextFile({ path: "/workspace/prepared.txt" }),
+                  );
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "deploy_service",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "schedule:workflow-step-sandbox",
+          }),
+        },
+      ]);
+      return String(await readFirstTurnReply(run));
+    });
+
+    // The step resumed the state the session recorded instead of running the definition again.
+    expect(output).toContain('"seed":"from-session"');
+    expect(readBySession).toEqual(["prepared:api"]);
+    const events = runtime.sandboxEvents.map((event) => event.split(":")[0]);
+    expect(events.filter((event) => event === "definition")).toHaveLength(1);
+    expect(events.filter((event) => event === "start")).toHaveLength(1);
+    expect(events).toContain("resume");
+  });
+
+  it("opens the parent's sandbox from a step of a child that shares it", async () => {
+    const readBySession: [string, string | null][] = [];
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-sandbox-child",
+      execute: sandboxPrepareWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/sandbox.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "message.received"(_event, ctx) {
+                  const sandbox = await ctx.getSandbox();
+                  readBySession.push([
+                    ctx.session.id,
+                    await sandbox.readTextFile({ path: "/workspace/prepared.txt" }),
+                  ]);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "deploy_service",
+    });
+
+    let parentId = "";
+    await runtime.run(async () => {
+      // The built-in `agent` copy shares the root's sandbox and calls the workflow tool.
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Delegate to a subagent: Run deploy_service with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "schedule:workflow-step-sandbox-child",
+          }),
+        },
+      ]);
+      parentId = run.runId;
+      const stream = captureTurnEvents(run);
+      try {
+        // The child's task settles within the parent's first turn; the parent reads on the next.
+        await stream.nextTurn();
+        await resumeSessionInbox(
+          { sessionId: run.runId },
+          { kind: "send", payload: { message: "Alice checks the prepared file." } },
+        );
+        await stream.nextTurn();
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), { kind: "reset" });
+        await stream.nextTurn();
+      } finally {
+        stream.dispose();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+
+    // The child's step opened the sandbox under the parent's key, so the parent reads its file and
+    // the parent's end removes it.
+    const keys = new Set(runtime.sandboxEvents.map((event) => event.split(":")[1]));
+    expect([...keys]).toEqual([parentId]);
+    expect(readBySession).toContainEqual([parentId, "prepared:api"]);
+    expect(runtime.sandboxCleanups).toEqual([parentId]);
   });
 
   it("settles the call with an error when the workflow body throws", async () => {

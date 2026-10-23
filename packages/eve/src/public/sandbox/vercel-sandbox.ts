@@ -50,23 +50,23 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
 export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
 
 /** Access mode for a Drive mounted into a Vercel Sandbox. */
-export type VercelSandboxMountMode = Vercel.SandboxMountMode;
+export type VercelSandboxMountMode = "read-write" | "snapshot";
 
-/** A Drive mounted at one absolute path in a Vercel Sandbox. */
-export type VercelSandboxMount = Vercel.SandboxMounts[string];
+/**
+ * A Drive mounted at one absolute path in a Vercel Sandbox: a `Drive` from
+ * `@vercel/sandbox`, mounted read-write, or a `{ drive, mode }` reference to
+ * a Drive by name, such as the one `drive.snapshot()` returns.
+ */
+export type VercelSandboxMount =
+  | { readonly name: string }
+  | { readonly drive: string; readonly mode: VercelSandboxMountMode };
 
 /** Drive mounts keyed by absolute sandbox path. */
-export type VercelSandboxMounts = Vercel.SandboxMounts;
-
-/** Options resolved when eve creates a fresh live session sandbox. */
-export interface VercelSandboxMountOptions {
-  readonly mounts?: VercelSandboxMounts;
-}
+export type VercelSandboxMounts = Readonly<Record<string, VercelSandboxMount>>;
 
 /** Options accepted when creating one live Vercel sandbox from an environment. */
 export type VercelSandboxRuntimeOptions = Omit<
   VercelSandboxCreateOptions,
   "fetch" | "image" | "projectId" | "source" | "tags" | "teamId" | "token"
 > &
-  SandboxNetworkOptions &
-  VercelSandboxMountOptions;
+  SandboxNetworkOptions & { readonly mounts?: VercelSandboxMounts };

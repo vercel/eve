@@ -56,13 +56,13 @@ describe("parseExtensionMountSpecifier", () => {
   });
 
   // https://github.com/vercel/eve/issues/4953
-  it.fails("reads a compiled identifier default export", () => {
+  it("reads a compiled identifier default export", () => {
     const source = 'import b from "@acme/b";\nvar b_default = b;\nexport { b_default as default };';
     expect(parseExtensionMountSpecifier(source)).toBe("@acme/b");
   });
 
   // https://github.com/vercel/eve/issues/4953
-  it.fails("reads an emitted default re-export", () => {
+  it("reads an emitted default re-export", () => {
     const source = 'import b_default from "@acme/b";\nexport { b_default as default };';
     expect(parseExtensionMountSpecifier(source)).toBe("@acme/b");
   });

@@ -18,7 +18,7 @@ import {
 } from "#harness/hitl/index.js";
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { startStep } from "#harness/session-machine/transitions.js";
-import { activeTurnId } from "#harness/session-machine/view.js";
+import { activeTurnId, nextStepIndex } from "#harness/session-machine/view.js";
 import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
@@ -194,7 +194,8 @@ async function selectModel(
         event: stepStartedForResolvers({
           modelId: step.session.agent.modelReference?.id ?? "dynamic",
           sequence: position.sequence,
-          stepIndex: position.stepIndex,
+          // Selection runs before `startStep` records the step, so the position is still the last one.
+          stepIndex: nextStepIndex(step.view().projection),
           turnId: activeTurnId(position),
         }),
         messages: validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),

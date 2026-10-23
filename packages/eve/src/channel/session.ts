@@ -58,6 +58,8 @@ export interface Session {
   ): Promise<SessionSendCommandResult>;
   /** Requests cancellation of this exact session's active turn. */
   cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  /** Prepares an idle session on the deployment accepting this request, without a model turn. */
+  prewarm(): Promise<import("#protocol/prewarm-session.js").PrewarmSessionResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -180,6 +182,12 @@ export function createSession(
       const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
       if (options?.turnId !== undefined) command.turnId = options.turnId;
       return await runtime.dispatchSession({ command, sessionId: id });
+    },
+    async prewarm() {
+      return await runtime.dispatchSession({
+        command: { kind: "prewarm", targetDeploymentId: metadata.acceptedDeploymentId },
+        sessionId: id,
+      });
     },
     async compact() {
       return await runtime.dispatchSession({ command: { kind: "compact" }, sessionId: id });

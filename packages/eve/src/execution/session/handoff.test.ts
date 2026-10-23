@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import {
   SESSION_CHECKPOINT_VERSION,
   SessionHandoff,
@@ -149,6 +149,20 @@ describe("SessionHandoff", () => {
         state(),
       ),
     ).resolves.toEqual({ kind: "retained", reason: "busy" });
+    expect(startSuccessorStepMock).not.toHaveBeenCalled();
+  });
+
+  it("retains ownership when durable state still holds work", async () => {
+    const inbox = createInbox();
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), {
+        ...state(),
+        sessionState: createTestSessionState(
+          { sessionId: "session-1" },
+          { sequence: 0, turnId: "turn_0" },
+        ),
+      }),
+    ).resolves.toEqual({ kind: "retained", reason: "not-idle" });
     expect(startSuccessorStepMock).not.toHaveBeenCalled();
   });
 
@@ -501,10 +515,10 @@ function state() {
     admittedDeliveryKeys: [],
     history: [],
     serializedContext: {},
-    sessionState: {
+    sessionState: createTestSessionState({
       continuationToken: "channel:current",
       sessionId: "session-1",
-    } as DurableSessionState,
+    }),
   };
 }
 

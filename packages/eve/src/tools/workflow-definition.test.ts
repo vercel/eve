@@ -38,10 +38,9 @@ describe("defineWorkflowTool", () => {
         });
         // @ts-expect-error The message is sent with send(), not passed to ctx.agent().
         void ctx.agent("researcher", { message: "Review the deployment." });
-        // Token capabilities are available when this context is passed into a step.
-        void ctx.getToken;
-        // @ts-expect-error Workflow bodies do not have a session sandbox.
-        void ctx.getSandbox;
+        // Token and sandbox capabilities are available when this context is passed into a step.
+        const useStepContext = async (stepCtx: WorkflowStepToolContext) => stepCtx;
+        void useStepContext(ctx);
         return { deployed: input.service };
       },
       approvalKey(input) {
@@ -104,6 +103,7 @@ describe("defineWorkflowTool", () => {
 
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
     const useStepContext = (ctx: WorkflowStepToolContext) => {
+      void ctx.getSandbox;
       void ctx.getToken;
       void ctx.requireAuth;
       void ctx.abortSignal;
