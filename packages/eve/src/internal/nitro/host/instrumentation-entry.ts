@@ -15,7 +15,8 @@ export function configureInstrumentationEntry(nitro: Nitro, instrumentationPath:
   nitro.options.inlineDynamicImports = false;
 
   // Presets finish selecting their runtime entry in build:before.
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     config.input = INSTRUMENTATION_ENTRY;
     config.plugins = [
       {
@@ -38,7 +39,7 @@ export function configureInstrumentationEntry(nitro: Nitro, instrumentationPath:
           ].join("\n");
         },
       },
-      ...(config.plugins ?? []),
+      ...[config.plugins ?? []].flat(),
     ];
   });
 }

@@ -12,7 +12,7 @@
     "@tanstack/react-router": "^1.170.41",
     "@tanstack/react-start": "^1.168.60",
     "eve": "workspace:*",
-    "nitro": "3.0.260903-beta",
+    "nitro": "npm:nitro-nightly@3.0.1-20261023-050017-821b2e38",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:"

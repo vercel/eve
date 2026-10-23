@@ -21,17 +21,17 @@ const eveRequire = createRequire(eveManifestPath);
 const nitroManifest = eveRequire("nitro/package.json");
 const wrapperPath = join(
   dirname(eveManifestPath),
-  "dist/src/internal/bundler/nitro-rolldown.js",
+  "dist/src/internal/bundler/rolldown.js",
 );
-const { buildWithNitroRolldown, parseWithNitroRolldownAst } = await import(
+const { buildWithRolldown, parseWithRolldownAst } = await import(
   pathToFileURL(wrapperPath).href
 );
 
-const ast = await parseWithNitroRolldownAst(
+const ast = await parseWithRolldownAst(
   "entry.ts",
   "export const parsedAnswer: number = 42;",
 );
-const build = await buildWithNitroRolldown({
+const build = await buildWithRolldown({
   input: "virtual:entry.js",
   output: { format: "esm" },
   plugins: [
@@ -63,14 +63,14 @@ console.log(
 );
 `;
 
-describe("packed Nitro Rolldown wrapper", () => {
-  it("builds and parses from Nitro's dependency tree without consumer-owned Rolldown", async () => {
+describe("packed Rolldown wrapper", () => {
+  it("builds and parses with eve's own Rolldown without consumer-owned Rolldown", async () => {
     const app = await scenarioApp({
       files: {
         "probe.mjs": PACKED_CONSUMER_PROBE,
       },
       installDependencies: true,
-      name: "packed-nitro-rolldown",
+      name: "packed-rolldown",
       packageManager: "npm",
     });
 
@@ -82,8 +82,8 @@ describe("packed Nitro Rolldown wrapper", () => {
     expect(JSON.parse(stdout.trim())).toEqual({
       bundled: true,
       consumerDeclaresRolldown: false,
-      eveDeclaresRolldown: false,
-      nitroDeclaresRolldown: true,
+      eveDeclaresRolldown: true,
+      nitroDeclaresRolldown: false,
       parsed: true,
     });
   }, 120_000);

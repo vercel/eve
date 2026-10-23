@@ -8,7 +8,12 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 const require = createRequire(import.meta.url);
 const TANSTACK_ROUTER_VERSION = "^1.170.0";
 const TANSTACK_START_VERSION = "^1.168.0";
-const NITRO_VERSION = (require("nitro/package.json") as { version: string }).version;
+const nitroPackage = require("nitro/package.json") as { name: string; version: string };
+// eve may alias `nitro` to a prerelease package such as `nitro-nightly`.
+const NITRO_VERSION =
+  nitroPackage.name === "nitro"
+    ? nitroPackage.version
+    : `npm:${nitroPackage.name}@${nitroPackage.version}`;
 const VITE_REACT_VERSION = "^6.1.0";
 const VITE_VERSION = "^8.1.5";
 const REACT_VERSION = "^19.0.0";

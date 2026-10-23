@@ -345,7 +345,7 @@ A skill is served whole or not at all. eve leaves a skill out of every method, a
 
 A `SKILL.md` whose frontmatter already names the skill and has a `description` is served as authored. Otherwise, as for flat `.md` and module skills, eve serves it with frontmatter that carries the skill's name and description, and the digest describes that served document. Skills added by dynamic resolvers or subagents are not served.
 
-Production builds ship skill files as eve-owned server assets, so they count toward the deployed function's size. `eve build` also drops Nitro's default `server` server-asset entry, the one that would bundle the app's `assets/` directory; eve reads only its own asset bases, and a route that reads `assets:server` storage finds it empty in production.
+Production builds embed skill files in the server bundle, so they count toward the deployed function's size.
 
 ## Invocation ownership
 

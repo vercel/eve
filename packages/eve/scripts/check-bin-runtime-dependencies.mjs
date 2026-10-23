@@ -3,13 +3,13 @@ import { isBuiltin } from "node:module";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadNitroRolldownParseAst } from "./nitro-rolldown.mjs";
+import { loadRolldownParseAst } from "./rolldown.mjs";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 const runtimeDependencies = new Set(Object.keys(packageJson.dependencies ?? {}));
 const binRoot = join(packageRoot, "bin");
-const { parseAst } = await loadNitroRolldownParseAst();
+const { parseAst } = await loadRolldownParseAst();
 
 function packageName(specifier) {
   if (specifier.startsWith("@")) {

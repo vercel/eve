@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import nodePath from "node:path";
@@ -60,59 +59,39 @@ export interface SkillFileSource {
   readFile(skill: string, path: string): Promise<Uint8Array>;
 }
 
-/** Nitro `serverAssets` base that holds the root agent's shipped skill files. */
-export const SKILL_FILES_SERVER_ASSET_BASE = "eve-skills";
-
-/** Nitro `serverAssets` base that holds {@link SKILL_FILES_INDEX_KEY}. */
-export const SKILL_FILES_INDEX_SERVER_ASSET_BASE = "eve-skill-index";
-
-/** Key of the skill file index inside {@link SKILL_FILES_INDEX_SERVER_ASSET_BASE}. */
-export const SKILL_FILES_INDEX_KEY = "skills.json";
-
 /**
- * One indexed file: `[path, size, sha256]`. `sha256` is `null` for files over
- * {@link MAX_SKILL_FILE_BYTES}, which are listed but not shipped. A shipped
- * file's storage key is {@link skillFileStorageKey} of its digest.
+ * One shipped file: `[path, size, sha256]`. `sha256` is `null` for files over
+ * {@link MAX_SKILL_FILE_BYTES}, which are listed but not shipped.
  */
-export type SkillFilesIndexEntry = readonly [path: string, size: number, sha256: string | null];
+export type BundledSkillFileEntry = readonly [path: string, size: number, sha256: string | null];
 
 /**
- * Index of the skill files a production build ships, written by `eve build`.
- * eve owns the listing rather than deriving it from storage keys, so real
- * paths never pass through unstorage key normalization. Entries are arrays,
+ * The root agent's skill files as a production build embeds them, installed
+ * by the Nitro plugin `eve build` generates. eve owns the listing, so
+ * directories, including empty ones, survive the build. Entries are arrays,
  * not object keys, so names such as `__proto__` stay plain data.
  */
-export interface SkillFilesIndex {
-  readonly version: 1;
+export interface BundledSkillFiles {
   /** `[skill, files, directories]`, sorted by skill then path. */
   readonly skills: readonly (readonly [
     skill: string,
-    files: readonly SkillFilesIndexEntry[],
+    files: readonly BundledSkillFileEntry[],
     directories: readonly string[],
   ])[];
+  /** Reads a shipped file by its SHA-256. */
+  read(sha256: string): Promise<Uint8Array>;
 }
 
-/**
- * Storage key of a shipped skill file: its SHA-256 with a `.bin` name. `.bin`
- * makes Nitro inline the file as a `Uint8Array` whatever its real extension,
- * and a hex name is left unchanged by unstorage key normalization.
- */
-export function skillFileStorageKey(sha256: string): string {
-  return `${sha256}.bin`;
-}
-
-/** The subset of an unstorage `Storage` the server asset source reads with. */
-export interface SkillFileStorage {
-  getItemRaw(key: string): Promise<unknown>;
-}
-
-/** Opens a Nitro server asset storage, e.g. `useStorage("assets:eve-skills")`. */
-export type OpenSkillFileStorage = (base: string) => Promise<SkillFileStorage>;
-
-const openNitroStorage: OpenSkillFileStorage = async (base) => {
-  const { useStorage } = await import("nitro/storage");
-  return useStorage(`assets:${base}`);
+// Rooted on `globalThis` so every bundled copy of eve sees the build's install.
+const BUNDLED_SKILL_FILES_GLOBAL_KEY = Symbol.for("eve.bundled-skill-files");
+type BundledSkillFilesGlobal = typeof globalThis & {
+  [BUNDLED_SKILL_FILES_GLOBAL_KEY]?: BundledSkillFiles;
 };
+
+/** Installs the skill files a production build embeds. */
+export function installBundledSkillFiles(files: BundledSkillFiles): void {
+  (globalThis as BundledSkillFilesGlobal)[BUNDLED_SKILL_FILES_GLOBAL_KEY] = files;
+}
 
 /**
  * Selects the skill file source for the active compiled artifacts.
@@ -120,15 +99,19 @@ const openNitroStorage: OpenSkillFileStorage = async (base) => {
  * Skill files are materialized under the node's workspace resource root by
  * `compiler/workspace-resources.ts`. Disk artifacts (dev) read that tree with
  * {@link createDiskSkillFileSource}; bundled artifacts (production builds)
- * read the Nitro server assets `eve build` registers for the root agent.
+ * read the files `eve build` embeds for the root agent.
  */
 export function createCompiledSkillFileSource(input: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
-  readonly openStorage?: OpenSkillFileStorage;
+  readonly bundledSkillFiles?: BundledSkillFiles;
 }): SkillFileSource {
   if (input.compiledArtifactsSource.kind !== "disk") {
-    return createServerAssetSkillFileSource(input.openStorage ?? openNitroStorage);
+    return createBundledSkillFileSource(
+      () =>
+        input.bundledSkillFiles ??
+        (globalThis as BundledSkillFilesGlobal)[BUNDLED_SKILL_FILES_GLOBAL_KEY],
+    );
   }
   const { compileDirectoryPath } = resolveRuntimeCompilerArtifactPaths(
     input.compiledArtifactsSource.appRoot,
@@ -139,101 +122,52 @@ export function createCompiledSkillFileSource(input: {
 }
 
 /**
- * Reads skill files from the Nitro server assets of a production build.
- * Listing and sizes come from the eve index, so an over-limit file is
- * rejected without loading it. The bytes storage returns must match the
- * indexed size and SHA-256; anything else is `unavailable` rather than
- * served altered.
+ * Reads the skill files a production build embeds. Listing and sizes come
+ * from the build's index, so an over-limit file is rejected without loading it.
  */
-function createServerAssetSkillFileSource(openStorage: OpenSkillFileStorage): SkillFileSource {
-  let index: Promise<Map<string, IndexedSkill>> | undefined;
-  const loadIndex = () => {
-    index ??= openStorage(SKILL_FILES_INDEX_SERVER_ASSET_BASE)
-      .then((storage) => storage.getItemRaw(SKILL_FILES_INDEX_KEY))
-      .then(parseSkillFilesIndex);
-    // A failed load is retried on the next call rather than cached.
-    index.catch(() => {
-      index = undefined;
-    });
-    return index;
+function createBundledSkillFileSource(
+  getBundled: () => BundledSkillFiles | undefined,
+): SkillFileSource {
+  let loaded: { bundled: BundledSkillFiles; index: Map<string, IndexedSkill> } | undefined;
+  const load = () => {
+    const bundled = getBundled();
+    if (bundled === undefined) {
+      throw new SkillReadError(
+        "unavailable",
+        "Skill files are not available: this server was not built by `eve build`, so it carries no skill files.",
+      );
+    }
+    if (loaded?.bundled !== bundled) {
+      const index = new Map(
+        bundled.skills.map(([skill, files, directories]) => [skill, { directories, files }]),
+      );
+      loaded = { bundled, index };
+    }
+    return loaded;
   };
   return {
     async listFiles(skill) {
-      return ((await loadIndex()).get(skill)?.files ?? []).map(([path, size]) => ({ path, size }));
+      return (load().index.get(skill)?.files ?? []).map(([path, size]) => ({ path, size }));
     },
     async listDirectories(skill) {
-      return (await loadIndex()).get(skill)?.directories ?? [];
+      return load().index.get(skill)?.directories ?? [];
     },
     async readFile(skill, path) {
-      const entry = (await loadIndex()).get(skill)?.files.find(([indexed]) => indexed === path);
+      const { bundled, index } = load();
+      const entry = index.get(skill)?.files.find(([indexed]) => indexed === path);
       if (entry === undefined) throw unknownFile(skill, path);
       const [, size, sha256] = entry;
       if (sha256 === null) throw tooLarge(skill, path, size);
-      const storage = await openStorage(SKILL_FILES_SERVER_ASSET_BASE);
-      const bytes = await storage.getItemRaw(skillFileStorageKey(sha256));
-      if (
-        !(bytes instanceof Uint8Array) ||
-        bytes.byteLength !== size ||
-        createHash("sha256").update(bytes).digest("hex") !== sha256
-      ) {
-        throw new SkillReadError(
-          "unavailable",
-          `Skill "${skill}" file "${path}" does not match its build index; this build did not ship it byte for byte.`,
-        );
-      }
-      return bytes;
+      // Each embedded file is one module-level array shared by every read and by
+      // identical files, so callers get a copy they are free to mutate.
+      return (await bundled.read(sha256)).slice();
     },
   };
 }
 
 interface IndexedSkill {
-  readonly files: readonly SkillFilesIndexEntry[];
+  readonly files: readonly BundledSkillFileEntry[];
   readonly directories: readonly string[];
-}
-
-function parseSkillFilesIndex(raw: unknown): Map<string, IndexedSkill> {
-  const text =
-    typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder().decode(raw) : "";
-  let parsed: unknown;
-  try {
-    parsed = text === "" ? undefined : JSON.parse(text);
-  } catch {
-    parsed = undefined;
-  }
-  if (!isSkillFilesIndex(parsed)) {
-    throw new SkillReadError(
-      "unavailable",
-      "Skill files are not available: this server was not built by `eve build`, so it carries no skill files.",
-    );
-  }
-  return new Map(
-    parsed.skills.map(([skill, files, directories]) => [skill, { directories, files }]),
-  );
-}
-
-function isSkillFilesIndex(value: unknown): value is SkillFilesIndex {
-  if (typeof value !== "object" || value === null) return false;
-  const { skills, version } = value as { skills?: unknown; version?: unknown };
-  return (
-    version === 1 &&
-    Array.isArray(skills) &&
-    skills.every(
-      (entry) =>
-        Array.isArray(entry) &&
-        typeof entry[0] === "string" &&
-        Array.isArray(entry[1]) &&
-        entry[1].every(
-          (file: unknown) =>
-            Array.isArray(file) &&
-            file.length === 3 &&
-            typeof file[0] === "string" &&
-            Number.isSafeInteger(file[1]) &&
-            (typeof file[2] === "string" || file[2] === null),
-        ) &&
-        Array.isArray(entry[2]) &&
-        entry[2].every((directory: unknown) => typeof directory === "string"),
-    )
-  );
 }
 
 /**

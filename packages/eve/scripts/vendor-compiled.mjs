@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveNitroRolldownVersion } from "./nitro-rolldown.mjs";
+import { resolveRolldownVersion } from "./rolldown.mjs";
 import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mjs";
 import { MODULES } from "./vendor-compiled/index.mjs";
 import { syncExtensions } from "./sync-extensions.mjs";
@@ -30,7 +30,7 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
-  join(here, "nitro-rolldown.mjs"),
+  join(here, "rolldown.mjs"),
   join(packageRoot, "src", "internal", "bundler", "vendored-dependency-log.ts"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
@@ -43,7 +43,7 @@ await runVendor({
   modules: MODULES,
   scriptFiles,
   toolVersions: {
-    rolldown: resolveNitroRolldownVersion(),
+    rolldown: resolveRolldownVersion(),
     typescript: require("typescript/package.json").version,
   },
 });

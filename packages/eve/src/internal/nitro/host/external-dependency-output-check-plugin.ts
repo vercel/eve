@@ -10,7 +10,7 @@ import {
   packageImportName,
   resolveConfiguredExternalDependency,
 } from "#internal/authored-package-boundary.js";
-import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/nitro-rolldown.js";
+import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/rolldown.js";
 import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
 
 interface ExternalDependencyOutputCheckPlugin {

@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import {
   createEvePackageImportsPlugin,
   createWorkflowImport,

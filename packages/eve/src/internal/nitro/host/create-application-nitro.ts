@@ -24,8 +24,9 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
-import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-assets.js";
+import { prepareBundledSkillFilesPlugin } from "#internal/nitro/host/bundled-skill-files.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import { resolveRolldownEntryPath } from "#internal/bundler/rolldown.js";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
@@ -44,7 +45,6 @@ import {
   createOptionalEngineDependencyPlugin,
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
 } from "#internal/nitro/host/optional-engine-dependency-plugin.js";
-import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
 import type {
   PreparedApplicationHost,
@@ -79,6 +79,7 @@ const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 // `nitro(`, which is the case when a TanStack Start host shares its root with
 // the agent. eve bundles its own runtime and never builds through the host's Vite.
 const EVE_NITRO_BUILDER = "rolldown";
+const EVE_SKILL_FILES_PLUGIN_ID = "#eve/skill-files";
 
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
@@ -383,7 +384,8 @@ function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: stri
     join(nitro.options.buildDir, "workflow"),
   ].map((directoryPath) => resolveNitroModuleComparisonPath(nitro.options.rootDir, directoryPath));
 
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     if (!Array.isArray(config.plugins)) {
       return;
     }
@@ -416,7 +418,8 @@ function addNitroStepModuleSideEffectsPlugin(
   nitro: Nitro,
   getStepTransformTargets: () => Promise<Set<string>>,
 ): void {
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     if (!Array.isArray(config.plugins)) {
       return;
     }
@@ -453,7 +456,8 @@ function addNitroStepTransformPlugin(
   nitro: Nitro,
   getStepTransformTargets: () => Promise<Set<string>>,
 ): void {
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     if (!Array.isArray(config.plugins)) {
       return;
     }
@@ -499,7 +503,8 @@ function addInstrumentationModuleSideEffectsPlugin(
     instrumentationModulePaths.map(normalizePath),
   );
 
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     if (!Array.isArray(config.plugins)) {
       return;
     }
@@ -530,7 +535,8 @@ function addInstrumentationModuleSideEffectsPlugin(
 function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: string): void {
   const normalizedWorkflowBuildDir = normalizePath(workflowBuildDir);
 
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     if (!Array.isArray(config.plugins)) {
       return;
     }
@@ -679,7 +685,6 @@ function configureSharedApplicationNitro(
   if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
     configureInstrumentationEntry(nitro, preparedHost.compiledArtifacts.instrumentationPluginPath);
   }
-  addNitroRoutingImportSpecifierPlugin(nitro);
   const workflowAliases = resolveWorkflowAliases();
   for (const [specifier, resolvedPath] of Object.entries(workflowAliases)) {
     nitro.options.alias[specifier] = resolvedPath;
@@ -721,7 +726,8 @@ function externalizeDevelopmentWorkflowBundle(
     normalizePath(join(preparedHost.workflowBuildDir, "workflows.mjs")),
   ]);
 
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+  nitro.hooks.hook("build:config", (_nitro, build) => {
+    const config = build.rolldown ?? build.rollup;
     const existingExternal = config.external;
     config.external = (id: string, ...rest: unknown[]) => {
       if (externalWorkflowModules.has(normalizePath(id))) {
@@ -767,6 +773,7 @@ export async function createDevelopmentApplicationNitro(
       _cli: { command: "dev" },
       builder: EVE_NITRO_BUILDER,
       buildDir: nitroBuildDir,
+      deps: { paths: { rolldown: resolveRolldownEntryPath() } },
       dev: true,
       features: { websocket: true },
       logLevel: 1,
@@ -838,11 +845,11 @@ export async function createProductionApplicationNitro(
   );
 
   await prepareEveVersionedCacheDirectory(options.buildDir);
-  // Production reads skill files through Nitro server assets; dev reads the
-  // compile directory directly (see `createCompiledSkillFileSource`).
+  // Production embeds skill files in the bundle; dev reads the compile
+  // directory directly (see `createCompiledSkillFileSource`).
   const { manifest, paths } = preparedHost.compileResult;
-  const skillServerAssets = await prepareSkillServerAssets({
-    stagingDirectory: join(options.buildDir, "eve-skill-assets"),
+  const skillFilesPlugin = await prepareBundledSkillFilesPlugin({
+    stagingDirectory: join(options.buildDir, "eve-skill-files"),
     skills: manifest.skills.map((skill) => skill.name),
     skillsRoot: join(
       paths.compileDirectoryPath,
@@ -850,10 +857,12 @@ export async function createProductionApplicationNitro(
       "skills",
     ),
   });
+  nitroPlugins.push(EVE_SKILL_FILES_PLUGIN_ID);
   const nitro = await createNitro({
     _cli: { command: "build" },
     builder: EVE_NITRO_BUILDER,
     buildDir: options.buildDir,
+    deps: { paths: { rolldown: resolveRolldownEntryPath() } },
     dev: false,
     features: {
       websocket: manifestHasWebSocketChannel(preparedHost.compileResult.manifest),
@@ -872,10 +881,10 @@ export async function createProductionApplicationNitro(
     },
     rollupConfig: bundler.nitroRollupConfig,
     rootDir: preparedHost.appRoot,
-    serverAssets: skillServerAssets,
     serverDir: false,
     traceDeps: bundler.tracedAppDependencies,
     traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
+    virtual: { [EVE_SKILL_FILES_PLUGIN_ID]: skillFilesPlugin },
     vercel: createEveVercelOptions({
       agentName: preparedHost.compileResult.manifest.config.name,
       enabled: preset === "vercel",
@@ -887,12 +896,6 @@ export async function createProductionApplicationNitro(
     }),
   });
   await writeEveVersionedCacheMetadata(options.buildDir);
-  // Nitro always appends a `server` asset for `<rootDir>/assets`. eve reads
-  // only its own bases, and reading storage would otherwise start bundling
-  // an app's `assets/` directory.
-  nitro.options.serverAssets = nitro.options.serverAssets.filter(
-    (asset) => asset.baseName !== "server",
-  );
 
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));

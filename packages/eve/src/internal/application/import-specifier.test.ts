@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  normalizeEsmImportSpecifier,
-  normalizeGeneratedEsmImportSpecifiers,
-  stringifyEsmImportSpecifier,
-} from "./import-specifier.js";
+import { normalizeEsmImportSpecifier, stringifyEsmImportSpecifier } from "./import-specifier.js";
 
 describe("normalizeEsmImportSpecifier", () => {
   it("converts Windows drive-letter paths to file URLs", () => {
@@ -48,28 +44,6 @@ describe("stringifyEsmImportSpecifier", () => {
   it("serializes normalized specifiers for generated source", () => {
     expect(stringifyEsmImportSpecifier("G:\\projects\\test-eve\\route.js")).toBe(
       JSON.stringify("file:///G:/projects/test-eve/route.js"),
-    );
-  });
-});
-
-describe("normalizeGeneratedEsmImportSpecifiers", () => {
-  it("rewrites raw Windows paths in generated ESM imports", () => {
-    expect(
-      normalizeGeneratedEsmImportSpecifiers(
-        [
-          'import handler from "G:\\projects\\test-eve\\route.js";',
-          'import "G:\\projects\\test-eve\\side-effect.js";',
-          'const lazy = () => import("G:\\projects\\test-eve\\lazy.js?meta");',
-          "",
-        ].join("\n"),
-      ),
-    ).toBe(
-      [
-        'import handler from "file:///G:/projects/test-eve/route.js";',
-        'import "file:///G:/projects/test-eve/side-effect.js";',
-        'const lazy = () => import("file:///G:/projects/test-eve/lazy.js?meta");',
-        "",
-      ].join("\n"),
     );
   });
 });

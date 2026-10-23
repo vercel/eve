@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { describe, expect, it } from "vitest";
 
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 describe("Node ESM compatibility banner bundling", () => {

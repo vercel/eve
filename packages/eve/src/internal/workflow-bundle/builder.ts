@@ -36,7 +36,7 @@ import {
   type WorkflowBundleCreateWorkflowsBundleResult,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import {
   type BundlerDefaultLogHandler,
   onVendoredDependencyLog,

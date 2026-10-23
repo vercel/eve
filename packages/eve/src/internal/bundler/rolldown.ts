@@ -46,33 +46,28 @@ type RolldownParseAstModule = {
 let rolldownPromise: Promise<RolldownModule> | undefined;
 let rolldownParseAstPromise: Promise<RolldownParseAstModule> | undefined;
 
-/**
- * Loads Rolldown from Nitro's dependency tree so eve does not carry a second
- * native bundler package in its own install footprint.
- */
-function loadNitroRolldown(): Promise<RolldownModule> {
-  rolldownPromise ??= (async () => {
-    const require = createRequire(import.meta.url);
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const rolldownPath = nitroRequire.resolve("rolldown");
-    return (await import(pathToFileURL(rolldownPath).href)) as RolldownModule;
-  })();
+const require = createRequire(import.meta.url);
 
+/**
+ * Resolves eve's pinned Rolldown entry. Nitro receives the same path through
+ * `deps.paths` so authored-module bundles and the Nitro server build share one
+ * Rolldown instead of Nitro installing its own into the application.
+ */
+export function resolveRolldownEntryPath(): string {
+  return require.resolve("rolldown");
+}
+
+function loadRolldown(): Promise<RolldownModule> {
+  rolldownPromise ??= import(
+    pathToFileURL(resolveRolldownEntryPath()).href
+  ) as Promise<RolldownModule>;
   return rolldownPromise;
 }
 
-/**
- * Loads Rolldown's parser from Nitro's dependency tree so workflow directive
- * transforms can use the same bundler dependency without exposing it publicly.
- */
-function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
-  rolldownParseAstPromise ??= (async () => {
-    const require = createRequire(import.meta.url);
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const parseAstPath = nitroRequire.resolve("rolldown/parseAst");
-    return (await import(pathToFileURL(parseAstPath).href)) as RolldownParseAstModule;
-  })();
-
+function loadRolldownParseAst(): Promise<RolldownParseAstModule> {
+  rolldownParseAstPromise ??= import(
+    pathToFileURL(require.resolve("rolldown/parseAst")).href
+  ) as Promise<RolldownParseAstModule>;
   return rolldownParseAstPromise;
 }
 
@@ -83,11 +78,8 @@ function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
   return "js";
 }
 
-export async function parseWithNitroRolldownAst(
-  filename: string,
-  sourceText: string,
-): Promise<unknown> {
-  const { parseAst } = await loadNitroRolldownParseAst();
+export async function parseWithRolldownAst(filename: string, sourceText: string): Promise<unknown> {
+  const { parseAst } = await loadRolldownParseAst();
   return parseAst(
     sourceText,
     {
@@ -108,14 +100,14 @@ export async function parseWithNitroRolldownAst(
  * unresolved imports. Pseudo-packages such as `server-only` load as empty
  * modules ahead of every caller plugin.
  */
-export async function buildWithNitroRolldown(
+export async function buildWithRolldown(
   options: Record<string, unknown> & {
     readonly experimental?: Record<string, unknown>;
     readonly plugins?: readonly unknown[];
   },
 ): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
-  const { build } = await loadNitroRolldown();
+  const { build } = await loadRolldown();
   return await build({
     onLog: onRolldownBuildLog,
     ...options,
@@ -177,7 +169,7 @@ export async function buildSingleRolldownChunk(
   description: string,
   options: Record<string, unknown> & { readonly output?: Record<string, unknown> },
 ): Promise<RolldownOutputChunk> {
-  const result = await buildWithNitroRolldown({
+  const result = await buildWithRolldown({
     ...options,
     write: false,
     output: { ...options.output, codeSplitting: false },

@@ -5,7 +5,7 @@
  * body references; the session, scope, and resolver bind its identity at resolve time.
  */
 
-import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 import {
   collectFreeVariables,
   collectPatternNames,
@@ -82,7 +82,7 @@ export async function transformDynamicToolExecute(
 ): Promise<{ code: string } | null> {
   if (!source.includes("defineTool") && !source.includes("defineWorkflowTool")) return null;
 
-  const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
+  const ast = (await parseWithRolldownAst(filename, source)) as AstNode;
   const defineToolAliases = findEveImportAliases(ast, ["defineTool", "defineWorkflowTool"]);
   if (defineToolAliases.size === 0) return null;
 

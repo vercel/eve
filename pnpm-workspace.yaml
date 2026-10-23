@@ -76,6 +76,10 @@ minimumReleaseAgeExclude:
   - eve
   - "@vercel/*"
   - "@workflow/*"
+  # Nitro RC prep: remove these three once eve depends on a released nitro.
+  - nitro-nightly
+  - "env-runner@0.3.7"
+  - "h3@2.0.8"
   - workflow
   - "@chat-adapter/catalog@4.42.0"
   - "@chat-adapter/gchat@4.42.0"

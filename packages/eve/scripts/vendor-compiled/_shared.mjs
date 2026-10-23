@@ -47,7 +47,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
+import { buildWithRolldown } from "../rolldown.mjs";
 import { onVendoredDependencyLog } from "../../src/internal/bundler/vendored-dependency-log.ts";
 
 const declarationsDir = fileURLToPath(new URL("./declarations/", import.meta.url));
@@ -682,7 +682,7 @@ async function bundleStandaloneModule({
     );
   }
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     cwd: packageRoot,
     input: entries[0].input,
     external: module.external ?? [],
@@ -740,7 +740,7 @@ async function bundleModuleGroup({
     ),
   ];
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     cwd: packageRoot,
     input: entrypoints,
     external,

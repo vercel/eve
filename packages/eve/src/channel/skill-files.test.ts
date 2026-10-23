@@ -1,13 +1,9 @@
-import { createHash } from "node:crypto";
-
 import { describe, expect, it } from "vitest";
 
 import {
   createCompiledSkillFileSource,
   MAX_SKILL_FILE_BYTES,
   readSkillFile,
-  skillFileStorageKey,
-  SKILL_FILES_INDEX_KEY,
   type SkillFileSource,
 } from "#channel/skill-files.js";
 
@@ -23,32 +19,27 @@ const memory: SkillFileSource = {
   readFile: async (_skill, path) => files[path]!,
 };
 
-// A production build's index and server assets; `stale.md` ships altered bytes.
+// A production build's embedded skill files.
 const shipped = new Uint8Array([1, 2, 3]);
-const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const bundled = createCompiledSkillFileSource({
+  bundledSkillFiles: {
+    skills: [
+      [
+        "triage",
+        [
+          ["SKILL.md", 3, "shipped"],
+          ["huge.md", MAX_SKILL_FILE_BYTES + 1, null],
+        ],
+        ["templates"],
+      ],
+    ],
+    read: async (sha256) => (sha256 === "shipped" ? shipped : new Uint8Array()),
+  },
   compiledArtifactsSource: { kind: "bundled" },
-  openStorage: async () => ({
-    getItemRaw: async (key) =>
-      key === SKILL_FILES_INDEX_KEY
-        ? JSON.stringify({
-            version: 1,
-            skills: [
-              [
-                "triage",
-                [
-                  ["SKILL.md", 3, digest(shipped)],
-                  ["huge.md", MAX_SKILL_FILE_BYTES + 1, null],
-                  ["stale.md", 3, digest(new Uint8Array([9, 9, 9]))],
-                ],
-                ["templates"],
-              ],
-            ],
-          })
-        : key === skillFileStorageKey(digest(shipped))
-          ? shipped
-          : new Uint8Array([7, 7, 7]),
-  }),
+  workspaceResourceRoot: { logicalPath: "workspace-resources/__root__", rootEntries: [] },
+});
+const unbuilt = createCompiledSkillFileSource({
+  compiledArtifactsSource: { kind: "bundled" },
   workspaceResourceRoot: { logicalPath: "workspace-resources/__root__", rootEntries: [] },
 });
 
@@ -57,10 +48,16 @@ describe("bundled skill files", () => {
     await expect(bundled.listFiles("triage")).resolves.toEqual([
       { path: "SKILL.md", size: 3 },
       { path: "huge.md", size: MAX_SKILL_FILE_BYTES + 1 },
-      { path: "stale.md", size: 3 },
     ]);
     await expect(bundled.listDirectories("triage")).resolves.toEqual(["templates"]);
     await expect(bundled.listDirectories("missing")).resolves.toEqual([]);
+  });
+
+  it("returns a copy that callers can mutate without changing later reads", async () => {
+    const first = await bundled.readFile("triage", "SKILL.md");
+    first.fill(0);
+    await expect(bundled.readFile("triage", "SKILL.md")).resolves.toEqual(shipped);
+    expect(shipped).toEqual(new Uint8Array([1, 2, 3]));
   });
 });
 
@@ -77,7 +74,7 @@ describe("readSkillFile", () => {
     ["references/API.md", memory, "unknown-file"],
     ["big.bin", memory, "too-large"],
     ["huge.md", bundled, "too-large"],
-    ["stale.md", bundled, "unavailable"],
+    [undefined, unbuilt, "unavailable"],
     [undefined, memory, files["skill.md"]],
     ["SKILL.md", memory, files["skill.md"]],
     ["references/api.md", memory, files["references/api.md"]],

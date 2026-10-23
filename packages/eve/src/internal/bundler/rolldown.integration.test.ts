@@ -5,10 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  buildSingleRolldownChunk,
-  buildWithNitroRolldown,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk, buildWithRolldown } from "#internal/bundler/rolldown.js";
 
 function scratchModuleWithDynamicImport(): string {
   const dir = mkdtempSync(join(tmpdir(), "eve-single-chunk-"));
@@ -29,7 +26,7 @@ function scratchModuleWithDynamicImport(): string {
 describe("buildSingleRolldownChunk", () => {
   it("rejects standard condition names that override per-edge resolution", async () => {
     await expect(
-      buildWithNitroRolldown({
+      buildWithRolldown({
         input: "entry.js",
         resolve: { conditionNames: ["eve-source", "import"] },
       }),

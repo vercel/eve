@@ -1,7 +1,5 @@
 const WINDOWS_DRIVE_ABSOLUTE_PATH_PATTERN = /^\/?[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_ABSOLUTE_PATH_PATTERN = /^\\\\[^\\]/;
-const IMPORT_SPECIFIER_PATTERN =
-  /(\b(?:from|import)\s*(?:\(\s*)?)(["'])([A-Za-z]:[\\/][^"'\n\r]*)\2/g;
 
 function isWindowsAbsolutePath(path: string): boolean {
   return (
@@ -66,15 +64,4 @@ export function normalizeEsmImportSpecifier(specifier: string): string {
  */
 export function stringifyEsmImportSpecifier(specifier: string): string {
   return JSON.stringify(normalizeEsmImportSpecifier(specifier));
-}
-
-/**
- * Rewrites generated ESM source containing raw Windows absolute imports.
- */
-export function normalizeGeneratedEsmImportSpecifiers(source: string): string {
-  return source.replace(
-    IMPORT_SPECIFIER_PATTERN,
-    (_match, prefix: string, quote: string, specifier: string) =>
-      `${prefix}${quote}${normalizeEsmImportSpecifier(specifier)}${quote}`,
-  );
 }

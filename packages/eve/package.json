@@ -576,7 +576,8 @@
     "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
-    "nitro": "3.0.260903-beta",
+    "nitro": "npm:nitro-nightly@3.0.1-20261023-050017-821b2e38",
+    "rolldown": "1.2.14",
     "undici": "8.10.2"
   },
   "devDependencies": {

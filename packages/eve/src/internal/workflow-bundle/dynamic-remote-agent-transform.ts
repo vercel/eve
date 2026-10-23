@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 import {
   collectFreeVariables,
   findEveImportAliases,
@@ -35,7 +35,7 @@ export async function transformDynamicRemoteAgentCredentials(
     return null;
   }
 
-  const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
+  const ast = (await parseWithRolldownAst(filename, source)) as AstNode;
   const factories = findCredentialsFactories(filename, source, ast);
   return factories.length === 0 ? null : applyTransform(source, factories);
 }

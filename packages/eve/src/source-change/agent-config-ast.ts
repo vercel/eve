@@ -1,4 +1,4 @@
-import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 
 /**
  * The AST plumbing shared by the agent-config source editors: the loose
@@ -57,7 +57,7 @@ type ParsedAgentObject =
 export async function parseAgentObject(sourceText: string): Promise<ParsedAgentObject> {
   let parsed: ParsedSource;
   try {
-    parsed = (await parseWithNitroRolldownAst("agent.ts", sourceText)) as ParsedSource;
+    parsed = (await parseWithRolldownAst("agent.ts", sourceText)) as ParsedSource;
   } catch (error) {
     const parseError = error as ParseError;
     return {
