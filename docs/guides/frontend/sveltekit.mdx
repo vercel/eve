@@ -40,6 +40,10 @@ export default defineConfig({
 
 The plugin accepts only two options, `eveRoot` and `eveBuildCommand`.
 
+### One agent per app
+
+The plugin mounts a single agent at `/eve/v1/**`. Named agents under `/eve/<name>/v1/**`, and the `agent` option of [`useEveAgent`](./use-eve-agent-svelte) that targets them, are specific to [`eve/next`](./nextjs#mount-agents-outside-a-workspace). To reach a second agent from a SvelteKit app, deploy it on its own origin and pass `host` to `useEveAgent`.
+
 ## Call the binding
 
 With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass a host:

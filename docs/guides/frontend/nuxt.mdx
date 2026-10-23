@@ -51,6 +51,10 @@ export default defineNuxtConfig({
 });
 ```
 
+### One agent per app
+
+The module mounts a single agent at `/eve/v1/**`. Named agents under `/eve/<name>/v1/**`, and the `agent` option of [`useEveAgent`](./use-eve-agent-vue) that targets them, are specific to [`eve/next`](./nextjs#mount-agents-outside-a-workspace). To reach a second agent from a Nuxt app, deploy it on its own origin and pass `host` to `useEveAgent`.
+
 ## Call the composable
 
 `useEveAgent` (`eve/vue`) is auto-imported, so a component calls it without an explicit import and without naming a host:

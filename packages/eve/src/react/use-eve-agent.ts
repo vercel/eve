@@ -81,10 +81,13 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
   /**
-   * Named agent mounted by a framework integration such as `withEve({ agents })`.
+   * Named agent mounted by a framework integration, currently `eve/next`'s
+   * `withEve({ agents })`.
    *
    * `agent: "support"` targets same-origin routes under
-   * `/eve/support/v1/...`. Do not combine with `host`.
+   * `/eve/support/v1/...`. Do not combine with `host`. `eve/nuxt` and
+   * `eve/sveltekit` mount one agent at `/eve/v1/...`, so an app on those
+   * integrations reaches a second agent through `host` instead.
    */
   readonly agent?: string;
   readonly auth?: ClientAuth;
