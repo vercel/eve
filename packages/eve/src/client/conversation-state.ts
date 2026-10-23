@@ -31,7 +31,7 @@ export type AgentObservation =
       readonly status: "queued" | "following" | "idle" | "interrupted" | "unavailable";
       /** Identity in this store's authorized reader scope, established by the server. */
       readonly key?: string;
-      readonly conversation?: ConversationState;
+      readonly conversation: ConversationState;
       /** Committed source-line position, coherent with conversation. */
       readonly position: number;
       /** Reached the tail captured when this read opened, not execution completion. */

@@ -1,6 +1,11 @@
 import type { ClientSession } from "#client/session.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError } from "#client/client-error.js";
+import {
+  DEFAULT_STREAM_RECONNECT_POLICY,
+  RECONNECT_BACKOFF,
+  isRetryableStreamError,
+} from "#client/open-stream.js";
 import { Conversation } from "#client/conversation.js";
 import type {
   AgentObservation,
@@ -287,7 +292,8 @@ export class AgentStreamFollower {
         }
         if (!this.#active || generation !== this.#generation) return;
         if (!controller.signal.aborted) {
-          if (!reachedTail) throw new Error("The descendant read ended before its captured tail.");
+          if (!reachedTail)
+            throw new Error("The descendant stream disconnected before its captured tail.");
           node.caughtUp = true;
           node.status = "idle";
           node.failures = 0;
@@ -305,9 +311,12 @@ export class AgentStreamFollower {
         } else {
           node.failures += 1;
           const status = error instanceof ClientError ? error.status : undefined;
-          const retryable =
-            status === undefined || [404, 409, 425, 500, 502, 503, 504].includes(status);
-          node.status = retryable && node.failures < 12 ? "interrupted" : "unavailable";
+          const retryable = isRetryableStreamError(error);
+          node.status =
+            retryable &&
+            node.failures < DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy.maxAttempts
+              ? "interrupted"
+              : "unavailable";
           node.reason =
             status === 401 || status === 403
               ? "unauthorized"
@@ -318,7 +327,12 @@ export class AgentStreamFollower {
                     ? "cycle"
                     : "unsupported"
                   : "transport";
-          node.readyAt = Date.now() + Math.min(5000, 250 * 2 ** Math.min(node.failures - 1, 5));
+          node.readyAt =
+            Date.now() +
+            Math.min(
+              RECONNECT_BACKOFF.maxDelayMs,
+              RECONNECT_BACKOFF.baseDelayMs * 2 ** Math.min(node.failures - 1, 5),
+            );
         }
       } finally {
         clearTimeout(lease);

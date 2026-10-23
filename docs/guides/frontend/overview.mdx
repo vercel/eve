@@ -238,7 +238,7 @@ Each `agents[sessionId]` describes an opening, with an `owner` naming its call o
 | `"interrupted"`    | A retryable read failure or detached observation scope.                                                                      |
 | `"unavailable"`    | History cannot currently be read. `reason` distinguishes authorization, expiry, unsupported readers, and transport failures. |
 
-Except for `"not-followed"`, an observation exposes `position` and `caughtUp`, plus any retained `conversation`. Its server-established `key` identifies the session within this store's authorized reader scope, not across principals or stores. Equal session IDs reached through different remote reader namespaces are not merged. Cursors use source-line positions and remain independent across sessions.
+Except for `"not-followed"`, an observation exposes `position`, `caughtUp`, and its committed `conversation`, which can be empty before the first successful read. Its server-established `key` identifies the session within this store's authorized reader scope, not across principals or stores. Equal session IDs reached through different remote reader namespaces are not merged. Cursors use source-line positions and remain independent across sessions.
 
 `caughtUp` describes the tail captured when that read opened, not execution completion or exhaustive subtree coverage. The next read establishes a new horizon. Root call results, `status`, `resume()`, `events`, and callbacks keep their root-session meaning; descendant failures remain on their observations. Parent-relayed interactions remain the source of actionable prompts, so do not render a second set of controls from child observations.
 

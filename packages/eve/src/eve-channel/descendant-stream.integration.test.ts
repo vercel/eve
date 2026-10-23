@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";
+import { StreamExpiredError } from "#compiled/@workflow/errors/index.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { InternalSession } from "#channel/session.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
@@ -244,6 +245,76 @@ describe("authorized descendant readers", () => {
     );
     await expect(collect(reader.stream({ follow: false }))).rejects.toMatchObject({ status: 422 });
     expect(requests.mock.calls.at(-1)?.[1]?.redirect).toBe("manual");
+  });
+
+  it("reports an expired ancestor without disguising it as a startup race", async () => {
+    const home = deployment("https://home.test", "browser");
+    home.link("root", "child");
+    vi.spyOn(home.histories, "get").mockImplementation(() => {
+      throw new StreamExpiredError("History expired.", "root");
+    });
+    const response = await home.serve(
+      new Request(
+        `https://home.test/eve/v1/session/root/descendants/stream?children=${encodeURIComponent(JSON.stringify([{ sessionId: "child", position: 0 }]))}&follow=false`,
+        { headers: { authorization: "Bearer browser" } },
+      ),
+    );
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({ code: "session_expired" });
+    expect(home.attached).toEqual(["root"]);
+  });
+
+  it("normalizes validated coordinates before forwarding the remaining remote path", async () => {
+    const home = deployment("https://home.test", "browser");
+    const remote = deployment("https://remote.test", "remote-reader");
+    home.link("root", "desk", remote.origin);
+    remote.link("desk", "nested");
+    remote.histories.set("nested", [{ type: "session.started", data: {} }]);
+    home.tokens.set(remote.origin, "remote-reader");
+    const requests = network(home, remote);
+    const children = [
+      { sessionId: "desk", position: 0, ignored: "first" },
+      { sessionId: "nested", position: 0, ignored: "second" },
+    ];
+    const response = await home.serve(
+      new Request(
+        `https://home.test/eve/v1/session/root/descendants/stream?children=${encodeURIComponent(JSON.stringify(children))}&follow=false`,
+        { headers: { authorization: "Bearer browser" } },
+      ),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(
+      JSON.parse(new URL(String(requests.mock.calls[0]![0])).searchParams.get("children")!),
+    ).toEqual([{ sessionId: "nested", position: 0 }]);
+  });
+
+  it("limits resolution without cutting off an authorized live remote body at ten seconds", async () => {
+    vi.useFakeTimers();
+    const home = deployment("https://home.test", "browser");
+    home.link("root", "child", "https://remote.test");
+    home.tokens.set("https://remote.test", "remote-reader");
+    let signal: AbortSignal | null | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      signal = init?.signal;
+      return new Response(new ReadableStream());
+    });
+    const controller = new AbortController();
+    const response = await home.serve(
+      new Request(
+        `https://home.test/eve/v1/session/root/descendants/stream?children=${encodeURIComponent(JSON.stringify([{ sessionId: "child", position: 0 }]))}`,
+        { headers: { authorization: "Bearer browser" }, signal: controller.signal },
+      ),
+    );
+    try {
+      expect(response.status).toBe(200);
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(signal?.aborted).toBe(false);
+      controller.abort();
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      await response.body?.cancel();
+    }
   });
 
   it.each(["abort", "deadline"])(

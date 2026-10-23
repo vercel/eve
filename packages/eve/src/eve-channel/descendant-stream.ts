@@ -16,6 +16,8 @@ import { createSessionStreamResponse } from "#eve-channel/request.js";
 import { findRemoteAgentBinding, type RemoteAgentBinding } from "#eve-channel/support.js";
 import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
+import { isObject } from "#shared/guards.js";
+import { isExpiredWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 
 /** Every hop resolves recorded authority on its owning deployment, never an event-supplied URL. */
 export async function descendantStreamResponse(input: {
@@ -29,23 +31,8 @@ export async function descendantStreamResponse(input: {
   let children: DescendantHop[];
   try {
     if (raw === null || raw.length > 4096) throw new Error();
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      !Array.isArray(parsed) ||
-      parsed.length === 0 ||
-      parsed.length > DESCENDANT_MAX_DEPTH ||
-      !parsed.every(
-        (hop) =>
-          hop !== null &&
-          typeof hop === "object" &&
-          typeof hop.sessionId === "string" &&
-          hop.sessionId.length > 0 &&
-          hop.sessionId.length <= 256 &&
-          Number.isSafeInteger(hop.position) &&
-          hop.position >= 0,
-      )
-    )
-      throw new Error();
+    const parsed = parseDescendantPath(JSON.parse(raw));
+    if (parsed === undefined) throw new Error();
     children = parsed;
   } catch {
     return Response.json({ error: "Invalid descendant path.", ok: false }, { status: 400 });
@@ -133,12 +120,34 @@ export async function descendantStreamResponse(input: {
       }
       return new Response(upstream.body, { headers: responseHeaders, status: upstream.status });
     }
-  } catch {
+  } catch (error) {
+    if (isExpiredWorkflowRunError(error)) return unavailable("session_expired", 410);
     return unavailable();
   } finally {
     clearTimeout(timeout);
   }
   return unavailable();
+}
+
+function parseDescendantPath(value: unknown): DescendantHop[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > DESCENDANT_MAX_DEPTH)
+    return undefined;
+  const hops: readonly unknown[] = value;
+  const path: DescendantHop[] = [];
+  for (const hop of hops) {
+    if (
+      !isObject(hop) ||
+      typeof hop.sessionId !== "string" ||
+      hop.sessionId.length === 0 ||
+      hop.sessionId.length > 256 ||
+      typeof hop.position !== "number" ||
+      !Number.isSafeInteger(hop.position) ||
+      hop.position < 0
+    )
+      return undefined;
+    path.push({ sessionId: hop.sessionId, position: hop.position });
+  }
+  return path;
 }
 
 async function resolvedResponse(
