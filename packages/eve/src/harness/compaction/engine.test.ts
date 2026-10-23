@@ -1589,6 +1589,21 @@ describe("compactMessages: current message larger than its share of the threshol
     },
   );
 
+  it("cuts the request when the previous checkpoint is what pushes the history over the limit", async () => {
+    const history: ModelMessage[] = [
+      ...checkpointHead("p".repeat(12_000)),
+      user("r".repeat(34_000)),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: 10_000 },
+      summarizeWith("z".repeat(8_000)),
+    );
+
+    expect(JSON.stringify(result)).toContain("were cut during context compaction");
+  });
+
   it("replays a folded-away request whose content is an array of parts", async () => {
     const request: ModelMessage = {
       content: [{ text: "review the storefront", type: "text" }],

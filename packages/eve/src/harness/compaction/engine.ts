@@ -285,7 +285,7 @@ async function compactWithScale(
   const currentIndex = findLastRealUserIndex(conversation);
   const current = conversation[currentIndex];
   const cut =
-    !fitsThreshold(conversation, config, calibration) && current !== undefined
+    !fitsThreshold(messages, config, calibration) && current !== undefined
       ? fitCurrentMessage(
           current,
           config.threshold,
