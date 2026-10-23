@@ -10,6 +10,7 @@ import {
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 
 const runsGet = vi.fn();
@@ -483,6 +484,74 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(invocation?.status === "working" ? invocation.result : undefined).toBeUndefined();
   });
 
+  it.each([
+    {
+      name: "the label a running call authored",
+      events: [actionsRequestedEvent([["call_1", "read_file"]], { call_1: "Reading notes.md" })],
+      expected: "Reading notes.md",
+    },
+    {
+      name: "the display title of an unlabeled call",
+      events: [actionsRequestedEvent([["call_1", "read_file"]])],
+      expected: "Read file",
+    },
+    {
+      name: "the latest call and how many others are running",
+      events: [
+        actionsRequestedEvent([["call_1", "read_file"]]),
+        actionsRequestedEvent([["call_2", "search_web"]], { call_2: "Searching the web" }),
+        actionsRequestedEvent([["call_3", "list_files"]]),
+      ],
+      expected: "List files (+2 more)",
+    },
+    {
+      name: "a label refreshed by a partial result",
+      events: [
+        actionsRequestedEvent([["call_1", "read_file"]]),
+        actionPartialEvent("call_1", "read_file", "Reading notes.md"),
+      ],
+      expected: "Reading notes.md",
+    },
+    {
+      name: "a partial result whose request left the event window",
+      events: [actionPartialEvent("call_1", "read_file", "Reading notes.md")],
+      expected: "Reading notes.md",
+    },
+    {
+      name: "nothing once the call settles",
+      events: [
+        actionsRequestedEvent([["call_1", "read_file"]]),
+        actionResultEvent("call_1", "read_file"),
+      ],
+      expected: undefined,
+    },
+    {
+      name: "nothing for the model waiting on its own tasks",
+      events: [actionsRequestedEvent([["call_1", TASK_WAIT_TOOL_NAME]])],
+      expected: undefined,
+    },
+    {
+      name: "nothing carried over from a previous turn",
+      events: [
+        actionsRequestedEvent([["call_1", "read_file"]]),
+        {
+          data: { sequence: 0, turnId: "turn_2" },
+          meta: { at: "2026-07-20T00:00:03.000Z", id: "event_turn_2" },
+          type: "turn.started",
+        } as HandleMessageStreamEvent,
+      ],
+      expected: undefined,
+    },
+  ])("reports $name as the working status message", async ({ events, expected }) => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockReturnValue(eventStream(events));
+
+    const invocation = await execution().read({ auth, invocationId: "wrun_invocation" });
+
+    expect(invocation).toMatchObject({ status: "working" });
+    expect(invocation?.status === "working" ? invocation.statusMessage : null).toBe(expected);
+  });
+
   it("decodes a final persisted event without a trailing newline", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
     getReadable.mockReturnValue(
@@ -709,6 +778,62 @@ function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleM
     },
     meta: { at: "2026-07-20T00:00:00.000Z", id },
     type: "input.requested",
+  };
+}
+
+function actionsRequestedEvent(
+  calls: readonly (readonly [callId: string, toolName: string])[],
+  labels: Readonly<Record<string, string>> = {},
+): HandleMessageStreamEvent {
+  return {
+    data: {
+      actions: calls.map(([callId, toolName]) => ({
+        callId,
+        input: {},
+        kind: "tool-call" as const,
+        toolName,
+      })),
+      presentation: Object.fromEntries(
+        Object.entries(labels).map(([callId, label]) => [callId, { label }]),
+      ),
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_1",
+    },
+    meta: { at: "2026-07-20T00:00:01.000Z", id: `event_requested_${calls[0]?.[0] ?? ""}` },
+    type: "actions.requested",
+  };
+}
+
+function actionPartialEvent(
+  callId: string,
+  toolName: string,
+  label: string,
+): HandleMessageStreamEvent {
+  return {
+    data: {
+      presentation: { [callId]: { label } },
+      result: { callId, kind: "tool-result", output: null, toolName },
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_1",
+    },
+    meta: { at: "2026-07-20T00:00:01.000Z", id: `event_partial_${callId}` },
+    type: "action.partial",
+  };
+}
+
+function actionResultEvent(callId: string, toolName: string): HandleMessageStreamEvent {
+  return {
+    data: {
+      result: { callId, kind: "tool-result", output: null, toolName },
+      sequence: 0,
+      status: "completed",
+      stepIndex: 0,
+      turnId: "turn_1",
+    },
+    meta: { at: "2026-07-20T00:00:01.000Z", id: `event_result_${callId}` },
+    type: "action.result",
   };
 }
 

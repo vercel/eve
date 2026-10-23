@@ -19,6 +19,7 @@ import {
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import { type InputRequest, type InputResponse, parseInputResponses } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
@@ -312,6 +313,8 @@ function projectInvocation(
   runStatus: string,
   events: readonly HandleMessageStreamEvent[],
 ): AgentInvocation {
+  // Labels of the calls still running, by call ID, in the order they started.
+  const activeActions = new Map<string, string>();
   const authorizations = new Map<string, AgentInvocationAuthorizationRequest>();
   let inputBatch: PendingInputBatch | undefined;
   let result: JsonValue | undefined;
@@ -319,6 +322,7 @@ function projectInvocation(
   for (const event of events) {
     switch (event.type) {
       case "turn.started":
+        activeActions.clear();
         authorizations.clear();
         inputBatch = undefined;
         result = undefined;
@@ -362,8 +366,23 @@ function projectInvocation(
           result = safeJson(event.data.message);
         }
         break;
+      case "actions.requested":
+        for (const action of visibleActions(event.data.actions)) {
+          activeActions.set(action.callId, actionLabel(action, event.data.presentation));
+        }
+        break;
+      case "action.partial": {
+        // Refreshes a label and recovers one whose request fell out of the event window.
+        const label = event.data.presentation?.[event.data.result.callId]?.label;
+        if (label !== undefined) activeActions.set(event.data.result.callId, label);
+        break;
+      }
+      case "action.result":
+        activeActions.delete(event.data.result.callId);
+        break;
       case "turn.waiting":
         // Text completed before the turn parked was interim; the reply comes after it resumes.
+        activeActions.clear();
         result = undefined;
         break;
       case "turn.completed":
@@ -406,7 +425,20 @@ function projectInvocation(
   if (failure !== undefined) return failed();
   if (settled === "cancelled") return { ...base, status: "cancelled" };
   if (settled === "completed") return { ...base, result, status: "completed" };
-  return { ...base, pollAfterMs: 1_000, result, status: "working" };
+  return {
+    ...base,
+    pollAfterMs: 1_000,
+    result,
+    status: "working",
+    statusMessage: activityStatusMessage([...activeActions.values()]),
+  };
+}
+
+/** The most recently started call, plus how many others are still running. */
+function activityStatusMessage(labels: readonly string[]): string | undefined {
+  const latest = labels.at(-1);
+  if (latest === undefined) return undefined;
+  return labels.length === 1 ? latest : `${latest} (+${String(labels.length - 1)} more)`;
 }
 
 function workingInvocation(

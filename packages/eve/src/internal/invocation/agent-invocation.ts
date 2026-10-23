@@ -20,6 +20,8 @@ export type AgentInvocation =
       readonly status: "working";
       readonly pollAfterMs: number;
       readonly result?: JsonValue;
+      /** What the agent is doing right now, such as the label of a running tool call. */
+      readonly statusMessage?: string;
     })
   | (AgentInvocationBase & {
       readonly status: "input_required";
