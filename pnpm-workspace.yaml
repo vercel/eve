@@ -1,6 +1,9 @@
 autoDedupe: true
 enableGlobalVirtualStore: false
 
+lockfile:
+  includeResolutionSettings: true
+
 packages:
   - apps/*
   - apps/fixtures/*
