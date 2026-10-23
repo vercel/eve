@@ -35,7 +35,7 @@ If setup stops partway, or Slack events stop reaching the agent, run `eve add ch
 
 Choose **Use portable credentials** when the agent does not run on Vercel or you can't use Vercel Connect. eve adds `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` to `.env.example` but doesn't create the Slack app. In [Slack app settings](https://api.slack.com/apps):
 
-1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `im:history` for DMs, `files:read` for inbound attachments, and `files:write` for long-response snippets.
+1. Add the `app_mentions:read`, `channels:read`, and `chat:write` bot scopes, plus `im:history` for DMs, `files:read` for inbound attachments, and `files:write` for long-response snippets.
 2. Install the app, then set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**. Put both values in `.env.local` for local development or in the target runtime's environment when deployed.
 3. Set the Request URL to `https://your-agent.example/eve/v1/slack` under **Event Subscriptions** (subscribe to `app_mention`, plus `message.im` for DMs), **Interactivity & Shortcuts**, and each **Slash Command**.
 
@@ -85,6 +85,7 @@ Slack must reach the preview route without an authentication challenge. For a Co
 | A preview request receives an authentication page       | Exempt the branch domain from Deployment Protection, or add the automation bypass secret to a self-managed Slack app's event and interaction Request URLs.                   |
 | Mentions work but DMs or thread replies don't           | Add `message.im` and `im:history` for DMs, or the matching message event and history scope for channel replies, then reinstall the Slack app.                                |
 | A long response can't be uploaded as a snippet          | Add the `files:write` bot scope and reinstall the Slack app.                                                                                                                 |
+| Scheduled public-channel runs omit trace content        | Ensure the bot has `channels:read`, reinstall the app after any scope change, and check that your `tracePolicy` permits content for `public`.                                |
 | The thread says the agent couldn't deliver its answer   | Search the Vercel runtime logs for the notice's error id. The `final reply was not delivered to Slack` line carries the error, including one thrown by an authored renderer. |
 | The webhook arrives but the agent doesn't reply         | Check the Vercel runtime logs, then the session in [**Agent Runs**](/docs/observability/agent-runs) when your team has access.                                               |
 
@@ -95,6 +96,15 @@ Slack public channels are `public`; DMs, group DMs, and private channels are
 checks Slack and treats an ambiguous or failed lookup as `private`. The audience
 controls observability content capture, not access to the channel. See
 [Audience](./overview#audience) for the shared channel model.
+
+Proactive sessions, including static and dynamic schedule sends, also check
+Slack's `conversations.info` API before the session starts unless the target
+supplies an explicit `audience`. Your `tracePolicy` receives that audience.
+Public-channel lookups require the bot scope `channels:read`. Generated Slack app
+manifests include this scope; add it to existing apps and reinstall them to enable
+the lookup.
+A failed or ambiguous proactive lookup stays `unknown` without blocking the send;
+trace content and task-card error details remain omitted by default.
 
 ## How the channel handles inbound events
 
@@ -738,7 +748,7 @@ Pass `{ channelId }` as the target to start a new thread. The agent's first post
 | `threadTs`           | Continue an existing thread instead of creating one.                                      |
 | `initialMessage`     | Post a card as the thread root before the agent runs. Cannot be combined with `threadTs`. |
 | `installationTeamId` | Select the app installation workspace when using a function-form bot token.               |
-| `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                 |
+| `audience`           | Override the destination's visibility. When omitted, eve looks it up through Slack.       |
 
 The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
 

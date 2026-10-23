@@ -84,7 +84,10 @@ import {
   formatSlackThreadContext,
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
-import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
+import {
+  isPrivateSlackConversation,
+  resolveSlackConversationPrivacy,
+} from "#public/channels/slack/privacy.js";
 import {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
@@ -336,9 +339,8 @@ export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
   /**
-   * Optional audience for proactive receives. Omit to leave `unknown`.
-   * Pass when the caller already knows channel visibility, for example a
-   * webhook or schedule that classified the Slack destination before handoff.
+   * Overrides the audience for proactive receives. When omitted, eve looks up
+   * the destination through Slack. Failed or ambiguous lookups stay unknown.
    */
   readonly audience?: ChannelAudience;
   /** Slack workspace whose app installation supplies credentials for this send. */
@@ -1021,16 +1023,16 @@ async function receiveOnSlack(
     );
   }
 
+  const { slack, thread } = buildSlackBinding({
+    api: deps.api,
+    botToken: deps.credentials?.botToken,
+    channelId,
+    threadTs: requestedThreadTs,
+    installationTeamId,
+    teamId: deps.teamId,
+  });
   let threadTs = requestedThreadTs;
   if (initialMessage) {
-    const { thread } = buildSlackBinding({
-      api: deps.api,
-      botToken: deps.credentials?.botToken,
-      channelId,
-      threadTs: "",
-      installationTeamId,
-      teamId: deps.teamId,
-    });
     const postInput: { card: CardElement; fallbackText?: string } = {
       card: initialMessage.card,
     };
@@ -1046,26 +1048,16 @@ async function receiveOnSlack(
   const continuationThreadTs = threadTs || crypto.randomUUID();
   const audience =
     receiveTarget.audience === undefined
-      ? undefined
+      ? await resolveSlackConversationPrivacy({ channelId, request: slack.request })
       : normalizeChannelAudience(receiveTarget.audience);
-  const state: {
-    channelId: string;
-    installationTeamId: string | null;
-    threadTs: string | null;
-    teamId: string | null;
-    triggeringUserId: string | null;
-    audience?: ChannelAudience;
-  } = {
+  const state = {
+    audience,
     channelId,
     installationTeamId: installationTeamId ?? null,
     threadTs: threadTs || null,
     teamId: deps.teamId ?? null,
     triggeringUserId: deps.triggeringUserId ?? null,
   };
-  if (audience !== undefined) {
-    state.audience = audience;
-  }
-
   return deps
     .from(slackContinuationToken(channelId, continuationThreadTs))
     .send(input.message, { auth: input.auth, history: input.history, state, title: input.title });
