@@ -168,6 +168,27 @@ eve removes `default` and `example` annotations when their values conflict with 
 
 Generated operations can mutate state like authored tools. Use the shared connection `approval` option for human approval, and combine it with `operations.allow` for the smallest practical surface. See [Per-connection approval](../connections#per-connection-approval) for the helpers and [Human-in-the-loop](../human-in-the-loop#approvals) for policy behavior.
 
+A custom policy sees each operation under its full tool name, `<connection>__<operationId>` (unlike `providedArguments` callbacks, which get the bare `operationId`). Its `toolInput` is the generated operation input: path, query, header, and cookie parameters as top-level properties, and the request body under `body`. To ask a person only for large orders:
+
+```ts title="agent/connections/petstore.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
+  description: "Pet store inventory and orders.",
+  auth: {
+    credentialOwner: "app",
+    getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }),
+  },
+  operations: { allow: ["getInventory", "placeOrder"] },
+  approval: ({ toolName, toolInput }) => {
+    if (toolName !== "petstore__placeOrder") return "not-applicable";
+    const order = toolInput?.body as { quantity?: number } | undefined;
+    return (order?.quantity ?? 0) >= 10 ? "user-approval" : "not-applicable";
+  },
+});
+```
+
 ## What to read next
 
 - [Connections](../connections): shared auth, headers, approval, and per-caller patterns.

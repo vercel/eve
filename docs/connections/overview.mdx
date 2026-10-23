@@ -198,6 +198,20 @@ export default defineMcpClientConnection({
 
 `never()` lets every call through, `once()` asks for approval the first time in a session, `always()` asks every time, and `auto()` uses a decision model to allow routine calls and ask about dangerous or unclear effects. The pause and resume is the same human-in-the-loop flow covered in [Tools](/docs/tools).
 
+To decide per call, pass your own policy. It receives the same context as a tool's approval policy, with `toolName` set to the connection tool's full name, `<connection>__<tool>`, and `toolInput` set to the input the model sent:
+
+```ts title="agent/connections/linear.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear workspace.",
+  auth: { getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }) },
+  approval: ({ toolName }) =>
+    toolName === "linear__delete_comment" ? "user-approval" : "not-applicable",
+});
+```
+
 For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, allow-lists, or other safeguards appropriate to the action.
 
 ## Interactive OAuth via Vercel Connect
