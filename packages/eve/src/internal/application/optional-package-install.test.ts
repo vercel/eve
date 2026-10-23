@@ -473,7 +473,7 @@ describe("installPackageIntoProject", () => {
     expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
   });
 
-  it.fails("hides the optional package installer console on Windows", async () => {
+  it("hides the optional package installer console on Windows", async () => {
     const restorePlatform = mockProcessPlatform("win32");
     try {
       await installPackageIntoProject({ appRoot: "/repo/app", packageName: "just-bash" });

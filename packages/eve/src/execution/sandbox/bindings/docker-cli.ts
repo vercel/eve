@@ -142,6 +142,7 @@ function probeLinuxDockerDaemonSync(): boolean {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
+      windowsHide: true,
     });
     return result.status === 0 && result.stdout.trim().toLowerCase() === "linux";
   } catch {
@@ -160,6 +161,7 @@ export function createDockerCli(): DockerCli {
       const child = spawn(resolveDockerExecutable(), args, {
         signal: options.signal,
         stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       const stdoutChunks: Buffer[] = [];
@@ -189,6 +191,7 @@ export function createDockerCli(): DockerCli {
       const child = spawn(resolveDockerExecutable(), args, {
         signal: options.signal,
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       const exit = new Promise<number>((resolve, reject) => {

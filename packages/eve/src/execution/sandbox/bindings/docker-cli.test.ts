@@ -52,7 +52,7 @@ describe("isLinuxDockerDaemonAvailableSync", () => {
     );
   });
 
-  it.fails("hides the Docker availability probe", async () => {
+  it("hides the Docker availability probe", async () => {
     spawnSync.mockReturnValue({ status: 0, stdout: "linux\n" });
     const { isLinuxDockerDaemonAvailableSync } = await import("./docker-cli.js");
 
@@ -65,7 +65,7 @@ describe("isLinuxDockerDaemonAvailableSync", () => {
     );
   });
 
-  it.fails("hides buffered Docker commands", async () => {
+  it("hides buffered Docker commands", async () => {
     const { createDockerCli } = await import("./docker-cli.js");
 
     await createDockerCli().run(["version"]);
@@ -77,7 +77,7 @@ describe("isLinuxDockerDaemonAvailableSync", () => {
     );
   });
 
-  it.fails("hides streamed Docker commands", async () => {
+  it("hides streamed Docker commands", async () => {
     const { createDockerCli } = await import("./docker-cli.js");
     const child = createDockerCli().stream(["exec", "container", "echo", "hello"]);
 
