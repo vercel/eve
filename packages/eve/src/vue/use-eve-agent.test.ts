@@ -71,6 +71,26 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
+function optimisticUserData(message: string, status: "failed" | "submitted") {
+  return {
+    tasks: {},
+    agents: {},
+    inputs: {},
+    turns: {},
+    messages: [
+      {
+        id: expect.stringMatching(/^optimistic:/),
+        metadata: {
+          optimistic: true,
+          status,
+        },
+        parts: [{ text: message, type: "text" }],
+        role: "user",
+      },
+    ],
+  };
+}
+
 function completedTurnData(input: {
   readonly assistantMessage?: string;
   readonly turnId: string;
@@ -468,6 +488,210 @@ describe("useEveAgent (Vue composable wiring)", () => {
 
     expect(agent.data.value).toBe(dataBeforeDispose);
     expect(agent.data.value.messages).toEqual([]);
+  });
+
+  it("prewarms a session on scope run when prewarm is enabled", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_request, init) =>
+        init?.method === "POST"
+          ? createStartedMessageResponse("session_1", "")
+          : createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]),
+      );
+
+    const scope = effectScope();
+    const agent = scope.run(() => useEveAgent({ prewarm: true }));
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    await vi.waitFor(() => expect(agent.session.value?.sessionId).toBe("session_1"));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/v1/session");
+
+    scope.stop();
+  });
+
+  it("does not prewarm a session when prewarm is disabled", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    const scope = effectScope();
+    scope.run(() => useEveAgent({ prewarm: false }));
+    await Promise.resolve();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    scope.stop();
+  });
+
+  it("keeps the stream closed while prewarming when followIdle is disabled", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createStartedMessageResponse("session_1", ""));
+
+    const scope = effectScope();
+    const agent = scope.run(() => useEveAgent({ followIdle: false, prewarm: true }));
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    await vi.waitFor(() => expect(agent.session.value?.sessionId).toBe("session_1"));
+    expect(
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method !== "POST",
+      ),
+    ).toEqual([]);
+
+    scope.stop();
+  });
+
+  it("targets named agent routes when agent is configured", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]));
+
+    const scope = effectScope();
+    const agent = scope.run(() => useEveAgent({ agent: "support", prewarm: false }));
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    await agent.send("Hello");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/support/v1/session");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/eve/support/v1/session/session_1/stream?streamControlVersion=1",
+    );
+
+    scope.stop();
+  });
+
+  it("prepares fresh clientContext before sending", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]));
+
+    let randomWord = "jazz";
+    const scope = effectScope();
+    const agent = scope.run(() =>
+      useEveAgent({
+        prewarm: false,
+        prepareSend: (input) => ({ ...input, clientContext: { randomWord } }),
+      }),
+    );
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    randomWord = "waltz";
+    await agent.send("What word is currently selected?");
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientContext: { randomWord: "waltz" },
+      message: "What word is currently selected?",
+    });
+
+    scope.stop();
+  });
+
+  it("marks an optimistic message as failed when send fails before confirmation", async () => {
+    vi.stubGlobal("window", {});
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
+
+    const seenErrors: Error[] = [];
+    const scope = effectScope();
+    const agent = scope.run(() =>
+      useEveAgent({
+        prewarm: false,
+        onError(error) {
+          seenErrors.push(error);
+        },
+      }),
+    );
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    await agent.send("Hello");
+
+    expect(seenErrors.map((error) => error.message)).toEqual(["Network failed"]);
+    expect(agent.status.value).toBe("error");
+    expect(agent.data.value).toEqual(optimisticUserData("Hello", "failed"));
+
+    scope.stop();
+  });
+
+  it("detaches an active turn stream on scope dispose without cancelling the turn", async () => {
+    vi.stubGlobal("window", {});
+    let streamSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamSignal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+          },
+        }),
+        { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+      );
+    });
+
+    const scope = effectScope();
+    const agent = scope.run(() => useEveAgent({ prewarm: false }));
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    const sendPromise = agent.send("Hello");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(streamSignal?.aborted).toBe(false);
+
+    scope.stop();
+
+    expect(streamSignal?.aborted).toBe(true);
+    // Detaching abandons the local stream only; no cancel request is sent.
+    expect(fetchMock.mock.calls.filter(([request]) => String(request).endsWith("/cancel"))).toEqual(
+      [],
+    );
+    await sendPromise.catch(() => {});
+  });
+
+  it("responds to a pending input request and resets the projection", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_request, init) =>
+        init?.method === "POST"
+          ? createStartedMessageResponse("session_1", "http:session_1")
+          : createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]),
+      );
+
+    const scope = effectScope();
+    const agent = scope.run(() =>
+      useEveAgent({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        prewarm: false,
+      }),
+    );
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    await agent.respond([{ optionId: "cancel", requestId: "approval_1" }]);
+
+    const postCall = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+    );
+    if (postCall === undefined) throw new Error("expected a POST request");
+    expect(JSON.parse(String((postCall[1] as RequestInit).body))).toEqual({
+      inputResponses: [{ optionId: "cancel", requestId: "approval_1" }],
+    });
+    expect(agent.events.value.length).toBeGreaterThan(0);
+
+    agent.reset();
+
+    expect(agent.status.value).toBe("ready");
+    expect(agent.events.value).toEqual([]);
+    expect(agent.data.value.messages).toEqual([]);
+
+    scope.stop();
   });
 
   it("renders initial projection without subscribing during SSR", async () => {

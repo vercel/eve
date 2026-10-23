@@ -290,6 +290,28 @@ describe("useEveAgent", () => {
     expect(agent?.session?.sessionId).toBe("session_1");
   });
 
+  it("keeps the stream closed while prewarming when followIdle is disabled", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createStartedMessageResponse("session_1", ""));
+    let agent: UseEveAgentHelpers<EveMessageData> | undefined;
+    function Chat() {
+      agent = useEveAgent({ followIdle: false, prewarm: true });
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(Chat));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(agent?.session?.sessionId).toBe("session_1"));
+    });
+
+    expect(fetchMock.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "POST")).toEqual(
+      [],
+    );
+  });
+
   it("does not abort prewarming when the option changes to false", async () => {
     const accepted = createDeferred<Response>();
     const fetchMock = vi
