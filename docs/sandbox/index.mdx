@@ -138,7 +138,7 @@ eve writes byte-backed files that reach the agent into the sandbox under `.eve/a
 
 Files that tools return by URL with `toolOutputPart.fileUrl` are not staged: the model provider reads the URL directly. See [Send a file by URL](/docs/tools#send-a-file-by-url).
 
-Before every model call, eve reads the referenced files back from the sandbox. Every file, whether attached to a message or returned by a tool, reaches the model with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow its label only when every major provider reads the format natively:
+Every file, whether attached to a message or returned by a tool, reaches the model on every call with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow its label only when every major provider reads the format natively:
 
 - A PNG, JPEG, GIF, or WebP image up to 3 MiB and at most 8000 pixels per side.
 - A PDF up to 20 MiB.
@@ -147,7 +147,7 @@ Other files, such as CSV, HEIC, audio, and video, reach the model as the label a
 
 To let the agent answer voice notes and other audio, add a tool that transcribes the staged file. See [Voice notes](/docs/patterns/voice-notes).
 
-If a referenced file is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
+eve keeps the bytes of recent images and PDFs it staged or read for a session in memory, so a model call resumes the sandbox only when it needs bytes that eve doesn't already hold. If a file read back from the sandbox is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
 
 A file that eve can't stage never enters session history. When a channel's `fetchFile` fails, or a file part's `data` is not bytes, base64, a `data:` URL, or a URL, the model receives a note that names the file instead.
 
