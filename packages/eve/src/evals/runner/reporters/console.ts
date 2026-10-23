@@ -15,6 +15,7 @@ import {
   exportedAssertionName,
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -73,7 +74,7 @@ class ConsoleReporter implements EvalReporter {
       )
       .join("  ");
 
-    const label = result.attempt === undefined ? result.id : `${result.id} #${result.attempt}`;
+    const label = formatAttemptLabel(result.id, result.attempt);
     const line = [icon, this.#colors.dim(label), gateText, scoreText].filter(Boolean).join("  ");
     this.#log(line);
 
@@ -244,13 +245,17 @@ class ConsoleReporter implements EvalReporter {
   }
 }
 
-/** Per-eval pass counts across attempts, for repeated runs only. */
+/**
+ * Per-eval gate pass counts across attempts, for repeated runs only. Scored
+ * and skipped attempts have no pass/fail verdict, so they are left out.
+ */
 function aggregateAttempts(
   results: readonly EveEvalResult[],
 ): { id: string; passed: number; total: number }[] {
   const totals = new Map<string, { passed: number; total: number }>();
   for (const result of results) {
     if (result.attempt === undefined) continue;
+    if (result.verdict !== "passed" && result.verdict !== "failed") continue;
     const entry = totals.get(result.id) ?? { passed: 0, total: 0 };
     entry.total += 1;
     if (result.verdict === "passed") entry.passed += 1;

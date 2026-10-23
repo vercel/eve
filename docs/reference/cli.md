@@ -465,6 +465,7 @@ Without `--url`, `eve eval` starts its own local server on a free port with stat
 | `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
 | `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
 | `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
+| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability               |
 | `--json`                 | flag   | off     | Output results as JSON                                        |
 | `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
 | `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |

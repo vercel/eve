@@ -7,6 +7,7 @@ import type {
   EveEvalTargetHandle,
 } from "#evals/types.js";
 import { resolveArtifactDirectory, writeArtifacts } from "#evals/runner/artifacts.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import { executeEval } from "#evals/runner/execute-eval.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
@@ -126,12 +127,13 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
       const next = pending.shift();
       if (next === undefined) break;
       const { evaluation, attempt } = next;
-      const logLabel = attempt === undefined ? evaluation.id : `${evaluation.id}#${attempt}`;
+      const logLabel = formatAttemptLabel(evaluation.id, attempt);
       const evalStartedAt = new Date().toISOString();
 
       enqueueReporterCallback(evaluation, async (reporter) => {
         await reporter.onEvalStart?.({
           evaluation,
+          attempt,
           startedAt: evalStartedAt,
           target,
         });
@@ -150,6 +152,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
             enqueueReporterCallback(evaluation, async (reporter) => {
               await reporter.onSessionStart?.({
                 evaluation,
+                attempt,
                 primary: event.primary,
                 sessionId: event.sessionId,
                 startedAt: event.startedAt,

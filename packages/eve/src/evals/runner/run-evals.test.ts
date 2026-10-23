@@ -493,9 +493,13 @@ describe("runEvals", () => {
     mockArtifacts();
     mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));
     const config: EveEvalConfig = { ...TEST_CONFIG, repeat: 2 };
+    const started: string[] = [];
     const reported: string[] = [];
     const reporter: EvalReporter = {
       onRunStart: () => {},
+      onEvalStart: (event) => {
+        started.push(`${event.evaluation.id}#${event.attempt}`);
+      },
       onEvalComplete: (result) => {
         reported.push(`${result.id}#${result.attempt}`);
       },
@@ -512,6 +516,7 @@ describe("runEvals", () => {
       maxConcurrency: 1,
     });
 
+    expect(started).toEqual(["a#1", "a#2", "b#1", "b#2"]);
     expect(reported).toEqual(["a#1", "a#2", "b#1", "b#2"]);
     expect(fromConfig.passed).toBe(4);
 
