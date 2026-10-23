@@ -189,8 +189,6 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/instructions.md",
       "agent/skills/catch_up.md",
       "agent/tools/read_recent_messages.ts",
-      "daemon/main.ts",
-      "vercel.json",
     ],
   },
   {

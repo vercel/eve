@@ -9,7 +9,7 @@ The agent comes with:
 - `no_reply`, so the agent stays quiet when people in its thread talk to each other; and
 - `web_search`, an eve default tool, for current events and facts.
 
-## Getting Started
+## Get started
 
 Install dependencies, then run the guided Discord setup. Choose **DMs, mentions, and threads** when it asks how people should reach the agent:
 
@@ -45,9 +45,9 @@ EVE_URL=http://localhost:2000 node --env-file=.env.local daemon/main.ts
 
 Edit the agent's behavior in `agent/instructions.md`, its tools in `agent/tools/`, and its skills in `agent/skills/`. The agent auto-updates as you edit the files.
 
-## Learn More
+## Learn more
 
-This project uses the eve framework's bundled guides — see `node_modules/eve/dist/docs/public/` after installing dependencies.
+This project uses the eve framework's bundled guides. After installing dependencies, see `node_modules/eve/dist/docs/public/`.
 
 - [eve documentation](https://eve.dev/docs) - learn about eve features and API.
 - [Discord channel](https://eve.dev/docs/channels/discord) - the channel, the Gateway relay, and their options.
