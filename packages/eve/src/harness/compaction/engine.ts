@@ -125,7 +125,7 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
   const cappedOlder = capToolResults(input.older);
   const capped = withResumptionGuard(
     [...input.checkpointHead, ...cappedOlder, ...input.recent],
-    input.conversation,
+    findLastRealUserMessage(input.conversation),
     input.config.threshold,
   );
 
@@ -278,18 +278,14 @@ async function compactWithScale(
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
   let keep = selectRecentWindowSize(conversation, recentConfig);
 
-  // The current request is replayed whole after every compaction, so one that
-  // cannot fit next to the summary would keep compaction from ever getting
-  // under the threshold. Replay only its newest part and summarize the
-  // cut-off head.
-  const currentIndex = findLastRealUserIndex(conversation, () => true);
+  // The current request is replayed whole after every compaction. One that
+  // takes more than half the threshold leaves no room for the summary and the
+  // next steps' tool results, so compaction would fire again on every step:
+  // replay only its newest part and summarize the cut-off head.
+  const currentIndex = findLastRealUserIndex(conversation);
   const current = conversation[currentIndex];
   const cut =
-    current !== undefined &&
-    messageTokens(current, calibration) +
-      resolveCompactionSummaryReserve(config) +
-      COMPACTION_PROMPT_OVERHEAD_TOKENS >
-      config.threshold
+    !fitsThreshold(conversation, config, calibration) && current !== undefined
       ? fitCurrentMessage(
           current,
           config.threshold,
@@ -297,7 +293,6 @@ async function compactWithScale(
           unsizedCharge(current, calibration),
         )
       : undefined;
-  const replay = cut?.replay;
   if (cut !== undefined) {
     // The replay is the measured message's newest part: it keeps that message's ratio.
     if (current !== undefined && calibration.measured.has(current)) {
@@ -307,11 +302,11 @@ async function compactWithScale(
   }
   // A request the window leaves out is replayed after the summary: the window
   // has to leave room for it.
-  const replayed = replay ?? current;
+  const replayed = cut?.replay ?? current;
   if (replayed !== undefined && currentIndex < conversation.length - keep) {
     keep = Math.min(
       keep,
-      selectRecentWindowSize(conversation, recentConfig, estimateTokens([replayed])),
+      selectRecentWindowSize(conversation, recentConfig, messageTokens(replayed, calibration)),
     );
   }
   const olderToSummarize = (older: readonly ModelMessage[]): readonly ModelMessage[] =>
@@ -363,21 +358,15 @@ async function compactWithScale(
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard(
-      [...summaryHead, ...recent],
-      conversation,
-      config.threshold,
-      replay,
-    );
+    const verbatim = withResumptionGuard([...summaryHead, ...recent], replayed, config.threshold);
     if (fitsThreshold(verbatim, config, calibration)) {
       return verbatim;
     }
 
     const stripped = withResumptionGuard(
       [...summaryHead, ...keepNonToolResultMessages(recent, calibration)],
-      conversation,
+      replayed,
       config.threshold,
-      replay,
     );
     if (fitsThreshold(stripped, config, calibration) || keep === 0) {
       return stripped;
@@ -452,12 +441,10 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
  */
 function withResumptionGuard(
   messages: ModelMessage[],
-  conversation: readonly ModelMessage[],
+  replay: ModelMessage | undefined,
   threshold: number,
-  fittedReplay?: ModelMessage,
 ): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  const replay = fittedReplay ?? findLastRealUserMessage(conversation);
   const alreadyKept =
     replay !== undefined &&
     messages.some((message) => message.role === "user" && message.content === replay.content);
@@ -591,16 +578,13 @@ function splitMessageText(
  * Latest user message authored by the user rather than the framework.
  */
 function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
-  return conversation[findLastRealUserIndex(conversation, () => true)];
+  return conversation[findLastRealUserIndex(conversation)];
 }
 
-function findLastRealUserIndex(
-  conversation: readonly ModelMessage[],
-  accepts: (message: ModelMessage) => boolean,
-): number {
+function findLastRealUserIndex(conversation: readonly ModelMessage[]): number {
   for (let index = conversation.length - 1; index >= 0; index -= 1) {
     const message = conversation[index];
-    if (message?.role !== "user" || !accepts(message) || isFrameworkUserMessage(message)) {
+    if (message?.role !== "user" || isFrameworkUserMessage(message)) {
       continue;
     }
     return index;

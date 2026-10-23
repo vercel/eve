@@ -1479,35 +1479,6 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(result.at(-1)).toEqual(request);
   });
 
-  it("replays the whole request when the summary and the whole message fit, whatever its attachment costs", async () => {
-    const request: ModelMessage = {
-      content: [
-        { text: "plain request text ".repeat(2_100), type: "text" },
-        {
-          data: new URL("https://example.com/report.pdf"),
-          mediaType: "application/pdf",
-          type: "file",
-        },
-      ],
-      role: "user",
-    };
-    const history: ModelMessage[] = [assistant("older text ".repeat(5_500)), request];
-
-    const result = await compactMessages(
-      history,
-      {
-        lastKnownInputTokens: 185_000,
-        lastKnownPromptMessageCount: history.length,
-        recentWindowSize: 1,
-        threshold: 180_000,
-      },
-      summarizeWith("checkpoint text"),
-    );
-
-    expect(JSON.stringify(result)).not.toContain("were cut during context compaction");
-    expect(result).toContainEqual(request);
-  });
-
   it("throws instead of summarizing away a request whose attachment alone is over the limit", async () => {
     const history: ModelMessage[] = [
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
@@ -1566,24 +1537,57 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(result).toContainEqual(pdfRequest);
   });
 
-  it("summarizes once and replays a request whole when the checkpoint and the whole request fit", async () => {
+  it("summarizes once and replays a request within its share whole", async () => {
     const summarizer = summarizeWith("checkpoint text");
-    const request: ModelMessage = { content: "request text ".repeat(2_000), role: "user" };
+    const request: ModelMessage = { content: "request text ".repeat(750), role: "user" };
     const history: ModelMessage[] = [
-      assistant("older text ".repeat(1_900)),
+      assistant("older text ".repeat(1_100)),
       request,
-      assistant("later text ".repeat(1_300)),
+      assistant("later text ".repeat(550)),
     ];
 
     const result = await compactMessages(
       history,
-      { recentWindowSize: 4, threshold: 10_000 },
+      { recentWindowSize: 4, threshold: 5_000 },
       summarizer,
     );
 
     expect(summarizer).toHaveBeenCalledOnce();
     expect(result).toContainEqual(request);
   });
+
+  it.each([0.8, 0.9])(
+    "compacts a few times, not on every step, when the request takes %s of the threshold",
+    async (share) => {
+      const threshold = 40_000;
+      const summarizer = summarizeWith("checkpoint text");
+      let history: ModelMessage[] = [
+        user("large request ".repeat(Math.floor((threshold * share * 4) / 14))),
+      ];
+      let compactions = 0;
+
+      for (let step = 1; step <= 20; step += 1) {
+        history.push(
+          ...toolExchange({
+            callId: `call-${step}`,
+            payloadChars: Math.floor(threshold * 0.06 * 4),
+          }),
+        );
+        const config: CompactionConfig = {
+          lastKnownInputTokens: Math.round(estimateTokens(history)),
+          lastKnownPromptMessageCount: history.length,
+          recentWindowSize: 4,
+          threshold,
+        };
+        if (shouldCompact(history, config)) {
+          compactions += 1;
+          history = await compactMessages(history, config, summarizer);
+        }
+      }
+
+      expect(compactions).toBeLessThanOrEqual(6);
+    },
+  );
 
   it("replays a folded-away request whose content is an array of parts", async () => {
     const request: ModelMessage = {
