@@ -4,6 +4,7 @@ import {
   checkExtensionVersionCompatibility,
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
   parseExtensionCompatibilityManifest,
+  UnsupportedExtensionManifestVersionError,
 } from "#compiler/extension-compatibility.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
@@ -191,6 +192,17 @@ export async function locateExtensionMount(input: {
       compatibilityPath,
     );
   } catch (error) {
+    if (error instanceof UnsupportedExtensionManifestVersionError) {
+      return {
+        diagnostics: [
+          createDiscoverErrorDiagnostic({
+            code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+            message: `Extension "${location.packageName}" uses an old epoch-based distribution manifest at "${compatibilityPath}". Rebuild the extension with this eve release or install a compatible extension release.`,
+            sourcePath: compatibilityPath,
+          }),
+        ],
+      };
+    }
     return {
       diagnostics: [
         createDiscoverErrorDiagnostic({

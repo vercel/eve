@@ -9,6 +9,9 @@ export const EXTENSION_COMPATIBILITY_MANIFEST_KIND = "eve-extension";
 export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 3;
 export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
 
+/** A legacy distribution must be rebuilt before its contents can be mounted. */
+export class UnsupportedExtensionManifestVersionError extends Error {}
+
 // Generation 0 starts with the new manifest format. Retain it at 1.0 if the
 // release candidate's distribution contract remains compatible; otherwise
 // advance the producer generation and explicitly choose consumer support.
@@ -39,27 +42,21 @@ export function checkExtensionVersionCompatibility(
     return { kind: "unsupported-contract", contractMajor: manifest.contractMajor };
   }
   if (
-    !isExactEveVersion(consumerVersion) ||
-    !semver.subset(consumerVersion, `>=${manifest.builtWithEve}`)
+    semver.valid(consumerVersion) === null ||
+    !semver.gte(consumerVersion, manifest.builtWithEve)
   ) {
     return { kind: "newer-eve", minimumVersion: manifest.builtWithEve };
   }
   return undefined;
 }
 
-function isExactEveVersion(version: string): boolean {
-  return (
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(
-      version,
-    ) && semver.validRange(version) !== null
-  );
-}
-
 const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z
   .object({
     kind: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_KIND),
     formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
-    builtWithEve: z.string().refine(isExactEveVersion, "Invalid eve version"),
+    builtWithEve: z
+      .string()
+      .refine((version) => semver.valid(version) !== null, "Invalid eve version"),
     contractMajor: z.number().int().nonnegative(),
     build: z
       .object({ externalDependencies: z.array(z.string().min(1)).readonly() })
@@ -95,8 +92,8 @@ export function parseExtensionCompatibilityManifest(
     "formatVersion" in value &&
     (value.formatVersion === 1 || value.formatVersion === 2)
   ) {
-    throw new Error(
-      `Extension compatibility manifest "${manifestPath}" uses the old epoch format. Rebuild the extension with this eve release or install a compatible extension release.`,
+    throw new UnsupportedExtensionManifestVersionError(
+      `Extension compatibility manifest "${manifestPath}" uses the old epoch format.`,
     );
   }
 

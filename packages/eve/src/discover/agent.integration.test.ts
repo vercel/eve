@@ -1311,8 +1311,10 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
-          message: expect.stringMatching(/old epoch format.*Rebuild the extension/),
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message: expect.stringMatching(
+            /old epoch-based distribution manifest.*Rebuild the extension/,
+          ),
         }),
       ]),
     );

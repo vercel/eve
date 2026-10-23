@@ -27,6 +27,7 @@ describe("version-based extension compatibility", () => {
   it("accepts an older build on newer patch and minor releases, not the reverse", () => {
     expect(checkExtensionVersionCompatibility(manifest, "1.3.2", [1])).toBeUndefined();
     expect(checkExtensionVersionCompatibility(manifest, "1.3.4", [1])).toBeUndefined();
+    expect(checkExtensionVersionCompatibility(manifest, "1.3.4-rc.1", [1])).toBeUndefined();
     expect(checkExtensionVersionCompatibility(manifest, "1.4.0", [1])).toBeUndefined();
     expect(checkExtensionVersionCompatibility(manifest, "1.3.1", [1])).toEqual({
       kind: "newer-eve",
@@ -68,11 +69,15 @@ describe("version-based extension compatibility", () => {
         }),
         path,
       ),
-    ).toThrow(/old epoch format.*Rebuild the extension with this eve release/);
+    ).toThrow(/old epoch format/);
   });
 
   it("rejects invalid versions and unexpected fields", () => {
-    for (const extra of [{ builtWithEve: "not-a-version" }, { requires: { tool: 1 } }]) {
+    for (const extra of [
+      { builtWithEve: "not-a-version" },
+      { builtWithEve: "1.3.2 || 1.4.0" },
+      { requires: { tool: 1 } },
+    ]) {
       expect(() =>
         parseExtensionCompatibilityManifest(JSON.stringify({ ...manifest, ...extra }), path),
       ).toThrow(/invalid/);
