@@ -131,3 +131,10 @@ function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number)
   if (!mediaType.startsWith("image/")) return { mediaType, size };
   return { ...readMediaMetadata(header, mediaType), size };
 }
+
+/**
+ * Text cannot cost more tokens than its UTF-8 bytes, and the estimate is
+ * bytes / 4. A larger ratio means the provider counted something the estimate
+ * cannot see (a remote file, an image), not that the text is denser.
+ */
+export const MAX_TEXT_SCALE = 4;

@@ -12,7 +12,7 @@ import {
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { estimateTokens } from "#harness/token-estimate.js";
+import { estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
@@ -155,7 +155,20 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
  */
 interface Calibration {
   readonly measured: Set<ModelMessage>;
+  /** The whole-history provider-to-estimate ratio. */
   readonly scale: number;
+  /** The ratio for text-only messages, bounded by what text can cost. */
+  readonly textScale: number;
+  /** The ratio for messages with parts the estimate cannot size: the rest of the gap. */
+  readonly otherScale: number;
+}
+
+const UNCALIBRATED: Omit<Calibration, "measured"> = { otherScale: 1, scale: 1, textScale: 1 };
+
+function isTextOnly(message: ModelMessage): boolean {
+  return (
+    typeof message.content === "string" || message.content.every((part) => part.type === "text")
+  );
 }
 
 function calibrate(messages: readonly ModelMessage[], config: CompactionConfig): Calibration {
@@ -168,14 +181,23 @@ function calibrate(messages: readonly ModelMessage[], config: CompactionConfig):
     count <= 0 ||
     count > messages.length
   ) {
-    return { measured: new Set(), scale: 1 };
+    return { measured: new Set(), ...UNCALIBRATED };
   }
   const prefix = messages.slice(0, count);
   const estimated = estimateTokens(prefix);
-  return {
-    measured: new Set(prefix),
-    scale: estimated > 0 ? Math.max(1, provider / estimated) : 1,
-  };
+  if (estimated <= 0) {
+    return { measured: new Set(prefix), ...UNCALIBRATED };
+  }
+  const scale = Math.max(1, provider / estimated);
+  const textEstimate = estimateTokens(prefix.filter(isTextOnly));
+  const otherEstimate = estimated - textEstimate;
+  // With only text in the measured history, nothing else can hold the gap.
+  if (otherEstimate <= 0) {
+    return { measured: new Set(prefix), otherScale: scale, scale, textScale: scale };
+  }
+  const textScale = Math.min(scale, MAX_TEXT_SCALE);
+  const otherScale = Math.max(1, (provider - textEstimate * textScale) / otherEstimate);
+  return { measured: new Set(prefix), otherScale, scale, textScale };
 }
 
 function calibratedTokens(messages: readonly ModelMessage[], calibration: Calibration): number {
@@ -187,7 +209,10 @@ function calibratedTokens(messages: readonly ModelMessage[], calibration: Calibr
 }
 
 function scaleOf(message: ModelMessage, calibration: Calibration): number {
-  return calibration.measured.has(message) ? calibration.scale : 1;
+  if (!calibration.measured.has(message)) {
+    return 1;
+  }
+  return isTextOnly(message) ? calibration.textScale : calibration.otherScale;
 }
 
 /**

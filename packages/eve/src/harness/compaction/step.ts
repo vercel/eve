@@ -26,7 +26,7 @@ import {
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
-import { estimateTokens } from "#harness/token-estimate.js";
+import { estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -141,11 +141,13 @@ export function replaceSessionHistory(
  * covered and the tokens they cost at that ratio, and (2) a threshold with the
  * memory records' tokens, at that ratio, and the request envelope taken off.
  */
-function describeHistoryForCompaction(input: {
+export function describeHistoryForCompaction(input: {
   readonly compaction: CompactionConfig;
   readonly memory: readonly ModelMessage[];
   readonly ordinary: readonly ModelMessage[];
   readonly previousEnvelopeTokens: number;
+  /** The history the prompt was projected from, before memory attribution was stripped. */
+  readonly promptSource: readonly ModelMessage[];
   readonly projectedPrompt: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens: number;
 }): CompactionConfig {
@@ -172,13 +174,19 @@ function describeHistoryForCompaction(input: {
     providerTokens !== undefined && promptEstimate > 0
       ? Math.max(1, providerTokens / promptEstimate)
       : 1;
+  // Projection passes ordinary messages through as they are and rebuilds the
+  // memory records it keeps, so the ordinary messages the provider measured
+  // are the ones still in the source history.
+  const source = new Set<ModelMessage>(input.promptSource);
   const measuredCount =
     measuredPrompt === undefined
       ? undefined
-      : Math.min(canonicalizeMemoryRecords(measuredPrompt).ordinary.length, ordinary.length);
+      : Math.min(measuredPrompt.filter((message) => source.has(message)).length, ordinary.length);
   const threshold = Math.max(
     1,
-    compaction.threshold - requestEnvelopeTokens - estimateTokens(input.memory) * scale,
+    compaction.threshold -
+      requestEnvelopeTokens -
+      estimateTokens(input.memory) * Math.min(scale, MAX_TEXT_SCALE),
   );
   if (measuredCount === undefined || measuredCount === 0) {
     return {
@@ -321,6 +329,7 @@ export async function maybeCompact(input: {
     memory: canonical.memory,
     ordinary,
     previousEnvelopeTokens: getRequestEnvelopeTokens(session) ?? 0,
+    promptSource: promptMessages,
     projectedPrompt: projectedPromptMessages,
     requestEnvelopeTokens: input.requestEnvelopeTokens ?? 0,
   });

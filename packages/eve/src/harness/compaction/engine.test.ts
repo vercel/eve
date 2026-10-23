@@ -1446,6 +1446,38 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(texts.join("")).toContain("FINAL SENTINEL");
     expect(estimateTokens(result) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
   });
+
+  it("does not cut a request for the gap an unseen attachment leaves", async () => {
+    const request = user(`${"plain request text ".repeat(2_100)}`);
+    const history: ModelMessage[] = [
+      {
+        content: [
+          { text: "See the attached report.", type: "text" },
+          {
+            data: new URL("https://example.com/report.pdf"),
+            mediaType: "application/pdf",
+            type: "file",
+          },
+        ],
+        role: "user",
+      },
+      assistant("Read it."),
+      request,
+    ];
+
+    const result = await compactMessages(
+      history,
+      {
+        lastKnownInputTokens: 185_000,
+        lastKnownPromptMessageCount: history.length,
+        recentWindowSize: 1,
+        threshold: 180_000,
+      },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(result.at(-1)).toEqual(request);
+  });
 });
 
 function isCheckpoint(message: ModelMessage): boolean {
