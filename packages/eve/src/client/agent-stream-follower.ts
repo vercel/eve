@@ -20,7 +20,6 @@ import {
 } from "#protocol/descendant-observation.js";
 
 interface Edge {
-  readonly sessionId: string;
   readonly depths: Set<number>;
   child?: Node;
   excluded?: AgentObservationReason;
@@ -33,7 +32,6 @@ interface Node {
   readonly edges: Map<string, Edge>;
   key?: string;
   alias?: Node;
-  cursor: number;
   status: Exclude<AgentObservation["status"], "not-followed">;
   caughtUp: boolean;
   reason?: AgentObservationReason;
@@ -65,10 +63,6 @@ export class AgentStreamFollower {
     this.#root = this.#node(options.session, options.conversation, 0);
     this.#root.key = localObservationKey(options.session.id);
     this.#identities.set(this.#root.key, this.#root);
-  }
-
-  get active(): boolean {
-    return this.#active;
   }
 
   start(): void {
@@ -114,7 +108,6 @@ export class AgentStreamFollower {
       readerDepth: depth,
       depths: new Set([depth]),
       edges: new Map(),
-      cursor: 0,
       status: "queued",
       caughtUp: false,
       readyAt: 0,
@@ -126,10 +119,7 @@ export class AgentStreamFollower {
   #discover(parent: Node): void {
     const generation = this.#generation;
     for (const child of Object.values(parent.conversation.view.children)) {
-      const edge: Edge = parent.edges.get(child.sessionId) ?? {
-        sessionId: child.sessionId,
-        depths: new Set<number>(),
-      };
+      const edge: Edge = parent.edges.get(child.sessionId) ?? { depths: new Set<number>() };
       parent.edges.set(child.sessionId, edge);
       for (const parentDepth of parent.depths) {
         if (!this.#active || generation !== this.#generation) return;
@@ -220,33 +210,35 @@ export class AgentStreamFollower {
   #read(node: Node): void {
     const generation = this.#generation;
     const controller = new AbortController();
+    const current = () =>
+      this.#active && generation === this.#generation && !controller.signal.aborted;
+    const { conversation } = node;
     node.controller = controller;
     node.status = "following";
     node.reason = undefined;
     node.caughtUp = false;
     this.#publish();
-    if (!this.#active || generation !== this.#generation) {
+    if (!current()) {
       controller.abort();
       return;
     }
     const lease = setTimeout(() => controller.abort(), 10_000);
     controller.signal.addEventListener("abort", () => clearTimeout(lease), { once: true });
-    const before = node.cursor;
+    const before = conversation.view.position;
     void (async () => {
       try {
         // Retry waits belong to the scheduler, so a disconnected child releases its request slot.
         const reader = node.reader as ClientAgentSession;
         let reachedTail = false;
-        for await (const { cursor, event } of reader.follow(
+        for await (const { event } of reader.follow(
           {
             signal: controller.signal,
-            startIndex: node.cursor,
+            startIndex: conversation.view.position,
             follow: false,
             streamReconnectPolicy: { reconnect: false },
           },
           (key) => {
-            if (!this.#active || generation !== this.#generation || controller.signal.aborted)
-              throw new Error("Observation stopped.");
+            if (!current()) throw new Error("Observation stopped.");
             if (node.key !== undefined && node.key !== key)
               throw new ClientError(422, "Descendant reader identity changed.");
             node.key = key;
@@ -268,81 +260,63 @@ export class AgentStreamFollower {
             reachedTail = true;
           },
           (position) => {
-            if (
-              !this.#active ||
-              generation !== this.#generation ||
-              controller.signal.aborted ||
-              position <= node.cursor
-            )
-              return;
-            node.cursor = position;
-            node.conversation.advancePosition(position);
+            if (!current() || position <= conversation.view.position) return;
+            conversation.advancePosition(position);
             this.#publish();
           },
         )) {
-          if (!this.#active || generation !== this.#generation || controller.signal.aborted) return;
-          node.conversation.observe(event);
+          if (!current()) return;
+          conversation.observe(event);
           if (event.meta.endOfLine !== false) {
-            node.cursor = cursor;
             this.#discover(node);
-            if (!this.#active || generation !== this.#generation) return;
+            if (!current()) return;
             this.#publish();
             this.#schedule();
           }
         }
-        if (!this.#active || generation !== this.#generation) return;
-        if (!controller.signal.aborted) {
-          if (!reachedTail)
-            throw new Error("The descendant stream disconnected before its captured tail.");
-          node.caughtUp = true;
-          node.status = "idle";
-          node.failures = 0;
-          node.idleReads = node.cursor === before ? node.idleReads + 1 : 0;
-          node.readyAt = Date.now() + Math.min(10_000, 1000 * 2 ** Math.min(node.idleReads, 4));
-        } else {
-          node.status = "queued";
-          node.readyAt = Date.now();
-        }
+        if (!current()) return;
+        if (!reachedTail)
+          throw new Error("The descendant stream disconnected before its captured tail.");
+        node.caughtUp = true;
+        node.status = "idle";
+        node.failures = 0;
+        node.idleReads = conversation.view.position === before ? node.idleReads + 1 : 0;
+        node.readyAt = Date.now() + Math.min(10_000, 1000 * 2 ** Math.min(node.idleReads, 4));
       } catch (error) {
-        if (!this.#active || generation !== this.#generation) return;
-        if (controller.signal.aborted) {
-          node.status = "queued";
-          node.readyAt = Date.now();
-        } else {
-          node.failures += 1;
-          const status = error instanceof ClientError ? error.status : undefined;
-          const retryable = isRetryableStreamError(error);
-          node.status =
-            retryable &&
-            node.failures < DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy.maxAttempts
-              ? "interrupted"
-              : "unavailable";
-          node.reason =
-            status === 401 || status === 403
-              ? "unauthorized"
-              : status === 410
-                ? "expired"
-                : status === 422
-                  ? error instanceof ClientError && error.code === "cycle"
-                    ? "cycle"
-                    : "unsupported"
-                  : "transport";
-          node.readyAt =
-            Date.now() +
-            Math.min(
-              RECONNECT_BACKOFF.maxDelayMs,
-              RECONNECT_BACKOFF.baseDelayMs * 2 ** Math.min(node.failures - 1, 5),
-            );
-        }
+        if (!current()) return;
+        node.failures += 1;
+        const status = error instanceof ClientError ? error.status : undefined;
+        const retryable = isRetryableStreamError(error);
+        node.status =
+          retryable &&
+          node.failures < DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy.maxAttempts
+            ? "interrupted"
+            : "unavailable";
+        node.reason =
+          status === 401 || status === 403
+            ? "unauthorized"
+            : status === 410
+              ? "expired"
+              : status === 422
+                ? error instanceof ClientError && error.code === "cycle"
+                  ? "cycle"
+                  : "unsupported"
+                : "transport";
+        node.readyAt =
+          Date.now() +
+          Math.min(
+            RECONNECT_BACKOFF.maxDelayMs,
+            RECONNECT_BACKOFF.baseDelayMs * 2 ** Math.min(node.failures - 1, 5),
+          );
       } finally {
         clearTimeout(lease);
         if (generation === this.#generation) {
           node.controller = undefined;
-          if (controller.signal.aborted && node.status === "following") {
+          if (controller.signal.aborted) {
             node.status = "queued";
             node.readyAt = Date.now();
           }
-          node.conversation.discardUncommitted();
+          conversation.discardUncommitted();
           if (this.#active) {
             this.#publish();
             this.#schedule();
@@ -358,9 +332,9 @@ export class AgentStreamFollower {
       if (published.has(node)) return;
       published.add(node);
       const next = new Set([...ancestors, node]);
-      for (const edge of node.edges.values()) {
+      for (const [sessionId, edge] of node.edges) {
         if (edge.child === undefined) {
-          node.conversation.observeAgent(edge.sessionId, {
+          node.conversation.observeAgent(sessionId, {
             status: "not-followed",
             reason: edge.excluded,
           });
@@ -368,18 +342,18 @@ export class AgentStreamFollower {
         }
         const child = edge.child.alias ?? edge.child;
         if (next.has(child)) {
-          node.conversation.observeAgent(edge.sessionId, {
+          node.conversation.observeAgent(sessionId, {
             status: "not-followed",
             reason: "cycle",
           });
           continue;
         }
         visit(child, next);
-        node.conversation.observeAgent(edge.sessionId, {
+        node.conversation.observeAgent(sessionId, {
           status: child.status,
           key: child.key,
           conversation: child.conversation.state,
-          position: child.cursor,
+          position: child.conversation.view.position,
           caughtUp: child.caughtUp,
           reason: child.reason,
         });

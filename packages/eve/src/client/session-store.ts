@@ -504,7 +504,7 @@ export class SessionStore {
   }
 
   #followAgents(): void {
-    if (this.#followChildStreams && this.#session && !this.#conversationClient.following)
+    if (this.#followChildStreams && this.#session)
       this.#conversationClient.follow(this.#session, this.#followChildStreams);
   }
 

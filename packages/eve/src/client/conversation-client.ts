@@ -44,10 +44,6 @@ export class ConversationClient {
     return this.#stream !== undefined && !this.#stream.ended;
   }
 
-  get following(): boolean {
-    return this.#follower?.active ?? false;
-  }
-
   /** Shows the messages this client sent that eve hasn't consumed. */
   showSubmissions(submissions: readonly LocalSubmission[]): void {
     this.#conversation.setSubmissions(submissions);
