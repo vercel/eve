@@ -21,8 +21,9 @@ new SessionStore({
 `followAgents` accepts a boolean or synchronous predicate over depth, name,
 session ID, and opening owner. Omitted/false disables following; true equals an
 always-true predicate. This deliberately replaces #4855's direct-agent-only true
-semantics before merge. Predicates are evaluated once per committed relationship;
-rejected children are not expanded. Bindings share the store implementation.
+semantics before merge. Predicates are evaluated once per committed relationship
+at each known reachable depth; rejected paths are not expanded. Authorized aliases
+share projections without losing either path's depth-dependent selection. Bindings share the store implementation.
 
 ## Observations and bounds
 

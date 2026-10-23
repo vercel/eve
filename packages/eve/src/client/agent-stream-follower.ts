@@ -16,13 +16,15 @@ import {
 
 interface Edge {
   readonly sessionId: string;
-  readonly child?: Node;
-  readonly excluded?: AgentObservationReason;
+  readonly depths: Set<number>;
+  child?: Node;
+  excluded?: AgentObservationReason;
 }
 interface Node {
-  readonly reader: ClientSession | ClientAgentSession;
+  reader: ClientSession | ClientAgentSession;
+  readerDepth: number;
   readonly conversation: Conversation;
-  readonly depth: number;
+  readonly depths: Set<number>;
   readonly edges: Map<string, Edge>;
   key?: string;
   alias?: Node;
@@ -78,6 +80,7 @@ export class AgentStreamFollower {
   reconcile(): void {
     if (!this.#active) return;
     this.#discover(this.#root);
+    if (!this.#active) return;
     this.#publish();
     this.#schedule();
   }
@@ -103,7 +106,8 @@ export class AgentStreamFollower {
     return {
       reader,
       conversation,
-      depth,
+      readerDepth: depth,
+      depths: new Set([depth]),
       edges: new Map(),
       cursor: 0,
       status: "queued",
@@ -115,34 +119,47 @@ export class AgentStreamFollower {
   }
 
   #discover(parent: Node): void {
+    const generation = this.#generation;
     for (const child of Object.values(parent.conversation.view.children)) {
-      if (parent.edges.has(child.sessionId)) continue;
-      const depth = parent.depth + 1;
-      let excluded: AgentObservationReason | undefined;
-      if (depth > DESCENDANT_MAX_DEPTH) excluded = "depth-limit";
-      else if (typeof this.#policy === "function") {
-        try {
-          if (
-            !this.#policy({
-              depth,
-              name: child.name,
-              sessionId: child.sessionId,
-              owner: child.owner,
-            })
-          )
+      const edge: Edge = parent.edges.get(child.sessionId) ?? {
+        sessionId: child.sessionId,
+        depths: new Set<number>(),
+      };
+      parent.edges.set(child.sessionId, edge);
+      for (const parentDepth of parent.depths) {
+        if (!this.#active || generation !== this.#generation) return;
+        const depth = parentDepth + 1;
+        if (edge.depths.has(depth)) continue;
+        edge.depths.add(depth);
+        let excluded: AgentObservationReason | undefined;
+        if (depth > DESCENDANT_MAX_DEPTH) excluded = "depth-limit";
+        else if (typeof this.#policy === "function") {
+          try {
+            if (
+              !this.#policy({
+                depth,
+                name: child.name,
+                sessionId: child.sessionId,
+                owner: child.owner,
+              })
+            )
+              excluded = "predicate";
+          } catch {
             excluded = "predicate";
-        } catch {
-          excluded = "predicate";
+          }
+        } else if (!this.#policy) excluded = "predicate";
+        if (!this.#active || generation !== this.#generation) return;
+        if (
+          excluded === undefined &&
+          edge.child === undefined &&
+          this.#nodes.size >= DESCENDANT_MAX_SESSIONS
+        )
+          excluded = "session-limit";
+        if (excluded !== undefined) {
+          if (edge.child === undefined) edge.excluded = excluded;
+          continue;
         }
-      } else if (!this.#policy) excluded = "predicate";
-      if (excluded === undefined && this.#nodes.size >= DESCENDANT_MAX_SESSIONS)
-        excluded = "session-limit";
-      if (excluded !== undefined) {
-        parent.edges.set(child.sessionId, { sessionId: child.sessionId, excluded });
-        continue;
-      }
-      const node = this.#node(
-        parent.reader.agent({
+        const reader = parent.reader.agent({
           type: "child.opened",
           data: child,
           meta: {
@@ -150,12 +167,24 @@ export class AgentStreamFollower {
             endOfLine: true,
             position: { line: child.introducedAt, index: 0 },
           },
-        }),
-        new Conversation(),
-        depth,
-      );
-      this.#nodes.add(node);
-      parent.edges.set(child.sessionId, { sessionId: child.sessionId, child: node });
+        });
+        if (edge.child === undefined) {
+          edge.child = this.#node(reader, new Conversation(), depth);
+          edge.child.readerDepth = parent.readerDepth + 1;
+          edge.excluded = undefined;
+          this.#nodes.add(edge.child);
+        } else {
+          const node = edge.child.alias ?? edge.child;
+          if (parent.readerDepth + 1 < node.readerDepth) {
+            node.reader = reader;
+            node.readerDepth = parent.readerDepth + 1;
+          }
+          if (node !== this.#root && !node.depths.has(depth)) {
+            node.depths.add(depth);
+            this.#discover(node);
+          }
+        }
+      }
     }
   }
 
@@ -163,9 +192,11 @@ export class AgentStreamFollower {
     clearTimeout(this.#timer);
     this.#timer = undefined;
     if (!this.#active) return;
+    const generation = this.#generation;
     let active = [...this.#nodes].filter((node) => node.controller !== undefined).length;
     let next = Infinity;
     for (const node of [...this.#nodes].sort((a, b) => a.readyAt - b.readyAt)) {
+      if (!this.#active || generation !== this.#generation) return;
       if (
         node.alias !== undefined ||
         node.controller !== undefined ||
@@ -189,6 +220,10 @@ export class AgentStreamFollower {
     node.reason = undefined;
     node.caughtUp = false;
     this.#publish();
+    if (!this.#active || generation !== this.#generation) {
+      controller.abort();
+      return;
+    }
     const lease = setTimeout(() => controller.abort(), 10_000);
     controller.signal.addEventListener("abort", () => clearTimeout(lease), { once: true });
     const before = node.cursor;
@@ -213,11 +248,31 @@ export class AgentStreamFollower {
             const existing = this.#identities.get(key);
             if (existing !== undefined && existing !== node) {
               node.alias = existing;
+              if (existing !== this.#root) {
+                if (node.readerDepth < existing.readerDepth) {
+                  existing.reader = node.reader;
+                  existing.readerDepth = node.readerDepth;
+                }
+                for (const depth of node.depths) existing.depths.add(depth);
+                this.#discover(existing);
+              }
               controller.abort();
             } else this.#identities.set(key, node);
           },
           () => {
             reachedTail = true;
+          },
+          (position) => {
+            if (
+              !this.#active ||
+              generation !== this.#generation ||
+              controller.signal.aborted ||
+              position <= node.cursor
+            )
+              return;
+            node.cursor = position;
+            node.conversation.advancePosition(position);
+            this.#publish();
           },
         )) {
           if (!this.#active || generation !== this.#generation || controller.signal.aborted) return;
@@ -225,6 +280,7 @@ export class AgentStreamFollower {
           if (event.meta.endOfLine !== false) {
             node.cursor = cursor;
             this.#discover(node);
+            if (!this.#active || generation !== this.#generation) return;
             this.#publish();
             this.#schedule();
           }

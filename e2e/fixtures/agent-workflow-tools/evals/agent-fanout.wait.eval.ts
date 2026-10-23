@@ -88,11 +88,12 @@ export default defineEval({
                 observation.status === "idle" &&
                 observation.caughtUp &&
                 observation.position > 0 &&
-                observation.conversation?.messages.some((message) =>
-                  message.parts.some(
-                    (part) =>
-                      part.type === "text" && part.text.includes("WORKFLOW-CHILD:api:replica-"),
-                  ),
+                observation.conversation?.messages.some(
+                  (message) =>
+                    message.role === "assistant" &&
+                    message.parts.some(
+                      (part) => part.type === "text" && part.text.includes("api:replica-"),
+                    ),
                 ),
             )
           );
@@ -103,6 +104,19 @@ export default defineEval({
         "the headless store observes workflow children without replaying the root",
         () => store.snapshot.events.length === turn.events.length,
       );
+    } catch (cause) {
+      const observations = Object.values(store.snapshot.agents).map(({ observation }) =>
+        observation.status === "not-followed"
+          ? observation
+          : {
+              status: observation.status,
+              reason: observation.reason,
+              position: observation.position,
+              caughtUp: observation.caughtUp,
+              roles: observation.conversation?.messages.map((message) => message.role),
+            },
+      );
+      throw new Error(`Nested prefix capture failed: ${JSON.stringify(observations)}`, { cause });
     } finally {
       stop();
       restoreFetch();

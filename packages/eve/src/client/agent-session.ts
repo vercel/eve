@@ -54,10 +54,12 @@ export class ClientAgentSession implements SessionReader {
     options?: SessionStreamOptions,
     onIdentity?: (key: string) => void,
     onCaughtUp?: () => void,
+    onPosition?: (position: number) => void,
   ): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
       follow: options?.follow,
       onCaughtUp,
+      onPosition,
       baseUrl: this.#context.baseUrl,
       path: createEveDescendantStreamRoutePath(this.#rootId),
       searchParams: { children: JSON.stringify(this.#children) },

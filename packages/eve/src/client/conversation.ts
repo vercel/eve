@@ -103,6 +103,14 @@ export class Conversation {
     return true;
   }
 
+  /** Advances over source lines without recognized facts, after the reader commits the whole line. */
+  advancePosition(position: number): void {
+    if (this.#uncommitted.length !== 0 || position <= this.view.position) return;
+    (this.view as Mutable<SessionView>).position = position;
+    this.#state = undefined;
+    this.#viewCopy = undefined;
+  }
+
   /** Forgets a partly received line so a reader replaying from the folded cursor admits it again. */
   discardUncommitted(): void {
     this.#uncommitted = [];

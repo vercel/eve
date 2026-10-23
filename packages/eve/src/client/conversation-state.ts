@@ -11,7 +11,7 @@ export interface FollowedChild {
   readonly owner: { readonly callId: string } | { readonly taskId: string };
 }
 
-/** A synchronous selection policy, evaluated once per recorded relationship. */
+/** A synchronous selection policy, evaluated once per relationship at each known reachable depth. */
 export type FollowAgents = boolean | ((child: FollowedChild) => boolean);
 
 export type AgentObservationReason =

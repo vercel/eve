@@ -15,6 +15,7 @@ import {
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import { findRemoteAgentBinding, type RemoteAgentBinding } from "#eve-channel/support.js";
 import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
+import { waitWithSignal } from "#shared/wait-with-signal.js";
 
 /** Every hop resolves recorded authority on its owning deployment, never an event-supplied URL. */
 export async function descendantStreamResponse(input: {
@@ -49,7 +50,12 @@ export async function descendantStreamResponse(input: {
   } catch {
     return Response.json({ error: "Invalid descendant path.", ok: false }, { status: 400 });
   }
-  const signal = AbortSignal.any([input.request.signal, AbortSignal.timeout(10_000)]);
+  const deadline = new AbortController();
+  const timeout = setTimeout(
+    () => deadline.abort(new DOMException("Reader resolution timed out.", "AbortError")),
+    10_000,
+  );
+  const signal = AbortSignal.any([input.request.signal, deadline.signal]);
   let parent = input.root;
   const ancestry = new Set([parent.id]);
   try {
@@ -63,23 +69,29 @@ export async function descendantStreamResponse(input: {
         ancestry.add(childId);
         parent = input.attachSession(childId);
         if (remaining.length !== 0) continue;
-        const response = await createSessionStreamResponse(input.request, parent);
+        const response = await resolvedResponse(
+          createSessionStreamResponse(input.request, parent),
+          signal,
+        );
         response.headers.set(EVE_OBSERVATION_KEY_HEADER, localObservationKey(childId));
         return response;
       }
-      const binding = await findRemoteAgentBinding({
-        parent: internalSession(parent),
-        callId: "callId" in opened.data.owner ? opened.data.owner.callId : "",
-        childSessionId: childId,
-        childStreamPath: opened.data.stream,
-      });
+      const binding = await waitWithSignal(
+        findRemoteAgentBinding({
+          parent: internalSession(parent),
+          callId: "callId" in opened.data.owner ? opened.data.owner.callId : "",
+          childSessionId: childId,
+          childStreamPath: opened.data.stream,
+        }),
+        signal,
+      );
       if (
         binding === undefined ||
         binding.earlierProtocol !== undefined ||
         input.resolveHeaders === undefined
       )
         return unavailable("unsupported", 422);
-      const headers = await input.resolveHeaders(binding);
+      const headers = await waitWithSignal(input.resolveHeaders(binding), signal);
       const route =
         remaining.length === 0
           ? createEveSessionStreamRoutePath(childId)
@@ -91,14 +103,17 @@ export async function descendantStreamResponse(input: {
       }
       if (remaining.length !== 0)
         upstreamUrl.searchParams.set("children", JSON.stringify(remaining));
-      const upstream = await fetch(upstreamUrl, {
-        cache: "no-store",
-        headers,
-        redirect: "manual",
+      const upstream = await resolvedResponse(
+        fetch(upstreamUrl, {
+          cache: "no-store",
+          headers,
+          redirect: "manual",
+          signal,
+        }),
         signal,
-      });
+      );
       if (upstream.status >= 300 && upstream.status < 400) {
-        await upstream.body?.cancel();
+        void upstream.body?.cancel().catch(() => {});
         return unavailable("unsupported", 422);
       }
       const responseHeaders = proxyStreamHeaders(upstream.headers);
@@ -108,7 +123,7 @@ export async function descendantStreamResponse(input: {
             ? localObservationKey(childId)
             : upstream.headers.get(EVE_OBSERVATION_KEY_HEADER);
         if (key === null || key.length > 8192) {
-          await upstream.body?.cancel();
+          void upstream.body?.cancel().catch(() => {});
           return unavailable("unsupported", 422);
         }
         responseHeaders.set(
@@ -120,8 +135,23 @@ export async function descendantStreamResponse(input: {
     }
   } catch {
     return unavailable();
+  } finally {
+    clearTimeout(timeout);
   }
   return unavailable();
+}
+
+async function resolvedResponse(
+  pending: Promise<Response>,
+  signal: AbortSignal,
+): Promise<Response> {
+  void pending.then(
+    (response) => {
+      if (signal.aborted) void response.body?.cancel().catch(() => {});
+    },
+    () => {},
+  );
+  return await waitWithSignal(pending, signal);
 }
 
 function unavailable(code = "descendant_unavailable", status = 404): Response {
@@ -137,17 +167,24 @@ async function recordedChild(
   signal: AbortSignal,
 ): Promise<ChildOpened | undefined> {
   signal.throwIfAborted();
-  const lines = await internalSession(parent).getLineStream({
+  const pending = internalSession(parent).getLineStream({
     follow: false,
     startIndex: hop.position,
   });
+  void pending.then(
+    (lines) => {
+      if (signal.aborted) void lines.cancel().catch(() => {});
+    },
+    () => {},
+  );
+  const lines = await waitWithSignal(pending, signal);
   const reader = lines.getReader();
   const cancel = () => void reader.cancel().catch(() => {});
   signal.addEventListener("abort", cancel, { once: true });
   const events = createEventReader();
   try {
     signal.throwIfAborted();
-    const next = await reader.read();
+    const next = await waitWithSignal(reader.read(), signal);
     if (next.done) return undefined;
     return events
       .read(next.value as StoredLine, hop.position)
@@ -157,6 +194,6 @@ async function recordedChild(
       );
   } finally {
     signal.removeEventListener("abort", cancel);
-    await reader.cancel().catch(() => {});
+    void reader.cancel().catch(() => {});
   }
 }

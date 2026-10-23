@@ -86,6 +86,8 @@ function resolveStreamReconnectPolicy(
 interface FollowStreamInput {
   /** Validates reader provenance before consuming any stream data. */
   readonly onOpen?: (headers: Headers) => void;
+  /** Committed source progress, including lines that materialize no recognized events. */
+  readonly onPosition?: (position: number) => void;
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly baseUrl: string;
@@ -200,6 +202,7 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
             switch (record.record.$eve) {
               case "position":
                 if (record.record.next > startIndex) startIndex = record.record.next;
+                input.onPosition?.(startIndex);
                 if (noteProgress()) return;
                 break;
               case "stream.lease-ended":
@@ -231,6 +234,7 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
             failures = 0;
             reconnectDelayMs = RECONNECT_BACKOFF.baseDelayMs;
             yield { line: record.kind === "invalid" ? undefined : record.line, position };
+            input.onPosition?.(startIndex);
             if (noteProgress()) return;
           }
         }

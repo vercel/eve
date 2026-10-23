@@ -26,7 +26,10 @@ async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 }
 
 const at = "2026-10-10T00:00:00.000Z";
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 function opened(
   parent: string,
   id: string,
@@ -242,6 +245,36 @@ describe("authorized descendant readers", () => {
     await expect(collect(reader.stream({ follow: false }))).rejects.toMatchObject({ status: 422 });
     expect(requests.mock.calls.at(-1)?.[1]?.redirect).toBe("manual");
   });
+
+  it.each(["abort", "deadline"])(
+    "bounds a stalled credential resolver on %s without a late upstream request",
+    async (mode) => {
+      vi.useFakeTimers();
+      const home = deployment("https://home.test", "browser");
+      home.link("root", "child", "https://remote.test");
+      const credentials = Promise.withResolvers<{ authorization: string }>();
+      home.authorization.mockImplementation(() => credentials.promise);
+      const requests = network(home);
+      const controller = new AbortController();
+      const response = home.serve(
+        new Request(
+          `https://home.test/eve/v1/session/root/descendants/stream?children=${encodeURIComponent(JSON.stringify([{ sessionId: "child", position: 0 }]))}&follow=false`,
+          {
+            headers: { authorization: "Bearer browser" },
+            signal: controller.signal,
+          },
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(home.authorization).toHaveBeenCalledTimes(1);
+      if (mode === "abort") controller.abort();
+      else await vi.advanceTimersByTimeAsync(10_000);
+      expect((await response).status).toBe(404);
+      credentials.resolve({ authorization: "Bearer later" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requests).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects unauthenticated access before reading a parent and exposes scoped identities only after validation", async () => {
     const home = deployment("https://home.test", "browser");

@@ -67,7 +67,7 @@ export interface SessionStoreInit {
   readonly optimistic?: boolean;
   /**
    * Recursively observe recorded child sessions, including workflow-created children, while
-   * mounted or programmatically streaming. A predicate selects relationships once, at discovery;
+   * mounted or programmatically streaming. A predicate selects relationships at each known depth;
    * `true` is equivalent to `() => true`. Returning false also excludes that child's descendants.
    * Observation is bounded to depth 8, 128 admitted children, and 8 simultaneous descendant reads.
    * Call results and root callbacks never wait for descendant catch-up. Off by default.

@@ -18,6 +18,7 @@ import {
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/session-http.js";
 import { testTurnFacts } from "#internal/testing/events.js";
+import { position } from "#protocol/session-projection/public-view.js";
 
 const at = "2026-10-10T00:00:00.000Z";
 const scopes: (() => void)[] = [];
@@ -282,6 +283,85 @@ describe("recursive child observations", () => {
         expect.objectContaining({ text: "right" }),
       );
     });
+  });
+
+  it("retains source progress over eventless lines without refetching the suffix", async () => {
+    vi.useFakeTimers();
+    const f = fixture([opening("child")]);
+    f.logs.set("child", [
+      ...linesOf(testTurnFacts(0, "Known.", ["known"]), at),
+      { at, facts: [{ type: "future.fact", data: {} }] },
+      { progress: { type: "future.progress", data: {} } },
+    ]);
+    f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const observed = f.store.snapshot.agents.child!.observation;
+    expect(observed).toMatchObject({ status: "idle", caughtUp: true, position: 3 });
+    expect(position(conversation(observed).view)).toBe(3);
+    expect(conversation(observed).messages).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.requests.at(-1)?.cursor).toBe(3);
+  });
+
+  it("stops the scheduling pass when a subscription replaces the root during publication", async () => {
+    vi.useFakeTimers();
+    const f = fixture([opening("first"), opening("second")]);
+    let replaced = false;
+    const unsubscribe = f.store.subscribe(() => {
+      if (
+        !replaced &&
+        Object.values(f.store.snapshot.agents).some(
+          ({ observation }) => observation.status === "following",
+        )
+      ) {
+        replaced = true;
+        f.store.newSession();
+      }
+    });
+    f.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    unsubscribe();
+    expect(replaced).toBe(true);
+    expect(f.requests).toHaveLength(0);
+    expect(f.store.snapshot.agents).toEqual({});
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("evaluates both reachable depths when a longer path establishes the shared observation first", async () => {
+    const f = fixture([opening("shared"), opening("middle")], ({ depth }) => depth <= 2);
+    f.logs.set("middle", linesOf([opening("shared")], at));
+    f.logs.set("shared", linesOf([opening("leaf")], at));
+    f.logs.set("leaf", linesOf(testTurnFacts(0, "Found.", ["found"]), at));
+    const direct = Promise.withResolvers<void>();
+    const serve = f.fetcher.getMockImplementation()!;
+    f.fetcher.mockImplementation(async (input, init) => {
+      const path = JSON.parse(new URL(String(input)).searchParams.get("children")!) as {
+        sessionId: string;
+      }[];
+      if (path.length === 1 && path[0]?.sessionId === "shared") await direct.promise;
+      return serve(input, init);
+    });
+    f.start();
+    try {
+      await vi.waitFor(() => {
+        const shared = conversation(
+          conversation(f.store.snapshot.agents.middle!.observation).agents.shared!.observation,
+        );
+        expect(shared.agents.leaf?.observation).toEqual({
+          status: "not-followed",
+          reason: "predicate",
+        });
+      });
+    } finally {
+      direct.resolve();
+    }
+    await vi.waitFor(() => {
+      const shared = conversation(f.store.snapshot.agents.shared!.observation);
+      expect(shared.agents.leaf?.observation).toMatchObject({ status: "idle", caughtUp: true });
+      expect(conversation(shared.agents.leaf!.observation).messages).toHaveLength(2);
+    });
+    const leafRead = f.fetcher.mock.calls.find(([input]) => String(input).includes("leaf"));
+    expect(JSON.parse(new URL(String(leafRead![0])).searchParams.get("children")!)).toHaveLength(2);
   });
 
   it("reference-counts headless observation scopes and tears down stalled reads without commands", async () => {

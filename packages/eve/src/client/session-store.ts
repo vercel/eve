@@ -19,11 +19,11 @@ import {
   assertAnswerable,
   assertExclusiveTurnInput,
   isAbortError,
-  waitWithSignal,
 } from "#client/session-store-helpers.js";
 import { activeTurn, failure, idle } from "#protocol/session-projection/selectors.js";
 import type { DeliveryReceipt } from "#protocol/delivery.js";
 import { toError } from "#shared/errors.js";
+import { waitWithSignal } from "#shared/wait-with-signal.js";
 import type { ClientSessionState, SendTurnPayload } from "#client/types.js";
 
 export type {
