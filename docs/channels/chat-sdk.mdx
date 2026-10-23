@@ -145,7 +145,7 @@ This policy controls overlapping eve turns. Chat SDK's separate `concurrency` op
 
 The default handlers post the agent's reply back to the thread — no `events` override required. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
 
-Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn or can't edit sent messages — email and WhatsApp, for example — so the reply posts once on completion instead of editing:
+Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). On completion it edits the message once more to show the full reply, skipping that edit when the message already shows it. The streamed message is the reply, so the channel never posts the reply a second time: when the final edit fails, it logs the error, posts a short notice with the error id, and tells the model on the next message that the user hasn't seen its reply. Set `streaming: false` for surfaces that deliver one message per turn or can't edit sent messages — email and WhatsApp, for example — so the reply posts once on completion instead of editing:
 
 ```ts
 chatSdkChannel({

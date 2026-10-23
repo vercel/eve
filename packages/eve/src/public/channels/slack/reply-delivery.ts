@@ -1,15 +1,13 @@
-import type { DeliverPayload } from "#channel/types.js";
-import { createLogger, logError } from "#internal/logging.js";
+import { createLogger } from "#internal/logging.js";
 import {
   SLACK_MARKDOWN_TEXT_MAX_LENGTH,
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
+import { reportUndeliveredReply } from "#public/channels/undelivered-reply.js";
 import type {
   SlackChannelInternalEvents,
   SlackChannelContext,
-  SlackChannelState,
   SlackContext,
-  SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 
 const log = createLogger("slack.reply");
@@ -222,41 +220,11 @@ export function withFinalReplyDelivery(
     try {
       await render?.(event, channel, ctx);
     } catch (error) {
-      await reportUndeliveredReply(channel, event.turnId, error);
+      await reportUndeliveredReply(
+        { log, name: "Slack", post: (notice) => channel.thread.post(notice), state: channel.state },
+        event.turnId,
+        error,
+      );
     }
   };
-}
-
-async function reportUndeliveredReply(
-  channel: SlackEventContext,
-  turnId: string,
-  error: unknown,
-): Promise<void> {
-  const errorId = logError(log, "final reply was not delivered to Slack", error, { turnId });
-  channel.state.undeliveredReplyErrorId = errorId;
-  try {
-    await channel.thread.post(
-      `I finished, but couldn't deliver my answer in Slack (error id \`${errorId}\`). Please ask me to resend it.`,
-    );
-  } catch (noticeError) {
-    logError(log, "undelivered reply notice failed", noticeError, { errorId, turnId });
-  }
-}
-
-/**
- * Tells the model, ahead of the next message, that its previous reply never
- * reached Slack, so it does not assume the user read that reply.
- */
-export function withUndeliveredReplyNote<T extends DeliverPayload>(
-  state: SlackChannelState,
-  payload: T,
-): T {
-  const errorId = state.undeliveredReplyErrorId;
-  if (!errorId || payload.message === undefined) return payload;
-  state.undeliveredReplyErrorId = null;
-  const note = [
-    `Your previous reply was not delivered to Slack (error id ${errorId}).`,
-    "The user has not seen it. Do not assume they read it; send the answer again if they ask for it.",
-  ].join(" ");
-  return { ...payload, context: [note, ...(payload.context ?? [])] };
 }

@@ -43,6 +43,11 @@ import {
   renderInputRequests,
   renderRetiredInputRequest,
 } from "#public/channels/chat-sdk/input-actions.js";
+import {
+  reportUndeliveredReply,
+  type UndeliveredReplyState,
+  withUndeliveredReplyNote,
+} from "#public/channels/undelivered-reply.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
@@ -62,7 +67,8 @@ const DEFAULT_ROUTE = "/eve/v1";
 const DEFAULT_INPUT_ACTION_PREFIX = "eve_input:";
 const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
-const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
+/** How the undelivered-reply notice and model note name a Chat SDK surface. */
+const SURFACE_NAME = "this chat";
 
 type ChatSdkAdapters = Record<string, Adapter>;
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
@@ -75,10 +81,15 @@ interface ActiveWebhookContext {
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
 /** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
-export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueueState {
+export interface ChatSdkChannelState
+  extends Record<string, unknown>, PromptQueueState, UndeliveredReplyState {
   thread: SerializedThread | null;
   /** Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
+  /** Text streamed for the anchor so far, including deltas no throttled edit has shown yet. */
+  streamText?: string | null;
+  /** Text the anchor showed after its last successful post or edit. */
+  shownText?: string | null;
   /**
    * Whether `adapter.editMessage` works for this session. Set to `false` once
    * an edit throws {@link isNotImplemented}, which disables streaming edits for
@@ -402,7 +413,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       if (answer !== undefined) {
         return { context: payload.context, inputResponses: parseInputResponses([answer]) };
       }
-      return defaultDeliverResult(payload);
+      return defaultDeliverResult(withUndeliveredReplyNote(channel.state, payload, SURFACE_NAME));
     },
     events: mergedEvents,
   });
@@ -499,15 +510,14 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     async "message.appended"(event, channel, _ctx) {
       if (!channel.thread || !canStream(channel)) return;
       const currentText =
-        channel.state.streamStepIndex === event.stepIndex
-          ? streamTextByState.get(channel.state)
-          : undefined;
+        channel.state.streamStepIndex === event.stepIndex ? channel.state.streamText : null;
       const message = (currentText ?? "") + event.messageDelta;
       if (!message) return;
-      streamTextByState.set(channel.state, message);
+      channel.state.streamText = message;
       const anchor = channel.state.anchorMessageId;
       if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
         const sent = await channel.thread.post({ markdown: message });
+        channel.state.shownText = message;
         channel.state.anchorMessageId = sent.id;
         channel.state.streamStepIndex = event.stepIndex;
         channel.state.lastEditAtMs = Date.now();
@@ -517,11 +527,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       if (Date.now() - lastEdit < channel.streamingEditIntervalMs) return;
       try {
         await editMessage(channel.thread, anchor, message);
+        channel.state.shownText = message;
         channel.state.lastEditAtMs = Date.now();
       } catch (error) {
         if (!isNotImplemented(error)) throw error;
+        // Keep the anchor: completion must not post the reply beside it.
         channel.state.editSupported = false;
-        clearStream(channel.state);
       }
     },
     // Some adapters show only text, where a reply can answer only the request
@@ -542,7 +553,11 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         // is posted when nothing was streamed — intermediate tool-call narration
         // must not become a standalone message on non-streaming surfaces.
         if (event.message) {
-          await finalizeStreamedMessage(channel, event.message, false);
+          try {
+            await finalizeStreamedMessage(channel, event.message, false);
+          } catch (error) {
+            if (!isNotImplemented(error)) throw error;
+          }
         } else {
           clearStream(channel.state);
         }
@@ -553,7 +568,20 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         clearStream(channel.state);
         return;
       }
-      await finalizeStreamedMessage(channel, event.message, true);
+      try {
+        await finalizeStreamedMessage(channel, event.message, true);
+      } catch (error) {
+        await reportUndeliveredReply(
+          {
+            log,
+            name: SURFACE_NAME,
+            post: async (notice) => channel.thread?.post(notice),
+            state: channel.state,
+          },
+          event.turnId,
+          error,
+        );
+      }
     },
     async "turn.failed"(event, channel, _ctx) {
       if (event.terminal) return;
@@ -591,8 +619,7 @@ async function safeStartTyping(thread: Thread | null, status?: string): Promise<
 
 /**
  * Edits a previously posted message in place via the adapter. Rendered as
- * markdown so streamed edits match the completed-message formatting. Callers
- * handle {@link isNotImplemented} to fall back to a fresh post.
+ * markdown so streamed edits match the completed-message formatting.
  */
 async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
   await thread.adapter.editMessage(thread.id, messageId, { markdown });
@@ -616,36 +643,35 @@ async function retireInputCard(
 }
 
 /**
- * Finalizes a completed assistant message. When a streamed anchor exists, edits
- * it in place so it shows the complete text instead of the last throttled
- * delta. When no anchor was streamed and `postWhenNoAnchor` is `true`, posts the
- * message fresh (the normal path for a final reply on a non-streaming surface);
- * when `false`, leaves the surface untouched so intermediate tool-call narration
- * does not become a standalone message. Clears the stream anchor either way.
+ * Shows a completed assistant message and clears the stream. With a streamed
+ * anchor, edits it to the complete text unless it already shows it; the
+ * anchor is the reply, so a failed edit throws rather than posting the reply
+ * beside it, and an edit {@link isNotImplemented} also disables edits for the
+ * session. Without an anchor, posts the message when `postWhenNoAnchor` is
+ * `true` (a final reply on a non-streaming surface); when `false`, leaves the
+ * surface untouched so intermediate tool-call narration does not become a
+ * standalone message.
  */
 async function finalizeStreamedMessage(
   channel: ChatSdkChannelContext,
   message: string,
   postWhenNoAnchor: boolean,
 ): Promise<void> {
+  const { anchorMessageId: anchor, shownText } = channel.state;
+  clearStream(channel.state);
   const thread = channel.thread;
-  if (!thread) {
-    clearStream(channel.state);
+  if (!thread) return;
+  if (!anchor) {
+    if (postWhenNoAnchor) await thread.post({ markdown: message });
     return;
   }
-  const anchor = channel.state.anchorMessageId;
-  if (canStream(channel) && anchor) {
-    try {
-      await editMessage(thread, anchor, message);
-    } catch (error) {
-      if (!isNotImplemented(error)) throw error;
-      channel.state.editSupported = false;
-      if (postWhenNoAnchor) await thread.post({ markdown: message });
-    }
-  } else if (postWhenNoAnchor) {
-    await thread.post({ markdown: message });
+  if (shownText === message) return;
+  try {
+    await editMessage(thread, anchor, message);
+  } catch (error) {
+    if (isNotImplemented(error)) channel.state.editSupported = false;
+    throw error;
   }
-  clearStream(channel.state);
 }
 
 /** Whether streamed edits are enabled and still supported by the adapter. */
@@ -658,7 +684,8 @@ function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
   state.streamStepIndex = null;
-  streamTextByState.delete(state);
+  state.streamText = null;
+  state.shownText = null;
 }
 
 /** First non-blank line of `text`, used as a compact typing status. */
