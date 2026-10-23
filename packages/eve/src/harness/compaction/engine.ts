@@ -154,7 +154,7 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
  * estimate.
  */
 interface Calibration {
-  readonly measured: ReadonlySet<ModelMessage>;
+  readonly measured: Set<ModelMessage>;
   readonly scale: number;
 }
 
@@ -260,6 +260,10 @@ async function compactWithScale(
       : undefined;
   const replay = cut?.replay;
   if (cut !== undefined) {
+    // The replay is the measured message's newest part: it keeps that message's ratio.
+    if (current !== undefined && calibration.measured.has(current)) {
+      calibration.measured.add(cut.replay);
+    }
     keep = Math.min(keep, conversation.length - 1 - currentIndex);
   }
   const olderToSummarize = (older: readonly ModelMessage[]): readonly ModelMessage[] =>

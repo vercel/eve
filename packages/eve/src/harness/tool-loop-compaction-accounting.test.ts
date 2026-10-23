@@ -316,7 +316,8 @@ describe("tool-loop structured compaction accounting", () => {
           threshold: 1000,
         },
       }),
-      { message: "Compute something" },
+      // Long enough that the mocked 600-token usage is a plausible count for it.
+      { message: `Compute something ${"data ".repeat(80)}` },
     );
 
     expect(first.next).toBe(runStep);

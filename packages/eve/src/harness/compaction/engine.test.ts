@@ -1347,6 +1347,19 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(result.at(-1)).toEqual(user("go on"));
   });
 
+  it("counts the cut replay at the provider's ratio", async () => {
+    // The replay is 3,125 estimated tokens, 5,000 to the provider. With a
+    // 5,000-token summary that is over the limit, though 3,125 + 5,000 is not.
+    const history: ModelMessage[] = [
+      bigTask(),
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+
+    await expect(
+      compactMessages(history, providerConfig(history), summarizeWith("s".repeat(20_000))),
+    ).rejects.toThrow(/under its limit/);
+  });
+
   it("does not read an unseen attachment's tokens as a reason to refuse a small summary", async () => {
     // The provider counted a 60k-token remote PDF that the character estimate
     // cannot see. The summary replaces it, so it is counted at its own size.
