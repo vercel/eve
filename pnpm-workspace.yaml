@@ -67,6 +67,11 @@ overrides:
   # @vercel/cli-config, which @vercel/oidc uses, pins its own Zod 4 release,
   # and the vendor build fails on a second copy.
   "@vercel/cli-config>zod": "catalog:"
+  # @vercel/connect peers on eve. Inside packages/eve that peer cannot resolve
+  # to the workspace package, so pnpm pulls a published eve from npm instead.
+  # Since pnpm 12.9, `pnpm update` re-resolves that peer to the workspace
+  # version, which is unpublished on release PRs and fails the install.
+  "@vercel/connect>eve": "workspace:*"
 
 minimumReleaseAge: 2880 # 2 days
 
