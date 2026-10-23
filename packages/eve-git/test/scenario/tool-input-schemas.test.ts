@@ -17,7 +17,7 @@ test("every extension tool advertises an object-root input schema without root u
     (file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),
   );
   assert.ok(files.length >= 1, `found ${files.join(", ")}`);
-  extension({ github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } });
+  extension({ github: { connector: "github/acme-bot", broker: async () => {} } });
   for (const file of files) {
     const tool = await resolveTool((await import(new URL(file, toolsDir).href)).default);
     const schema = z.toJSONSchema(tool.inputSchema, { io: "input" });

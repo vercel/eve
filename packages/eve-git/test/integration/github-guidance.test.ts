@@ -41,8 +41,17 @@ test("without github config, GitHub goes through the shell's gh and git", async 
   assert.match(skill.markdown, /gh pr create --draft/u);
 });
 
+test("rejects the removed github.org option instead of dropping it", () => {
+  const legacy = { connector: "github/acme-bot", org: "acme", broker: async () => {} };
+  assert.throws(
+    // @ts-expect-error `org` is typed as removed, too.
+    () => extension({ github: legacy }),
+    /Invalid extension config: github\.org: was removed\..*restrict organizations with authorize/u,
+  );
+});
+
 test("with github config, GitHub goes through the brokered gh tool and signed commits", async () => {
-  extension({ github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } });
+  extension({ github: { connector: "github/acme-bot", broker: async () => {} } });
   const { content, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);

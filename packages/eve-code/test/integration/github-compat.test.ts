@@ -35,7 +35,7 @@ test("code({}) contributes no GitHub tool, instructions, or pr skill", async () 
 });
 
 test("deprecated code({ github }) keeps the gh tool, GitHub instructions, and signed-commit pr skill", async () => {
-  extension({ github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } });
+  extension({ github: { connector: "github/acme-bot", broker: async () => {} } });
   const { guidance, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
   assert.ok(guidance && "content" in guidance);

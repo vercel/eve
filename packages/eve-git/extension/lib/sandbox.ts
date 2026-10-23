@@ -2,6 +2,8 @@
 export {
   executeGitHubShell,
   githubShellApproval,
+  type GitHubAuthorize,
+  type GitHubAuthorizeRequest,
   type GitHubCoAuthor,
   type GitHubConfig,
   type GitHubLeaseRule,

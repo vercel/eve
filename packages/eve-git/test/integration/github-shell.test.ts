@@ -20,7 +20,6 @@ type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>
 
 const CONFIG = {
   connector: "github/citron-compass",
-  org: "vercel",
   async broker(
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
@@ -102,8 +101,7 @@ test("runs clone without approval while retaining repository-scoped write-capabl
         authorizationDetails: [
           {
             type: "github_app_installation",
-            org: "vercel",
-            repositories: ["internal-agents"],
+            repositories: ["vercel/internal-agents"],
           },
         ],
         subject: { type: "app" },
@@ -255,8 +253,7 @@ test("mints a repository-scoped token only during execution and redacts output",
         authorizationDetails: [
           {
             type: "github_app_installation",
-            org: "vercel",
-            repositories: ["internal-agents"],
+            repositories: ["vercel/internal-agents"],
           },
         ],
         subject: { type: "app" },
@@ -372,32 +369,40 @@ test("rejects explicit command targets outside the declared repository before mi
   }
 });
 
-test("rejects repositories outside the configured organization before minting", async () => {
-  let tokenRequested = false;
+test("requests the declared repository's owner from Connect and leaves organization policy to authorize", async () => {
+  const repositories: unknown[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const other: GitHubShellInput = {
+    ...READ,
+    command: "gh pr view 1 --repo acme/widgets",
+    permissions: [{ provider: "github", repositories: ["acme/widgets"], access: "write" }],
+  };
+  const dependencies = {
+    sessionId: "session-orgs",
+    async getConnectToken(_connector: string, params: ConnectTokenParams) {
+      repositories.push(params.authorizationDetails?.[0]?.repositories);
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+    },
+  };
+
+  await executeGitHubShell(other, CONFIG, dependencies);
+  assert.deepEqual(repositories, [["acme/widgets"]]);
+  assert.equal(runs.length, 1);
+
+  const config = {
+    ...CONFIG,
+    authorize: ({ repository }: { repository: string }) => repository.startsWith("vercel/"),
+  };
   await assert.rejects(
-    executeGitHubShell(
-      {
-        ...READ,
-        command: "gh pr view 2583 --repo other/internal-agents",
-        permissions: [
-          { provider: "github", repositories: ["other/internal-agents"], access: "write" },
-        ],
-      },
-      CONFIG,
-      {
-        sessionId: "session-1",
-        async getConnectToken() {
-          tokenRequested = true;
-          return "token";
-        },
-        async getSandbox() {
-          return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
-        },
-      },
-    ),
-    /outside vercel/u,
+    executeGitHubShell(other, config, dependencies),
+    /not authorized to access acme\/widgets/u,
   );
-  assert.equal(tokenRequested, false);
+  assert.equal(runs.length, 1);
+  await executeGitHubShell(READ, config, dependencies);
+  assert.equal(runs.length, 2);
 });
 
 test("attributes pull requests to the person the tool context resolves", async () => {
