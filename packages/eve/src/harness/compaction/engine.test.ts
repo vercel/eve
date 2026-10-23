@@ -1252,7 +1252,7 @@ describe("compactMessages: current message larger than its share of the threshol
       ),
     ).rejects.toMatchObject({
       message: expect.stringMatching(/start a new session, or send a smaller message/i),
-      name: "FatalError",
+      name: "CompactionOverLimitError",
     });
   });
 

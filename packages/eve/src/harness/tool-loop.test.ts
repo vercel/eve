@@ -49,6 +49,7 @@ import {
   type ConversationContext,
 } from "#shared/conversation-context.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactMessages, shouldCompact } from "#harness/compaction/engine.js";
 import {
   createFrameworkUserMessage,
@@ -8328,6 +8329,37 @@ describe("createToolLoopHarness", () => {
         store: false,
       },
     });
+  });
+
+  it("ends the session with the compaction message when the history stays over the limit", async () => {
+    const message =
+      "Context compaction could not bring the conversation under its limit. Start a new session, or send a smaller message.";
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockRejectedValue(new CompactionOverLimitError(message));
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(createTestSession(), { message: "Hi" }),
+    );
+
+    expect(result.next).toEqual({ done: true, output: "" });
+    expect(compactMessages).toHaveBeenCalledOnce();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(events.find((event) => event.type === "turn.failed")?.data.message).toBe(message);
+    expect(events.at(-1)?.type).toBe("session.failed");
+  });
+
+  it("still throws a compaction failure that is not an over-limit result", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockRejectedValue(new Error("summarizer unavailable"));
+    const runStep = createToolLoopHarness(createTestConfig());
+
+    await expect(
+      contextStorage.run(new ContextContainer(), () =>
+        runStep(createTestSession(), { message: "Hi" }),
+      ),
+    ).rejects.toThrow("summarizer unavailable");
   });
 
   it("groups Gateway compaction under the forwarded trace conversation", async () => {

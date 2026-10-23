@@ -1,6 +1,5 @@
 import type { ModelMessage } from "ai";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
 import {
   clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
@@ -12,6 +11,7 @@ import {
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
@@ -231,8 +231,7 @@ export async function compactMessages(
     const remaining = Math.round(
       calibratedTokens(compacted, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS,
     );
-    // Fatal: retrying the step would summarize the same history again and fail the same way.
-    throw new FatalError(
+    throw new CompactionOverLimitError(
       `Context compaction could not bring the conversation under its limit: it is still about ${remaining} tokens against a ${config.threshold}-token limit. Start a new session, or send a smaller message.`,
     );
   }
