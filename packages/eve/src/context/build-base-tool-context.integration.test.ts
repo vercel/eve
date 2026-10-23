@@ -4,6 +4,18 @@ import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { VercelSandbox } from "#public/sandbox/vercel.js";
+import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+
+interface AcmeSandboxSession extends SandboxSession {
+  exists(path: string): Promise<boolean>;
+}
+
+class AcmeSession {
+  async exists(path: string): Promise<boolean> {
+    return path === "present.txt";
+  }
+}
 
 describe("buildBaseToolContext – getSandbox abort binding", () => {
   it("returns a session bound to the turn abort signal", async () => {
@@ -47,6 +59,38 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
       const live = await ctx.getSandbox(environment);
       expect(live.name).toBe("eve-sbx-vercel-test");
     });
+  });
+
+  it.fails("keeps custom provider session methods defined on a class", async () => {
+    const environment = defineSandboxProvider<undefined, undefined, null, null, AcmeSandboxSession>(
+      {
+        name: "acme",
+        environment: () => ({
+          prepare: async () => null,
+          resume: async () => {
+            throw new Error("unused");
+          },
+          start: async () => {
+            throw new Error("unused");
+          },
+        }),
+      },
+    ).environment();
+    const sandbox = mockSandbox();
+    const providerSession: AcmeSandboxSession = Object.assign(new AcmeSession(), sandbox.session);
+    const runtime = await createTestRuntime();
+
+    await runtime.runAsSession(
+      { sandboxAccess: { ...sandbox.access, environment, get: async () => providerSession } },
+      async () => {
+        const ctx = buildBaseToolContext({
+          options: { toolCallId: "call_1" },
+          toolName: "check",
+        });
+        const live = await ctx.getSandbox(environment);
+        await expect(live.exists("present.txt")).resolves.toBe(true);
+      },
+    );
   });
 
   it("binds the inert fallback signal when no turn signal exists", async () => {
