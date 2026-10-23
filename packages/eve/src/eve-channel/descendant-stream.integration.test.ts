@@ -15,7 +15,9 @@ import {
   EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 import { EVE_OBSERVATION_KEY_HEADER } from "#protocol/descendant-observation.js";
-import { linesOf } from "#protocol/session-lines.js";
+import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
+import { convertLegacyEvents } from "#execution/v26-history.js";
+import { KITCHEN_SINK } from "#execution/v26-history.fixtures.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
@@ -55,6 +57,7 @@ function opened(
 }
 function deployment(origin: string, token: string) {
   const histories = new Map<string, SessionEvent[]>();
+  const legacy = new Map<string, readonly unknown[]>();
   const bindings = new Map<string, RemoteChildBinding>();
   const tokens = new Map<string, string>();
   const attached: string[] = [];
@@ -79,21 +82,29 @@ function deployment(origin: string, token: string) {
     )!;
     const attachSession = (sessionId: string): InternalSession => {
       attached.push(sessionId);
-      if (!histories.has(sessionId)) throw new Error("Unknown session");
+      if (!histories.has(sessionId) && !legacy.has(sessionId)) throw new Error("Unknown session");
+      const stored = () => legacy.get(sessionId) ?? linesOf(histories.get(sessionId)!, at);
       return {
         id: sessionId,
         getChildBinding: async (childId) => bindings.get(JSON.stringify([sessionId, childId])),
-        getStreamTailIndex: async () => linesOf(histories.get(sessionId)!, at).length - 1,
+        getStreamTailIndex: async () => stored().length - 1,
         getLineStream: async (options) =>
           new ReadableStream({
             start(controller) {
-              for (const line of linesOf(histories.get(sessionId)!, at).slice(
-                options?.startIndex ?? 0,
-              ))
-                controller.enqueue(line);
+              for (const line of stored().slice(options?.startIndex ?? 0)) controller.enqueue(line);
               controller.close();
             },
           }),
+        async *stream(options): AsyncIterable<SessionStreamEvent> {
+          const records = legacy.get(sessionId);
+          const events =
+            records === undefined
+              ? linesOf(histories.get(sessionId)!, at).flatMap((line, position) =>
+                  eventsOfLine(line, position, at),
+                )
+              : convertLegacyEvents(records);
+          yield* events.filter((event) => event.meta.position.line >= (options?.startIndex ?? 0));
+        },
       } as InternalSession;
     };
     const args = {
@@ -128,7 +139,7 @@ function deployment(origin: string, token: string) {
       });
     return event;
   };
-  return { origin, histories, bindings, tokens, attached, authorization, serve, link };
+  return { origin, histories, legacy, bindings, tokens, attached, authorization, serve, link };
 }
 function network(...deployments: ReturnType<typeof deployment>[]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -174,6 +185,23 @@ describe("authorized descendant readers", () => {
     expect(desk.authorization).toHaveBeenCalledTimes(1);
   });
 
+  it("reads a child opening translated from v26 history through its recorded source position", async () => {
+    const home = deployment("https://home.test", "browser");
+    home.legacy.set("root", KITCHEN_SINK);
+    network(home);
+    const session = new Client({
+      baseUrl: home.origin,
+      auth: { bearer: "browser" },
+    }).sessions.attach("root");
+    const history = await collect(session.stream({ follow: false }));
+    const child = history.find((event) => event.type === "child.opened")!;
+    home.histories.set(child.data.sessionId, [{ type: "session.started", data: {} }]);
+    const events = await collect(
+      session.agent(child).stream({ follow: false, streamReconnectPolicy: { reconnect: false } }),
+    );
+    expect(events.map((event) => event.type)).toEqual(["session.started"]);
+  });
+
   it("rejects forged cached links and unrelated children before contacting any foreign destination", async () => {
     const home = deployment("https://home.test", "browser");
     home.histories.set("root", []);
@@ -202,16 +230,24 @@ describe("authorized descendant readers", () => {
       baseUrl: home.origin,
       auth: { bearer: "browser" },
     }).sessions.attach("root");
-    const wrong = { ...child, meta: { ...child.meta, position: { line: 999, index: 0 } } };
+    home.histories
+      .get("root")!
+      .unshift({ type: "call.progress", data: { callId: "another", output: "Working." } });
+    for (const line of [0, 999]) {
+      const wrong = { ...child, meta: { ...child.meta, position: { line, index: 0 } } };
+      await expect(
+        collect(
+          session
+            .agent(wrong)
+            .stream({ follow: false, streamReconnectPolicy: { reconnect: false } }),
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(home.attached).toEqual(["root"]);
+      home.attached.splice(0);
+    }
+    const recorded = { ...child, meta: { ...child.meta, position: { line: 1, index: 0 } } };
     await expect(
-      collect(
-        session.agent(wrong).stream({ follow: false, streamReconnectPolicy: { reconnect: false } }),
-      ),
-    ).rejects.toMatchObject({ status: 404 });
-    expect(home.attached).toEqual(["root"]);
-    home.attached.splice(0);
-    await expect(
-      collect(session.agent(child).agent(back).stream({ follow: false })),
+      collect(session.agent(recorded).agent(back).stream({ follow: false })),
     ).rejects.toMatchObject({ status: 422, code: "cycle" });
     expect(home.attached).toEqual(["root", "child"]);
   });

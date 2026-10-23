@@ -1,7 +1,5 @@
 import { internalSession, type Session } from "#channel/session.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
-import type { StoredLine } from "#protocol/session-events/envelope.js";
-import { createEventReader } from "#protocol/session-lines.js";
 import {
   createEveDescendantStreamRoutePath,
   createEveSessionStreamRoutePath,
@@ -176,33 +174,28 @@ async function recordedChild(
   signal: AbortSignal,
 ): Promise<ChildOpened | undefined> {
   signal.throwIfAborted();
-  const pending = internalSession(parent).getLineStream({
-    follow: false,
-    startIndex: hop.position,
-  });
-  void pending.then(
-    (lines) => {
-      if (signal.aborted) void lines.cancel().catch(() => {});
-    },
-    () => {},
-  );
-  const lines = await waitWithSignal(pending, signal);
-  const reader = lines.getReader();
-  const cancel = () => void reader.cancel().catch(() => {});
-  signal.addEventListener("abort", cancel, { once: true });
-  const events = createEventReader();
+  const cancellation = new AbortController();
+  const events = parent
+    .stream({
+      follow: false,
+      startIndex: hop.position,
+      signal: AbortSignal.any([signal, cancellation.signal]),
+    })
+    [Symbol.asyncIterator]();
   try {
-    signal.throwIfAborted();
-    const next = await waitWithSignal(reader.read(), signal);
-    if (next.done) return undefined;
-    return events
-      .read(next.value as StoredLine, hop.position)
-      .find(
-        (event): event is Extract<typeof event, { type: "child.opened" }> =>
-          event.type === "child.opened" && event.data.sessionId === hop.sessionId,
-      );
+    while (true) {
+      const next = await waitWithSignal(events.next(), signal);
+      if (next.done || next.value.meta.position.line > hop.position) return undefined;
+      const event = next.value;
+      if (
+        event.meta.position.line === hop.position &&
+        event.type === "child.opened" &&
+        event.data.sessionId === hop.sessionId
+      )
+        return event;
+    }
   } finally {
-    signal.removeEventListener("abort", cancel);
-    void reader.cancel().catch(() => {});
+    cancellation.abort();
+    void events.return?.().catch(() => {});
   }
 }
