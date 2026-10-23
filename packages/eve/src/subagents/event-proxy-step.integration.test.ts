@@ -29,6 +29,23 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
+import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
+
+const sent = vi.hoisted(() => ({
+  remote: vi.fn(async (..._args: unknown[]) => {}),
+  session: vi.fn(async (..._args: unknown[]) => {}),
+  workflowAsk: vi.fn(async (..._args: unknown[]) => {}),
+}));
+vi.mock("#execution/session-inbox/resume.js", () => ({ resumeSessionInbox: sent.session }));
+vi.mock("#execution/agent-sessions/remote.js", () => ({
+  resolveRemoteAgentStreamHeaders: async () => ({}),
+  respondToRemoteAgentSession: sent.remote,
+}));
+vi.mock("#execution/tools/workflow/answer.js", async (importOriginal: () => Promise<object>) => ({
+  ...(await importOriginal()),
+  sendWorkflowAskAnswers: sent.workflowAsk,
+}));
 
 function fixture() {
   const order: string[] = [];
@@ -596,4 +613,85 @@ describe("proxied stream hooks", () => {
     expect(f.wildcard).toHaveBeenCalledTimes(2);
     expect(f.sessionWritable.locked).toBe(false);
   });
+});
+
+// #4923: a turn's principal is fixed, so whichever route a relayed prompt
+// answers through, only the turn's own principal answers it by typing.
+describe("typed answers to a relayed prompt", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const routes = [
+    ["a subagent", { send: sent.session }],
+    [
+      "a remote agent",
+      {
+        remote: {
+          name: "remote-child",
+          sessionId: "remote-session",
+          url: "https://remote.example",
+        },
+        send: sent.remote,
+      },
+    ],
+    [
+      "a workflow tool's ctx.ask",
+      { send: sent.workflowAsk, workflowAsk: { control: "control-1" } },
+    ],
+  ] as const;
+
+  it.fails.each(routes)(
+    "keeps another principal's text for the parent when %s asked",
+    async (_, route) => {
+      const f = fixture();
+      f.ctx.set(AuthKey, alice);
+      const relayed = await emitProxiedSubagentEvent({
+        ...f,
+        hookPayload: {
+          ...f.hookPayload,
+          event: {
+            ...f.hookPayload.event,
+            requests: [
+              {
+                action: { callId: "deploy-1", input: {}, kind: "tool-call", toolName: "deploy" },
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "cancel", label: "Cancel" },
+                ],
+                prompt: "Approve deploy?",
+                requestId: "approval-1",
+              },
+            ],
+          },
+          ...("remote" in route && { remote: route.remote }),
+        },
+        ...("workflowAsk" in route && { workflowAsk: route.workflowAsk }),
+      });
+      route.send.mockClear();
+      const { state } = relayed.sessionState.snapshot.session;
+      // Typed by the turn's own principal, the text would answer the prompt.
+      expect(
+        routeDeliverPayload({ payload: { message: "approve" }, resolveMessage: true, state })
+          .forChildren,
+      ).toHaveLength(1);
+      const delivery: DeliverHookPayload = {
+        auth: { ...alice, principalId: "bob" },
+        kind: "deliver",
+        payloads: [{ message: "approve" }],
+      };
+      const routed = await routeProxiedDeliverStep({
+        delivery,
+        serializedContext: relayed.serializedContext,
+        sessionState: relayed.sessionState,
+        sessionWritable: f.sessionWritable,
+      });
+      expect(routed).toMatchObject({ kind: "continue", remainder: delivery });
+      expect(route.send.mock.calls).toEqual([]);
+      expect(routed.stateDelta.serializedContext).toBeUndefined();
+    },
+  );
 });

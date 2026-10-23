@@ -12,6 +12,8 @@ import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
 import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
+import { ASK_QUESTION_INPUT_SCHEMA } from "#tools/provided/ask-question.js";
+import { executeAskQuestionTool } from "#tools/provided/ask-question-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   askThenRaceWorkflow,
@@ -657,6 +659,185 @@ describe("workflow tools", () => {
       }
     });
   }, 60_000);
+
+  // #4923: a typed answer is the person's next message, so its hooks and the
+  // rest of the turn see the request that sent it, as a steering message does.
+  it.fails("runs a typed answer's turn under the auth of the request that sent it", async () => {
+    const asker = {
+      attributes: { msg: "asking request" },
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const seen: (readonly [string, unknown])[] = [];
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-answer-auth",
+      execute: confirmDeployWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/observe.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.received"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.attributes.msg]);
+                },
+                "turn.completed"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.attributes.msg]);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "http:workflow-tool-answer-auth",
+              requestInput: true,
+            }),
+            "eve.auth": asker,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        await stream.nextTurn();
+        seen.length = 0;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          auth: { ...asker, attributes: { msg: "answering request" } },
+          delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+          kind: "send",
+          payload: { message: "Deploy" },
+        });
+
+        await stream.nextTurn();
+        expect(seen).toEqual([
+          ["message.received", "answering request"],
+          ["turn.completed", "answering request"],
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  // #4923: a turn's principal is fixed. Another person's typed text must not
+  // answer the turn's question; it waits and runs as their own turn.
+  it.fails.each([
+    {
+      answers: { alice: "Deploy", bob: "Cancel" },
+      execute: confirmDeployWorkflow,
+      inputSchema: undefined,
+      message: 'Run confirm_deploy with service "api"',
+      output: { approved: true, service: "api" },
+      toolName: "confirm_deploy",
+    },
+    {
+      answers: { alice: "us-east", bob: "eu-west" },
+      execute: executeAskQuestionTool,
+      inputSchema: ASK_QUESTION_INPUT_SCHEMA,
+      message: "Run ask_question and ask which region to deploy to.",
+      output: { answer: "us-east", status: "answered" },
+      toolName: "ask_question",
+    },
+  ])(
+    "keeps another principal's typed answer out of the turn that asked through $toolName",
+    async ({ answers, execute, inputSchema, message, output, toolName }) => {
+      const alice = {
+        attributes: {},
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user",
+      };
+      const bob = { ...alice, principalId: "bob" };
+      const seen: (readonly [string, unknown])[] = [];
+      const runtime = await createWorkflowToolRuntime({
+        agentName: `workflow-tool-foreign-answer-${toolName}`,
+        execute,
+        inputSchema,
+        modules: [
+          {
+            logicalPath: "hooks/observe.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "message.received"(event, ctx) {
+                    seen.push([event.type, ctx.session.auth.current?.principalId]);
+                  },
+                  "turn.completed"(event, ctx) {
+                    seen.push([event.type, ctx.session.auth.current?.principalId]);
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+        toolName,
+      });
+
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message },
+            serializedContext: {
+              ...buildWorkflowToolSerializedContext({
+                continuationToken: `http:workflow-tool-foreign-answer-${toolName}`,
+                requestInput: true,
+              }),
+              "eve.auth": alice,
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await stream.nextTurn();
+          seen.length = 0;
+          const inbox = sessionCommandHookToken(run.runId);
+          for (const [auth, text] of [
+            [bob, answers.bob],
+            [alice, answers.alice],
+          ] as const) {
+            await resumeSessionInbox(inbox, {
+              auth,
+              delivery: { channelKind: "http", channelName: "test", deliveryId: auth.principalId },
+              kind: "send",
+              payload: { message: text },
+            });
+          }
+
+          const answered = await stream.nextTurn();
+          const result = filterEventsByType(answered, "action.result").find(
+            (event) =>
+              event.data.result.kind === "tool-result" && event.data.result.toolName === toolName,
+          );
+          expect(result?.data.result.output).toEqual(output);
+          await stream.nextTurn();
+          expect(seen).toEqual([
+            ["message.received", "alice"],
+            ["turn.completed", "alice"],
+            ["message.received", "bob"],
+            ["turn.completed", "bob"],
+          ]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+    60_000,
+  );
 
   // #3836: the selected option's answer has `text: undefined`, which used to
   // fail the turn when the session projected the result for the model.
