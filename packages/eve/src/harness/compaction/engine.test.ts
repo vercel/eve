@@ -947,6 +947,74 @@ describe("compactMessages: forced summary", () => {
   });
 });
 
+describe("compactMessages: deferred provider tool results", () => {
+  // Anthropic defers a web search called beside a local tool: the search runs once the local
+  // result is in, and its result opens the next response.
+  const searchRun: ModelMessage[] = [
+    user("Run date and search for the Node LTS."),
+    {
+      content: [
+        {
+          input: { query: "node lts" },
+          providerExecuted: true,
+          toolCallId: "srvtoolu_1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { input: { command: "date" }, toolCallId: "toolu_1", toolName: "bash", type: "tool-call" },
+      ],
+      role: "assistant",
+    },
+    {
+      content: [
+        {
+          output: { type: "text", value: "Thu Jan  1 00:00:00 UTC 1970" },
+          toolCallId: "toolu_1",
+          toolName: "bash",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    },
+  ];
+  const searchAnswer: ModelMessage = {
+    content: [
+      {
+        output: { type: "json", value: [] },
+        toolCallId: "srvtoolu_1",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+      { text: "Node 24 is LTS.", type: "text" },
+    ],
+    role: "assistant",
+  };
+
+  it.fails("keeps the deferred result with its call", async () => {
+    // `compact` fails on any kept result whose call was summarized away.
+    await compact(
+      [
+        ...searchRun,
+        searchAnswer,
+        user("And npm?"),
+        assistant("npm 11."),
+        user("Thanks."),
+        assistant("Anytime."),
+      ],
+      { recentWindowSize: 5, threshold: HEURISTICS_FORBIDDEN },
+    );
+  });
+
+  it.fails("ends on the local result while the search waits", async () => {
+    const { result } = await compact(searchRun, {
+      recentWindowSize: 2,
+      threshold: HEURISTICS_FORBIDDEN,
+    });
+
+    expect(result.at(-1)).toEqual(searchRun.at(-1));
+  });
+});
+
 describe("compactMessages: summarization fallback", () => {
   it("summarizes when capping cannot free enough space", async () => {
     // All bulk is conversational prose — capping removes nothing — and the
