@@ -293,18 +293,22 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // Resolve the tail before committing a response; otherwise an unknown or
-    // unreachable session would answer 200 and fail mid-body. Open the event
-    // stream alongside the tail lookup to avoid an extra round trip.
+    // Fail before committing a response; otherwise an unknown or unreachable
+    // session would answer 200 and fail mid-body. A following read checks the
+    // session as it opens, and a historical read always reports the tail, so
+    // only a response that reports it pays for the tail lookup. Open the event
+    // stream alongside that lookup to avoid an extra round trip.
     const eventsPromise = session.getEventStream({ follow, startIndex });
     // Handled below; this keeps an early rejection from being reported as unhandled.
     eventsPromise.catch(() => {});
-    let tailIndex: number;
-    try {
-      tailIndex = await session.getStreamTailIndex();
-    } catch (error) {
-      void eventsPromise.then((events) => events.cancel()).catch(() => {});
-      throw error;
+    let tailIndex: number | undefined;
+    if (includeTailIndex) {
+      try {
+        tailIndex = await session.getStreamTailIndex();
+      } catch (error) {
+        void eventsPromise.then((events) => events.cancel()).catch(() => {});
+        throw error;
+      }
     }
     const events = await eventsPromise;
     const controlVersion =
@@ -320,14 +324,14 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (includeTailIndex) {
+    if (tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
       serializeAsNdjson(
         events,
         request.signal,
-        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
+        tailIndex === undefined ? undefined : streamEventLimit(startIndex, tailIndex),
         controlVersion !== undefined,
       ),
       { headers },

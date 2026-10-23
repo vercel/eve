@@ -48,6 +48,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import {
+  assertSessionHistoryReadable,
   readSessionEventHistory,
   readSessionEventStream,
   readSessionStreamTailIndex,
@@ -309,9 +310,13 @@ export function createWorkflowRuntime(config: {
       // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false) return readSessionEventHistory(sessionId, options.startIndex);
       // An ended session has no inbox, and a dormant `eve dev` run may resume;
-      // either recorded stream stays readable. Only a stranded owner refuses.
+      // either recorded stream stays readable. Only a stranded owner, an
+      // unknown session, or expired history refuses.
       try {
-        await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
+        await Promise.all([
+          assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId))),
+          assertSessionHistoryReadable(sessionId),
+        ]);
       } catch (error) {
         if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
         throw error;
