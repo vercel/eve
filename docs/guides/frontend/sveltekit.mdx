@@ -88,7 +88,17 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** When the eve service runs on a separate origin, pass `host` directly to `useEveAgent`:
+- **Non-Vercel hosts.** The Vite plugin only configures dev and preview, so a production build (for example `adapter-node`) needs a server route for `/eve/v1/**`. Add the eve `handle` hook, which keeps the browser on one origin and avoids CORS:
+
+  ```ts title="src/hooks.server.ts"
+  import { createEveHandle } from "eve/sveltekit";
+
+  export const handle = createEveHandle();
+  ```
+
+  The hook forwards eve routes to `EVE_SVELTEKIT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_SVELTEKIT_PRODUCTION_PORT`, or pass `origin` to `createEveHandle()`. Run the eve service yourself; see [Self-host eve](../deployment/self-hosting). Compose the hook with your own hooks through SvelteKit's [`sequence`](https://svelte.dev/docs/kit/@sveltejs-kit-hooks#sequence).
+
+  The hook is a no-op on Vercel deployments, where the eve service answers `/eve/v1/**` before SvelteKit. When the eve service instead runs on a public origin the browser calls directly, pass `host` to `useEveAgent` and handle CORS and authentication yourself:
 
   ```ts
   const agent = useEveAgent({
