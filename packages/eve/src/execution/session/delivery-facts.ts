@@ -8,7 +8,6 @@ import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { HarnessStepInput, StepInput } from "#harness/types.js";
 import { defined, fact } from "#harness/facts.js";
 import { userPartsOf } from "#harness/user-parts.js";
-import { readClientContext } from "#internal/client-context.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
@@ -66,20 +65,11 @@ export function admitDeliveries(input: {
           ? undefined
           : { sessionId: input.parent.sessionId, callId },
     });
-    const clientContext = readClientContext(payload);
+    // Turn context stays out of facts: stream readers may see it, and the turn reads it from
+    // the payload and its private state instead.
     const status = input.status?.(deliveryId);
     if (status === undefined) {
-      facts.push(
-        fact("delivery.admitted", {
-          clientContext:
-            clientContext !== undefined && clientContext.length > 0
-              ? [...clientContext]
-              : undefined,
-          deliveryId,
-          principal,
-          source,
-        }),
-      );
+      facts.push(fact("delivery.admitted", { deliveryId, principal, source }));
     }
     if (stepInput === undefined) {
       if (status !== "settled")

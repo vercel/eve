@@ -68,7 +68,6 @@ export interface DeliveryRow extends Introduced, Ended {
   readonly deliveryId: string;
   readonly principal?: Principal;
   readonly source?: DeliverySource;
-  readonly clientContext?: JsonValue;
   readonly status: "admitted" | "consumed" | "settled";
   /** The turn that consumed it, or the turn its settlement points at. */
   readonly turnId?: string;

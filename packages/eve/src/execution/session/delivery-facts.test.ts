@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { admitDeliveries } from "#execution/session/delivery-facts.js";
+import { attachClientContext } from "#internal/client-context.js";
 
 it.each([
   { status: undefined, facts: ["delivery.admitted", "delivery.settled"] },
@@ -72,4 +73,23 @@ it("takes answer provenance from admission, not helper fields returned by a deli
       responseId: "response_answer_0",
     },
   ]);
+});
+
+it("keeps turn context a server's onMessage supplied out of the public admission fact", () => {
+  const payload = attachClientContext({}, ["Verified plan: hobby"]);
+  const admitted = admitDeliveries({
+    channelKind: "eve",
+    sessionStarted: true,
+    delivery: {
+      kind: "deliver",
+      auth: null,
+      payloads: [payload],
+      deliveryMetadata: [
+        { channelKind: "eve", channelName: "eve", deliveryId: "message", payloadIndex: 0 },
+      ],
+    },
+    payloads: [{ payload, input: { message: "What plan am I on?" } }],
+  });
+  expect(admitted.facts.map((fact) => fact.type)).toEqual(["delivery.admitted"]);
+  expect(JSON.stringify(admitted.facts)).not.toContain("Verified plan");
 });

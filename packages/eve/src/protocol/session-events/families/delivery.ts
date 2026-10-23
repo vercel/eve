@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
-import { conforming, envelopeOf, id, jsonValue, principal, userPart, known } from "../common.js";
-import type { Envelope, JsonValue, Principal, UserPart } from "../envelope.js";
+import { conforming, envelopeOf, id, principal, userPart, known } from "../common.js";
+import type { Envelope, Principal, UserPart } from "../envelope.js";
 
 /**
  * Where a delivery came from: a channel (with the schedule or calling session that sent it), a
@@ -21,7 +21,6 @@ export interface DeliveryAdmittedData {
   /** Absent for deliveries without auth, such as a sign-in callback. */
   readonly principal?: Principal;
   readonly source?: DeliverySource;
-  readonly clientContext?: JsonValue;
 }
 
 /**
@@ -89,7 +88,6 @@ export const deliverySchemas = {
     "delivery.admitted",
     conforming<DeliveryAdmittedData>()(
       z.object({
-        clientContext: jsonValue.optional(),
         deliveryId: id,
         principal: principal.optional(),
         source: deliverySource.optional(),
