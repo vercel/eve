@@ -756,7 +756,10 @@ async function bundleModuleGroup({
       dir: compiledRoot,
       entryFileNames: "[name].js",
       format: "esm",
-      minify: true,
+      // App bundlers re-bundle the browser `client` group. webpack before 5.90
+      // drops import bindings used after `var a = class {}, b = f()` (#5037),
+      // so keep each declaration in its own statement there.
+      minify: chunkGroup === "client" ? { compress: { joinVars: false } } : true,
       sourcemap: false,
     },
     onLog: onVendoredDependencyLog,
