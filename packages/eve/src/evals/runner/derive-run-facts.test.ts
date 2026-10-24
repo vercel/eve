@@ -188,8 +188,7 @@ describe("deriveRunFacts", () => {
     expect(facts.toolCallCount).toBe(2);
   });
 
-  // Bug #5063: agent calls drop the input the model sent. Remove `.fails` with the fix.
-  it.fails("records the input the model sent an agent tool", () => {
+  it("records the input the model sent an agent tool", () => {
     const facts = derive([
       turnStarted("t1", 0),
       {

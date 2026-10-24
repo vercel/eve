@@ -106,6 +106,9 @@ export function deriveRunFacts(
         for (const action of event.data.actions) {
           if (action.kind === "tool-call") {
             ensureToolCall(action.callId, action.toolName, action.input);
+          } else if (action.kind === "subagent-call" || action.kind === "remote-agent-call") {
+            // Keyed by the model's tool name, which the call's `tool-result` reports.
+            ensureToolCall(action.callId, action.name, action.input);
           } else if (action.kind === "load-skill") {
             skillLoads.set(action.callId, {
               output: undefined,
