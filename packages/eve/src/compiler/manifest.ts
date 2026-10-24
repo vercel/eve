@@ -268,6 +268,8 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly extensionNamespace?: string;
 }
 
+export type CompiledCompactionDefinition = ModuleSourceRef;
+
 export interface CompiledMemoryDefinition extends ModuleSourceRef {
   readonly description?: string;
   readonly slot: string;
@@ -918,6 +920,15 @@ const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefiniti
   })
   .strict();
 
+const compiledCompactionDefinitionSchema: z.ZodType<CompiledCompactionDefinition> = z
+  .object({
+    exportName: z.string().optional(),
+    logicalPath: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+  })
+  .strict();
+
 const compiledMemoryDefinitionSchema: z.ZodType<CompiledMemoryDefinition> = z
   .object({
     description: z.string().optional(),
@@ -1005,6 +1016,7 @@ const compiledAgentResourceFields = {
   extensionMounts: z.array(compiledExtensionMountSchema).default([]),
   hooks: z.array(compiledHookDefinitionSchema),
   memories: z.array(compiledMemoryDefinitionSchema).default([]),
+  compaction: compiledCompactionDefinitionSchema.nullable().default(null),
   sandbox: compiledSandboxDefinitionSchema,
   sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
   schedules: z.array(compiledScheduleDefinitionSchema),
@@ -1112,6 +1124,7 @@ export const compiledAgentManifestSchema = z
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
     memories: z.array(compiledMemoryDefinitionSchema).default([]),
+    compaction: compiledCompactionDefinitionSchema.nullable().default(null),
     kind: z.literal(COMPILED_AGENT_MANIFEST_KIND),
     remoteAgents: z.array(compiledRemoteAgentNodeSchema),
     sandbox: compiledSandboxDefinitionSchema,
@@ -1142,6 +1155,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly memories?: readonly CompiledMemoryDefinition[];
+  readonly compaction?: CompiledCompactionDefinition | null;
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox: CompiledSandboxDefinition;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
@@ -1181,6 +1195,7 @@ export function createCompiledAgentResources(
     extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
     memories: [...(input.memories ?? [])],
+    compaction: input.compaction ?? null,
     instructions: [...(input.instructions ?? [])],
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox,

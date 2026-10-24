@@ -50,7 +50,11 @@ import {
 } from "#shared/conversation-context.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { compactMessages, shouldCompact } from "#harness/compaction/engine.js";
+import {
+  compactMessages,
+  shouldCompact,
+} from "#harness/compaction/strategies/fixed-tail/engine.js";
+import { getInputTokenCount } from "#harness/compaction/measure.js";
 import {
   createFrameworkUserMessage,
   createUserMessage,
@@ -248,11 +252,13 @@ function bindHookInstrumentation(
   )!.prepareExecution();
 }
 
-vi.mock("#harness/compaction/engine.js", () => ({
+vi.mock("#harness/compaction/strategies/fixed-tail/engine.js", () => ({
   compactMessages: vi.fn(),
   estimateTokens: vi.fn().mockReturnValue(5000),
-  getInputTokenCount: vi.fn().mockReturnValue(5000),
   shouldCompact: vi.fn().mockReturnValue(false),
+}));
+vi.mock("#harness/compaction/measure.js", () => ({
+  getInputTokenCount: vi.fn().mockReturnValue(5000),
 }));
 
 /** Compacts to `messages` through one summary call, which {@link summaryCall} reads. */
@@ -11473,7 +11479,7 @@ describe("createToolLoopHarness", () => {
         attachClientContext({ message: "Hi" }, ["Client context:\ncurrent"]),
       );
 
-      expect(vi.mocked(shouldCompact)).toHaveBeenCalledWith(
+      expect(vi.mocked(getInputTokenCount)).toHaveBeenCalledWith(
         [
           { content: "earlier", kind: "user" as const, role: "user" },
           { content: "Client context:\ncurrent", kind: "context.instruction", role: "user" },

@@ -1,13 +1,57 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
-import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
+import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/strategies/fixed-tail/prompt.js";
+import { getInputTokenCount } from "#harness/compaction/measure.js";
+import {
+  compactMessages as compactWithMeasure,
+  shouldCompact as exceedsThreshold,
+} from "#harness/compaction/strategies/fixed-tail/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
+
+/** The strategy's trigger over a history: the core measures, `exceedsThreshold` decides. */
+function shouldCompact(
+  messages: readonly ModelMessage[],
+  config: CompactionConfig,
+  requestEnvelopeTokens = 0,
+  previousEnvelopeTokens = 0,
+): boolean {
+  return (
+    messages.length > 0 &&
+    exceedsThreshold({
+      inputTokens: getInputTokenCount(
+        messages,
+        config,
+        requestEnvelopeTokens,
+        previousEnvelopeTokens,
+      ),
+      reason: "step",
+      recentWindowSize: config.recentWindowSize,
+      requestEnvelopeTokens,
+      threshold: config.threshold,
+    })
+  );
+}
+
+/** Compacts with the history's own token count, as the strategy does when nothing was measured. */
+function compactMessages(
+  messages: ModelMessage[],
+  config: CompactionConfig,
+  summarize: Parameters<typeof compactWithMeasure>[2],
+  forceSummary = false,
+) {
+  return compactWithMeasure(
+    messages,
+    config,
+    summarize,
+    forceSummary,
+    getInputTokenCount(messages, config),
+  );
+}
 
 const config: CompactionConfig = {
   recentWindowSize: 2,

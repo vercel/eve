@@ -23,6 +23,7 @@ import {
 } from "#discover/grammar.js";
 import { DISCOVER_HOOKS_DIRECTORY_INVALID } from "#discover/grammar.js";
 import { discoverLibSources } from "#discover/lib.js";
+import { discoverCompactionSource } from "#discover/compaction.js";
 import { discoverMemorySources } from "#discover/memory.js";
 import {
   type CreateAgentSourceManifestInput,
@@ -246,6 +247,12 @@ async function discoverLocalSubagentPackage(input: {
   });
   diagnostics.push(...sandboxResult.diagnostics);
 
+  const compactionResult = discoverCompactionSource({
+    rootEntries,
+    rootPath: input.subagentRoot,
+  });
+  diagnostics.push(...compactionResult.diagnostics);
+
   const toolsResult = await discoverNamedSourceDirectory({
     directoryName: "tools",
     invalidDirectoryCode: DISCOVER_TOOLS_DIRECTORY_INVALID,
@@ -314,6 +321,7 @@ async function discoverLocalSubagentPackage(input: {
     resolvedExtensions: resolvedExtensions.mounts,
     hooks: hooksResult.sources,
     memories: memoryResult.memories,
+    compaction: compactionResult.compaction,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
     sandbox: sandboxResult.sandbox,

@@ -7,7 +7,7 @@ import {
   createCompactionPrompt,
   sliceUtf16Safe,
   TRANSCRIPT_PAYLOAD_LIMIT,
-} from "#harness/compaction/prompt.js";
+} from "#harness/compaction/strategies/fixed-tail/prompt.js";
 
 describe("createCompactionPrompt", () => {
   it("preserves the previous checkpoint without applying transcript truncation", () => {

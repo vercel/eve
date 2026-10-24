@@ -31,6 +31,7 @@ export type ProjectedModuleSource =
       readonly candidate: AgentModuleCandidate;
       readonly kind:
         | "channel"
+        | "compaction"
         | "config"
         | "extension"
         | "hook"
@@ -67,6 +68,7 @@ const MODULE_KIND_BY_SLOT_ROOT: Partial<
 > = {
   agent: "config",
   channels: "channel",
+  compaction: "compaction",
   extensions: "extension",
   hooks: "hook",
   instructions: "instructions",
@@ -189,6 +191,7 @@ export function listApplicationModulePaths(manifest: AgentSourceManifest): strin
     ...manifest.connections,
     ...manifest.hooks,
     ...manifest.memories,
+    ...(manifest.compaction === null ? [] : [manifest.compaction]),
     ...manifest.tools,
     ...manifest.instructions,
     ...manifest.schedules,
@@ -385,6 +388,7 @@ function projectManifest(input: {
   for (const source of input.manifest.connections) pushModule(source);
   for (const source of input.manifest.hooks) pushModule(source);
   for (const source of input.manifest.memories) pushModule(source);
+  if (input.manifest.compaction !== null) pushModule(input.manifest.compaction);
   if (input.manifest.sandbox !== null) pushModule(input.manifest.sandbox);
   for (const source of input.manifest.tools) pushModule(source);
   for (const source of input.manifest.instructions) {

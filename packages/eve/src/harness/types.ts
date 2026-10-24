@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#harness/compaction/strategy.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
@@ -294,6 +295,8 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** How the history is compacted. The built-in fixed-tail strategy when omitted. */
+  readonly compactionStrategy?: CompactionStrategy;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

@@ -106,6 +106,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
+    compactionStrategy: input.node.agent.compaction?.strategy,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,

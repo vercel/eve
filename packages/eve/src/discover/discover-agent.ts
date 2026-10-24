@@ -8,6 +8,7 @@ import {
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
+  DISCOVER_EXTENSION_COMPACTION_UNSUPPORTED,
   DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
@@ -31,6 +32,7 @@ import {
   readSortedDirectoryEntries,
 } from "#discover/grammar.js";
 import { discoverLibSources } from "#discover/lib.js";
+import { discoverCompactionSource } from "#discover/compaction.js";
 import { discoverMemorySources } from "#discover/memory.js";
 import {
   type AgentSourceManifest,
@@ -167,6 +169,9 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...sandboxResult.diagnostics);
 
+  const compactionResult = discoverCompactionSource({ rootEntries, rootPath: agentRoot });
+  diagnostics.push(...compactionResult.diagnostics);
+
   if (role === "extension") {
     if (configModuleResult.module !== undefined) {
       diagnostics.push(
@@ -199,6 +204,16 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
           message:
             "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
           sourcePath: join(agentRoot, firstMemory.logicalPath),
+        }),
+      );
+    }
+    if (compactionResult.compaction !== null) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_COMPACTION_UNSUPPORTED,
+          message:
+            "An extension may not declare a compaction strategy — it is the consuming agent's to own.",
+          sourcePath: join(agentRoot, compactionResult.compaction.logicalPath),
         }),
       );
     }
@@ -307,6 +322,7 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
     resolvedExtensions,
     hooks: hooksResult.sources,
     memories: role === "extension" ? [] : memoryResult.memories,
+    compaction: role === "extension" ? null : compactionResult.compaction,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
     sandbox: role === "extension" ? null : sandboxResult.sandbox,

@@ -44,6 +44,7 @@ import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type { SandboxEnvironmentIdentity, SandboxSelector } from "#shared/sandbox-environment.js";
 import type { ToolSchema } from "#tools/schema.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
+import type { CompactionStrategy } from "#harness/compaction/strategy.js";
 import type { MemoryDefinition } from "#public/memory/index.js";
 
 /**
@@ -401,6 +402,10 @@ export interface ResolvedDynamicConnectionResolver extends Readonly<ModuleSource
   readonly extensionNamespace?: string;
 }
 
+export type ResolvedCompactionDefinition = Readonly<
+  { strategy: CompactionStrategy } & ModuleSourceRef
+>;
+
 export type ResolvedMemoryDefinition = Readonly<
   MemoryDefinition &
     ModuleSourceRef & {
@@ -469,6 +474,8 @@ export interface ResolvedAgent {
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
   readonly hooks: readonly ResolvedHookDefinition[];
   readonly memories: readonly ResolvedMemoryDefinition[];
+  /** Authored compaction strategy from `compaction.ts`, or `undefined` for the default. */
+  readonly compaction?: ResolvedCompactionDefinition | undefined;
   readonly skills: readonly ResolvedSkillDefinition[];
   readonly tools: readonly ResolvedToolDefinition[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;
