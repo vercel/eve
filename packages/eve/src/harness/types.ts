@@ -311,6 +311,12 @@ export interface ToolLoopHarnessConfig {
    * a connection's sign-in resumes the turn that asked for it.
    */
   readonly signInCompletions?: readonly AuthorizationChallenge[];
+  /**
+   * False when the session's messages come from the agent that delegated it, not a person: none
+   * of them answers a pending request by text. A person answers through the root session, which
+   * routes structured answers down.
+   */
+  readonly typedAnswers?: boolean;
   /** Restores runtime resources for the originating turn before approval work. */
   readonly prepareApprovalTurn?: (event: {
     readonly sequence: number;

@@ -78,6 +78,7 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import {
   resolveEffectiveAgentRuntime,
   resolveSessionUsageLimit,
@@ -527,6 +528,7 @@ async function runSessionStepBody(
         handleEvent,
         prepareApprovalTurn: (event) => dynamicConnections.dispatch(turnStartedForResolvers(event)),
         signInCompletions,
+        typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
