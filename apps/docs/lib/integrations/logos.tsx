@@ -84,6 +84,15 @@ export const voiceLogo = (props: LogoProps) => (
   </svg>
 );
 
+const assistantUiLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M12.5 4c0-.1-.03-.196-.084-.277l-.062-.077A.5.5 0 0 0 12 3.5H4a.5.5 0 0 0-.5.5v7.379l1.44-1.44.11-.1A1.5 1.5 0 0 1 6 9.5h6a.5.5 0 0 0 .5-.5V4ZM15.5 9c0 .928-.369 1.818-1.025 2.475A3.5 3.5 0 0 1 12 12.5H6.621l-3.56 3.56a1.5 1.5 0 0 1-2.56-1.06V4A3.5 3.5 0 0 1 4 .5h8c1.928 0 3.5 1.572 3.5 3.5v5ZM20.5 11a.5.5 0 0 0-.146-.354.5.5 0 0 0-.354-.146h-2A1.5 1.5 0 0 1 16.5 9c0-.828.672-1.5 1.5-1.5h2c1.928 0 3.5 1.572 3.5 3.5v11a1.5 1.5 0 0 1-2.56 1.06l-3.56-3.56H12a3.5 3.5 0 0 1-3.5-3.5v-1c0-.828.672-1.5 1.5-1.5s1.5.672 1.5 1.5v1c0 .132.053.26.146.354A.5.5 0 0 0 12 16.5h6c.398 0 .78.158 1.06.44l1.44 1.439V11Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 const browserUseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -932,6 +941,7 @@ const shopifyLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
+  "assistant-ui": assistantUiLogo,
   "browser-use": browserUseLogo,
   waydock: waydockLogo,
   github: githubLogo,

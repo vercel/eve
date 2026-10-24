@@ -93,6 +93,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: true, registry: true, gallery: true },
   },
   {
+    slug: "assistant-ui",
+    name: "assistant-ui",
+    kind: "channel",
+    tagline: "Build a customizable React chat UI backed by your eve agent.",
+    surfaces: { scaffoldable: false, registry: false, gallery: true },
+  },
+  {
     slug: "slack",
     name: "Slack",
     kind: "channel",
