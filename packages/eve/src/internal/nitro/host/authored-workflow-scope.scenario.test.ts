@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -15,6 +15,8 @@ import { startProductionServer } from "./start-production-server.js";
 import { prepareProductionApplicationHost } from "./prepare-application-host.js";
 
 const ALIAS_MARKER = "workflow-alias-resolved";
+const WORKFLOW_ASSET_MARKER = "workflow-raw-asset-embedded";
+const STEP_ASSET_MARKER = "step-raw-asset-embedded";
 
 function workflowCode(source: string): string {
   const match = source.match(
@@ -122,5 +124,37 @@ describe("authored workflow scope", () => {
     } finally {
       await removeApplicationBuildWorkspace(workspace);
     }
+  });
+
+  // Expected failure until #5269 is fixed: workflow bundles lack the asset import plugin.
+  it.fails("embeds ?raw assets imported by workflow and step modules", async () => {
+    const app = await scenarioApp({
+      name: "workflow-raw-assets",
+      installDependencies: true,
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "Call the probe tool.",
+        "agent/tools/probe.ts":
+          'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+        "lib/run.ts":
+          'import header from "../prompts/workflow.txt?raw"; import { readPrompt } from "./step"; export async function run() { "use workflow"; return header + (await readPrompt()); }',
+        "lib/step.ts":
+          'import prompt from "../prompts/step.md?raw"; export async function readPrompt() { "use step"; return prompt; }',
+        "prompts/workflow.txt": WORKFLOW_ASSET_MARKER,
+        "prompts/step.md": STEP_ASSET_MARKER,
+      },
+    });
+    const appRoot = await realpath(app.appRoot);
+    const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
+    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
+    const serverCode = await Promise.all(
+      serverFiles
+        .filter((file) => file.endsWith(".mjs"))
+        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
+    );
+    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
+    expect(serverCode.some((code) => workflowCode(code).includes(WORKFLOW_ASSET_MARKER))).toBe(
+      true,
+    );
   });
 });
