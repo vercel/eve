@@ -8,7 +8,7 @@ import { formatDuration } from "#shared/format-duration.js";
 export const TASK_WAIT_DESCRIPTION = `Call ${TASK_WAIT_TOOL_NAME} sparingly, only when you deliberately want to withhold a message from the user while waiting for a task result. Tasks keep running and their results reach you without calling ${TASK_WAIT_TOOL_NAME}. If the user should hear from you now, reply instead. Wait silently until any of your tasks has a result, a new message arrives, or timeoutSeconds pass. It returns after the first result, which follows in a <task_result> message; wait again only if you still want to withhold a reply until another result arrives. Waiting never stops a task.`;
 
 export const TASK_WAIT_TIMEOUT_DESCRIPTION =
-  "Optional. Seconds to wait before returning without a result. Omit it to wait for a result or a new message, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
+  "Optional. Seconds to wait before returning without a result. Omit it to wait for a result or a new message, for at most 30 minutes, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
 
 export const TASK_CANCEL_DESCRIPTION =
   "Stop a task's current work. That work never reports back; if it already had a result, that result is still delivered. An agent, or any task that accepts more input, stays available: call its tool with its taskId to give it new work.";
