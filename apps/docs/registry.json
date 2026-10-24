@@ -1827,6 +1827,41 @@
       ]
     },
     {
+      "name": "connection/shop",
+      "type": "registry:item",
+      "title": "Shop",
+      "description": "Find products, manage carts, orders and delegated budgets, and approve purchases with saved cards.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "shop",
+              "shop",
+              "shop",
+              "--connection-method",
+              "mcp"
+            ]
+          },
+          "requires": ">=0.55.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/shop.ts",
+          "type": "registry:file",
+          "target": "agent/connections/shop.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/shopify",
       "type": "registry:item",
       "title": "Shopify",

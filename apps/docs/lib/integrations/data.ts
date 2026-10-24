@@ -2559,6 +2559,15 @@ The MCP server can edit and publish content; use [tool filters and approval gate
     keywords: ["mcp", "traffic", "market data", "competitive intelligence", "oauth", "connect"],
     authModes: ["user"],
   },
+  shop: {
+    logo: "shop",
+    docsHref: "https://shop.dev/docs",
+    keywords: ["mcp", "shopping", "checkout", "shop pay", "commerce", "oauth", "connect"],
+    authModes: ["user"],
+    connectors: { user: { uid: "shop/shop", service: "shop", name: "shop" } },
+    configureNote:
+      "When prompted, enter your client ID and secret from [Shopify Partners](https://www.shopify.com/partners). Shop can make purchases, so add an approval gate before checkout.",
+  },
   shopify: {
     logo: "shopify",
     docsHref: "https://shopify.dev/docs/apps/build/storefront-mcp",
