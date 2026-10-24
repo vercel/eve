@@ -2,6 +2,9 @@ import type { Sandbox } from "@vercel/agent-eval";
 
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
+import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
+
+const sessionSetups: readonly AuthoringSetup[] = [inventoryOpenApiSetup, northstarFulfillmentSetup];
 
 interface FixtureBootstrap {
   readonly startingPoint: "scaffolded" | "empty";
@@ -74,7 +77,7 @@ export function createNativeAuthoringSetup(options: {
 }
 
 function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
-  return ids.flatMap((id) => (id === inventoryOpenApiSetup.id ? [inventoryOpenApiSetup] : []));
+  return sessionSetups.filter((setup) => ids.includes(setup.id));
 }
 
 function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSetupContext {

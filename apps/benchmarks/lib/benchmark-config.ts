@@ -243,3 +243,18 @@ export function findPublishedBenchmarkModel(value: string): AuthoringBenchmarkMo
     `Model ${JSON.stringify(value)} is not in the supported publication set. Expected one of: ${publishedBenchmarkModels.map((candidate) => candidate.id).join(", ")}.`,
   );
 }
+
+/** Resolves a comma-separated `--models` list, or `all` for the supported set. */
+export function selectBenchmarkModels(value: string): AuthoringBenchmarkModel[] {
+  if (value === "all") return [...publishedBenchmarkModels];
+  const ids = value
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (ids.length === 0) throw new Error("--models needs at least one model id, or `all`.");
+  const selected = ids.map((id) => findBenchmarkModel(id));
+  if (new Set(selected.map((benchmark) => benchmark.id)).size !== selected.length) {
+    throw new Error("--models lists the same model more than once.");
+  }
+  return selected;
+}

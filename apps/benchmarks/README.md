@@ -29,6 +29,17 @@ harness, when the failure itself is what you want to read.
 artifact before it starts an eval. Local working trees, unpublished commits, and revision comparisons
 are not supported by the native runner.
 
+To compare models in one command, pass `--models` with a comma-separated list, or `all` for the
+supported publication set. `--concurrency N` keeps N models running at a time and starts the next
+model as soon as one finishes; it defaults to 1. Each model's `--runs` attempts run in parallel, so up
+to `N × runs` sandboxes run at once. Each model gets its own experiment and results directory, and
+its output goes to `results/logs/current--<model>.log`:
+
+```sh
+pnpm benchmark author-008-restock-agent --models all --concurrency 3 --runs 3
+pnpm benchmark author-008-restock-agent --models kimi-k3,claude-sonnet-5 --treatment baseline
+```
+
 The runner uses agent-eval's native Gateway harnesses: OpenCode for other providers, Claude Code
 for Anthropic models, and Codex for OpenAI models. Each attempt starts an isolated Vercel Sandbox,
 then scaffolds the selected immutable canary with `npx` before the coding agent starts.

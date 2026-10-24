@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { findBenchmarkModel, findPublishedBenchmarkModel, harnessId } from "./benchmark-config.ts";
+import {
+  findBenchmarkModel,
+  findPublishedBenchmarkModel,
+  harnessId,
+  publishedBenchmarkModels,
+  selectBenchmarkModels,
+} from "./benchmark-config.ts";
+
+test("selects a --models list or the whole supported set", () => {
+  assert.deepEqual(
+    selectBenchmarkModels("kimi-k3, anthropic/claude-sonnet-5").map((benchmark) => benchmark.id),
+    ["kimi-k3", "claude-sonnet-5"],
+  );
+  assert.deepEqual(selectBenchmarkModels("all"), publishedBenchmarkModels);
+  assert.throws(() => selectBenchmarkModels(" , "), /at least one model/u);
+  assert.throws(() => selectBenchmarkModels("kimi-k3,moonshotai/kimi-k3"), /more than once/u);
+  assert.throws(() => selectBenchmarkModels("nope"), /Unknown model/u);
+});
 
 test("selects qualified Gateway IDs and explicit reasoning settings for publication", () => {
   assert.equal(findPublishedBenchmarkModel("grok-4-7").model, "spacexai/grok-4.7");
