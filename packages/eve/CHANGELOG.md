@@ -1,5 +1,26 @@
 # eve
 
+## 0.83.2
+
+### Patch Changes
+
+- 8329939: A parent agent's message to a subagent no longer answers the subagent's pending tool approval or session-limit prompt. Before, a follow-up such as `approve` or `continue` settled the prompt as if the person had answered it. Now only a person's structured answer settles it: the parent's message is delivered as an ordinary message, so a pending approval resolves as `ignored` and a session-limit prompt keeps waiting for the person. Thanks @devon-seitz for reporting this in #5075.
+- 084b2bf: When compaction runs partway through a turn, notices the framework sends again, such as the deferred tool catalog notice, now go before the turn's input instead of after the latest tool result, where the model read them as the newest message.
+  
+  Thanks @hrayn3 for reporting this in #5198.
+- c37d279: The connection sign-in page now says "Authorization not completed" instead of "Authorization complete" when the provider redirects back with an OAuth error, such as the person declining consent. Thanks @dretanacr for reporting this in #5105.
+- 4853062: Connection tool calls now fail after 5 minutes without an answer, instead of holding the turn until it is cancelled. eve cancels the request and returns a tool error the agent can report, so a tool that takes longer than 5 minutes now fails. Thanks @dretanacr for reporting this in #4977.
+- 697741e: Record the input the model sent to an agent tool in eval facts, so a subagent or remote agent call in `turn.toolCalls` no longer shows `input: {}` and `t.calledTool(name, { input })` can match it. Thanks @dretanacr for reporting this in #5063.
+- 6447c36: Evals keep an input request pending after a `respond()` that answers only some of the open requests. `session.pendingInputRequests` still lists the unanswered ones, and `parked()` holds (and `succeeded()` fails) while the run waits on them. Thanks @elrumordelaluz for reporting this in #5157.
+- 3b9ceef: An expired session is no longer reported as failed when writing its final `session.completed` event fails. Before, channels such as Slack posted a `session.failed` error after they had already handled `session.completed`. Thanks @bisak for reporting this in #5261.
+- 3d7eb49: A session stream request that does not report the durable tail no longer looks it up. Default opens and client reconnects now check that the session exists with one run lookup, instead of a tail lookup that on the local world opens every chunk file. Unknown and expired sessions still answer 404 and 410 before the stream starts. Thanks @KingAmo for reporting this in #5016.
+- 7d653ef: MCP connections now fall back to the highest mutually supported legacy protocol version when `server/discover` returns `-32022`. Thanks @zico-io for reporting this in #4406, and @bluepegasus123 for proposing the fallback.
+- 9b24d70: PDFs that store their pages in compressed object streams, as phone scans and `pdf-lib` output usually do, now get a per-page token estimate instead of one based on file size. A multi-megabyte scan no longer requests compaction on the first step of a session. Thanks @DLME2024 for reporting this and suggesting the fix in #5090.
+- 1a735c6: `git({ github })` and the deprecated `code({ github })` register their authenticated `gh` tool at session start again, as do dynamic tools built with `defineGhTool` from `eve/extensions/git/sandbox`. Thanks @seahiLin for reporting this in #4986.
+- 653a257: Slack apps that set `onInputResponse` or `approvalChannel` no longer let a message typed in the thread answer an open question. Before, the typed message answered it without running `onInputResponse`, and the answer was the whole `<slack_message>` envelope. The message now reaches the agent as a new message instead.
+- e14685b: On Vercel Sandbox, aborting a `sandbox.run()` or `sandbox.spawn()` command after it starts now kills it, and `run()` rejects instead of waiting, as the `abortSignal` option documents. Before, the command kept running until it exited by itself, including after a turn was cancelled. Thanks @voidhrithik for reporting this in #5301.
+- 64b5d06: Workflow and step modules can now use `?raw` and other relative asset imports. Before, `eve build` failed with `UNLOADABLE_DEPENDENCY` when a module reachable from a workflow imported a file this way, even though the same import worked in a tool. Thanks @gmstevenson for reporting this in #5269.
+
 ## 0.83.1
 
 ### Patch Changes
