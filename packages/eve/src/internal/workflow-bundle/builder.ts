@@ -11,6 +11,7 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
@@ -328,6 +329,10 @@ export class WorkflowBundleBuilder {
         createWorkflowDriverAliasPlugin(this.config.workingDir),
         createAuthoredRelativeExtensionResolverPlugin({
           extensions: WORKFLOW_SOURCE_EXTENSIONS,
+        }),
+        createAuthoredAssetImportPlugin({
+          authoredSourceOnly: true,
+          packageRoot: this.transformProjectRoot,
         }),
         createAuthoredPackageTsConfigPathsPlugin({
           appPackageRoot: this.transformProjectRoot,
