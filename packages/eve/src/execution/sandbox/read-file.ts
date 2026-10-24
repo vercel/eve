@@ -9,9 +9,9 @@ import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import {
   detectImageMediaType,
   hasPdfHeader,
-  readMediaMetadata,
   type MediaMetadata,
 } from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
 import { inlinesSandboxRefAsBytes } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
