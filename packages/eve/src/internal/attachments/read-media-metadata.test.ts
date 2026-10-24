@@ -105,9 +105,8 @@ describe("readMediaMetadata", () => {
   });
 
   it("leaves the PDF page count out past the object stream limit", () => {
-    const pdf = Buffer.concat(
-      Array.from({ length: 10_001 }, () => objectStreamPdf(deflateSync("<< /Type /Page >>"))),
-    );
+    const stream = objectStreamPdf(deflateSync("<< /Type /Page >>"));
+    const pdf = Buffer.concat(Array.from({ length: 10_001 }, () => stream));
 
     expect(readMediaMetadata(pdf, "application/pdf").pages).toBeUndefined();
   });
