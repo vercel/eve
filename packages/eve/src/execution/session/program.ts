@@ -88,7 +88,6 @@ type SessionActionResult =
 interface SessionProgress {
   /** Delegated caller whose awaited reply is still unsettled. */
   caller: TurnCaller | undefined;
-  terminalEmitted: boolean;
   /** Last dispatched turn; a crash between turns is attributed to it. */
   turnId?: string;
 }
@@ -109,7 +108,7 @@ export async function runPreparedSession(
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
   });
-  const progress: SessionProgress = { caller: boot.caller, terminalEmitted: false };
+  const progress: SessionProgress = { caller: boot.caller };
   const handoff = new SessionHandoff({
     checkpoint: {
       capabilities: boot.capabilities,
@@ -140,12 +139,13 @@ export async function runPreparedSession(
         cursor,
         sessionWritable: boot.sessionWritable,
       });
-      progress.terminalEmitted = true;
       return result;
     });
     return result;
   } catch (error) {
-    if (!progress.terminalEmitted) {
+    // Once the loop decides how the session ends, failing to finalize it must not report a
+    // different outcome. The channel may already have handled the decided terminal event.
+    if (loop?.kind !== "terminal") {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
         { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
