@@ -133,4 +133,24 @@ describe("adaptMultiplexedCommandToSandboxProcess", () => {
     await process.kill();
     expect(command.kill).toHaveBeenCalledOnce();
   });
+
+  it("does not kill a command that exited before its signal aborts", async () => {
+    const controller = new AbortController();
+    const command = {
+      kill: vi.fn(async () => undefined),
+      logs: logs(),
+      wait: vi.fn(async () => ({ exitCode: 0 })),
+    };
+    const process = adaptMultiplexedCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      command,
+      getOutput: (log) => log.output,
+    });
+
+    await process.wait();
+    controller.abort();
+    await Promise.resolve();
+
+    expect(command.kill).not.toHaveBeenCalled();
+  });
 });
