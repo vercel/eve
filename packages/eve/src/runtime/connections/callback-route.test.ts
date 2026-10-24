@@ -125,8 +125,7 @@ describe("handleConnectionCallbackRequest", () => {
     });
   });
 
-  // Known bug (#5105): the page reports success even when the provider returns an OAuth error.
-  it.fails("does not report success when the provider redirects back with an OAuth error", async () => {
+  it("does not report success when the provider redirects back with an OAuth error", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
     const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "eve:inbox:v1:tok123")}?error=access_denied&state=xyz`;
     const response = await handleConnectionCallbackRequest(
@@ -137,7 +136,9 @@ describe("handleConnectionCallbackRequest", () => {
     // The callback still resumes the workflow so it can fail the attempt.
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(await response.text()).not.toContain("Authorization complete");
+    const body = await response.text();
+    expect(body).not.toContain("Authorization complete");
+    expect(body).toContain("Authorization not completed");
   });
 
   it("returns 404 when the workflow runtime reports no hook for the supplied token", async () => {
