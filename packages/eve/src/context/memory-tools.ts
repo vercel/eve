@@ -108,6 +108,16 @@ function createProviderToolCallbacks(input: {
         await resolveApprovalPolicy((await loadTool(rawClosure)).approval!)(context),
       closure,
     };
+    const prompt =
+      typeof input.tool.approval === "function" ? undefined : input.tool.approval.prompt;
+    if (prompt !== undefined) {
+      // Prompts are synchronous, so they cannot reload provider tools. Every
+      // resolve and rebind re-stamps this callback from the live tool.
+      callbacks.approvalPrompt = {
+        callback: (_closure, context) => prompt(context),
+        closure,
+      };
+    }
     if (typeof input.tool.approval !== "function" && input.tool.approval.response !== undefined) {
       callbacks.approvalResponse = {
         callback: async (rawClosure, context) => {
