@@ -27,6 +27,53 @@ export default slackChannel({
 
 `connectSlackCredentials` keeps the bot token, token rotation, multiple workspace installations, and request verification inside Connect. Deploy with `eve deploy` once setup finishes.
 
+### Declare deployment requirements
+
+The channel contributes a native Slack app manifest to eve's build metadata.
+With `connectSlackCredentials`, the Connect compiler includes it in
+`.vercel/output/vercel-connect-manifest.json` for a Vercel build, or
+`.output/vercel-connect-manifest.json` for a standalone build. Customize it in the channel:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  app: {
+    name: "Support agent",
+    description: "Answers support questions.",
+    backgroundColor: "#000000",
+  },
+  bot: { displayName: "support-agent" },
+  scopes: ["im:history"],
+  optionalScopes: ["reactions:write"],
+  eventSubscriptions: ["message.im"],
+});
+```
+
+eve always includes `app_mentions:read`, `chat:write`, and the `app_mention`
+event. Additional events and scopes are explicit; eve does not analyze handler
+bodies to infer permissions. Optional scopes appear in both Slack's `bot` and
+`bot_optional` lists. A required scope cannot become optional through overlap.
+
+Name defaults come from the channel file. eve limits `app.name` to 35 characters.
+For `bot.displayName`, eve lowercases the name, replaces characters outside
+`a-z`, `0-9`, `.`, `_`, and `-` with `-`, limits it to 80 characters, then trims
+leading and trailing hyphens. Empty results use `eve`.
+
+`app.description` must have at most 140 characters. `app.backgroundColor` must
+use `#RGB` or `#RRGGBB` hex notation. Invalid values fail manifest generation.
+Slack lets you update an app's background color, but not remove it once set.
+
+`app.name` and `bot.displayName` replace the previous `botName` setting.
+
+Building only declares desired configuration. It does not create an app, grant
+permissions, install it in a workspace, or change a running connector. Connect
+owns provider callbacks, configuration reconciliation, workspace installation,
+and project event destinations. Existing runtime credentials and delivery keep
+working independently of this metadata. Use `eve add channel/slack` for guided setup.
+
 ### Resume setup
 
 If setup stops partway, or Slack events stop reaching the agent, run `eve add channel/slack` again. Setup checks what is already in place and runs only the missing steps. When `agent/channels/slack.ts` names a connector, setup finishes that connector without asking anything. Setup never runs `vercel connect detach`, which would remove the project's token access and every trigger destination for the project.

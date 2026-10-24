@@ -139,7 +139,8 @@ export default defineSandbox(() =>
   "eve/channels/slack";
 
 export default slackChannel({
-  botName: "my-agent",
+  app: { name: "my-agent" },
+  bot: { displayName: "my-agent" },
 });`,
   },
   {

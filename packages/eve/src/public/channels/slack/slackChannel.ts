@@ -641,7 +641,20 @@ export interface SlackChannelConfig {
   /** Slack API transport overrides: base URLs and a custom fetch. */
   readonly api?: SlackTransportOptions;
   readonly credentials?: SlackChannelCredentials;
-  readonly botName?: string;
+  /** Presentation in the generated Slack app manifest. Defaults to the channel file name. */
+  readonly app?: {
+    readonly name?: string;
+    readonly description?: string;
+    readonly backgroundColor?: string;
+  };
+  /** Bot user presentation, separate from the app's display name. */
+  readonly bot?: { readonly displayName?: string };
+  /** Required bot scopes in addition to app_mentions:read and chat:write. */
+  readonly scopes?: readonly string[];
+  /** Requested bot scopes that do not block setup when not granted. Required scopes take precedence. */
+  readonly optionalScopes?: readonly string[];
+  /** Slack bot event types in addition to app_mention. Does not infer scopes from handler code. */
+  readonly eventSubscriptions?: readonly string[];
 
   /**
    * Chooses where each input request is delivered. Direct-message requests go to the
@@ -967,7 +980,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     events,
   });
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
-  const manifest = defineSlackAppManifest({ botName: config.botName });
+  const manifest = defineSlackAppManifest(config);
   setChannelBuildMetadata(channel, (channelName) => ({
     externalCredentials: credentials?.vercelConnect,
     manifest: manifest.build(channelName),
