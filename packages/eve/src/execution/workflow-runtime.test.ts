@@ -36,10 +36,12 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const getHookByTokenMock = vi.fn();
+const getRunRecordMock = vi.fn();
 const world = {
   // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
   capabilities: { deploymentAffinity: true },
   getDeploymentId: vi.fn(async () => "dpl_current"),
+  runs: { get: getRunRecordMock },
 };
 const getRunMock = vi.fn();
 const getWorldMock = vi.fn();
@@ -67,6 +69,7 @@ beforeEach(() => {
     return currentSessionHook(token);
   });
   getWorldMock.mockResolvedValue(world);
+  getRunRecordMock.mockResolvedValue({ status: "running" });
   getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
   resumeHookMock.mockImplementation(async (token: string) => currentSessionHook(token));
 });
@@ -955,6 +958,17 @@ describe("createWorkflowRuntime#createSession", () => {
         type: "message.appended",
       },
     });
+  });
+
+  it("rejects a following read of an unknown session before opening its stream", async () => {
+    const getReadable = vi.fn();
+    getRunMock.mockReturnValue({ getReadable });
+    getRunRecordMock.mockRejectedValueOnce(new WorkflowRunNotFoundError("missing-run"));
+
+    await expect(
+      buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream("missing-run"),
+    ).rejects.toBeInstanceOf(WorkflowRunNotFoundError);
+    expect(getReadable).not.toHaveBeenCalled();
   });
 });
 

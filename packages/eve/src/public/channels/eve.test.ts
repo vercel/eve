@@ -628,21 +628,21 @@ describe("eveChannel — stream cursor", () => {
     },
   );
 
-  it("resolves the tail index by default without returning it", async () => {
+  // On the local world the tail lookup opens every chunk file, so a follow
+  // read that does not report the tail must not pay for it.
+  it("follows a session without resolving a tail it does not report", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
-    expect(handler.getStreamTailIndex).toHaveBeenCalledOnce();
+    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown session in follow mode", async () => {
     const handler = createEveStreamHandler({ auth: none() });
-    handler.getStreamTailIndex.mockRejectedValueOnce(
-      new WorkflowRunNotFoundError("test-session-id"),
-    );
+    handler.getEventStream.mockRejectedValueOnce(new WorkflowRunNotFoundError("test-session-id"));
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
@@ -655,7 +655,7 @@ describe("eveChannel — stream cursor", () => {
     ["run", new RunExpiredError("Run expired.", "test-session-id")],
   ])("returns a terminal 410 when the session %s passed retention", async (_, error) => {
     const handler = createEveStreamHandler({ auth: none() });
-    handler.getStreamTailIndex.mockRejectedValueOnce(error);
+    handler.getEventStream.mockRejectedValueOnce(error);
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
@@ -671,7 +671,9 @@ describe("eveChannel — stream cursor", () => {
       new WorkflowRunNotFoundError("test-session-id"),
     );
 
-    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
+    );
 
     expect(response.status).toBe(404);
     await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
@@ -679,7 +681,7 @@ describe("eveChannel — stream cursor", () => {
 
   it("returns 503 when the session lookup fails transiently", async () => {
     const handler = createEveStreamHandler({ auth: none() });
-    handler.getStreamTailIndex.mockRejectedValueOnce(new Error("stream lookup failed"));
+    handler.getEventStream.mockRejectedValueOnce(new Error("stream lookup failed"));
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 

@@ -645,8 +645,9 @@ export interface Runtime {
    * parameter unchanged.
    *
    * A following read throws `SessionStrandedError` when the session's owner
-   * cannot execute here. A historical read (`follow: false`) never inspects
-   * or changes the session's lifecycle.
+   * cannot execute here, and rejects before returning when the session does
+   * not exist or its history has expired. A historical read (`follow: false`)
+   * never inspects or changes the session's lifecycle.
    */
   getEventStream(
     sessionId: string,
