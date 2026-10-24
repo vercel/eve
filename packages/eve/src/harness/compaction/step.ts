@@ -330,19 +330,29 @@ export async function maybeCompact(input: {
 }
 
 /**
+ * Where a compaction during a turn leaves the turn's input: its latest user message, or that
+ * message's replay. What the framework adds for the turn goes before it, as on the turn's first
+ * step.
+ */
+export function compactedTurnInput<Message extends ModelMessage>(
+  messages: readonly Message[],
+): Message | undefined {
+  return messages.findLast((message) => isUserModelMessage(message) && message.kind === "user");
+}
+
+/**
  * Memory recalled after a compaction during a turn goes where `turn.started` puts it: before the
- * turn's latest user message, or its replay. Between turns it follows the history, so it still
- * comes before the next turn's input.
+ * turn's input. Between turns it follows the history, so it still comes before the next turn's
+ * input.
  */
 function placeRecalledMemory(
   messages: readonly ModelMessage[],
   recalled: readonly ModelMessage[],
   betweenTurns: boolean,
 ): ModelMessage[] {
-  const index = betweenTurns
-    ? -1
-    : messages.findLastIndex((message) => isUserModelMessage(message) && message.kind === "user");
-  if (index === -1) return [...messages, ...recalled];
+  const input = betweenTurns ? undefined : compactedTurnInput(messages);
+  if (input === undefined) return [...messages, ...recalled];
+  const index = messages.indexOf(input);
   return [...messages.slice(0, index), ...recalled, ...messages.slice(index)];
 }
 

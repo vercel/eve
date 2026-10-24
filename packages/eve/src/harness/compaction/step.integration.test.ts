@@ -358,7 +358,7 @@ describe("memory recalled after a compaction", () => {
 });
 
 describe("announcements after a compaction during a turn", () => {
-  it.fails("announces the catalog again before the turn's question, not after it", async () => {
+  it("announces the catalog again before the turn's question, not after it", async () => {
     const question = "Which sources back the second claim?";
     const requests: string[][] = [];
     const model = new MockLanguageModelV3({
