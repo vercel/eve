@@ -229,6 +229,52 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
+  it("settles an agent tool call from its subagent result", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "c1",
+              description: "Research agent",
+              input: { message: "Find three sources" },
+              kind: "subagent-call",
+              name: "research",
+              nodeId: "subagents/research",
+              subagentName: "research",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            callId: "c1",
+            isError: true,
+            kind: "subagent-result",
+            origin: "dispatch",
+            output: "Subagent depth limit reached",
+            subagentName: "research",
+          },
+          sequence: 1,
+          stepIndex: 0,
+          status: "failed",
+          turnId: "t1",
+        },
+      },
+    ]);
+
+    expect(facts.toolCalls.map(({ name, output, status }) => ({ name, output, status }))).toEqual([
+      { name: "research", output: "Subagent depth limit reached", status: "failed" },
+    ]);
+  });
+
   it("uses the normalized failed lifecycle status for error results", () => {
     const events: UnstampedMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),

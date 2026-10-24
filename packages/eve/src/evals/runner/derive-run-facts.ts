@@ -124,8 +124,13 @@ export function deriveRunFacts(
 
       case "action.result": {
         const { result, status } = event.data;
-        if (result.kind === "tool-result") {
-          const call = ensureToolCall(result.callId, result.toolName, {});
+        const call =
+          result.kind === "tool-result"
+            ? ensureToolCall(result.callId, result.toolName, {})
+            : result.kind === "subagent-result"
+              ? toolCallsByCallId.get(result.callId)
+              : undefined;
+        if (call !== undefined) {
           call.output = result.output;
           call.status = status;
         }
