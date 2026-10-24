@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SkillDefinition } from "eve/skills";
 
+import { validateDurableDynamicToolCallbacks } from "../../../eve/dist/src/context/dynamic-tool-lifecycle.js";
+
 import extension from "../../extension/extension.ts";
 import instructions from "../../extension/instructions/github.ts";
 import pr from "../../extension/skills/pr.ts";
@@ -38,6 +40,16 @@ test("deprecated code({ github }) keeps the gh tool, GitHub instructions, and si
   extension({ github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } });
   const { guidance, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
+  // #4986: eve does not transform eve/extensions/git/sandbox, so every callback needs its own descriptor.
+  const entry = tool as Parameters<typeof validateDurableDynamicToolCallbacks>[1];
+  const callbacks = validateDurableDynamicToolCallbacks("code__gh", entry, {
+    entryKey: "gh",
+    name: "code__gh",
+    resolverSlug: "code__gh",
+    scope: "session",
+    sessionId: context.session.id,
+  });
+  assert.deepEqual(callbacks.execute.closure, {});
   assert.ok(guidance && "content" in guidance);
   assert.match(
     guidance.content ?? "",
