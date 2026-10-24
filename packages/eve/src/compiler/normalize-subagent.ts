@@ -85,9 +85,23 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
   return { definition: value, kind: "local" };
 }
 
-export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(
-  source: LocalSubagentSourceRef,
-): void {
+export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(source: {
+  readonly logicalPath: string;
+  readonly manifest: Pick<
+    LocalSubagentSourceRef["manifest"],
+    | "compaction"
+    | "connections"
+    | "hooks"
+    | "instructions"
+    | "lib"
+    | "sandbox"
+    | "sandboxWorkspaces"
+    | "schedules"
+    | "skills"
+    | "subagents"
+    | "tools"
+  >;
+}): void {
   const manifest = source.manifest;
   const extraEntries = [
     manifest.compaction !== null ? "compaction.ts" : undefined,

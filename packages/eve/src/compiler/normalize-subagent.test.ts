@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { LocalSubagentSourceRef } from "#discover/manifest.js";
 import {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries,
   normalizeSubagentConfig,
@@ -85,7 +84,12 @@ describe("assertRemoteAgentDefinitionHasNoLocalPackageEntries", () => {
     const source = {
       logicalPath: "subagents/remote.ts",
       manifest: {
-        compaction: { logicalPath: "subagents/remote/compaction.ts" },
+        compaction: {
+          exportName: "default",
+          logicalPath: "subagents/remote/compaction.ts",
+          sourceId: "subagents/remote/compaction.ts",
+          sourceKind: "module" as const,
+        },
         connections: [],
         hooks: [],
         instructions: [],
@@ -97,7 +101,7 @@ describe("assertRemoteAgentDefinitionHasNoLocalPackageEntries", () => {
         subagents: [],
         tools: [],
       },
-    } as unknown as LocalSubagentSourceRef;
+    };
 
     expect(() => assertRemoteAgentDefinitionHasNoLocalPackageEntries(source)).toThrow(
       /Remove unsupported entries: compaction\.ts\./,
