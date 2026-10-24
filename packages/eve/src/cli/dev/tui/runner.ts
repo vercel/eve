@@ -1,29 +1,26 @@
+import { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";
 import {
-  openConversationInputs,
-  type ConversationInput,
-  type ConversationState,
-} from "#client/conversation-state.js";
-import {
-  attachEveAgentStore,
-  detachEveAgentStore,
-  EveAgentStore,
-} from "#client/eve-agent-store.js";
-import { isAbortError } from "#client/eve-agent-store-helpers.js";
+  activeTurn,
+  delivery,
+  turn as readTurn,
+  task,
+  openInteractions,
+  failure,
+} from "#protocol/session-projection/public-view.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
+import type { Delivery } from "#shared/delivery.js";
+import { optionStyle } from "#channel/interaction-prompts.js";
+import { type ConversationState } from "#client/conversation-state.js";
+import { attachSessionStore, detachSessionStore, SessionStore } from "#client/session-store.js";
+import { isAbortError } from "#client/session-store-helpers.js";
 import { formatStrandedSessionNotice } from "./stranded-session.js";
-import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
-import { userText } from "./transcript-parts.js";
-import { isTaskRetryRefusal } from "#protocol/task-tools.js";
+import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
-import type {
-  AgentInfoResult,
-  Client,
-  InputOption,
-  InputRequest,
-  InputResponse,
-  MessageStreamEvent,
-} from "#client/index.js";
+import type { AgentInfoResult, Client, SessionStreamEvent } from "#client/index.js";
+import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
+import type { Answer } from "#shared/input.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
@@ -37,16 +34,14 @@ import { toErrorMessage } from "#shared/errors.js";
 import {
   conversationView,
   isWorking,
-  tuiSessionReducer,
+  tuiSessionData,
   type AgentTUIConversationView,
-  type TuiSessionData,
+  type TuiFailure,
 } from "./conversation-view.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
 import {
-  failureKey,
   formatFailureDetail,
-  formatFailureHint,
   formatFailureMessage,
   interruptedError,
   isInterruptedError,
@@ -414,10 +409,16 @@ function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
   return undefined;
 }
 
+/** A turn waiting on a person is open while the store is idle, so it still takes steering and Stop. */
+function hasOpenTurn(snapshot: SessionStore["snapshot"]): boolean {
+  return activeTurn(snapshot.view) !== undefined;
+}
+
 export class EveTUIRunner {
   readonly #client: Client;
   /** Owns the conversation's sessions, root stream, turns, and subagent streams. */
-  readonly #store: EveAgentStore<TuiSessionData>;
+  readonly #store: SessionStore;
+  /** The terminal's presentation facts, folded from the store's events. */
   readonly #renderer: AgentTUIRenderer;
   readonly #diagnostics?: DevDiagnostics;
   readonly #name: string;
@@ -447,7 +448,7 @@ export class EveTUIRunner {
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
   /** The message this TUI last sent, until its turn settles. */
-  #sentMessage?: string;
+  #sentMessage?: { readonly text: string; deliveryId?: string };
   /** Whether this TUI asked to cancel the turn of {@link #sentMessage}. */
   #cancelRequested = false;
   /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
@@ -476,6 +477,8 @@ export class EveTUIRunner {
   #inputController?: AbortController;
   /** Questions the user skipped; they stay open for the server to resolve. */
   readonly #dismissedInputs = new Set<string>();
+  /** Questions answered here that stay open until the session settles them. */
+  readonly #answeredInputs = new Set<string>();
   /** Registry setups queued by tool results on root or child streams. */
   readonly #pendingRegistrySetups: string[] = [];
   #activeRegistrySetup?: string;
@@ -484,8 +487,11 @@ export class EveTUIRunner {
   /** The last session error shown, so each renders once. */
   #reportedError?: Error;
   /** Failure cascades already recorded in diagnostics this turn. */
-  readonly #recordedFailures = new Set<string>();
+  /** How many of the session's failures the diagnostics log already has. */
+  #recordedFailures = 0;
   readonly #recordedAgentToolFailures = new Set<string>();
+  /** Calls' names from their requests: a call can settle in the commit that requests it. */
+  readonly #callNames = new Map<string, string>();
   readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
@@ -493,10 +499,9 @@ export class EveTUIRunner {
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
-    this.#store = new EveAgentStore({
+    this.#store = new SessionStore({
       client: options.client,
-      followSubagents: true,
-      reducer: tuiSessionReducer,
+      followAgents: true,
     });
     this.#store.setCallbacks({
       onEvent: (event) => this.#recordDiagnostics(event),
@@ -628,7 +633,7 @@ export class EveTUIRunner {
     if (this.#lifecycle?.signal.aborted === true) onStop();
     else this.#lifecycle?.signal.addEventListener("abort", onStop, { once: true });
     const unsubscribe = this.#store.subscribe(() => this.#renderSnapshot());
-    attachEveAgentStore(this.#store);
+    attachSessionStore(this.#store);
     try {
       await this.#run();
     } catch (error) {
@@ -639,7 +644,7 @@ export class EveTUIRunner {
       this.#authProbeAbort.abort();
       this.#inputController?.abort();
       unsubscribe();
-      detachEveAgentStore(this.#store);
+      detachSessionStore(this.#store);
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint
@@ -713,7 +718,7 @@ export class EveTUIRunner {
     // One loop for everything that takes the keyboard. The store streams the
     // session throughout, so the composer stays open while work runs.
     while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
-      if (this.#store.snapshot.data.sessionFailed) {
+      if (this.#sessionFailed()) {
         this.#replaceSession();
         continue;
       }
@@ -775,7 +780,7 @@ export class EveTUIRunner {
         this.#lifecycle?.requestStop();
         return "exit";
       case "cancel": {
-        const working = isWorking(this.#store.snapshot.status);
+        const working = hasOpenTurn(this.#store.snapshot);
         if (working) this.#cancelTurn();
         this.#finishCommand({
           kind: "result",
@@ -844,18 +849,25 @@ export class EveTUIRunner {
   /** Sends a message; while work runs it steers the active turn instead. */
   #submitMessage(message: string): void {
     const snapshot = this.#store.snapshot;
-    const steering = isWorking(snapshot.status);
-    this.#sentMessage = message;
+    const steering = hasOpenTurn(snapshot);
+    const sent: { text: string; deliveryId?: string } = { text: message };
+    this.#sentMessage = sent;
     if (!steering) this.#cancelRequested = false;
     const input: SendTurnPayload = steering
       ? { message, turnPolicy: "steer" }
       : snapshot.session === undefined
         ? { message }
         : { message, turnPolicy: "queue" };
-    void this.#store.send(input).catch((error: unknown) => {
-      if (this.#disposed || isAbortError(error)) return;
-      this.#renderSendError(steering ? "Steering failed" : "Error", error);
-    });
+    void this.#store
+      .send(input)
+      .then(({ deliveryId }) => {
+        sent.deliveryId = deliveryId;
+        if (!this.#disposed) this.#restoreCancelledMessage(this.#store.snapshot);
+      })
+      .catch((error: unknown) => {
+        if (this.#disposed || isAbortError(error)) return;
+        this.#renderSendError(steering ? "Steering failed" : "Error", error);
+      });
   }
 
   /** Refreshes local dev artifacts so a new turn runs the latest authored code. */
@@ -864,7 +876,7 @@ export class EveTUIRunner {
     if (input.turnPolicy === "steer") return input;
     if (this.#runtimeArtifacts !== undefined) {
       await this.#runtimeArtifacts.refresh({
-        inputResponses: input.inputResponses,
+        answers: input.answers,
         message: typeof input.message === "string" ? input.message : undefined,
         onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
       });
@@ -875,16 +887,18 @@ export class EveTUIRunner {
 
   #renderSnapshot(): void {
     const snapshot = this.#store.snapshot;
+    const data = tuiSessionData(snapshot);
     this.#renderer.renderConversation?.(
-      conversationView(snapshot, this.#appRoot === undefined ? undefined : localFailureHint),
+      conversationView(snapshot, data, this.#appRoot === undefined ? undefined : localFailureHint),
     );
-    this.#reportSessionError(snapshot.error, snapshot.data.sessionFailed);
-    this.#recordAgentToolFailures(snapshot.conversation);
-    this.#reportFirstResponse(snapshot.conversation);
-    this.#queueRegistryHandoffs(snapshot.conversation);
-    this.#restoreCancelledMessage(snapshot.conversation);
+    this.#reportSessionError(snapshot.error, data.sessionFailed);
+    this.#recordFailures(data.failures);
+    this.#recordAgentToolFailures(snapshot);
+    this.#reportFirstResponse(snapshot);
+    this.#queueRegistryHandoffs(snapshot);
+    this.#restoreCancelledMessage(snapshot);
     if (
-      snapshot.data.sessionFailed ||
+      data.sessionFailed ||
       this.#answerableInputs().length > 0 ||
       (!isWorking(snapshot.status) && this.#pendingRegistrySetups.length > 0)
     ) {
@@ -892,17 +906,27 @@ export class EveTUIRunner {
     }
   }
 
+  #sessionFailed(): boolean {
+    return tuiSessionData(this.#store.snapshot).sessionFailed;
+  }
+
   /** A turn cancelled from outside this prompt hands its message back instead of losing it. */
   #restoreCancelledMessage(conversation: ConversationState): void {
     const sent = this.#sentMessage;
-    if (sent === undefined) return;
-    const message = conversation.messages.findLast((candidate) => candidate.role === "user");
-    const turnId = message?.metadata?.turnId;
-    if (message === undefined || turnId === undefined || userText(message) !== sent) return;
-    const status = conversation.turns[turnId]?.status;
-    if (status === undefined || status === "active") return;
+    if (sent?.deliveryId === undefined) return;
+    const turnId = delivery(conversation.view, sent.deliveryId)?.turnId;
+    if (turnId === undefined) return;
+    const turn = readTurn(conversation.view, turnId);
+    if (turn === undefined || turn.status === "running") return;
+    const status = turn.outcome;
     this.#sentMessage = undefined;
-    if (status === "cancelled" && !this.#cancelRequested) this.#renderer.restoreDraft?.(sent);
+    // A failure cancels its turn too; the failure shows, and the message isn't handed back.
+    if (
+      status === "cancelled" &&
+      !this.#cancelRequested &&
+      failure(conversation.view, turnId) === undefined
+    )
+      this.#renderer.restoreDraft?.(sent.text);
   }
 
   /** Session failures render from the conversation; other errors get one block each. */
@@ -950,9 +974,13 @@ export class EveTUIRunner {
   }
 
   /** Open requests the user can answer now, including while other work runs. */
-  #answerableInputs(): readonly ConversationInput[] {
-    return openConversationInputs(this.#store.snapshot.conversation).filter(
-      (input) => !this.#dismissedInputs.has(input.request.requestId),
+  #answerableInputs(): readonly Interaction[] {
+    // A sign-in completes by its callback, not an answer typed here.
+    return openInteractions(this.#store.snapshot.view).filter(
+      (input) =>
+        input.request.kind !== "sign-in" &&
+        !this.#dismissedInputs.has(input.interactionId) &&
+        !this.#answeredInputs.has(input.interactionId),
     );
   }
 
@@ -966,26 +994,28 @@ export class EveTUIRunner {
       const input = inputs[0];
       if (input === undefined) return;
       const context = inputContext(input, answered + 1, answered + inputs.length);
-      const response = await this.#readInputResponse(input.request, context, title);
+      const response = await this.#readAnswer(input, context, title);
       if (response === undefined) {
         // A skipped question stays open; the server decides whether the
         // user's next message answers, dismisses, or leaves it.
-        this.#dismissedInputs.add(input.request.requestId);
+        this.#dismissedInputs.add(input.interactionId);
         continue;
       }
-      void this.#store.send({ inputResponses: [response] }).catch((error: unknown) => {
+      this.#answeredInputs.add(input.interactionId);
+      void this.#store.send({ answers: [response] }).catch((error: unknown) => {
+        this.#answeredInputs.delete(input.interactionId);
         if (this.#disposed || isAbortError(error)) return;
         this.#renderSendError("Error", error);
       });
     }
   }
 
-  async #readInputResponse(
-    request: InputRequest,
+  async #readAnswer(
+    request: Interaction,
     context: AgentTUIInputContext | undefined,
     title: string,
-  ): Promise<InputResponse | undefined> {
-    if (request.kind === "tool-approval") {
+  ): Promise<Answer | undefined> {
+    if (request.request.kind === "approval") {
       if (!this.#renderer.readToolApproval) {
         throw new Error(
           "Tool approval was requested, but the renderer does not support tool approval input.",
@@ -995,7 +1025,10 @@ export class EveTUIRunner {
         toAgentTUIToolApprovalRequest(request, context),
         { title },
       );
-      return { requestId: request.requestId, optionId: response.approved ? "approve" : "cancel" };
+      return {
+        interactionId: request.interactionId,
+        optionId: response.approved ? APPROVE_OPTION_ID : DENY_OPTION_ID,
+      };
     }
     if (!this.#renderer.readInputQuestion) {
       throw new Error(
@@ -1007,10 +1040,11 @@ export class EveTUIRunner {
       { title },
     );
     if (response === undefined) return undefined;
-    const inputResponse: InputResponse = { requestId: request.requestId };
-    if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
-    if (response.text !== undefined) inputResponse.text = response.text;
-    return inputResponse;
+    return {
+      interactionId: request.interactionId,
+      ...(response.optionId !== undefined && { optionId: response.optionId }),
+      ...(response.text !== undefined && { text: response.text }),
+    } satisfies Answer;
   }
 
   /**
@@ -1031,14 +1065,16 @@ export class EveTUIRunner {
   }
 
   #resetConversation(): void {
-    this.#store.reset();
+    this.#store.newSession();
     this.#clearRunnerState();
   }
 
   #clearRunnerState(): void {
     this.#dismissedInputs.clear();
+    this.#answeredInputs.clear();
     this.#handledHandoffs.clear();
-    this.#recordedFailures.clear();
+    this.#callNames.clear();
+    this.#recordedFailures = 0;
     this.#runtimeArtifacts?.clear();
   }
 
@@ -1055,18 +1091,15 @@ export class EveTUIRunner {
     readonly absent: string;
     readonly accepted: string;
     readonly failed: string;
-    readonly invoke: () => Promise<{ status: string }>;
+    readonly invoke: () => Promise<Delivery>;
   }): Promise<void> {
     if (this.#store.snapshot.session === undefined) {
       this.#finishCommand({ kind: "result", summary: input.absent });
       return;
     }
     try {
-      const result = await input.invoke();
-      if (result.status !== "accepted") {
-        this.#finishCommand({ kind: "result", summary: input.absent });
-        return;
-      }
+      const result = await (await input.invoke()).result();
+      if (result.status !== "completed") throw new Error(`The command settled ${result.status}.`);
       this.#finishCommand({ kind: "result", summary: input.accepted });
     } catch (error) {
       this.#finishCommand({
@@ -1080,7 +1113,8 @@ export class EveTUIRunner {
   /** Retires the durable session before clearing the local conversation view. */
   async #resetSession(): Promise<void> {
     try {
-      await this.#store.retire();
+      if (this.#store.snapshot.session !== undefined) await (await this.#store.reset()).result();
+      this.#store.newSession();
     } catch (error) {
       this.#finishCommand({
         kind: "result",
@@ -1552,13 +1586,13 @@ export class EveTUIRunner {
       if (agent.observation.status === "not-followed") continue;
       for (const message of agent.observation.conversation?.messages ?? []) {
         for (const part of message.parts) {
-          if (part.type !== "dynamic-tool" || part.state !== "output-error") continue;
-          if (this.#recordedAgentToolFailures.has(part.toolCallId)) continue;
-          this.#recordedAgentToolFailures.add(part.toolCallId);
+          if (part.type !== "tool" || part.state !== "failed") continue;
+          if (this.#recordedAgentToolFailures.has(part.callId)) continue;
+          this.#recordedAgentToolFailures.add(part.callId);
           diagnostics.append({
             source: "tool",
-            summary: `${part.toolName} failed (subagent ${agent.name})`,
-            detail: part.errorText,
+            summary: `${part.name} failed (subagent ${agent.name})`,
+            detail: part.error?.message ?? "Failed.",
           });
         }
       }
@@ -1566,67 +1600,65 @@ export class EveTUIRunner {
   }
 
   /** Records session activity that the diagnostics log keeps regardless of display. */
-  #recordDiagnostics(event: MessageStreamEvent): void {
+  #recordDiagnostics(event: SessionStreamEvent): void {
     const diagnostics = this.#diagnostics;
     if (diagnostics === undefined) return;
     switch (event.type) {
-      case "turn.started":
-        this.#recordedFailures.clear();
+      case "call.requested":
+        this.#callNames.set(event.data.callId, event.data.capability.name);
+        if (event.data.capability.kind === "tool")
+          diagnostics.recordToolCall(event.data.capability.name);
         break;
-      case "actions.requested":
-        for (const action of event.data.actions) {
-          const descriptor = normalizeActionRequest(action);
-          if (descriptor.kind === "tool-call") diagnostics.recordToolCall(descriptor.toolName);
-        }
-        break;
-      case "action.result":
-        if (isTaskRetryRefusal(event)) {
+      case "call.settled": {
+        const name = this.#callNames.get(event.data.callId) ?? event.data.callId;
+        if (isTaskAdmissionRefused(event.data)) {
           diagnostics.append({
             source: "tool",
-            summary: `${normalizeActionResult(event.data.result).toolName} was refused for the model to retry`,
+            summary: `${name} was refused for the model to retry`,
             detail: event.data.error?.message ?? "Refused.",
           });
-        } else if (event.data.status === "failed") {
+        } else if (event.data.outcome === "failed") {
           diagnostics.append({
             source: "tool",
-            summary: `${normalizeActionResult(event.data.result).toolName} failed`,
+            summary: `${name} failed`,
             detail: event.data.error?.message ?? "Tool failed.",
           });
         }
         break;
-      // A task call's receipt never fails; its task's outcome does.
-      case "task.settled":
-        if (event.data.status === "failed") {
+      }
+      // A reusable body's failure can arrive after it already replied to every call.
+      case "task.ended":
+        if (event.data.outcome === "failed") {
           diagnostics.append({
             source: "tool",
-            summary: `${this.#store.snapshot.conversation.tasks[event.data.taskId]?.name ?? "A task"} failed`,
+            summary: `${task(this.#store.snapshot.view, event.data.taskId)?.name ?? "A task"} ended with an error`,
             detail: event.data.error?.message ?? "Task failed.",
           });
         }
         break;
-      case "agent.started":
-        diagnostics.recordSubagentDispatch(event.data.callId);
+      case "child.opened":
+        if ("callId" in event.data.owner)
+          diagnostics.recordSubagentDispatch(event.data.owner.callId);
         break;
-      case "step.completed":
+      case "usage.recorded":
         diagnostics.recordStepUsage(event.data.usage);
         break;
-      case "step.failed":
-      case "turn.failed":
-      case "session.failed": {
-        const key = failureKey(event);
-        if (this.#recordedFailures.has(key)) break;
-        this.#recordedFailures.add(key);
-        const message = formatFailureMessage(event);
-        const detail = formatFailureDetail(event) ?? message;
-        const hint = formatFailureHint(event);
-        diagnostics.append(
-          hint === undefined
-            ? { source: "workflow", summary: `Error: ${message}`, detail }
-            : { source: "workflow", summary: `Error: ${message}`, detail, hint },
-        );
-        break;
-      }
     }
+  }
+
+  /** Logs each failure the session shows once, as it appears. A reset session starts over. */
+  #recordFailures(failures: readonly TuiFailure[]): void {
+    if (failures.length < this.#recordedFailures) this.#recordedFailures = 0;
+    for (const { error } of failures.slice(this.#recordedFailures)) {
+      const message = formatFailureMessage(error);
+      const entry = {
+        detail: formatFailureDetail(error) ?? message,
+        source: "workflow" as const,
+        summary: `Error: ${message}`,
+      };
+      this.#diagnostics?.append(error.hint === undefined ? entry : { ...entry, hint: error.hint });
+    }
+    this.#recordedFailures = failures.length;
   }
 }
 
@@ -1677,11 +1709,9 @@ function registryHandoffs(
   const collect = (state: ConversationState, subagentName: string | undefined) => {
     for (const message of state.messages) {
       for (const part of message.parts) {
-        if (!isTerminalToolCallPart(part) || part.state !== "output-available" || part.partial) {
-          continue;
-        }
-        const address = registryHandoffAddress(subagentName, part.toolName, part.output);
-        if (address !== undefined) handoffs.push({ callId: part.toolCallId, address });
+        if (!isTerminalToolCallPart(part) || part.state !== "completed") continue;
+        const address = registryHandoffAddress(subagentName, part.name, part.output);
+        if (address !== undefined) handoffs.push({ callId: part.callId, address });
       }
     }
   };
@@ -1713,7 +1743,7 @@ export function registryHandoffAddress(
 }
 
 function inputContext(
-  input: ConversationInput,
+  input: Interaction,
   index: number,
   total: number,
 ): AgentTUIInputContext | undefined {
@@ -1724,50 +1754,51 @@ function inputContext(
 }
 
 function toAgentTUIToolApprovalRequest(
-  request: InputRequest,
+  request: Interaction,
   context: AgentTUIInputContext | undefined,
 ): AgentTUIToolApprovalRequest {
   const approval: AgentTUIToolApprovalRequest = {
-    approvalId: request.requestId,
-    toolCallId: request.action.callId,
-    toolName: request.action.toolName,
-    prompt: request.prompt,
-    input: request.action.input,
+    approvalId: request.interactionId,
+    toolCallId: request.call?.callId ?? request.interactionId,
+    toolName: request.call?.name ?? request.request.kind,
+    prompt: request.request.prompt,
+    input: request.call?.input ?? {},
   };
   if (context !== undefined) approval.context = context;
   return approval;
 }
 
 function toAgentTUIInputQuestion(
-  request: InputRequest,
+  request: Interaction,
   context: AgentTUIInputContext | undefined,
 ): AgentTUIInputQuestion {
   const display: "select" | "text" =
-    request.display === "text"
+    request.request.display === "text"
       ? "text"
-      : request.display === "select"
+      : request.request.display === "select"
         ? "select"
-        : request.options !== undefined && request.options.length > 0
+        : request.request.options !== undefined && request.request.options.length > 0
           ? "select"
           : "text";
 
   const question: AgentTUIInputQuestion = {
-    requestId: request.requestId,
-    prompt: request.prompt,
+    requestId: request.interactionId,
+    prompt: request.request.prompt,
     display,
   };
 
-  if (request.options !== undefined) {
-    question.options = request.options.map((option: InputOption) => {
+  if (request.request.options !== undefined) {
+    question.options = request.request.options.map((option: InteractionOption) => {
       const out: AgentTUIInputOption = { id: option.id, label: option.label };
       if (option.description !== undefined) out.description = option.description;
-      if (option.style !== undefined) out.style = option.style;
+      const style = optionStyle(option);
+      if (style !== undefined) out.style = style;
       return out;
     });
   }
 
-  if (request.allowFreeform !== undefined) {
-    question.allowFreeform = request.allowFreeform;
+  if (request.request.allowFreeform !== undefined) {
+    question.allowFreeform = request.request.allowFreeform;
   }
   if (context !== undefined) question.context = context;
 

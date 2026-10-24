@@ -3,7 +3,6 @@ import type { ThreadRecord } from "#eve/types/thread";
 import { resumeOptionsFromThread } from "~/composables/chat/providers/eve/thread-state";
 import { useChatNavigation, refreshThreadList } from "~/composables/chat/navigation";
 import { useAuthorizationChallenges } from "~/composables/chat/useAuthorizationChallenges";
-import { useStreamLog } from "~/composables/chat/providers/eve/stream-log";
 import { useChatSession } from "~/composables/chat/useChatSession";
 
 const route = useRoute();
@@ -45,17 +44,10 @@ const {
 } = useChatSession(chatId, () => data.value?.resume ?? {});
 
 const { consumePendingOnMount } = useChatNavigation(chatId);
-const { resetTurnEventCounts } = useStreamLog();
 const { pendingChallenges, failedChallenges, tryResumeConnectedChallenges } =
   useAuthorizationChallenges();
 
 const input = ref("");
-
-watch(status, (value) => {
-  if (value === "submitted") {
-    resetTurnEventCounts();
-  }
-});
 
 onMounted(() => {
   void refreshThreadList();

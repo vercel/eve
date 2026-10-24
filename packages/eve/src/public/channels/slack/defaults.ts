@@ -1,27 +1,42 @@
+import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { errorHintOf } from "#public/channels/reply.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
+import { waiting } from "#protocol/session-projection/selectors.js";
 import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
 import {
   reviewingResults,
   waitingOnTasks,
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
   buildAuthEphemeralText,
   buildAuthRequiredPublicText,
-  formatConnectionDisplayName,
-  type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
-import { approvalEvents } from "#public/channels/slack/approval-cards.js";
+import {
+  defaultInteractionsHandler,
+  notifyRefusedResponder,
+  settleApproval,
+} from "#public/channels/slack/approval-cards.js";
+import {
+  refusedAnswerOf,
+  requestBatchOf,
+  requestSettlementOf,
+} from "#channel/interaction-prompts.js";
+import { signInOf, type SignIn } from "#channel/sign-in.js";
+import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
+  SlackApprovalChannelResolver,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
@@ -47,30 +62,47 @@ const WRITING_REPLY_MIN_CHARS = 280;
  * needs to survive serialization, and a new step starts empty.
  */
 interface StepStream {
-  /** The step's tool calls: the first call's label, or the model's narration, and how many. */
+  /** The run's tool calls: the first call's label, or the model's narration, and how many. */
   calls: { readonly count: number; readonly label: string; readonly narrated: boolean } | null;
   /** The current reasoning block, and when a piece of it last showed. */
   reasoning: string;
   reasoningShownAtMs: number | null;
   replyChars: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
+  readonly runId: string;
+  /** The kinds of the run's streaming parts: later deltas name only their part. */
+  readonly partKinds: Map<string, string>;
 }
 const streamByState = new WeakMap<SlackChannelState, StepStream>();
 
-function stepStream(state: SlackChannelState, turnId: string, stepIndex: number): StepStream {
+function stepStream(state: SlackChannelState, runId: string): StepStream {
   const current = streamByState.get(state);
-  if (current?.turnId === turnId && current.stepIndex === stepIndex) return current;
+  if (current?.runId === runId) return current;
   const fresh: StepStream = {
     calls: null,
+    partKinds: new Map(),
     reasoning: "",
     reasoningShownAtMs: null,
     replyChars: 0,
-    stepIndex,
-    turnId,
+    runId,
   };
   streamByState.set(state, fresh);
   return fresh;
+}
+
+/** The stream a content delta belongs to, and the kind of its part. */
+function deltaStream(
+  state: SlackChannelState,
+  event: { readonly partId: string; readonly kind?: string },
+  runId: string | undefined,
+): { readonly stream: StepStream; readonly kind: string } | undefined {
+  if (runId !== undefined && event.kind !== undefined) {
+    const stream = stepStream(state, runId);
+    stream.partKinds.set(event.partId, event.kind);
+    return { kind: event.kind, stream };
+  }
+  const current = streamByState.get(state);
+  const kind = current?.partKinds.get(event.partId);
+  return current === undefined || kind === undefined ? undefined : { kind, stream: current };
 }
 
 function heldWithin(atMs: number | null | undefined, now: number): boolean {
@@ -91,77 +123,31 @@ async function showReasoning(
   stream.reasoningShownAtMs = now;
 }
 
-interface SlackSemanticErrorSummary {
-  readonly hint?: string;
-  readonly message: string;
-  readonly name: string;
-}
-
-function extractSemanticErrorSummary(event: {
-  readonly details?: unknown;
-  readonly message?: string;
-}): SlackSemanticErrorSummary | null {
-  if (typeof event.details !== "object" || event.details === null) return null;
-  const details = event.details as {
-    readonly hint?: unknown;
-    readonly message?: unknown;
-    readonly name?: unknown;
-    readonly semanticErrorId?: unknown;
-  };
-  if (
-    typeof details.semanticErrorId !== "string" ||
-    details.semanticErrorId.length === 0 ||
-    typeof details.name !== "string" ||
-    details.name.length === 0
-  ) {
-    return null;
-  }
-
-  const message =
-    typeof details.message === "string" && details.message.trim().length > 0
-      ? details.message.trim()
-      : event.message?.trim();
-  if (!message) return null;
-
-  const hint =
-    typeof details.hint === "string" && details.hint.trim().length > 0
-      ? details.hint.trim()
-      : undefined;
-  return hint === undefined
-    ? { message, name: details.name }
-    : { hint, message, name: details.name };
-}
-
-function formatSemanticErrorBlock(
-  summary: SlackSemanticErrorSummary,
-  errorId: string | undefined,
+/**
+ * A failure eve recognized, quoted with how to fix it and the id to give support. Only a
+ * recognized failure carries a hint.
+ */
+function formatFixableErrorReply(
+  introduction: string,
+  error: ErrorInfo,
+  hint: string,
+  options?: { readonly followUp?: string },
 ): string {
-  const lines = [
-    `### ${summary.name}`,
+  const quoted = [
+    error.message,
     "",
-    summary.message,
-    ...(summary.hint ? ["", "**How to fix**", summary.hint] : []),
-    ...(errorId ? ["", "**Error id:**", `\`${errorId}\``] : []),
-  ];
-  return lines
+    "**How to fix**",
+    hint,
+    ...(error.id === undefined ? [] : ["", "**Error id:**", `\`${error.id}\``]),
+  ]
     .flatMap((line) => line.split("\n"))
     .map((line) => (line.length > 0 ? `> ${line}` : "> "))
     .join("\n");
-}
-
-function formatSemanticErrorReply(input: {
-  readonly errorId: string | undefined;
-  readonly followUp?: string;
-  readonly introduction: string;
-  readonly nextStep: string;
-  readonly summary: SlackSemanticErrorSummary;
-}): string {
   return [
-    `${input.introduction}.`,
+    `${introduction}.`,
     "",
-    formatSemanticErrorBlock(input.summary, input.errorId),
-    ...(!input.summary.hint ? ["", input.nextStep] : []),
-    ...(input.summary.hint && input.followUp ? ["", input.followUp] : []),
+    quoted,
+    ...(options?.followUp === undefined ? [] : ["", options.followUp]),
   ].join("\n");
 }
 
@@ -207,7 +193,7 @@ export async function defaultReceived(_message: SlackMessage, ctx: SlackContext)
 
 /**
  * Reads the first non-empty line of a model-emitted message. The
- * default `actions.requested` handler uses this to surface the
+ * default `call.requested` handler uses this to surface the
  * model's own pre-tool-call narration as the typing indicator.
  */
 function firstNonEmptyLine(text: string): string | undefined {
@@ -219,105 +205,229 @@ function firstNonEmptyLine(text: string): string | undefined {
 }
 
 /**
+ * A sign-in: a public, link-free status for the thread, and the challenge, which is a credential,
+ * privately to the person who must sign in.
+ */
+export async function showSlackSignIn(event: SignIn, channel: SlackEventContext): Promise<void> {
+  const { displayName } = event;
+  const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
+  const challengeUrl = event.url;
+
+  // Post a public, link-free status so everyone in the thread can see
+  // the session is blocked and later see it complete. The challenge
+  // itself remains private.
+  const pending = channel.state.pendingAuthMessageTs ?? {};
+  if (event.responseId === undefined && pending[event.name] === undefined) {
+    const publicText = buildAuthRequiredPublicText({ displayName, recipientUserId });
+    try {
+      const sent = await channel.thread.post(publicText);
+      if (sent.id) {
+        channel.state.pendingAuthMessageTs = {
+          ...pending,
+          [event.name]: sent.id,
+        };
+      }
+    } catch (error) {
+      log.error("Slack auth public message delivery failed", {
+        name: event.name,
+        error,
+      });
+    }
+  }
+
+  // The challenge is user-specific: the sign-in link (and device code)
+  // must only ever be visible to the person who started the sign-in, never posted into
+  // the shared thread.
+  const { instructions } = event;
+  if (recipientUserId && (challengeUrl || instructions)) {
+    const { channelId, threadTs } = channel.state;
+    // The turn's own sign-in holds it, so the prompt can cancel that turn.
+    const cancel =
+      event.responseId === undefined && channelId && threadTs && event.turnId
+        ? { channelId, threadTs, turnId: event.turnId }
+        : undefined;
+    const prompt = {
+      cancel,
+      displayName,
+      instructions,
+      url: challengeUrl,
+      userCode: event.userCode,
+    };
+    try {
+      await channel.thread.postEphemeral(recipientUserId, {
+        blocks: buildAuthEphemeralBlocks(prompt),
+        text: buildAuthEphemeralText(prompt),
+      });
+    } catch (error) {
+      log.error("Slack auth ephemeral delivery failed", {
+        name: event.name,
+        error,
+      });
+    }
+  }
+}
+
+async function settleSlackSignIn(
+  event: SignIn,
+  settled: InteractionSettledData,
+  channel: SlackEventContext,
+): Promise<void> {
+  const { displayName } = event;
+  if (settled.outcome === "accepted" && event.responseId === undefined) {
+    await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
+  }
+
+  const pending = channel.state.pendingAuthMessageTs ?? {};
+  const ts = pending[event.name];
+  if (ts === undefined) return;
+
+  const text = buildAuthCompletedText({
+    displayName,
+    outcome: settled.outcome,
+    reason: settled.reason,
+  });
+
+  try {
+    await channel.slack.request("chat.update", {
+      channel: channel.slack.channelId,
+      ts,
+      text,
+    });
+  } catch (error) {
+    log.error("Slack auth status edit failed", {
+      name: event.name,
+      error,
+    });
+  }
+
+  const next = { ...pending };
+  delete next[event.name];
+  channel.state.pendingAuthMessageTs = next;
+}
+
+/**
+ * Default `interaction.opened` handler: a commit's requests render as one batch, and a sign-in
+ * as its public status and private challenge.
+ */
+export function defaultInteractionOpenedHandler(
+  approvalChannel?: SlackApprovalChannelResolver,
+): NonNullable<SlackChannelInternalEvents["interaction.opened"]> {
+  const showRequests = defaultInteractionsHandler(approvalChannel);
+  return async ({ data }, ctx) => {
+    const view = sessionTables(ctx.view);
+    const batch = requestBatchOf(view, data);
+    if (batch !== undefined) {
+      await showRequests(batch, ctx);
+      return;
+    }
+    const signIn = signInOf(view, data.interactionId);
+    if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
+  };
+}
+
+/**
  * eve's default Slack event rendering: status lines, replies, errors, and the
  * connection-authorization flow. It is the innermost link of every channel's
  * renderer chain. Typed as the internal full-context map because the default
- * `authorization.required` handler owns the public link-free status, which
+ * sign-in `interaction.opened` handler owns the public link-free status, which
  * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
-  ...approvalEvents,
-  // A turn held on a person's approval, answer, or sign-in isn't working, and
-  // the prompt asking them says so. Its status comes back when it resumes.
-  async "turn.waiting"(event, channel, _ctx) {
-    if (event.on === "input") {
-      await hideStatus(channel);
+  async "interaction.settled"({ data }, ctx) {
+    const { channel } = ctx;
+    const view = sessionTables(ctx.view);
+    const signIn = signInOf(view, data.interactionId);
+    if (signIn !== undefined) {
+      await settleSlackSignIn(signIn, data, channel);
       return;
     }
-    const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
-    if (working.length > 0) await showStatus(channel, waitingOnTasks(working));
+    const resolution = requestSettlementOf(view, data);
+    if (resolution !== undefined) await settleApproval(resolution, channel);
   },
 
-  // The turn's next model step reads the results, so `step.started` can say so.
-  async "task.settled"(event, channel, _ctx) {
-    if (event.cancel !== undefined) return;
-    const pending = channel.state.pendingTaskResults;
-    const names = pending?.turnId === event.turnId ? pending.names : [];
-    const name = event.kind === "agent" && event.name !== undefined ? event.name : null;
-    channel.state.pendingTaskResults = { names: [...names, name], turnId: event.turnId };
+  async "response.settled"({ data }, ctx) {
+    const { channel } = ctx;
+    const refused = refusedAnswerOf(sessionTables(ctx.view), data);
+    if (refused !== undefined) await notifyRefusedResponder(refused, channel);
   },
 
-  // A model step means nothing to someone reading the thread, so the status
+  // A turn held on a person's approval, answer, or sign-in isn't working, and
+  // the prompt asking them says so. Its status comes back when it resumes.
+  async "turn.paused"(_event, { channel }) {
+    await hideStatus(channel);
+  },
+
+  // A model run that leaves its turn waiting on tasks names them.
+  async "model.settled"(event, ctx) {
+    const turnId = event.scope?.turnId;
+    if (turnId === undefined || waiting(sessionTables(ctx.view), turnId)?.on !== "work") return;
+    const working = workingTaskNames(sessionTables(ctx.view), turnId);
+    if (working.length > 0) await showStatus(ctx.channel, waitingOnTasks(working));
+  },
+
+  // A model run means nothing to someone reading the thread, so the status
   // keeps naming the work, such as the call that just finished, and is written
-  // again so Slack doesn't time it out. Only task results the step is about to
-  // read change it. `turn.started` covers step 0.
-  async "step.started"(event, channel, _ctx) {
-    if (event.stepIndex === 0) return;
+  // again so Slack doesn't time it out. Only task results the run is about to
+  // read change it.
+  async "model.started"(event, ctx) {
+    const { channel } = ctx;
+    const turnId = event.scope?.turnId;
+    if (turnId === undefined) return;
     const pending = channel.state.pendingTaskResults;
     channel.state.pendingTaskResults = null;
     const status =
-      pending?.turnId === event.turnId
+      pending?.turnId === turnId
         ? reviewingResults(pending.names)
         : (channel.state.threadStatus?.text ?? "Thinking...");
     await showStatus(channel, status, { force: true });
   },
 
-  async "turn.started"(_event, channel, _ctx) {
+  async "turn.started"(_event, { channel }) {
     channel.state.pendingTaskResults = null;
     channel.state.pendingToolCallMessage = null;
     streamByState.delete(channel.state);
     await showStatus(channel, "Thinking...", { force: true });
   },
 
-  // A reply clears the status, but a turn ended by an `endsTurn` tool posts
-  // none, and Slack would otherwise show the status until it times out.
-  async "turn.completed"(_event, channel, _ctx) {
-    await clearStatus(channel);
-  },
-
-  // Shows the newest heading or sentence, each for at least a few seconds, so
-  // a long reasoning block reads as progress instead of its opening words.
-  async "reasoning.appended"(event, channel, _ctx) {
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
-    if (stream.reasoning === "") stream.reasoningShownAtMs = null;
-    stream.reasoning += event.reasoningDelta;
-    await showReasoning(channel, stream);
-  },
-
-  // The block's last sentence never shows while it streams unless it fills
-  // the status, so a short one only shows once the block ends.
-  async "reasoning.completed"(event, channel, _ctx) {
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
-    stream.reasoning = event.reasoning;
-    await showReasoning(channel, stream, { complete: true });
-    stream.reasoning = "";
-  },
-
-  async "message.appended"(event, channel, _ctx) {
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+  // Shows the newest heading or sentence of reasoning, each for at least a few seconds, so a
+  // long reasoning block reads as progress instead of its opening words, and says a reply is on
+  // its way once its text gets going.
+  async "content.delta"(event, ctx) {
+    const { data } = event;
+    const { channel } = ctx;
+    const found = deltaStream(channel.state, data, event.scope?.runId);
+    if (found === undefined) return;
+    const { kind, stream } = found;
+    if (kind === "reasoning") {
+      if (stream.reasoning === "") stream.reasoningShownAtMs = null;
+      stream.reasoning += data.delta;
+      await showReasoning(channel, stream);
+      return;
+    }
+    if (kind !== "text") return;
     const before = stream.replyChars;
-    stream.replyChars += event.messageDelta.length;
+    stream.replyChars += data.delta.length;
     if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
       await showStatus(channel, "Writing a reply...");
     }
   },
 
-  // Calls in one step stream in one at a time, so the step keeps its first
-  // label, or the model's narration, and counts the rest.
-  async "actions.requested"(event, channel, _ctx) {
+  // Calls in one run stream in one at a time, so the run keeps its first
+  // label, or the model's narration, and counts the rest. Calls a tool makes
+  // on the model's behalf, such as a connection tool, belong to their parent.
+  async "call.requested"({ data }, { channel }) {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
-    const actions = visibleActions(event.actions);
-    if (!narration && actions.length === 0) return;
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    const { capability, owner } = data;
+    const counts = !("callId" in owner) && capability.kind !== "control";
+    if (!narration && !counts) return;
+    if (!("runId" in owner)) return;
+    const stream = stepStream(channel.state, owner.runId);
+    const label = callLabel(data);
     const calls =
       !narration && stream.calls
-        ? { ...stream.calls, count: stream.calls.count + actions.length }
-        : {
-            count: actions.length,
-            label: narration ?? actionLabel(actions[0]!, event.presentation),
-            narrated: narration != null,
-          };
+        ? { ...stream.calls, count: stream.calls.count + 1 }
+        : { count: counts ? 1 : 0, label: narration ?? label, narrated: narration != null };
     stream.calls = calls;
     await showStatus(
       channel,
@@ -325,51 +435,69 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "action.partial"(event, channel, _ctx) {
-    const label = event.presentation?.[event.result.callId]?.label;
+  async "call.progress"({ data }, { channel }) {
+    const label = data.label;
     if (!label || heldWithin(channel.state.threadStatus?.atMs, Date.now())) return;
     await showStatus(channel, label);
   },
 
-  async "action.result"(event, channel, _ctx) {
-    const label = event.presentation?.[event.result.callId]?.label;
-    if (label) await showStatus(channel, label);
+  async "call.settled"(event, ctx) {
+    const { data } = event;
+    const { channel } = ctx;
+    // Task replies settle their calls, not their reusable task. The next model run reads them.
+    const { taskId, turnId } = event.scope ?? {};
+    if (taskId !== undefined && turnId !== undefined && data.outcome !== "interrupted") {
+      const task = sessionTables(ctx.view).tasks[taskId];
+      const pending = channel.state.pendingTaskResults;
+      const names = pending?.turnId === turnId ? pending.names : [];
+      const name = task?.kind === "agent" ? task.name : null;
+      channel.state.pendingTaskResults = { names: [...names, name], turnId };
+    }
+    if (data.label) await showStatus(channel, data.label);
   },
 
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls") {
-      channel.state.pendingToolCallMessage = event.message
-        ? (firstNonEmptyLine(event.message) ?? null)
-        : null;
+  async "content.completed"({ data }, ctx) {
+    const { channel } = ctx;
+    if (data.kind === "reasoning") {
+      const stream = streamByState.get(channel.state);
+      if (stream?.runId !== data.runId || typeof data.value !== "string") return;
+      stream.reasoning = data.value;
+      await showReasoning(channel, stream, { complete: true });
+      stream.reasoning = "";
+      return;
+    }
+    if (data.kind !== "text") return;
+    const text = typeof data.value === "string" ? data.value : "";
+    if (contentPhase(data.phase) === "narration") {
+      channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
       return;
     }
     channel.state.pendingToolCallMessage = null;
-    if (!event.message) {
+    if (!text) {
       await clearStatus(channel);
       return;
     }
     // Slack clears the status when the reply posts.
     channel.state.threadStatus = null;
-    await deliverCompletedSlackReply(channel, event.message, { turnId: event.turnId });
+    await deliverCompletedSlackReply(channel, text, { turnId: ctx.session.turn.id });
   },
 
-  async "turn.failed"(event, channel, _ctx) {
-    if (event.terminal) return;
-    const errorId = extractErrorId(event.details);
-    const semanticSummary = extractSemanticErrorSummary(event);
-    if (semanticSummary !== null) {
+  // A reply clears the status, but a turn ended by an `endsTurn` tool posts
+  // none, and Slack would otherwise show the status until it times out.
+  async "turn.settled"({ data }, { channel }) {
+    if (data.outcome !== "failed") {
+      await clearStatus(channel);
+      return;
+    }
+    const hint = data.error?.hint;
+    if (data.error !== undefined && hint !== undefined) {
       await channel.thread.post(
-        formatSemanticErrorReply({
-          errorId,
-          introduction: "I hit an error while handling your request",
-          nextStep: "Please try again, rephrase, or reach out if it keeps failing.",
-          summary: semanticSummary,
-        }),
+        formatFixableErrorReply("I hit an error while handling your request", data.error, hint),
       );
       return;
     }
-
-    const summary = formatErrorHint(event);
+    const errorId = data.error?.id;
+    const summary = formatErrorHint(errorHintOf(data.error));
     await channel.thread.post(
       [
         `I hit an error while handling your request${summary}.`,
@@ -380,23 +508,19 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "session.failed"(event, channel) {
-    const errorId = extractErrorId(event.details);
-    const semanticSummary = extractSemanticErrorSummary(event);
-    if (semanticSummary !== null) {
+  async "session.ended"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = data.error?.hint;
+    if (data.error !== undefined && hint !== undefined) {
       await channel.thread.post(
-        formatSemanticErrorReply({
-          errorId,
+        formatFixableErrorReply("This session couldn't recover from an error", data.error, hint, {
           followUp: "Start a new thread to continue — I can't pick this one back up.",
-          introduction: "This session couldn't recover from an error",
-          nextStep: "Resolve the issue, then start a new thread — I can't pick this one back up.",
-          summary: semanticSummary,
         }),
       );
       return;
     }
-
-    const summary = formatErrorHint(event);
+    const errorId = data.error?.id;
+    const summary = formatErrorHint(errorHintOf(data.error));
     await channel.thread.post(
       [
         `This session couldn't recover from an error${summary}.`,
@@ -405,98 +529,5 @@ export const defaultEvents: SlackChannelInternalEvents = {
         ...(errorId ? ["", `_Error id: \`${errorId}\`_`] : []),
       ].join("\n"),
     );
-  },
-
-  async "authorization.required"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
-    const challengeUrl = event.authorization?.url;
-
-    // Post a public, link-free status so everyone in the thread can see
-    // the session is blocked and later see it complete. The challenge
-    // itself remains private.
-    const pending = channel.state.pendingAuthMessageTs ?? {};
-    if (event.candidateId === undefined && pending[event.name] === undefined) {
-      const publicText = buildAuthRequiredPublicText({ displayName, recipientUserId });
-      try {
-        const sent = await channel.thread.post(publicText);
-        if (sent.id) {
-          channel.state.pendingAuthMessageTs = {
-            ...pending,
-            [event.name]: sent.id,
-          };
-        }
-      } catch (error) {
-        log.error("Slack auth public message delivery failed", {
-          name: event.name,
-          error,
-        });
-      }
-    }
-
-    // The challenge is user-specific: the sign-in link (and device code)
-    // must only ever be visible to the person who started the sign-in, never posted into
-    // the shared thread.
-    const instructions = event.authorization?.instructions;
-    if (recipientUserId && (challengeUrl || instructions)) {
-      const { channelId, threadTs } = channel.state;
-      // The turn's own sign-in holds it, so the prompt can cancel that turn.
-      const cancel =
-        event.candidateId === undefined && channelId && threadTs && event.turnId
-          ? { channelId, threadTs, turnId: event.turnId }
-          : undefined;
-      const prompt = {
-        cancel,
-        displayName,
-        instructions,
-        url: challengeUrl,
-        userCode: event.authorization?.userCode,
-      };
-      try {
-        await channel.thread.postEphemeral(recipientUserId, {
-          blocks: buildAuthEphemeralBlocks(prompt),
-          text: buildAuthEphemeralText(prompt),
-        });
-      } catch (error) {
-        log.error("Slack auth ephemeral delivery failed", {
-          name: event.name,
-          error,
-        });
-      }
-    }
-  },
-
-  async "authorization.completed"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    if (event.outcome === "authorized" && event.candidateId === undefined) {
-      await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
-    }
-
-    const pending = channel.state.pendingAuthMessageTs ?? {};
-    const ts = pending[event.name];
-    if (ts === undefined) return;
-
-    const text = buildAuthCompletedText({
-      displayName,
-      outcome: event.outcome as ConnectionAuthorizationOutcome,
-      reason: event.reason,
-    });
-
-    try {
-      await channel.slack.request("chat.update", {
-        channel: channel.slack.channelId,
-        ts,
-        text,
-      });
-    } catch (error) {
-      log.error("Slack auth status edit failed", {
-        name: event.name,
-        error,
-      });
-    }
-
-    const next = { ...pending };
-    delete next[event.name];
-    channel.state.pendingAuthMessageTs = next;
   },
 };

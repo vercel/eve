@@ -1,8 +1,10 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { Client } from "#client/client.js";
-import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
+import { addTokenUsage } from "#shared/token-usage-math.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   AssertionResult,
   EveEval,
@@ -13,7 +15,7 @@ import type {
   EveEvalTraceContext,
   EveEvalTurn,
 } from "#evals/types.js";
-import { createEmptyDerivedFacts, latestUsage } from "#evals/runner/derive-run-facts.js";
+import { createEmptyDerivedFacts, deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
@@ -126,10 +128,13 @@ function buildTaskResult(input: {
   readonly turn: EveEvalTurn | undefined;
 }): EveEvalTaskResult {
   const events = input.sessions.flatMap((session) => session.events);
-  const finalMessage = input.turn?.message ?? null;
   return {
-    output: input.turn?.data === undefined ? finalMessage : input.turn.data,
-    finalMessage,
+    data: input.turn?.data,
+    outcome: input.turn?.outcome,
+    error: input.turn?.error,
+    reply: input.turn?.reply,
+    view: input.turn?.view,
+    sessionEnded: input.turn?.sessionEnded ?? false,
     sessionId: selectPrimarySessionId(input.sessions),
     status: input.turn?.status ?? "completed",
     events,
@@ -155,13 +160,55 @@ function collectTraceContexts(
   });
 }
 
-function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEvalDerivedFacts {
+/**
+ * Each session's facts once. Handles that read the same session, such as a turn watched after
+ * the handle that sent it, saw parts of one stream: a call one requested, another settled. Their
+ * events merge by position before facts are derived.
+ */
+function derivedBySession(
+  sessions: readonly EveEvalSessionResult[],
+): readonly EveEvalSessionResult["derived"][] {
+  const groups: EveEvalSessionResult[][] = [];
+  const byId = new Map<string, EveEvalSessionResult[]>();
+  for (const session of sessions) {
+    const group = session.sessionId === undefined ? undefined : byId.get(session.sessionId);
+    if (group !== undefined) {
+      group.push(session);
+      continue;
+    }
+    const created = [session];
+    groups.push(created);
+    if (session.sessionId !== undefined) byId.set(session.sessionId, created);
+  }
+  return groups.map((group) => {
+    if (group.length === 1) return group[0]!.derived;
+    const byPosition = new Map<string, SessionStreamEvent>();
+    for (const session of group) {
+      for (const event of session.events) {
+        const { index, line } = event.meta.position;
+        byPosition.set(`${line}:${index}`, event);
+      }
+    }
+    const events = [...byPosition.values()].sort(
+      (a, b) =>
+        a.meta.position.line - b.meta.position.line ||
+        a.meta.position.index - b.meta.position.index,
+    );
+    return deriveRunFacts(events, { sessionId: group[0]!.sessionId });
+  });
+}
+
+/** The facts of every session an eval read, each session's handles read as one stream. */
+export function combineDerivedFacts(
+  sessions: readonly EveEvalSessionResult[],
+): EveEvalDerivedFacts {
   if (sessions.length === 0) return createEmptyDerivedFacts();
 
-  const toolCalls = sessions.flatMap((session) => session.derived.toolCalls);
-  const skillLoads = sessions.flatMap((session) => session.derived.skillLoads);
-  const subagentCalls = sessions.flatMap((session) => session.derived.subagentCalls);
-  const inputRequests = sessions.flatMap((session) => session.derived.inputRequests);
+  const derived = derivedBySession(sessions);
+  const toolCalls = derived.flatMap((facts) => facts.toolCalls);
+  const skillLoads = derived.flatMap((facts) => facts.skillLoads);
+  const subagentCalls = derived.flatMap((facts) => facts.subagentCalls);
+  const interactions = derived.flatMap((facts) => facts.interactions);
   const failureCode = sessions.find((session) => session.derived.failureCode !== undefined)?.derived
     .failureCode;
 
@@ -171,8 +218,9 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
     skillLoads,
     subagentCalls,
     subagentCallCount: subagentCalls.length,
-    inputRequests,
-    parked: sessions.some((session) => session.derived.parked),
+    interactions,
+    // A session read in several handles is parked only if its merged stream still is.
+    parked: derived.some((facts) => facts.parked),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
     models: [...new Set(sessions.flatMap((session) => session.derived.models))],
@@ -194,21 +242,21 @@ function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | unde
   const opened = new Set(
     sessions.flatMap((session) =>
       session.events.flatMap((event) =>
-        event.type === "agent.started" ? [event.data.sessionId] : [],
+        event.type === "child.opened" ? [event.data.sessionId] : [],
       ),
     ),
   );
-  const latestById = new Map<string | undefined, ReturnType<typeof latestUsage>>();
+  const latestById = new Map<string | undefined, { at: number; usage: TokenUsage | undefined }>();
   for (const session of sessions) {
-    const latest = latestUsage(session.events);
-    const prior = latestById.get(session.sessionId);
-    // A capture with no usage event never replaces one that has one; on equal times the later
+    // A capture that recorded no usage never replaces one that did; on equal times the later
     // capture wins.
-    if (prior === undefined || (latest !== undefined && latest.at >= prior.at))
-      latestById.set(session.sessionId, latest ?? prior);
+    const at = lastUsageRecordedAt(session.events) ?? -Infinity;
+    const prior = latestById.get(session.sessionId);
+    if (prior === undefined || at >= prior.at)
+      latestById.set(session.sessionId, { at, usage: session.derived.usage });
   }
   const counted = [...latestById].flatMap(([id, latest]) =>
-    id !== undefined && opened.has(id) ? [] : [latest?.usage],
+    id !== undefined && opened.has(id) ? [] : [latest.usage],
   );
   if (counted.length === 0) return undefined;
   if (!counted.every((usage): usage is TokenUsage => usage !== undefined)) return undefined;
@@ -216,6 +264,14 @@ function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | unde
   if (counted.every((usage) => usage.costUsd !== undefined)) return total;
   const { costUsd: _partial, ...withoutCost } = total;
   return withoutCost;
+}
+
+function lastUsageRecordedAt(events: readonly SessionStreamEvent[]): number | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event?.type === "usage.recorded") return Date.parse(event.meta.at);
+  }
+  return undefined;
 }
 
 function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): string | undefined {
@@ -227,7 +283,7 @@ function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): stri
  * in the stream, if present.
  */
 function extractRuntimeIdentity(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
 ): RuntimeIdentity | undefined {
   for (const event of events) {
     if (event.type === "session.started" && event.data.runtime !== undefined) {

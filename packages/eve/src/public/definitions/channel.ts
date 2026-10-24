@@ -1,8 +1,19 @@
-import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
 import {
-  createMetadataAudienceProjector,
-  type ChannelAudienceProjector,
-} from "#channel/audience.js";
+  authoringEventTypes,
+  type AuthoringEventType,
+} from "#protocol/session-events/authoring.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type {
+  ChannelAdapter,
+  ChannelInstrumentationMetadata,
+  CommittedLine,
+} from "#channel/adapter.js";
+export type { CommittedLine } from "#channel/adapter.js";
+import type { ChannelAudienceProjector } from "#channel/audience.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
+export type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import {
@@ -23,11 +34,18 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
+import type { ChannelContext, ChannelContinuationOps } from "#shared/channel-context.js";
+export type { ChannelContext, ChannelContinuationOps } from "#shared/channel-context.js";
+import type { Delivery } from "#shared/delivery.js";
+export type { Delivery, DeliveryResult } from "#shared/delivery.js";
+export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { FactPosition } from "#protocol/session-events/envelope.js";
+import { snapshotOf, type SessionView } from "#protocol/session-projection/session-view.js";
+import { currentView } from "#harness/session-machine/current.js";
+import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
@@ -36,19 +54,16 @@ export type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
-  GetEventStreamOptions,
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
 export { SessionStrandedError } from "#channel/session-stranded-error.js";
-export type { Session, SessionHandle } from "#channel/session.js";
+export type { Session } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   AudienceCaller,
   AudienceContext,
-  AudienceInput,
-  AudiencePrincipal,
   ConversationEnvironment,
 } from "#shared/conversation-context.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
@@ -172,70 +187,55 @@ export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteS
   );
 }
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+/** The session event a handler keyed `T` observes. */
+export type ChannelEventOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>;
 
-/** Continuation routing on the `channel` argument of every channel event handler. */
-export interface ChannelContinuationOps {
-  readonly continuation?: {
-    readonly token: string;
-    alias(token: string): void;
-  };
+/** Continuation routing on the `ctx.channel` of every channel event handler. */
+
+/**
+ * What a channel event handler knows beyond the event it observes: the channel's own context,
+ * where the event sits on the stream, and the session's tables. Observer-only, so tools never see
+ * it.
+ */
+export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends SessionContext {
+  /** The channel's context, as its `context()` built it, with continuation routing. */
+  readonly channel: TChannel;
+  /** The position of the event's line, and its index in that line. */
+  readonly position: FactPosition;
+  /** Immutable observation snapshot of the whole commit the event is in. */
+  readonly view: SessionView;
 }
 
 /**
- * Channel context passed to event handlers: `TCtx` intersected with
- * {@link ChannelContinuationOps}.
+ * Handles one session event: the fact or progress record, with its `type`, `data`, and `scope`,
+ * and the {@link ChannelEventContext}. Hooks receive the same event.
  */
-type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
-
-type ChannelEventHandler<T extends UnstampedMessageStreamEvent["type"], TCtx> = (
-  data: EventData<T>,
-  channel: ChannelContext<TCtx>,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type ChannelSessionFailedHandler<TCtx> = (
-  data: EventData<"session.failed">,
-  channel: ChannelContext<TCtx>,
+export type ChannelEventHandler<T extends SessionEvent["type"], TCtx = void> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TCtx & ChannelContinuationOps>,
 ) => void | Promise<void>;
 
 /**
- * Optional handlers keyed by session lifecycle event name. Each handler receives
- * the event `data`, the {@link ChannelContext}, and a {@link SessionContext}
- * `ctx`. The `session.failed` handler is the exception: it receives only `data`
- * and the channel context, with no `ctx`; its data includes `sessionId`.
+ * Handles one committed line, once its events' handlers ran: the facts the channel heard, and the
+ * {@link ChannelEventContext} with the session's tables as of the line. For what a channel keeps
+ * in step with the tables, such as a status, a card, or the prompts still open, so it renders
+ * once per change rather than once per event.
  */
-export interface ChannelEvents<TCtx = void> {
-  readonly "approval.candidate"?: ChannelEventHandler<"approval.candidate", TCtx>;
-  readonly "approval.settled"?: ChannelEventHandler<"approval.settled", TCtx>;
-  readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
-  readonly "compaction.requested"?: ChannelEventHandler<"compaction.requested", TCtx>;
-  readonly "compaction.completed"?: ChannelEventHandler<"compaction.completed", TCtx>;
-  readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
-  readonly "actions.requested"?: ChannelEventHandler<"actions.requested", TCtx>;
-  readonly "action.partial"?: ChannelEventHandler<"action.partial", TCtx>;
-  readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
-  readonly "message.completed"?: ChannelEventHandler<"message.completed", TCtx>;
-  readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
-  readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
-  readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
-  readonly "step.started"?: ChannelEventHandler<"step.started", TCtx>;
-  readonly "step.completed"?: ChannelEventHandler<"step.completed", TCtx>;
-  readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
-  readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
-  readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
-  readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
-  readonly "turn.waiting"?: ChannelEventHandler<"turn.waiting", TCtx>;
-  readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
-  readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
-  readonly "turn.cancelled"?: ChannelEventHandler<"turn.cancelled", TCtx>;
-  readonly "session.failed"?: ChannelSessionFailedHandler<TCtx>;
-  readonly "session.completed"?: ChannelEventHandler<"session.completed", TCtx>;
-  readonly "session.waiting"?: ChannelEventHandler<"session.waiting", TCtx>;
-  readonly "authorization.required"?: ChannelEventHandler<"authorization.required", TCtx>;
-  readonly "authorization.completed"?: ChannelEventHandler<"authorization.completed", TCtx>;
-}
+export type ChannelCommitHandler<TCtx = void> = (
+  line: CommittedLine,
+  ctx: ChannelEventContext<TCtx & ChannelContinuationOps>,
+) => void | Promise<void>;
+
+/**
+ * Optional handlers keyed by session event type: the session's facts and the progress records a
+ * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the
+ * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
+ * run after the event is written, so they observe it and never shape it. `committed` runs once
+ * per committed line, after them.
+ */
+export type ChannelEvents<TCtx = void> = {
+  readonly [T in AuthoringEventType]?: ChannelEventHandler<T, TCtx>;
+} & { readonly committed?: ChannelCommitHandler<TCtx> };
 
 /**
  * Input passed to a channel's `receive` callback when another channel or
@@ -246,8 +246,8 @@ export type ReceiveInput<TReceiveTarget = Record<string, unknown>> =
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
- * for `events` and `deliver`, `events` handle session lifecycle, `receive`
+ * seeds durable adapter state, `context` builds the per-step channel context
+ * for `events` (as `ctx.channel`) and `deliver`, `events` handle session lifecycle, `receive`
  * accepts cross-channel handoffs, `fetchFile` stages remote file URLs, and
  * `metadata` projects observability data.
  *
@@ -280,7 +280,7 @@ export interface Channel<
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
-  ) => Promise<Session>;
+  ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;
 }
 
@@ -320,40 +320,7 @@ export function defineChannel<
   return compiled;
 }
 
-// The Record type fails to compile if this map drifts from the ChannelEvents
-// keys in either direction.
-const channelEventTypes: Record<keyof ChannelEvents, null> = {
-  "approval.candidate": null,
-  "approval.settled": null,
-  "context.cleared": null,
-  "compaction.requested": null,
-  "compaction.completed": null,
-  "turn.started": null,
-  "actions.requested": null,
-  "action.partial": null,
-  "action.result": null,
-  "message.completed": null,
-  "message.appended": null,
-  "reasoning.appended": null,
-  "reasoning.completed": null,
-  "step.started": null,
-  "step.completed": null,
-  "input.requested": null,
-  "input.resolved": null,
-  "task.started": null,
-  "task.settled": null,
-  "turn.waiting": null,
-  "turn.failed": null,
-  "turn.completed": null,
-  "turn.cancelled": null,
-  "session.failed": null,
-  "session.completed": null,
-  "session.waiting": null,
-  "authorization.required": null,
-  "authorization.completed": null,
-};
-
-const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];
+const eventTypes = [...authoringEventTypes, "committed"] as const;
 
 function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<string, unknown>>(
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
@@ -366,48 +333,59 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const audience = definition.audience;
   const uploadPolicy =
     definition.uploadPolicy === undefined ? undefined : mergeUploadPolicy(definition.uploadPolicy);
-  const hasBehavior = hasState || hasContext || hasMetadata || uploadPolicy !== undefined;
+  const hasBehavior =
+    hasState ||
+    hasContext ||
+    hasMetadata ||
+    uploadPolicy !== undefined ||
+    definition.deliver !== undefined;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
-  const legacyAudienceSource = {
-    kind: definition.kindHint ?? "defineChannel",
-  };
 
   const events = definition.events;
+  for (const key of Object.keys(events ?? {})) {
+    const removed = removedEventKeyMessage(key);
+    if (removed !== undefined) throw new Error(`A channel handles ${removed}`);
+  }
   for (const eventType of eventTypes) {
     const userHandler = events?.[eventType];
     if (userHandler) {
       hasEventHandlers = true;
-      eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
-        const { session, ...platformContext } = adapterCtx;
+      eventHandlers[eventType] = (event: SessionEvent, adapterCtx: any) => {
+        const {
+          session: _session,
+          continuation: _continuation,
+          position,
+          scope: _scope,
+          view,
+          ...platformContext
+        } = adapterCtx;
         const channel = {
           ...platformContext,
-          continuation:
-            session?.continuation === undefined
-              ? undefined
-              : {
-                  token: session.continuation.token,
-                  alias: (token: string) => session.continuation?.alias(token),
-                },
+          get continuation() {
+            return adapterCtx.continuation;
+          },
         };
-        if (eventType === "session.failed") {
-          return (userHandler as (data: unknown, channel: any) => void | Promise<void>)(
-            data,
-            channel,
-          );
-        }
-        const ctx = buildCallbackContext();
+        const ctx: ChannelEventContext<typeof channel> = {
+          ...buildCallbackContext(),
+          channel,
+          position: position ?? { index: 0, line: 0 },
+          view: snapshotOf(view ?? currentView()),
+        };
         return (
-          userHandler as (data: unknown, channel: any, ctx: SessionContext) => void | Promise<void>
-        )(data, channel, ctx);
+          userHandler as (
+            event: SessionEvent,
+            ctx: ChannelEventContext<typeof channel>,
+          ) => void | Promise<void>
+        )(event, ctx);
       };
     }
   }
 
   if (!hasBehavior && !hasEventHandlers && !hasFetchFile) {
     return {
-      kind: definition.kindHint ?? HTTP_ADAPTER_KIND,
+      kind: HTTP_ADAPTER_KIND,
       ...(audience === undefined
         ? undefined
         : {
@@ -419,7 +397,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   }
 
   const adapter: ChannelAdapter<any> = {
-    kind: definition.kindHint ?? "defineChannel",
+    kind: "defineChannel",
     state: hasState ? { ...(definition.state as Record<string, unknown>) } : {},
     fetchFile: definition.fetchFile,
     uploadPolicy,
@@ -440,35 +418,44 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
                   },
                 }),
             ...(audience === undefined
-              ? metadata !== undefined
-                ? {
-                    audience: createMetadataAudienceProjector(
-                      legacyAudienceSource,
-                      metadata as (state: Record<string, unknown> | undefined) => unknown,
-                    ),
-                  }
-                : undefined
+              ? undefined
               : { audience: audience as ChannelAudienceProjector }),
           },
 
     createAdapterContext(base): any {
       const state = base.state;
-      const session = base.session;
+      const channel: ChannelContext = {
+        session: base.session,
+        get continuation() {
+          return base.continuation;
+        },
+      };
       const channelCtx = hasContext
-        ? (definition.context as (s: any, session: SessionHandle) => any)(state, session)
+        ? (definition.context as (s: any, channel: ChannelContext) => any)(state, channel)
         : {};
 
       return {
         ...channelCtx,
         state,
         ctx: base.ctx,
-        session,
+        session: channel.session,
+        get continuation() {
+          return channel.continuation;
+        },
       };
     },
 
-    deliver(payload: DeliverPayload, adapterCtx) {
-      if (definition.deliver === undefined) return defaultDeliverResult(payload);
-      return definition.deliver(payload, adapterCtx as TCtx);
+    async deliver(payload: DeliverPayload, adapterCtx) {
+      const replacement = await definition.deliver?.(
+        payload as ChannelDelivery<TState>,
+        adapterCtx as TCtx & ChannelContext,
+      );
+      const delivered = defaultDeliverResult(replacement ?? payload);
+      if (delivered === undefined) return undefined;
+      return attachClientContext(
+        attachInputText(delivered, readInputText(payload)),
+        readClientContext(payload),
+      );
     },
 
     ...eventHandlers,

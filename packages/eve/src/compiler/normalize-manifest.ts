@@ -303,7 +303,6 @@ class AgentGraphCompiler {
       }
 
       let config: CompiledAgentDefinition | undefined;
-      let dynamicBuildDependencies: readonly string[] | undefined;
       if (normalized.kind === "local") {
         config = await compileAgentConfig(source.manifest, this.context, {
           binding: phaseOne.selectedConfig.binding,
@@ -313,13 +312,10 @@ class AgentGraphCompiler {
         assertRootOnlyConfig(config, false, source.manifest.agentId);
         applyAgentToolPolicy(phaseOne, config);
         applyDefaultToolPolicy(phaseOne, config);
-      } else {
-        dynamicBuildDependencies = normalized.build?.externalDependencies;
       }
       const externalDependencies = mergeExternalDependencies(
         inheritedExternalDependencies,
         config?.build?.externalDependencies,
-        dynamicBuildDependencies,
         source.manifest.resolvedExtensions.flatMap((mount) => mount.externalDependencies),
       );
       if (config !== undefined && externalDependencies.length > 0) {
@@ -354,8 +350,6 @@ class AgentGraphCompiler {
             remoteAgents: children.remoteAgents,
           }),
           configResolver: {
-            build: normalized.kind === "dynamic" ? normalized.build : undefined,
-            eventNames: normalized.kind === "dynamic" ? normalized.eventNames : [],
             exportName: phaseOne.selectedConfig.source.exportName,
             logicalPath: phaseOne.selectedConfig.source.logicalPath,
             sourceId: phaseOne.selectedConfig.source.sourceId,

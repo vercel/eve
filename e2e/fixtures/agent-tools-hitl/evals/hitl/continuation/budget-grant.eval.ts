@@ -17,21 +17,21 @@ export default defineEval({
     requestFrom(first, "change-a");
     const session = first.session;
     const limited = await session.send("Read the draft status using the remaining budget.");
-    const budget = requestFrom(limited, "session_limit_continuation");
+    const budget = requestFrom(limited, "budget");
 
     // When the user grants another budget window.
     const live = await session.startRespond([
-      { requestId: budget.requestId, optionId: "continue" },
+      { interactionId: budget.interactionId, optionId: "approve" },
     ]);
 
     // Then the read executes and a new budget request appears; A stays unexecuted.
     await expectToolResult(t, live, "read-draft");
     const next = (await live.result()).expectOk();
-    const nextBudget = requestFrom(next, "session_limit_continuation");
-    await t.check(nextBudget.requestId === budget.requestId, equals(false));
+    const nextBudget = requestFrom(next, "budget");
+    await t.check(nextBudget.interactionId === budget.interactionId, equals(false));
     next.calledTool("read-draft", { status: "completed", count: 1 });
-    next.notEvent("message.completed");
+    next.notEvent("content.completed", { data: { kind: "text", phase: "reply" } });
     expectChangeStillUnexecuted(session);
-    await session.respond([{ requestId: nextBudget.requestId, optionId: "stop" }]);
+    await session.respond([{ interactionId: nextBudget.interactionId, optionId: "deny" }]);
   },
 });

@@ -51,11 +51,11 @@ describe("createConnectionSession", () => {
     expect(session.resolvePath("notes/todo.txt")).toBe("/workspace/notes/todo.txt");
     expect([...files.keys()]).toEqual(["/workspace/notes/a.txt", "/tmp/b.bin"]);
     expect(connection.spawn.mock.calls).toEqual([
-      [{ abortSignal: undefined, command: "ls", env: {}, workingDirectory: "/workspace/src" }],
-      [{ abortSignal: undefined, command: "pwd", env: {}, workingDirectory: "/workspace" }],
+      [{ signal: undefined, command: "ls", env: {}, workingDirectory: "/workspace/src" }],
+      [{ signal: undefined, command: "pwd", env: {}, workingDirectory: "/workspace" }],
     ]);
     expect(connection.removePath).toHaveBeenCalledWith({
-      abortSignal: undefined,
+      signal: undefined,
       force: true,
       path: "/tmp/x",
       recursive: true,

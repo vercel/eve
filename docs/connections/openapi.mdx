@@ -18,7 +18,7 @@ export default defineOpenAPIConnection({
   spec: "https://petstore3.swagger.io/api/v3/openapi.json",
   description: "Pet store inventory and orders.",
   auth: {
-    credentialOwner: "app",
+    principalType: "app",
     getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }),
   },
 });
@@ -108,7 +108,7 @@ export default defineOpenAPIConnection({
   spec: "https://petstore3.swagger.io/api/v3/openapi.json",
   description: "Pet store inventory and orders.",
   auth: {
-    credentialOwner: "app",
+    principalType: "app",
     getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }),
   },
   operations: { allow: ["getInventory", "placeOrder"] },

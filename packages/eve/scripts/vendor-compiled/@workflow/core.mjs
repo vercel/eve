@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 
 import {
   buildOpaqueTypesStub,
@@ -196,5 +197,14 @@ export default {
       outputPath: "private",
     },
   ],
-  copyDeclarations,
+  async copyDeclarations(context) {
+    await copyDeclarations(context);
+    // Workflow runs in Node, where Request.duplex is always "half". DOM's
+    // Request type deliberately lacks that Node-only property; do not augment it.
+    for (const path of await collectFilesRecursively(context.destinationRoot, [".d.ts"])) {
+      const source = await readFile(path, "utf8");
+      const portable = source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"');
+      if (source !== portable) await writeFile(path, portable);
+    }
+  },
 };

@@ -5,7 +5,7 @@ description: "Ask your agent to update its own authored files during local devel
 
 When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve remote connect --url <url>` does not add the bundled extension to that server.
 
-The bundled extension is `eve/self-modification/local`. It is for local development and is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/self-modification/remote`](#propose-changes-from-a-deployed-agent) extension.
+The bundled extension is `eve/extensions/self-modification/local`. It is for local development and is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/extensions/self-modification/remote`](#propose-changes-from-a-deployed-agent) extension.
 
 ```bash
 eve dev
@@ -31,7 +31,7 @@ The first time, this creates `agent/extensions/self-modification/extension.ts` w
 
 ```ts
 // agent/extensions/self-modification/extension.ts
-import selfModification from "eve/self-modification/local";
+import selfModification from "eve/extensions/self-modification/local";
 
 export default selfModification({
   model: "openai/gpt-6-sol",
@@ -39,17 +39,17 @@ export default selfModification({
 });
 ```
 
-Mounts that import `eve/self-modification` still work; that specifier is an alias for `eve/self-modification/local`. Neither specifier accepts a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/self-modification/remote` mount.
+The bare `eve/self-modification` entry is removed. Mount `eve/extensions/self-modification/local` for development or `eve/extensions/self-modification/remote` for deployed source changes. The local mount does not accept a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/extensions/self-modification/remote` mount.
 
 ## Propose changes from a deployed agent
 
-`eve/self-modification/remote` is a separate extension for deployed agents. It adds a subagent that checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment. Changes take effect only after you review, merge, and redeploy.
+`eve/extensions/self-modification/remote` is a separate extension for deployed agents. It adds a subagent that checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment. Changes take effect only after you review, merge, and redeploy.
 
 Mount it under its own namespace so it does not replace the local extension:
 
 ```ts
 // agent/extensions/self-modification-remote/extension.ts
-import selfModification from "eve/self-modification/remote";
+import selfModification from "eve/extensions/self-modification/remote";
 
 export default selfModification({
   source: {
@@ -61,7 +61,7 @@ export default selfModification({
   target: { branch: "main" },
   credentials: { pat: true },
   authorize: ({ channel, principal }) =>
-    channel.kind === "http" && principal?.principalId === "release-bot",
+    channel.kind === "channel:eve" && principal?.principalId === "release-bot",
 });
 ```
 
@@ -74,7 +74,7 @@ export default selfModification({
 | `credentials`           | Required. An object with a `resolve({ capability, repository })` function that returns a GitHub token, or `{ pat: true }` to read `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from the deployment environment. |
 | `model`, `reasoning`    | Optional model and reasoning level for the deployed subagent. It defaults to the parent agent's model.                                                                                                  |
 
-The deployed subagent is never offered during `eve dev`. It requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Builds succeed on any host, but in a deployment outside Vercel the deployed subagent fails with an error that names this requirement when it opens its sandbox. Don't mount `eve/self-modification/remote` in self-hosted deployments. eve applies the GitHub token as a sandbox network credential only while it checks out or publishes, so commands in the sandbox cannot read it.
+The deployed subagent is never offered during `eve dev`. It requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Builds succeed on any host, but in a deployment outside Vercel the deployed subagent fails with an error that names this requirement when it opens its sandbox. Don't mount `eve/extensions/self-modification/remote` in self-hosted deployments. eve applies the GitHub token as a sandbox network credential only while it checks out or publishes, so commands in the sandbox cannot read it.
 
 ## Run without self-modification
 

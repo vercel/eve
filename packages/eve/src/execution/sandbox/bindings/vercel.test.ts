@@ -1555,7 +1555,12 @@ describe("createVercelSandbox", () => {
     const abortSignal = new AbortController().signal;
 
     await expect(
-      provider.endSession({ ...session, abortSignal, reason: "deleted", state: handle.state }),
+      provider.endSession({
+        ...session,
+        signal: abortSignal,
+        reason: "deleted",
+        state: handle.state,
+      }),
     ).resolves.toBeUndefined();
 
     expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(

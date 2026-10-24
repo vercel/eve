@@ -2,15 +2,13 @@ import type { LanguageModel } from "ai";
 import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
-import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
-import type { RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import {
   resolveRuntimeModelReference,
@@ -18,7 +16,6 @@ import {
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
@@ -63,19 +60,14 @@ interface CreateExecutionNodeStepInput {
   readonly clearOnly?: boolean;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
+  readonly controlDelivery?: ToolLoopHarnessConfig["controlDelivery"];
   /**
    * Runtime constructor used by the subagent tool executor to start
    * delegated child runs on the same workflow runtime as the parent.
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
-  readonly prepareApprovalTurn?: (event: {
-    readonly sequence: number;
-    readonly turnId: string;
-  }) => Promise<void>;
   readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
-  readonly historyProjector?: HistoryViewProjector;
-  readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
@@ -89,14 +81,6 @@ interface CreateExecutionNodeStepInput {
  */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
-  const dispatchModelEvent =
-    input.node.turnAgent.dynamicModel === undefined
-      ? undefined
-      : createRuntimeDynamicModelEventDispatcher(
-          input.modelResolutionScope,
-          input.node.turnAgent.dynamicModel,
-          input.abortSignal,
-        );
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
@@ -106,18 +90,10 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
+    controlDelivery: input.controlDelivery,
     handleEvent: input.handleEvent,
-    historyProjector: input.historyProjector,
-    historyView: input.historyView,
     instrumentation: sessionInstrumentation,
-    prepareApprovalTurn: input.prepareApprovalTurn,
     signInCompletions: input.signInCompletions,
-    resolveStepDynamicTools: (resolveInput) =>
-      preparePersistedStepDynamicToolMetadata({
-        ...resolveInput,
-        resolvers: input.node.agent.dynamicToolResolvers ?? [],
-      }),
-    dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     sessionUsageLimit: input.sessionUsageLimit,
@@ -169,22 +145,6 @@ function createRuntimeModelResolver(
   scope: RuntimeModelResolutionScope,
 ): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<LanguageModel> {
   return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
-}
-
-function createRuntimeDynamicModelEventDispatcher(
-  scope: RuntimeModelResolutionScope,
-  dynamicModel: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["dynamicModel"]>,
-  abortSignal: AbortSignal | undefined,
-): NonNullable<Parameters<typeof createToolLoopHarness>[0]["dispatchDynamicModelEvent"]> {
-  return (input) =>
-    dispatchDynamicModelEvent({
-      abortSignal,
-      ctx: input.ctx,
-      dynamicModel,
-      event: input.event,
-      messages: input.messages,
-      scope,
-    });
 }
 
 /**
@@ -266,7 +226,6 @@ function createRegisteredHarnessToolDefinition(input: {
       (def.owner.kind === "framework" && def.name === WEB_SEARCH_TOOL_NAME
         ? { start: resolveWebSearchActivityLabel }
         : undefined),
-    approvalKey: def.approvalKey,
     behavior: input.behavior,
     deferred: def.deferred,
     description: def.description,

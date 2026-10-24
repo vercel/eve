@@ -123,7 +123,7 @@ eve does not append the sentence for a function, because whether the call ends t
 
 The turn ends only when every tool call in the model's step can end the turn and succeeds, and every `endsTurn` function returns `true`. Otherwise the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
 
-eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there, and eve does not call an `endsTurn` function. `defineWorkflowTool` rejects `endsTurn` at build time. Dynamic tool entries accept `endsTurn` too, including a function. eve replays the function from a durable descriptor, as it does `execute`. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there, and eve does not call an `endsTurn` function. `defineWorkflowTool` rejects `endsTurn` at build time. Dynamic tool entries accept `endsTurn` too, including a function. The session records only `endsTurn: true`; eve calls a function on the tool the dynamic function returns, so a fresh process rebuilds it with ordinary code. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Label tool activity
 
@@ -174,7 +174,7 @@ export default defineTool({
 });
 ```
 
-eve publishes earlier yields as `action.partial` stream events. When the durable
+eve publishes earlier yields as `call.progress` stream records. When the durable
 writer is busy, eve may keep only the newest adjacent snapshot for a call. The
 snapshot is visible to channels, hooks, and clients but never enters model
 history or `toModelOutput`; only the final yield does. Treat snapshots as
@@ -193,7 +193,7 @@ action complete.
 eve normalizes and bounds projected text before rendering it. If either
 callback throws or returns an empty string, eve keeps the existing activity
 label. `label.complete` does not run for failed or rejected tool calls. The
-full values remain available in `action.partial` and `action.result`; renderers
+full values remain available in `call.progress` and `call.settled`; renderers
 receive only the projected text.
 
 ### Durable waits
@@ -229,10 +229,10 @@ answer from the human.
 It does not by itself create a durable wait for a person, timer, or external event. The value's
 meaning depends on the executor:
 
-| Executor             | Ordinary `yield value`                                                                  | Final output                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `defineTool`         | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                  |
-| `defineWorkflowTool` | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`. |
+| Executor             | Ordinary `yield value`                                                                 | Final output                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `defineTool`         | Earlier values are `call.progress` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                  |
+| `defineWorkflowTool` | Every yield is a `call.progress` snapshot.                                             | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`. |
 
 Progress snapshots do not enter model history as intermediate tool results. The final output
 selected by the rules above becomes the tool result.
@@ -251,19 +251,21 @@ examples.
 - `ctx.session`: session metadata, turn, auth, parent lineage.
 - `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
 - `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
-- `ctx.messages`: the model input for the step that requested this call, the same messages a `step.started` [dynamic resolver](/docs/guides/dynamic-capabilities) reads.
+- `ctx.messages`: the model input for the step that requested this call, the same messages a [dynamic capability's](/docs/guides/dynamic-capabilities) `ctx.messages()` returns before that call.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
-eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
+eve never runs authored tools during discovery. The model sees descriptors first, and only what it calls gets executed. Completed steps replay their recorded result. An interrupted step runs again from its checkpoint, but a call it already started does not run again: the model reads that the call may have taken effect, and decides whether to call it again.
+
+Use operation-specific idempotency keys for external writes such as charges or emails. Approval records consent; it does not deduplicate an operation. See [Crash recovery](/docs/concepts/execution-model-and-durability#resuming-after-a-crash).
 
 ## When a tool throws
 
-If an authored tool's `execute` function throws, eve records a failed `action.result` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
+If an authored tool's `execute` function throws, eve records the call as `call.settled` with `outcome: "failed"` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
 
-Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: an interruption before the durable step completes can re-run the step and execute the tool again even if the first request reached the upstream service.
+Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: the model can issue a fresh call, and authored workflow steps have their own durable retries. A tool-call ID does not deduplicate an application operation across fresh calls.
 
 Protect non-idempotent operations with the strongest mechanism the service supports:
 
@@ -304,7 +306,7 @@ toModelOutput(output) {
 },
 ```
 
-`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `call.settled`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 

@@ -18,7 +18,7 @@ export default defineEval({
   description: "Session runtime smoke: onMessage replaces a turn's client context.",
 
   async test(t) {
-    const reply = await t.send(
+    const turn = await t.send(
       "Reply with every token beginning with clientctx- or serverctx- that is visible anywhere in your model input, one per line, and nothing else.",
       {
         clientContext: [
@@ -29,7 +29,7 @@ export default defineEval({
     );
 
     t.succeeded();
-    const tokens = reply.message?.match(CONTEXT_TOKEN_PATTERN) ?? [];
+    const tokens = turn.reply?.match(CONTEXT_TOKEN_PATTERN) ?? [];
     await t.require(
       tokens,
       satisfies<readonly string[]>(

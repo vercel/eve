@@ -1,9 +1,9 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { InvokeToolFn } from "#channel/invoke-tool.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
@@ -61,9 +61,9 @@ export interface RouteHandlerArgs<TState = undefined> {
 }
 
 export interface SendPayload {
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
   readonly [key: string]: unknown;
-  readonly inputResponses?: readonly InputResponse[];
+  readonly answers?: readonly Answer[];
   /**
    * Context strings contributed by the channel. eve appends each entry
    * as a `role: "user"` message to `session.history` before the delivery

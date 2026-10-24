@@ -27,7 +27,7 @@ export function resolveDevelopmentStateDirectory(appRoot: string): string {
   return resolve(appRoot, override);
 }
 
-type InstrumentationEnvironment = "development" | "preview" | "production";
+type ConversationEnvironment = "development" | "preview" | "production";
 
 /** Reports whether this process belongs to an `eve dev` session. */
 export function isEveDevEnvironment(): boolean {
@@ -35,7 +35,7 @@ export function isEveDevEnvironment(): boolean {
 }
 
 /** Resolves the deployment environment used by setup hooks and trace policies. */
-export function resolveInstrumentationEnvironment(): InstrumentationEnvironment {
+export function resolveInstrumentationEnvironment(): ConversationEnvironment {
   if (isEveDevEnvironment() || process.env.VERCEL_ENV === "development") return "development";
   return process.env.VERCEL_ENV === "preview" ? "preview" : "production";
 }

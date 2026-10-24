@@ -193,6 +193,11 @@ export async function* confirmDeployWorkflow(
   return { approved, service: input.service };
 }
 
+export async function waitingForCleanupWorkflow(): Promise<void> {
+  "use workflow";
+  await workflowSleep("1h");
+}
+
 export async function answerWithResponderWorkflow(
   _input: DeployInput,
   ctx: WorkflowToolContext,

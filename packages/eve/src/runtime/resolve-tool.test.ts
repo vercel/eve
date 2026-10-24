@@ -3,10 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { ToolResultSource } from "#public/tools/result.js";
 import { defineTool } from "#tools/definition.js";
 import { sleep } from "#tools/provided/sleep.js";
 import { noReply } from "#tools/provided/no-reply.js";
@@ -37,8 +36,8 @@ function moduleMap(value: unknown): CompiledModuleMap {
 
 describe("resolveToolDefinition", () => {
   it.each([
-    { tool: sleep(), action: "sleep", workflow: true },
-    { tool: noReply(), action: "no_reply", workflow: false },
+    { tool: sleep, action: "sleep", workflow: true },
+    { tool: noReply, action: "no_reply", workflow: false },
   ])(
     "marks $action after an author spreads and renames the provided definition",
     async ({ tool, workflow }) => {
@@ -83,38 +82,6 @@ describe("resolveToolDefinition", () => {
   });
 });
 
-describe("authored tool approval keys", () => {
-  it("validates and reattaches the scoped key callback", async () => {
-    const authored = defineTool({
-      description: "Scoped write",
-      inputSchema: { type: "object" },
-      approvalKey: (input) => `write:${input.scope}`,
-      execute: () => null,
-    });
-    expect(normalizeToolDefinition(authored, "Invalid tool").kind).toBe("tool");
-    const resolved = await resolveToolDefinition(
-      {
-        description: authored.description,
-        name: "write",
-        inputSchema: { type: "object" },
-        logicalPath: "tools/write.ts",
-        sourceId: "tools/write.ts",
-        sourceKind: "module",
-        hasExecute: true,
-        requiresApproval: false,
-        hasModelOutputProjection: false,
-      },
-      { nodes: { __root__: { modules: { "tools/write.ts": { default: authored } } } } },
-      undefined,
-      { kind: "application" },
-    );
-    expect(resolved.approvalKey?.({ scope: "repo" })).toBe("write:repo");
-    expect(() =>
-      normalizeToolDefinition({ ...authored, approvalKey: "invalid" }, "Invalid tool"),
-    ).toThrow();
-  });
-});
-
 describe("toolResultFrom identity for resolved tools", () => {
   it("matches every name one shared definition is mounted under without warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -147,6 +114,12 @@ describe("toolResultFrom identity for resolved tools", () => {
   });
 });
 
-function toolResult(toolName: string): RuntimeActionResult {
-  return { callId: "call_1", kind: "tool-result", output: null, toolName };
+function toolResult(toolName: string): ToolResultSource {
+  return {
+    callId: "call_1",
+    kind: "tool",
+    name: toolName,
+    state: "completed",
+    output: null,
+  };
 }

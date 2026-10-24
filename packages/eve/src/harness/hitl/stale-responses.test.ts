@@ -1,43 +1,72 @@
 import { expect, it } from "vitest";
 
-import type { InputRequest } from "#shared/input.js";
+import { tablesOf } from "#internal/testing/session-machine.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/hitl/stale-responses.js";
 
-/** Requests the session still knows, closed ones included. */
-const knownApproval = new Map<string, InputRequest>([
-  [
-    "approval-1",
-    {
-      action: {
-        callId: "call-1",
-        input: { command: "deploy --force" },
-        kind: "tool-call",
-        toolName: "bash",
-      },
-      kind: "tool-approval",
-      options: [
-        { id: "approve", label: "Approve" },
-        { id: "cancel", label: "Cancel" },
-      ],
-      prompt: "Approve tool call: bash",
-      requestId: "approval-1",
+/** The tables of a session that asked to approve a call, which closed. */
+const knownApproval = tablesOf([
+  { data: {}, type: "session.started" },
+  {
+    data: { cause: { deliveryId: "d0" }, follows: null, turnId: "turn_0" },
+    type: "turn.started",
+  },
+  {
+    data: { owner: { turnId: "turn_0" }, runId: "run_0" },
+    scope: { turnId: "turn_0" },
+    type: "model.requested",
+  },
+  {
+    data: {
+      callId: "call-1",
+      capability: { kind: "tool", name: "bash" },
+      input: { command: "deploy --force" },
+      owner: { runId: "run_0" },
     },
-  ],
-]);
+    scope: { turnId: "turn_0" },
+    type: "call.requested",
+  },
+  {
+    data: {
+      interactionId: "approval-1",
+      request: {
+        kind: "approval",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
+        ],
+        prompt: "Approve tool call: bash",
+      },
+      subject: { callId: "call-1" },
+    },
+    scope: { turnId: "turn_0" },
+    type: "interaction.opened",
+  },
+] as SessionEvent[]);
+
+/** An answer as the session received it, from one delivery. */
+function submitted(interactionId: string, optionId: string) {
+  return {
+    deliveryId: "delivery-1",
+    interactionId,
+    optionId,
+    responseId: `response-${interactionId}`,
+  };
+}
 
 /** The session no longer knows the request a response answers. */
-const unknown = new Map<string, InputRequest>();
+const unknown = tablesOf([]);
 
 it("converts a stale approval into a non-authorizing user message", () => {
   const result = convertStaleResponsesToUserMessage({
-    requests: knownApproval,
+    view: knownApproval,
     pendingRequestIds: new Set(),
     stepInput: {
-      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+      answers: [submitted("approval-1", "approve")],
     },
   });
 
@@ -47,7 +76,7 @@ it("converts a stale approval into a non-authorizing user message", () => {
   }
 
   expect(result.displayMessage).toBe("Approve");
-  expect(result.stepInput.inputResponses).toBeUndefined();
+  expect(result.stepInput.answers).toBeUndefined();
   expect(result.stepInput.message).toEqual(
     expect.stringContaining('"prompt": "Approve tool call: bash"'),
   );
@@ -60,18 +89,18 @@ it("converts a stale approval into a non-authorizing user message", () => {
 
 it("converts an attributed stale approval using its option label", () => {
   const result = convertStaleResponsesToUserMessage({
-    requests: knownApproval,
+    view: knownApproval,
     pendingRequestIds: new Set(),
     stepInput: {
-      attributedInputResponses: [
+      answers: [
         {
-          auth: {
+          ...submitted("approval-1", "approve"),
+          responder: {
             attributes: {},
             authenticator: "test",
             principalId: "user-1",
             principalType: "user",
           },
-          response: { optionId: "approve", requestId: "approval-1" },
         },
       ],
     },
@@ -83,19 +112,16 @@ it("converts an attributed stale approval using its option label", () => {
   }
 
   expect(result.displayMessage).toBe("Approve");
-  expect(result.stepInput.attributedInputResponses).toBeUndefined();
+  expect(result.stepInput.answers).toBeUndefined();
   expect(result.stepInput.message).toEqual(expect.stringContaining('"requestType": "approval"'));
 });
 
 it("keeps responses for pending requests structured while converting stale ones", () => {
   const result = convertStaleResponsesToUserMessage({
-    requests: unknown,
+    view: unknown,
     pendingRequestIds: new Set(["question-2"]),
     stepInput: {
-      inputResponses: [
-        { optionId: "alpha", requestId: "question-2" },
-        { optionId: "candidate", requestId: "question-1" },
-      ],
+      answers: [submitted("question-2", "alpha"), submitted("question-1", "candidate")],
     },
   });
 
@@ -104,17 +130,17 @@ it("keeps responses for pending requests structured while converting stale ones"
     throw new Error("Expected the stale response to be converted.");
   }
 
-  expect(result.stepInput.inputResponses).toEqual([{ optionId: "alpha", requestId: "question-2" }]);
+  expect(result.stepInput.answers).toEqual([submitted("question-2", "alpha")]);
   expect(result.stepInput.message).toEqual(expect.stringContaining("question-1"));
   expect(result.stepInput.message).not.toEqual(expect.stringContaining("question-2"));
 });
 
 it("keeps the non-authorization notice when request metadata is missing", () => {
   const result = convertStaleResponsesToUserMessage({
-    requests: unknown,
+    view: unknown,
     pendingRequestIds: new Set(),
     stepInput: {
-      inputResponses: [{ optionId: "approve", requestId: "approval-gone" }],
+      answers: [submitted("approval-gone", "approve")],
     },
   });
 
@@ -132,10 +158,10 @@ it("keeps the non-authorization notice when request metadata is missing", () => 
 
 it("returns unchanged when every response matches the pending batch", () => {
   const stepInput = {
-    inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    answers: [submitted("approval-1", "approve")],
   };
   const result = convertStaleResponsesToUserMessage({
-    requests: knownApproval,
+    view: knownApproval,
     pendingRequestIds: new Set(["approval-1"]),
     stepInput,
   });
@@ -148,14 +174,14 @@ it("drops a stale session-limit continuation answer and keeps the rest of the in
   const stepInput = dropStaleSessionLimitContinuationResponses({
     pendingRequestIds: new Set(),
     stepInput: {
-      inputResponses: [{ optionId: "stop", requestId: "sess-1:0:limit:input:12" }],
+      answers: [submitted("sess-1:0:limit:input:12", "deny")],
       message: "also do this",
     },
   });
 
   // Nothing model-visible: a stale "Stop" must not read as prose, and a
   // stale grant must not extend any budget.
-  expect(stepInput?.inputResponses).toBeUndefined();
+  expect(stepInput?.answers).toBeUndefined();
   expect(stepInput?.message).toBe("also do this");
 });
 
@@ -163,25 +189,25 @@ it("keeps pending and non-continuation responses while dropping stale continuati
   const stepInput = dropStaleSessionLimitContinuationResponses({
     pendingRequestIds: new Set(["question-1", "sess-1:0:limit:input:20"]),
     stepInput: {
-      inputResponses: [
-        { optionId: "candidate", requestId: "question-1" },
-        { optionId: "continue", requestId: "sess-1:0:limit:input:12" },
-        { optionId: "stop", requestId: "sess-1:0:limit:input:20" },
+      answers: [
+        submitted("question-1", "candidate"),
+        submitted("sess-1:0:limit:input:12", "approve"),
+        submitted("sess-1:0:limit:input:20", "deny"),
       ],
     },
   });
 
   // The stale grant is dropped; the pending question answer and the answer
   // to the currently pending continuation prompt pass through.
-  expect(stepInput?.inputResponses).toEqual([
-    { optionId: "candidate", requestId: "question-1" },
-    { optionId: "stop", requestId: "sess-1:0:limit:input:20" },
+  expect(stepInput?.answers).toEqual([
+    submitted("question-1", "candidate"),
+    submitted("sess-1:0:limit:input:20", "deny"),
   ]);
 });
 
 it("returns the input unchanged when nothing is dropped", () => {
   const stepInput = {
-    inputResponses: [{ optionId: "candidate", requestId: "question-1" }],
+    answers: [submitted("question-1", "candidate")],
   };
 
   expect(
@@ -197,14 +223,11 @@ it("converts remaining stale responses after the drop pass", () => {
   const stepInput = dropStaleSessionLimitContinuationResponses({
     pendingRequestIds,
     stepInput: {
-      inputResponses: [
-        { optionId: "candidate", requestId: "question-1" },
-        { optionId: "stop", requestId: "sess-1:0:limit:input:12" },
-      ],
+      answers: [submitted("question-1", "candidate"), submitted("sess-1:0:limit:input:12", "deny")],
     },
   });
   const result = convertStaleResponsesToUserMessage({
-    requests: unknown,
+    view: unknown,
     pendingRequestIds,
     stepInput,
   });
@@ -214,7 +237,7 @@ it("converts remaining stale responses after the drop pass", () => {
     throw new Error("Expected the stale response to be converted.");
   }
 
-  expect(result.stepInput.inputResponses).toBeUndefined();
+  expect(result.stepInput.answers).toBeUndefined();
   expect(result.stepInput.message).toEqual(expect.stringContaining("question-1"));
   expect(result.stepInput.message).not.toEqual(expect.stringContaining("limit:input"));
 });

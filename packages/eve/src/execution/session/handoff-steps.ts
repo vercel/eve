@@ -1,9 +1,4 @@
-import {
-  EntityConflictError,
-  HookNotFoundError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
@@ -20,8 +15,8 @@ import {
   type SessionCheckpoint,
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
-import { createLogger, logError } from "#internal/logging.js";
-import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { createLogger } from "#internal/logging.js";
+import { getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
   hasRunEnded,
   startWorkflowOnDeployment,
@@ -46,7 +41,6 @@ import {
 } from "#sandbox/state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import { walkCauseChain } from "#shared/errors.js";
 
 const log = createLogger("execution.handoff");
 
@@ -218,37 +212,6 @@ async function holdsEveryAddress(source: {
     findSessionHookHolder(sessionInboxHookToken(token)),
   );
   return holders.every((holder) => holder?.runId === source.runId);
-}
-
-/**
- * Stops idle subagent sessions an older owner kept resumable, after this owner
- * activates. Best effort: a child that cannot be stopped ends at its own timeout.
- */
-export async function stopUntrackedChildSessionsStep(input: {
-  readonly runIds: readonly string[];
-  readonly sessionId: string;
-}): Promise<void> {
-  "use step";
-  const world = await getWorld();
-  for (const runId of input.runIds) {
-    if (runId === input.sessionId) continue;
-    try {
-      await cancelRun(world, runId, { cancelReason: "Session upgraded" });
-    } catch (error) {
-      const settled = [...walkCauseChain(error)].some(
-        (cause) =>
-          EntityConflictError.is(cause) ||
-          RunExpiredError.is(cause) ||
-          WorkflowRunNotFoundError.is(cause),
-      );
-      if (!settled) {
-        logError(log, "could not stop a subagent session after handoff", error, {
-          childRunId: runId,
-          sessionId: input.sessionId,
-        });
-      }
-    }
-  }
 }
 
 /** Records why the owner kept a session it tried to move, so a stuck handoff is visible. */

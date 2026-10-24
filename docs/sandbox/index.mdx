@@ -168,6 +168,10 @@ To run sandboxes on a backend eve does not ship, define a provider with `defineS
 | [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
 | [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
 
+For SDK-specific just-bash commands or filesystem factories, use `JustBashSandbox.environment()`
+from `eve/sandbox/just-bash`. `DefaultSandbox` keeps only `autoInstall` and `prepare` for its
+just-bash fallback, so importing the default provider does not require that optional SDK's types.
+
 ## Lifecycle
 
 Session-owned sandboxes persist across turns and deployments while their provider state remains available. `sandbox.stop()` stops compute without deleting persisted state; a later access resumes that state directly. `sandbox.delete()` deletes the sandbox and clears provider state, so the next `ctx.getSandbox()` reruns the selector, and the provider starts a fresh sandbox under the same session key from the current environment. If the native sandbox is gone when a session resumes, for example after a local daemon restart, a removed container, or a deleted just-bash session directory, eve does the same: the session continues in a fresh sandbox, without the lost sandbox's files. eve also starts a fresh sandbox when the recorded state belongs to another provider or state protocol than the current environment, for example after you change providers; the old sandbox is not deleted. When the durable session reaches a terminal outcome, eve calls the provider's `onSessionEnd()` hook to delete what remains under the session's key.

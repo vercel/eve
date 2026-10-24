@@ -1,3 +1,4 @@
+import type { MessageContent } from "#shared/message-content.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
 import type { JsonObject } from "#shared/json.js";
@@ -145,8 +146,8 @@ export function buildSubagentRunInput(input: {
 function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentDispatchRequest, "input" | "subagentName">;
   readonly source: SubagentInputSource;
-}): string {
-  const { message } = input.action.input as { message: string };
+}): MessageContent<string | URL> {
+  const { message } = input.action.input as { message: MessageContent<string | URL> };
 
   switch (input.source.type) {
     case "local":

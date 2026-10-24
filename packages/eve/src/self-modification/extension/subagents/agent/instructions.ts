@@ -35,27 +35,23 @@ Only when the requester explicitly names the self-modification subagent, edit wh
 \`\`\`ts
 ${renderLocalSelfModificationExtension()}\`\`\``;
 
-export default defineDynamic({
-  events: {
-    "session.started": () => {
-      if (!isLocalSelfModificationEnabled(resolveSelfModificationConfig(selfModification.config))) {
-        return null;
-      }
+export default defineDynamic(() => {
+  if (!isLocalSelfModificationEnabled(resolveSelfModificationConfig(selfModification.config))) {
+    return null;
+  }
 
-      return defineInstructions({
-        markdown: renderInstructions([
-          roleInstructions,
-          sourceWorkspaceInstructions,
-          sourceEditingInstructions,
-          toolAuthoringInstructions,
-          registryWorkflowInstructions,
-          documentationInstructions,
-          localGuidance,
-          workingInstructions,
-          selfModificationSubagentGuidance,
-          localReportingGuidance,
-        ]),
-      });
-    },
-  },
+  return defineInstructions({
+    content: renderInstructions([
+      roleInstructions,
+      sourceWorkspaceInstructions,
+      sourceEditingInstructions,
+      toolAuthoringInstructions,
+      registryWorkflowInstructions,
+      documentationInstructions,
+      localGuidance,
+      workingInstructions,
+      selfModificationSubagentGuidance,
+      localReportingGuidance,
+    ]),
+  });
 });

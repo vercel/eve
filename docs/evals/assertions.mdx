@@ -12,22 +12,22 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | Assertion                                             | Asserts                                                                       |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `t.succeeded()`                                       | The run did not fail and did not park on unanswered HITL input                |
-| `t.parked()`                                          | The run cleanly parked on HITL input                                          |
+| `t.awaitingInput()`                                   | The run cleanly parked on HITL input                                          |
 | `t.messageIncludes(token)`                            | Joined assistant text contains `token` (string or RegExp)                     |
 | `turn.outputEquals(value)` / `.outputMatches(schema)` | Deep equality or Standard Schema validation of turn/session structured output |
 | `t.calledTool(name, opts?)`                           | A matching tool call completed (`input`, `output`, `status`, `count`)         |
-| `t.loadedSkill(skill, opts?)`                         | A load of `skill` completed (`output`, `status`, `count`)                     |
+| `t.calledSkill(skill, opts?)`                         | A load of `skill` completed (`output`, `status`, `count`)                     |
 | `t.notCalledTool(name)`                               | No request for `name` in any lifecycle state                                  |
 | `t.toolOrder([...names])`                             | Tool requests appear in order                                                 |
 | `t.usedNoTools()`                                     | No tool calls at all; skill loads don't count                                 |
 | `t.maxToolCalls(n)`                                   | At most `n` tool calls; skill loads don't count                               |
-| `t.noFailedActions()`                                 | No tool, subagent, or skill action reported a failure                         |
-| `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (identity, remote, output, status, count)      |
+| `t.noFailedCalls()`                                   | No tool, subagent, or skill action reported a failure                         |
+| `t.calledAgent(name, opts?)`                          | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
 | `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
 | `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                       |
 
-`succeeded()` accepts both a closed session and a healthy session left open for the next user message; it rejects protocol failures and unanswered HITL. `parked()` requires a clean HITL park. Structured output assertions live on turns and independent sessions, where the output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
+`succeeded()` accepts both a closed session and a healthy session left open for the next user message; it rejects protocol failures and unanswered HITL. `awaitingInput()` requires a clean HITL park. Structured output assertions live on turns and independent sessions, where the output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
 
 ```ts
 await t.send("What is the weather in Brooklyn?");
@@ -41,7 +41,8 @@ The same vocabulary narrows naturally in multi-turn and externally-created sessi
 const first = await t.send("Call get_weather for Brooklyn");
 first.calledTool("get_weather", { count: 1 });
 
-const attached = await t.target.attachSession(sessionId);
+const attached = t.target.attach(sessionId);
+await attached.nextTurn();
 attached.succeeded();
 attached.messageIncludes("Sunny");
 ```
@@ -132,11 +133,11 @@ The same entries land in the [run artifacts](./running#artifacts) under `.eve/ev
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledAgent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"pending"`, `"completed"`, `"failed"`, `"rejected"`, `"interrupted"`, and `"abandoned"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
-A subagent call is a task call: it stays `working` until its `task.settled` event arrives, then takes that event's `status` (`completed`, `failed`, or `cancelled`) and, when completed, its `output`. A completed call leaves the child session available for later calls with the same `taskId`.
+A subagent call is a task call: it stays `pending` until its `call.settled` arrives, then takes that call's outcome and, when completed, its `output`. A completed call leaves the child session available for later calls with the same `taskId`.
 
-The runner counts each `task.started` with `kind: "agent"` as a subagent call and takes its status from `task.settled`. `childSessionId` and `remoteUrl` come from the task's `agent.started`, so they are absent for a call that failed before its session opened. A proxied input request alone does not change the subagent call's status; assert that request with `requireInputRequest`.
+The runner counts each call that reaches an agent task (`call.started` whose task has `kind: "agent"`) as a subagent call and takes its status from its `call.settled`. `childSessionId` comes from the `child.opened` for the call or its task, so it is absent for a call that failed before its session opened. A proxied input request alone does not change the subagent call's status; assert that request with `requireInteraction`.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
@@ -150,16 +151,16 @@ t.calledTool("echo", { output: (value) => String(value).includes(marker) });
 parked.calledTool("guarded", { status: "pending", count: 1 });
 t.calledTool("guarded", { output: /approved/, count: 1 });
 
-t.calledSubagent("weather", {
+t.calledAgent("weather", {
   remoteUrl: (value) => value === process.env.WEATHER_AGENT_URL,
   output: /72F/,
 });
 ```
 
-`requireInputRequest` uses the same matcher language for `input`, `prompt`, and `display`. Its `optionIds` matcher receives option ids in request order; a literal array must match that complete ordered list exactly:
+`requireInteraction` uses the same matcher language for `input`, `prompt`, and `display`. Its `optionIds` matcher receives option ids in request order; a literal array must match that complete ordered list exactly:
 
 ```ts
-const request = session.requireInputRequest({
+const request = session.requireInteraction({
   toolName: "confirm_deploy",
   optionIds: ["approve", "cancel"],
 });
@@ -172,10 +173,10 @@ Beyond the raw `session.events` stream, the runner derives typed facts the asser
 Typed event matching covers presence, absence, numeric or predicate counts, partial event data, and ordering:
 
 ```ts
-turn.notEvent("result.completed");
+turn.notEvent("content.completed", { data: { kind: "result" } });
 turn.eventOrder([
   { type: "task.started", data: { name: "researcher" }, count: 2 },
-  { type: "task.settled", data: { status: "completed" }, count: 2 },
+  { type: "task.ended", data: { outcome: "completed" }, count: 2 },
 ]);
 ```
 
@@ -183,7 +184,13 @@ When a protocol invariant needs cross-event correlation, `eventsSatisfy` remains
 
 ```ts
 t.eventsSatisfy("assistant reply includes the marker", (events) =>
-  events.some((e) => e.type === "message.completed" && e.data.message?.includes(marker)),
+  events.some(
+    (e) =>
+      e.type === "content.completed" &&
+      e.data.phase === "reply" &&
+      typeof e.data.value === "string" &&
+      e.data.value.includes(marker),
+  ),
 );
 ```
 
@@ -217,14 +224,14 @@ await t.require(
   sessionIds,
   satisfies((ids) => ids.length > 0, "dispatch started a session"),
 );
-await t.target.attachSession(sessionIds[0]!);
+await t.target.attach(sessionIds[0]!).nextTurn();
 ```
 
 Use the matching `require*` lookups when dependent code needs protocol data:
 
 ```ts
 const call = turn.requireToolCall("search");
-const request = session.requireInputRequest({ toolName: "guarded" });
+const request = session.requireInteraction({ toolName: "guarded" });
 ```
 
 ## Severity

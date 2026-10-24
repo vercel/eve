@@ -1,10 +1,11 @@
 import { type ChannelCors } from "#channel/cors.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { StepInput } from "#harness/types.js";
+import type { ChannelContext } from "#shared/channel-context.js";
+import type { Delivery } from "#shared/delivery.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { ChannelDelivery, ChannelDeliveryReplacement } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -28,7 +29,7 @@ export interface FetchFileResult {
 export interface FetchFileContext {
   readonly state: Readonly<Record<string, unknown>>;
   /** The session the attachment arrived in, for checking it against the session's caller. */
-  readonly session: SessionHandle;
+  readonly session: ChannelContext["session"];
 }
 
 export type FetchFileFunction = (
@@ -41,14 +42,14 @@ export type FetchFileFunction = (
  * schedule proactively routes a message to it.
  */
 export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
-  readonly message: string | UserContent;
+  readonly message: MessageContent;
   readonly target: Readonly<TReceiveTarget>;
   readonly auth: SessionAuthContext | null;
 }
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
+ * seeds durable adapter state, `context` builds the per-step `ctx.channel`
  * for `events` and `deliver`, `events` handle session lifecycle, `receive`
  * accepts cross-channel handoffs, `fetchFile` stages remote file URLs,
  * `audience` classifies conversation visibility, and `metadata` projects
@@ -67,7 +68,14 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
+  /**
+   * Return a replacement delivery, or void to deliver the original payload unchanged. A
+   * replacement carries no `state`; change durable channel state through `ctx.state`.
+   */
+  deliver?(
+    payload: ChannelDelivery<TState>,
+    ctx: TCtx & ChannelContext,
+  ): ChannelDeliveryReplacement | void | Promise<ChannelDeliveryReplacement | void>;
   readonly state?: TState;
   /**
    * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's
@@ -78,22 +86,21 @@ export interface GenericChannelDefinition<
   readonly cors?: ChannelCors;
   /**
    * Builds the per-step channel context handed to `events` and `deliver`.
-   * Receives the live {@link SessionHandle}, so a factory can close over it to
+   * Receives live session information and channel continuation routing, so a factory can
    * register late-bound callbacks. eve writes state mutations made inside the
    * returned context back through `adapter.state`.
    *
-   * Return the channel-owned context (thread handles, API clients, etc.). The
-   * framework passes it as the `channel` argument to event handlers (with
-   * {@link ChannelContinuationOps} injected) and passes {@link SessionContext}
-   * as a separate `ctx` argument.
+   * Return the channel-owned context (thread handles, API clients, etc.). An
+   * event handler reads it as `ctx.channel`, with continuation routing added,
+   * beside the session's context.
    */
-  context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
+  context?(state: NonNullable<TState>, channel: ChannelContext): TCtx;
 
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
 
   readonly events?: TEvents;
 
@@ -131,16 +138,4 @@ export interface GenericChannelDefinition<
    * confident; consumers treat it as non-public.
    */
   readonly audience?: (input: AudienceContext<TState>) => ChannelAudience;
-
-  /**
-   * Identifier of the adapter family this channel belongs to. Set by
-   * higher-level wrappers (e.g. `slackChannel` passes `"slack"`) so downstream
-   * consumers can render typed channel chips instead of bucketing everything
-   * under "unknown".
-   *
-   * Authors calling `defineChannel` directly do not need to set this; the
-   * framework defaults to `"http"` for stateless channels and `"defineChannel"`
-   * for stateful ones.
-   */
-  readonly kindHint?: string;
 }

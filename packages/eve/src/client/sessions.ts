@@ -1,10 +1,10 @@
 import { ClientSession, type ClientSessionContext } from "#client/session.js";
-import type { MessageResponse } from "#client/message-response.js";
+import type { Delivery } from "#client/delivery.js";
 import type { CreateSessionOptions, SendTurnInput } from "#client/types.js";
 
 /** Result of explicitly creating an ID-addressed client session. */
 export interface CreatedClientSession<TOutput = unknown> {
-  readonly response: MessageResponse<TOutput>;
+  readonly delivery: Delivery<TOutput>;
   readonly session: ClientSession;
 }
 

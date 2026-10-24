@@ -96,8 +96,8 @@ export function createDockerConnection(input: {
         `status=$?; rm -f ${shellQuote(pidFilePath)}; exit $status`;
       args.push(containerIdentity, "bash", "-c", wrapped);
 
-      const child = cli.stream(args, { signal: options.abortSignal });
-      options.abortSignal?.addEventListener("abort", () => void killSpawnTree(pidFilePath), {
+      const child = cli.stream(args, { signal: options.signal });
+      options.signal?.addEventListener("abort", () => void killSpawnTree(pidFilePath), {
         once: true,
       });
 
@@ -125,7 +125,7 @@ export function createDockerConnection(input: {
           // failures (permissions, directories) which must surface.
           `if [ -e ${quoted} ]; then exec cat ${quoted}; else exit 43; fi`,
         ],
-        { signal: options.abortSignal },
+        { signal: options.signal },
       );
       if (result.exitCode === 43) {
         return null;
@@ -143,7 +143,7 @@ export function createDockerConnection(input: {
         "--",
         options.path,
       ];
-      const result = await cli.run(args, { signal: options.abortSignal });
+      const result = await cli.run(args, { signal: options.signal });
       expectDockerSuccess(result, `remove "${options.path}" from sandbox container`);
     },
     stop: () => stopDockerContainerIfRunning(cli, containerIdentity),
@@ -158,7 +158,7 @@ export function createDockerConnection(input: {
             "-lc",
             `mkdir -p ${shellQuote(posixDirname(file.path))} && cat > ${shellQuote(file.path)}`,
           ],
-          { signal: options.abortSignal, stdin: file.content },
+          { signal: options.signal, stdin: file.content },
         );
         expectDockerSuccess(result, `write "${file.path}" into sandbox container`);
       }

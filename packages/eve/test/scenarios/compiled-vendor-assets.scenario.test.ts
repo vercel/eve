@@ -9,6 +9,9 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
+import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
+const createTemporaryRoot = useTemporaryAppRoots();
+
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const EVE_CATALOG_ROOT = join(EVE_PACKAGE_ROOT, "..", "eve-catalog");
 const EVE_CATALOG_FINGERPRINT_FILES = [
@@ -42,12 +45,76 @@ function rewriteDeclarationImports(
       .replaceAll(`from '${moduleName}'`, `from '${replacement}'`)
       .replaceAll(`from "${moduleName}"`, `from "${replacement}"`)
       .replaceAll(`import '${moduleName}'`, `import '${replacement}'`)
-      .replaceAll(`import "${moduleName}"`, `import "${replacement}"`);
+      .replaceAll(`import "${moduleName}"`, `import "${replacement}"`)
+      .replaceAll(`import('${moduleName}')`, `import('${replacement}')`)
+      .replaceAll(`import("${moduleName}")`, `import("${replacement}")`);
   }
   return rewritten;
 }
 
 describe("compiled vendor assets", () => {
+  it("copies and rewrites transitive declaration chunks for an isolated consumer", async () => {
+    const { appRoot: root } = await createTemporaryRoot("eve-vendor-declarations-");
+    const upstream = join(root, "upstream");
+    const destinationRoot = join(root, "consumer");
+    await mkdir(join(upstream, "dist", "nested"), { recursive: true });
+    await mkdir(destinationRoot);
+    await writeFile(
+      join(upstream, "dist", "index.d.ts"),
+      `/// <reference path="./ambient.d.ts" />
+export type { Item } from "./nested/chunk.js";
+type Note = 'request from "./not-an-import"';`,
+    );
+    await writeFile(
+      join(upstream, "dist", "nested", "chunk.d.ts"),
+      'export interface Item { value: import("external-types").Value; meta: VendorFixture.Metadata; next?: import("./cycle.js").Next }',
+    );
+    await writeFile(
+      join(upstream, "dist", "nested", "cycle.d.ts"),
+      'export type Next = import("../index.js").Item;',
+    );
+    await writeFile(
+      join(upstream, "dist", "ambient.d.ts"),
+      "declare namespace VendorFixture { interface Metadata { declaredByReference: true } }",
+    );
+    const { createDeclarationCopier } = await import(
+      pathToFileURL(join(EVE_PACKAGE_ROOT, "scripts", "vendor-compiled", "_shared.mjs")).href
+    );
+    await createDeclarationCopier({
+      rewrites: {
+        "external-types": {
+          kind: "stub",
+          stubBaseName: "_value",
+          build: () => "export type Value = string;",
+        },
+      },
+    })({
+      destinationRoot,
+      packageInfo: { packageRoot: upstream, packageJson: { name: "example" } },
+    });
+    await writeFile(
+      join(destinationRoot, "consumer.ts"),
+      'import type { Item } from "./index.js"; const item: Item = { value: "ok", meta: { declaredByReference: true } }; const value: string = item.value; const referenced: true = item.meta.declaredByReference;',
+    );
+    await execFileAsync(process.execPath, [
+      join(EVE_PACKAGE_ROOT, "..", "..", "node_modules", "typescript", "bin", "tsc"),
+      "--ignoreConfig",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "false",
+      "--types",
+      "node",
+      "--typeRoots",
+      join(EVE_PACKAGE_ROOT, "..", "..", "node_modules", "@types"),
+      "--module",
+      "NodeNext",
+      join(destinationRoot, "consumer.ts"),
+    ]).catch((error) => {
+      throw new Error(error.stdout || error.message, { cause: error });
+    });
+  });
+
   it("vendors a symlinked workspace package before its compiled export exists", async () => {
     const root = await createTemporaryDirectory("eve-vendor-workspace-");
     const packageRoot = join(root, "packages", "consumer");

@@ -1,32 +1,31 @@
-import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
-import type { UserContent } from "ai";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { failureNotice } from "#public/channels/reply.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
+import { type PromptQueueState, promptQueue } from "#channel/prompt-queue.js";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type {
   ChannelFrom,
   ChannelRespondOptions,
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
-import { defaultDeliverResult } from "#channel/adapter.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { assertWithinLimit } from "#internal/attachments/limited-read.js";
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createLogger } from "#internal/logging.js";
+import type { RequestSettlement } from "#channel/interaction-prompts.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
-import type { InputRequest } from "#shared/input.js";
-import {
-  type InputResponse,
-  parseInputResponses,
-  type StrictInputResponses,
-} from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
+import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
@@ -36,11 +35,13 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
-import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
+import { chatSdkSignIns } from "#public/channels/chat-sdk/authorization.js";
+import { requestSettlementOf } from "#channel/interaction-prompts.js";
+import { settleSignIn, showSignIn } from "#channel/sign-in.js";
 import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
 import {
   decodeInputAction,
-  renderInputRequests,
+  renderInteractions,
   renderRetiredInputRequest,
 } from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
@@ -53,7 +54,7 @@ import {
   type ChannelEvents,
   type ChannelContinuationOps,
   type RouteHandlerArgs,
-  type Session,
+  type Delivery,
 } from "#public/definitions/channel.js";
 import { chatSdkInstrumentation } from "#public/channels/chat-sdk/audience.js";
 
@@ -65,9 +66,6 @@ const MAX_TYPING_STATUS = 80;
 const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 interface ActiveWebhookContext {
   readonly from: ChannelFrom<ChatSdkChannelState>;
 }
@@ -98,15 +96,15 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
   usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
+  streamPartId?: string | null;
   /** Id of the latest message someone other than the bot sent in the thread. */
   latestMessageId?: string;
-  streamStepIndex?: number | null;
 }
 
 /** One posted card's requests and the resolutions eve has reported for them so far. */
 export interface ChatSdkPendingInputCard {
-  readonly requests: readonly InputRequest[];
-  readonly resolved: Readonly<Record<string, InputResolution>>;
+  readonly requests: readonly Interaction[];
+  readonly resolved: Readonly<Record<string, RequestSettlement>>;
 }
 
 /**
@@ -268,15 +266,15 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(message: string | UserContent, options: ChatSdkSendOptions): Promise<Session>;
+  send(message: MessageContent, options: ChatSdkSendOptions): Promise<Delivery>;
   /**
    * Answers pending input requests on the thread's session from inside a Chat
    * SDK webhook handler. Never creates a session.
    */
-  respond<const TResponses extends readonly InputResponse[]>(
-    inputResponses: StrictInputResponses<TResponses>,
+  respond<const TResponses extends readonly Answer[]>(
+    answers: StrictAnswers<TResponses>,
     options: ChatSdkRespondOptions,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
 }
 
 /**
@@ -347,7 +345,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     ChatSdkReceiveTarget,
     ChatSdkInstrumentationMetadata
   >({
-    kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
     fetchFile: (url) => fetchAttachment(bot, url),
     state: initialState(),
@@ -394,15 +391,13 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     // `session.auth.current` is the caller of this delivery.
     deliver(
       payload,
-      channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
+      channel: ChatSdkChannelContext<TAdapters> & { readonly session: ChannelContext["session"] },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
       recordLatestMessage(channel.state, payload);
       const answer = resolveInputAnswer(channel.state, payload);
-      if (answer !== undefined) {
-        return { context: payload.context, inputResponses: parseInputResponses([answer]) };
-      }
-      return defaultDeliverResult(payload);
+      if (answer !== undefined)
+        return { answers: parseAnswers([answer]), context: payload.context };
     },
     events: mergedEvents,
   });
@@ -413,8 +408,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     send(message, options) {
       return bridgeSend(bot, message, options);
     },
-    respond(inputResponses, options) {
-      return bridgeRespond(bot, inputResponses, options);
+    respond(answers, options) {
+      return bridgeRespond(bot, answers, options);
     },
   };
 }
@@ -423,12 +418,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   type EventChannel = Parameters<
-    NonNullable<ChatSdkChannelEvents<TAdapters>["input.requested"]>
-  >[1];
+    NonNullable<ChatSdkChannelEvents<TAdapters>["interaction.opened"]>
+  >[1]["channel"];
 
-  async function showPrompt(channel: EventChannel, request: InputRequest) {
+  async function showPrompt(channel: EventChannel, request: Interaction) {
     if (!channel.thread) return false;
-    const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
+    const posted = await channel.thread.post(renderInteractions([request], inputActionPrefix));
     if (!posted.id) return;
     // Tracked even without edit support, so an answer can name the card it is on.
     channel.state.pendingInputCards = {
@@ -438,23 +433,25 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   }
 
   async function clearAnsweredCards(
-    event: { readonly resolutions: readonly InputResolution[] },
+    event: { readonly resolutions: readonly RequestSettlement[] },
     channel: EventChannel,
   ) {
     const thread = channel.thread;
     if (!thread) return;
     for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
       const resolutions = event.resolutions.filter((resolution) =>
-        card.requests.some((request) => request.requestId === resolution.requestId),
+        card.requests.some((request) => request.interactionId === resolution.interactionId),
       );
       if (resolutions.length === 0) continue;
       const resolved = {
         ...card.resolved,
-        ...Object.fromEntries(resolutions.map((resolution) => [resolution.requestId, resolution])),
+        ...Object.fromEntries(
+          resolutions.map((resolution) => [resolution.interactionId, resolution]),
+        ),
       };
       const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
       channel.state.pendingInputCards = card.requests.every(
-        (request) => resolved[request.requestId] !== undefined,
+        (request) => resolved[request.interactionId] !== undefined,
       )
         ? rest
         : { ...rest, [messageId]: { requests: card.requests, resolved } };
@@ -463,7 +460,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await thread.adapter.editMessage(
           thread.id,
           messageId,
-          renderInputRequests(card.requests, inputActionPrefix, resolved),
+          renderInteractions(card.requests, inputActionPrefix, resolved),
         );
       } catch (error) {
         if (!isNotImplemented(error)) {
@@ -475,41 +472,39 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     }
   }
 
-  const prompts = promptQueueEvents(showPrompt);
+  const prompts = promptQueue(showPrompt);
   return {
-    ...defaultAuthorizationEvents(),
-    async "turn.started"(_event, channel, _ctx) {
+    async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
       await safeStartTyping(channel.thread, "Working...");
     },
-    async "actions.requested"(event, channel, _ctx) {
+    async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      const labels = visibleActions(event.actions).map((action) =>
-        actionLabel(action, event.presentation),
-      );
-      if (labels.length === 0) return;
-      await safeStartTyping(channel.thread, truncate(`${labels.join(", ")}...`));
+      // eve's own task controls stay out of view.
+      if (data.capability.kind === "control") return;
+      const label = callLabel(data);
+      await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
-    async "message.appended"(event, channel, _ctx) {
+    async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
-      const currentText =
-        channel.state.streamStepIndex === event.stepIndex
-          ? streamTextByState.get(channel.state)
-          : undefined;
-      const message = (currentText ?? "") + event.messageDelta;
+      // Only text streams: a part announces its kind with its first delta.
+      const streaming = channel.state.streamPartId === data.partId;
+      if (data.kind === undefined ? !streaming : data.kind !== "text") return;
+      const currentText = streaming ? streamTextByState.get(channel.state) : undefined;
+      const message = (currentText ?? "") + data.delta;
       if (!message) return;
       streamTextByState.set(channel.state, message);
       const anchor = channel.state.anchorMessageId;
-      if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
+      if (!anchor || !streaming) {
         const sent = await channel.thread.post({ markdown: message });
         channel.state.anchorMessageId = sent.id;
-        channel.state.streamStepIndex = event.stepIndex;
+        channel.state.streamPartId = data.partId;
         channel.state.lastEditAtMs = Date.now();
         return;
       }
@@ -526,51 +521,54 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     // Some adapters show only text, where a reply can answer only the request
     // it sees, so cards post one at a time.
-    ...prompts,
-    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
-    async "input.resolved"(event, channel, _ctx) {
-      await clearAnsweredCards(event, channel);
-      await prompts["input.resolved"](event, channel);
+    async "interaction.opened"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      const signIns = chatSdkSignIns(channel);
+      if (signIns !== undefined)
+        await showSignIn(sessionTables(ctx.view), data.interactionId, signIns);
     },
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
-        channel.state.pendingToolCallMessage = event.message
-          ? (firstNonEmptyLine(event.message) ?? null)
-          : null;
+    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
+    async "interaction.settled"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      const signIns = chatSdkSignIns(channel);
+      if (signIns !== undefined) await settleSignIn(sessionTables(ctx.view), data, signIns);
+      const resolution = requestSettlementOf(sessionTables(ctx.view), data);
+      if (resolution !== undefined)
+        await clearAnsweredCards({ resolutions: [resolution] }, channel);
+    },
+    committed: prompts,
+    async "content.completed"({ data }, { channel }) {
+      if (data.kind !== "text") return;
+      const text = typeof data.value === "string" ? data.value : "";
+      if (contentPhase(data.phase) === "narration") {
+        channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
         // text rather than the last throttled edit. Pass `false` so nothing new
         // is posted when nothing was streamed — intermediate tool-call narration
         // must not become a standalone message on non-streaming surfaces.
-        if (event.message) {
-          await finalizeStreamedMessage(channel, event.message, false);
+        if (text) {
+          await finalizeStreamedMessage(channel, text, false);
         } else {
           clearStream(channel.state);
         }
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message) {
+      if (!text) {
         clearStream(channel.state);
         return;
       }
-      await finalizeStreamedMessage(channel, event.message, true);
+      await finalizeStreamedMessage(channel, text, true);
     },
-    async "turn.failed"(event, channel, _ctx) {
-      if (event.terminal) return;
-      await postFailure(
-        channel.thread,
-        "I hit an error while handling your request",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        event,
-      );
+    async "turn.settled"({ data }, { channel }) {
+      const notice = failureNotice(data, "turn");
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
-    async "session.failed"(event, channel) {
-      await postFailure(
-        channel.thread,
-        "This session could not recover from an error",
-        "Start a new conversation to continue.",
-        event,
-      );
+    async "session.ended"({ data }, { channel }) {
+      const notice = failureNotice(data, { restart: "message" });
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
   };
 }
@@ -657,7 +655,7 @@ function canStream(channel: ChatSdkChannelContext): boolean {
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
-  state.streamStepIndex = null;
+  state.streamPartId = null;
   streamTextByState.delete(state);
 }
 
@@ -675,25 +673,11 @@ function truncate(text: string, max = MAX_TYPING_STATUS): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
 }
 
-async function postFailure(
-  thread: Thread | null,
-  prefix: string,
-  nextStep: string,
-  event: EventData<"turn.failed"> | EventData<"session.failed">,
-): Promise<void> {
-  if (!thread) return;
-  const hint = formatErrorHint(event);
-  const errorId = extractErrorId(event.details);
-  await thread.post(
-    [`${prefix}${hint}.`, nextStep, ...(errorId ? [`Error id: ${errorId}`] : [])].join("\n\n"),
-  );
-}
-
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
-  message: string | UserContent,
+  message: MessageContent,
   options: ChatSdkSendOptions,
-): Promise<Session> {
+): Promise<Delivery> {
   const from = activeFrom("send");
   const { adapterName, auth, inputAnswer, thread: threadInput, ...sendOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
@@ -708,13 +692,13 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
 
 async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
-  inputResponses: readonly InputResponse[],
+  answers: readonly Answer[],
   options: ChatSdkRespondOptions,
-): Promise<Session> {
+): Promise<Delivery> {
   const from = activeFrom("respond");
   const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
-  return from(thread.id).respond(parseInputResponses(inputResponses), {
+  return from(thread.id).respond(parseAnswers(answers), {
     ...respondOptions,
     auth: auth ?? null,
   });
@@ -728,10 +712,10 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
 function recordPrincipalUser(
   state: ChatSdkChannelState,
   caller: SessionAuthContext | null,
-  payload: DeliverPayload,
+  payload: ChannelDelivery<ChatSdkChannelState>,
 ): void {
   if (caller === null) return;
-  const thread = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread;
+  const thread = payload.state?.thread;
   const author = thread?.currentMessage?.author;
   if (author === undefined || author.isBot === true || author.isMe) return;
   const recorded = state.usersByPrincipal?.[caller.principalId];
@@ -746,9 +730,11 @@ function recordPrincipalUser(
  * Records the delivery's message as the thread's latest. Session state keeps
  * the thread from the first delivery, so its `currentMessage` goes stale.
  */
-function recordLatestMessage(state: ChatSdkChannelState, payload: DeliverPayload): void {
-  const message = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread
-    ?.currentMessage;
+function recordLatestMessage(
+  state: ChatSdkChannelState,
+  payload: ChannelDelivery<ChatSdkChannelState>,
+): void {
+  const message = payload.state?.thread?.currentMessage;
   if (message === undefined || message.author.isMe) return;
   state.latestMessageId = message.id;
 }
@@ -765,19 +751,20 @@ interface ChatSdkDeliveryState extends ChatSdkChannelState {
  */
 function resolveInputAnswer(
   state: ChatSdkChannelState,
-  payload: DeliverPayload,
-): InputResponse | undefined {
+  payload: ChannelDelivery<ChatSdkChannelState>,
+): Answer | undefined {
   const answer = (payload.state as Partial<ChatSdkDeliveryState> | undefined)?.inputAnswer;
   if (answer === undefined) return undefined;
   const card = state.pendingInputCards?.[answer.messageId];
   const request = card?.requests.find(
     (candidate) =>
-      card.resolved[candidate.requestId] === undefined &&
-      candidate.options?.some((option) => option.id === answer.optionId) === true,
+      card.resolved[candidate.interactionId] === undefined &&
+      candidate.request.kind !== "sign-in" &&
+      candidate.request.options?.some((option) => option.id === answer.optionId) === true,
   );
   return request === undefined
     ? undefined
-    : { optionId: answer.optionId, requestId: request.requestId };
+    : { optionId: answer.optionId, interactionId: request.interactionId };
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {
@@ -795,7 +782,7 @@ function initialState(): ChatSdkChannelState {
 }
 
 /**
- * Downloads an attachment `messageToUserContent` deferred to the step: rebuilds
+ * Downloads an attachment `messageContentOf` deferred to the step: rebuilds
  * the download with the adapter's `rehydrateAttachment`, since the message's
  * own `fetchData` didn't survive the queue.
  */

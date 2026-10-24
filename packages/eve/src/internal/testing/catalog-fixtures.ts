@@ -116,7 +116,6 @@ export function catalogBundle(
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
     graph: undefined as never,
-    hookRegistry: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
@@ -127,7 +126,7 @@ export function catalogBundle(
       skills: (input.skills ?? []).map((skill) => ({
         deferred: skill.deferred,
         description: skill.description ?? `${skill.name} skill`,
-        markdown: skill.markdown ?? `# ${skill.name}`,
+        content: skill.markdown ?? `# ${skill.name}`,
         name: skill.name,
       })),
     } as never,

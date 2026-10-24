@@ -20,8 +20,6 @@ import {
 } from "#tracing/eve/otel-declaration.js";
 
 export {
-  isOtelDeclaration,
-  isOtelIntegration,
   otel,
   otelIntegration,
   type OtelDeclaration,

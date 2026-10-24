@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 
 /** Longest {@link InvokeToolOptions.key} `invokeTool` accepts. */
 export const TOOL_SESSION_KEY_MAX_LENGTH = 512;
@@ -32,17 +33,18 @@ export interface InvokeToolOptions {
 /** Outcome of one {@link InvokeToolFn} call. */
 export type InvokeToolResult =
   | {
-      readonly status: "completed";
+      readonly outcome: "completed";
       readonly output: unknown;
       readonly modelOutput: ToolModelOutput;
     }
-  | { readonly status: "failed"; readonly message: string; readonly errorId?: string }
-  | { readonly status: "invalid-input"; readonly message: string }
-  | { readonly status: "denied"; readonly reason?: string }
-  /** The tool's approval policy asks a person. A call has no one to ask, so the tool did not run. */
-  | { readonly status: "approval-required" }
-  /** The tool needs a sign-in to these connections first. The tool stopped where it needed them. */
-  | { readonly status: "authorization-required"; readonly connections: readonly string[] };
+  | { readonly outcome: "failed"; readonly error: ErrorInfo }
+  | {
+      readonly outcome: "rejected";
+      /** `approval-required`, `sign-in-required`, or the reason a policy refused the call. */
+      readonly reason: string;
+      readonly connections?: readonly string[];
+      readonly cause?: { readonly policy: string };
+    };
 
 /**
  * Runs one of the agent's tools outside a conversation. No model, turn, or

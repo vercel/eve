@@ -37,7 +37,7 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
       },
       {
         loadNamespace: async () => ({
-          default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the digest." }),
+          default: defineSchedule({ cron: "0 9 * * *", content: "Run the digest." }),
         }),
         logicalPath: "schedules/morning-digest.ts",
       },

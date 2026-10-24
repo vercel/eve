@@ -54,7 +54,6 @@ export type PhotonInboundResult = {
 } | null;
 
 /** Sync or async {@link PhotonInboundResult}. */
-export type PhotonInboundResultOrPromise = PhotonInboundResult | Promise<PhotonInboundResult>;
 
 /** Configuration for {@link photonIMessageChannel}. */
 export interface PhotonIMessageChannelConfig {
@@ -66,7 +65,7 @@ export interface PhotonIMessageChannelConfig {
   readonly onMessage?: (
     ctx: PhotonInboundMessageContext,
     message: Message,
-  ) => PhotonInboundResultOrPromise;
+  ) => PhotonInboundResult | Promise<PhotonInboundResult>;
   /**
    * Inbound tapback policy. Tapbacks are ignored by default. Return a result to
    * send the tapback to the agent as a message such as `Tapback: Loved “See you at 7”`,

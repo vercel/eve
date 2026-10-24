@@ -44,16 +44,22 @@ describe("delivery idempotency", () => {
           .from(address)
           .send("Alice asks for a report.", { auth: null, idempotencyKey: "initial" });
       const initial = await Promise.all([send(), send()]);
-      expect(initial[0]!.id).toBe(initial[1]!.id);
+      expect(initial[0]!.sessionId).toBe(initial[1]!.sessionId);
       const session = initial[0]!;
-      const stream = captureTurnEvents(getRun(session.id));
+      const stream = captureTurnEvents(getRun(session.sessionId));
       let completed = false;
       try {
         await stream.nextTurn();
-        await waitForParkedTurnStep(session.id);
+        await waitForParkedTurnStep(session.sessionId);
+        const firstResults = await Promise.all(
+          initial.map((receipt) => receipt.result({ signal: AbortSignal.timeout(5_000) })),
+        );
+        expect(firstResults.map((result) => result.outcome).sort()).toEqual(["handled", "ignored"]);
         // Each hook resume replays the owner from its recorded history.
-        await send();
-        const fixed = createSession(session.id, runtime);
+        expect((await (await send()).result({ signal: AbortSignal.timeout(5_000) })).outcome).toBe(
+          "ignored",
+        );
+        const fixed = createSession(session.sessionId, runtime);
         const followUp = () =>
           fixed.send("Bob asks for the next step.", {
             auth: null,
@@ -62,18 +68,20 @@ describe("delivery idempotency", () => {
           });
         await Promise.all([followUp(), followUp()]);
         await stream.nextTurn();
-        await waitForParkedTurnStep(session.id, 2);
-        await followUp();
+        await waitForParkedTurnStep(session.sessionId, 2);
+        expect(
+          (await (await followUp()).result({ signal: AbortSignal.timeout(5_000) })).outcome,
+        ).toBe("ignored");
         await fixed.send("Alice thanks Bob.", { auth: null, turnPolicy: "queue" });
         await stream.nextTurn();
-        await waitForParkedTurnStep(session.id, 3);
+        await waitForParkedTurnStep(session.sessionId, 3);
         await fixed.reset();
         completed = true;
         expect(messages).toHaveLength(3);
       } finally {
         stream.dispose();
-        if (!completed && ["pending", "running"].includes(await getRun(session.id).status)) {
-          await getRun(session.id).cancel();
+        if (!completed && ["pending", "running"].includes(await getRun(session.sessionId).status)) {
+          await getRun(session.sessionId).cancel();
         }
       }
     });

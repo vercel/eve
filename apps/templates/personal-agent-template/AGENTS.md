@@ -1,6 +1,6 @@
 # Personal Agent Template
 
-Durable personal AI assistant built with Eve and Nuxt.
+Durable personal AI assistant built with eve and Nuxt.
 
 ## Quick Reference
 
@@ -19,7 +19,7 @@ Durable personal AI assistant built with Eve and Nuxt.
 
 ```
 personal-agent-template/
-├── agent/          # Eve agent (channels, tools, skills, connections)
+├── agent/          # eve agent (channels, tools, skills, connections)
 ├── apps/web/       # Nuxt UI, Nitro API, and shared application code
 └── docs/           # Architecture, environment, customization
 ```
@@ -31,13 +31,13 @@ personal-agent-template/
 - [Customization](docs/CUSTOMIZATION.md) — Rename agent, add tools, integrations
 - [README](README.md) — Quick start and feature overview
 
-## Eve Framework
+## eve framework
 
 This project deploys its Nuxt frontend and eve agent as peer Vercel services through `vercel.ts`. Before writing agent code, read the relevant guide in `node_modules/eve/dist/docs/public/`.
 
 ## Internal API Pattern
 
-The Eve agent calls Nuxt over HTTP:
+The eve agent calls Nuxt over HTTP:
 
 ```
 agent/lib/*-internal.ts  →  /api/internal/*  →  server/utils/*
@@ -47,7 +47,7 @@ Authenticated with `Authorization: Bearer <INTERNAL_API_SECRET>`. See [`apps/web
 
 ## Memory Flow
 
-1. **Session injection** — [`agent/instructions.ts`](agent/instructions.ts) on `session.started`
+1. **Session injection** — [`agent/instructions.ts`](agent/instructions.ts), with the profile memoized per user
 2. **Agent save** — [`agent/tools/save_memory.ts`](agent/tools/save_memory.ts) with web approval UI
 3. **Profile UI** — import, view, edit, delete on Settings → Profile
 

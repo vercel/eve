@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { parseCreateBody } from "#eve-channel/request.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
+const CALLBACK = {
+  callId: "call-1",
+  subagentName: "researcher",
+  token: "parent-callback-token",
+  url: "https://parent.example.com/eve/v1/callback/parent-callback-token",
+};
+
 describe("parseCreateBody", () => {
   it("accepts a conversation session without a message", () => {
     expect(parseCreateBody({})).toEqual({
@@ -13,24 +20,78 @@ describe("parseCreateBody", () => {
     });
   });
 
-  it("accepts a delegated call from an older eve that still sends an activity observer", () => {
-    const callback = {
-      callId: "call-1",
-      subagentName: "researcher",
-      token: "parent-callback-token",
-      url: "https://parent.example.com/eve/v1/callback/parent-callback-token",
-    };
-    const body = parseCreateBody({
-      activityObserver: {
-        sink: { url: "https://parent.example.com/eve/v1/activity/x", version: 1 },
-      },
-      callback,
-      message: "research this",
-      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
-    });
+  it.each([1, 2, REMOTE_AGENT_PROTOCOL_VERSION])(
+    "accepts a delegated protocol %s call with a retired activity observer",
+    (protocolVersion) => {
+      const callback = {
+        callId: "call-1",
+        subagentName: "researcher",
+        token: "parent-callback-token",
+        url: "https://parent.example.com/eve/v1/callback/parent-callback-token",
+      };
+      const body = parseCreateBody({
+        activityObserver: {
+          sink: { url: "https://parent.example.com/eve/v1/activity/x", version: 1 },
+        },
+        callback,
+        message: "research this",
+        protocolVersion,
+      });
 
-    expect(body).toEqual(expect.objectContaining({ callback, message: "research this" }));
-    expect(body).not.toHaveProperty("activityObserver");
+      expect(body).toEqual(expect.objectContaining({ callback, message: "research this" }));
+      expect(body).not.toHaveProperty("activityObserver");
+    },
+  );
+
+  it.each([
+    ["an eve 0.66–0.68 caller, which sends no version", undefined, 1],
+    ["a caller on protocol 2", 2, 2],
+    ["a caller on this protocol", REMOTE_AGENT_PROTOCOL_VERSION, REMOTE_AGENT_PROTOCOL_VERSION],
+  ])("serves %s", (_name, sent, served) => {
+    const payload: Record<string, unknown> = { callback: CALLBACK, message: "research this" };
+    if (sent !== undefined) payload.protocolVersion = sent;
+    const body = parseCreateBody(payload);
+    expect(body).toEqual(expect.objectContaining({ callback: CALLBACK, protocolVersion: served }));
+  });
+
+  it("drops the background task id an eve 0.66–0.68 caller names on its callback", () => {
+    const body = parseCreateBody({
+      callback: { ...CALLBACK, taskId: "caller-task" },
+      message: "research this",
+    });
+    expect(body).toEqual(expect.objectContaining({ callback: CALLBACK, protocolVersion: 1 }));
+  });
+
+  it.each([{}, { nextProtocolOption: true }])(
+    "preserves protocol upgrade guidance with additional fields %j",
+    async (additional) => {
+      const body = parseCreateBody({
+        ...additional,
+        callback: CALLBACK,
+        message: "research this",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION + 1,
+      });
+      if (!(body instanceof Response)) throw new Error("expected a refusal");
+      expect(body.status).toBe(409);
+      await expect(body.json()).resolves.toMatchObject({
+        code: "REMOTE_AGENT_PROTOCOL_MISMATCH",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+      });
+    },
+  );
+
+  it.each([64, 65])("bounds message-part work before admission (%i parts)", async (count) => {
+    const body = parseCreateBody({
+      message: Array.from({ length: count }, () => ({ type: "text", text: "A report section." })),
+    });
+    if (count === 64) expect(body).not.toBeInstanceOf(Response);
+    else {
+      expect(body).toBeInstanceOf(Response);
+      expect((body as Response).status).toBe(400);
+      await expect((body as Response).json()).resolves.toMatchObject({
+        error: expect.stringContaining("64"),
+      });
+    }
   });
 
   it("rejects an explicitly empty message", async () => {

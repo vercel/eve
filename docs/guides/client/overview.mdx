@@ -9,17 +9,17 @@ For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire
 
 ## Create a client
 
-A `Client` binds one host, auth policy, and header policy:
+A `Client` binds one base URL, auth policy, and header policy:
 
 ```ts
 import { Client } from "eve/client";
 
 const client = new Client({
-  host: "http://127.0.0.1:2000",
+  baseUrl: "http://127.0.0.1:2000",
 });
 ```
 
-`host` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `host` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
+`baseUrl` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `baseUrl` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
 
 ## Check health
 
@@ -51,7 +51,7 @@ Pass `auth` when the [eve channel](../../channels/eve) route requires credential
 
 ```ts
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   auth: {
     bearer: async () => await getAccessToken(),
   },
@@ -62,7 +62,7 @@ Bearer values and Basic auth passwords can be strings or functions. Functions ru
 
 ```ts
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   auth: {
     basic: {
       username: "agent-client",
@@ -78,7 +78,7 @@ For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves th
 import { getVercelOidcToken } from "@vercel/oidc";
 
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   auth: {
     vercelOidc: {
       token: async () => await getVercelOidcToken(),
@@ -91,7 +91,7 @@ Use `headers` for route-specific credentials such as bypass tokens or tenant hin
 
 ```ts
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   headers: async () => ({
     "x-vercel-protection-bypass": await getBypassToken(),
   }),
@@ -132,8 +132,8 @@ same bounded startup retries as other follow-ups.
 To create the session and start its first turn in one request, include the message:
 
 ```ts
-const { session, response } = await client.sessions.create({ message: "Summarize account A." });
-await response.result();
+const { session, delivery } = await client.sessions.create({ message: "Summarize account A." });
+await delivery.result();
 
 await (await session.send("Now list the risks.")).result();
 await session.compact();
@@ -168,14 +168,14 @@ await session.reset({ reason: "User requested a fresh session" });
 A client can own many independent fixed sessions at once:
 
 ```ts
-const { session: alice, response: aliceResponse } = await client.sessions.create({
+const { session: alice, delivery: aliceDelivery } = await client.sessions.create({
   message: "Summarize account A.",
 });
-const { session: bob, response: bobResponse } = await client.sessions.create({
+const { session: bob, delivery: bobDelivery } = await client.sessions.create({
   message: "Summarize account B.",
 });
 
-await Promise.all([aliceResponse.result(), bobResponse.result()]);
+await Promise.all([aliceDelivery.result(), bobDelivery.result()]);
 ```
 
 The next pages cover the session lifecycle:

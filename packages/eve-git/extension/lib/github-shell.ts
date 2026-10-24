@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { getToken, type ConnectTokenParams } from "@vercel/connect";
+import { getToken } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolContext } from "eve/tools";
@@ -36,6 +36,11 @@ export interface GitHubShellOutput {
   readonly truncated: boolean;
 }
 
+/** Resolves the co-author credited by this turn's GitHub publishing commands. */
+export type GitHubAttribution = (
+  ctx: ToolContext,
+) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
+
 export interface GitHubConfig {
   /**
    * Resolves who the current turn publishes for. When it returns a person,
@@ -44,9 +49,7 @@ export interface GitHubConfig {
    * receives the `gh` tool's context, so `ctx.getToken` can resolve the
    * requester's linked accounts.
    */
-  readonly attribution?: (
-    ctx: ToolContext,
-  ) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
+  readonly attribution?: GitHubAttribution;
   readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
@@ -83,7 +86,17 @@ interface GitHubShellDependencies {
   /** The calling tool's context, passed to `attribution`. */
   readonly context?: ToolContext;
   readonly auth?: SessionAuthContext | null;
-  readonly getConnectToken?: typeof getToken;
+  readonly getConnectToken?: (
+    connector: string,
+    params: {
+      authorizationDetails: {
+        type: "github_app_installation";
+        org: string;
+        repositories: string[];
+      }[];
+      subject: { type: "app" };
+    },
+  ) => Promise<string>;
   readonly getSandbox: () => Promise<SandboxSession>;
   /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
   readonly sessionId: string;
@@ -128,7 +141,7 @@ export async function executeGitHubShell(
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const repositories = repositoryNames(declaredRepositories, config.org);
-  const tokenParams: ConnectTokenParams = {
+  const tokenParams: Parameters<NonNullable<GitHubShellDependencies["getConnectToken"]>>[1] = {
     authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
     subject: { type: "app" },
   };

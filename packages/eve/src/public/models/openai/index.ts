@@ -43,9 +43,6 @@ export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): LanguageModel
   return createCodexSubscriptionModel({ model: slug });
 }
 
-/** @deprecated Use {@link chatgpt}. */
-export const experimental_chatgpt = chatgpt;
-
 /** Creates a direct OpenAI model. Uses OPENAI_API_KEY, or /login credentials in local development. */
 export function openai(model: string = MODEL_HELPERS.openai.defaultModel): LanguageModel {
   const id = model.trim().replace(/^openai\//u, "");

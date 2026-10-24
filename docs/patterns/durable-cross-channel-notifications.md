@@ -21,14 +21,15 @@ import { notificationOutbox } from "../lib/notification-outbox";
 export default githubChannel({
   botName: process.env.GITHUB_APP_SLUG,
   events: {
-    async "turn.completed"(event, channel, ctx) {
+    async "turn.settled"(event, ctx) {
+      if (event.data.outcome !== "completed") return;
       await notificationOutbox.enqueue({
-        key: `github-review:${ctx.session.id}:${event.turnId}`,
+        key: `github-review:${ctx.session.id}:${event.data.turnId}`,
         destination: {
           channelId: process.env.SLACK_REVIEW_CHANNEL_ID!,
           provider: "slack",
         },
-        message: `PR review completed for ${channel.repository.fullName}.`,
+        message: `PR review completed for ${ctx.channel.repository.fullName}.`,
       });
     },
   },

@@ -1,5 +1,9 @@
 import { cardToSlackBlocks, type SlackCardChild } from "#compiled/@chat-adapter/slack/blocks.js";
-import { cardChildToFallbackText, type CardChild, type CardElement } from "#compiled/chat/index.js";
+import {
+  cardChildToFallbackText,
+  type CardChild,
+  type CardElement,
+} from "#public/channels/slack/cards.js";
 
 /** A Slack Block Kit block emitted by {@link cardToBlocks}. */
 export type BlockKitBlock = Record<string, unknown>;

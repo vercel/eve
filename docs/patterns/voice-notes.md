@@ -32,7 +32,7 @@ export default defineTool({
     }
 
     const sandbox = await ctx.getSandbox();
-    const audio = await sandbox.readBinaryFile({ path: file, abortSignal: ctx.abortSignal });
+    const audio = await sandbox.readBinaryFile({ path: file, signal: ctx.abortSignal });
     if (!audio) {
       throw new Error(`Attachment not found: ${file}. Ask the user to send the voice note again.`);
     }

@@ -143,7 +143,7 @@ function collectConfiguredExternalDependencies(manifest: CompiledAgentManifest):
     ...manifest.subagents.flatMap((subagent) =>
       subagent.configResolver === undefined
         ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
+        : [],
     ),
   ];
 }

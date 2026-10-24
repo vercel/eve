@@ -23,8 +23,8 @@ import {
   findMisplacedEvalDirs,
 } from "#evals/runner/discover.js";
 import { runEvals } from "#evals/runner/run-evals.js";
-import { Console } from "#evals/runner/reporters/console.js";
-import { JUnit } from "#evals/runner/reporters/junit.js";
+import { consoleReporter } from "#evals/runner/reporters/console.js";
+import { junitReporter } from "#evals/runner/reporters/junit.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
 import type { EveEval, EveEvalTargetHandle } from "#evals/types.js";
@@ -182,9 +182,9 @@ export async function runEvalCommand(
       });
     }
 
-    const reporters: EvalReporter[] = options.json === true ? [] : [Console()];
+    const reporters: EvalReporter[] = options.json === true ? [] : [consoleReporter()];
     if (options.junit !== undefined) {
-      reporters.push(JUnit({ filePath: options.junit }));
+      reporters.push(junitReporter({ filePath: options.junit }));
     }
 
     const summary = await runEvals({

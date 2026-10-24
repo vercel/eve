@@ -1,3 +1,5 @@
+import type { SessionStreamEvent } from "eve/client";
+
 export type AuthorizationChallengeState = {
   name: string;
   description: string;
@@ -11,60 +13,70 @@ export type AuthorizationChallengeState = {
 };
 
 const challengesByName = ref<Map<string, AuthorizationChallengeState>>(new Map());
+/** The connection each open sign-in interaction is for. */
+const connectionsByInteraction = new Map<string, string>();
 
-export function recordAuthorizationEvent(event: { type: string; data: Record<string, unknown> }) {
-  if (event.type === "authorization.required") {
-    const data = event.data as {
-      name: string;
-      description: string;
-      webhookUrl?: string;
-      authorization?: {
-        url?: string;
-        userCode?: string;
-        expiresAt?: string;
-        instructions?: string;
-      };
-    };
+/** Records a sign-in interaction opening or settling, from the session's events. */
+export function recordAuthorizationEvent(event: SessionStreamEvent) {
+  if (event.type === "interaction.opened") {
+    const { interactionId, request } = event.data;
+    const signIn = request.kind === "sign-in" ? request.signIn : undefined;
+    if (!signIn) return;
 
+    connectionsByInteraction.set(interactionId, signIn.name);
     const next = new Map(challengesByName.value);
-    next.set(data.name, {
-      name: data.name,
-      description: data.description,
-      instructions: data.authorization?.instructions,
-      url: data.authorization?.url,
-      userCode: data.authorization?.userCode,
-      expiresAt: data.authorization?.expiresAt,
-      webhookUrl: data.webhookUrl,
+    next.set(signIn.name, {
+      name: signIn.name,
+      description: request.prompt,
+      instructions: signIn.instructions,
+      url: signIn.url,
+      userCode: signIn.userCode,
+      expiresAt: signIn.expiresAt,
+      webhookUrl: signIn.callbackUrl,
     });
     challengesByName.value = next;
     return;
   }
 
-  if (event.type === "authorization.completed") {
-    const data = event.data as {
-      name: string;
-      outcome: AuthorizationChallengeState["outcome"];
-      reason?: string;
-    };
+  if (event.type === "interaction.settled") {
+    const name = connectionsByInteraction.get(event.data.interactionId);
+    if (!name) {
+      return;
+    }
+    connectionsByInteraction.delete(event.data.interactionId);
 
-    const existing = challengesByName.value.get(data.name);
+    const existing = challengesByName.value.get(name);
     if (!existing) {
       return;
     }
 
     const next = new Map(challengesByName.value);
+    const outcome = signInOutcome(event.data.outcome);
 
-    if (data.outcome === "authorized") {
-      next.delete(data.name);
+    if (outcome === "authorized") {
+      next.delete(name);
     } else {
-      next.set(data.name, {
+      next.set(name, {
         ...existing,
-        outcome: data.outcome,
-        reason: data.reason,
+        outcome,
+        reason: event.data.reason,
       });
     }
 
     challengesByName.value = next;
+  }
+}
+
+function signInOutcome(outcome: string): NonNullable<AuthorizationChallengeState["outcome"]> {
+  switch (outcome) {
+    case "accepted":
+      return "authorized";
+    case "declined":
+      return "declined";
+    case "expired":
+      return "timed-out";
+    default:
+      return "failed";
   }
 }
 
@@ -101,6 +113,7 @@ export async function resolveAuthorizationChallenge(connectionName: string) {
 
 export function clearAuthorizationChallenges() {
   challengesByName.value = new Map();
+  connectionsByInteraction.clear();
 }
 
 export function useAuthorizationChallenges() {

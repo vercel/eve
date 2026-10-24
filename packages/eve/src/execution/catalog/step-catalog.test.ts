@@ -18,6 +18,7 @@ import {
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
+import { writeReactionsState } from "#reactions/state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
@@ -523,6 +524,37 @@ describe("buildStepCatalog", () => {
         resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
       );
       expect(linear.calls).toEqual([{ input: { limit: 20, team: "core" }, tool: "list_issues" }]);
+    });
+
+    it("versions a dynamic connection's entries by its target and memo results", () => {
+      const { ctx } = linearCatalog();
+      const versionFor = (tenant: string) => {
+        writeReactionsState(ctx, {
+          latest: {},
+          memos: { "connection::linear": { tenant } },
+          slots: {
+            "connection::linear": {
+              digest: "linear",
+              since: 0,
+              value: [{ name: "linear", protocol: "mcp", url: "https://linear.example" }],
+            },
+          },
+        });
+        const catalog = buildStepCatalog({
+          agentTools: new Map(),
+          ctx,
+          endsTurn: false,
+          session: {},
+        });
+        return [catalog.get("linear")?.version, catalog.get("linear__list_issues")?.version];
+      };
+
+      const [signIn, tool] = versionFor("a");
+      expect(signIn).toBeDefined();
+      expect(tool).toBe(signIn);
+      expect(versionFor("a")).toEqual([signIn, tool]);
+      expect(versionFor("b")[1]).not.toBe(tool);
+      expect(linearCatalog().catalog.get("linear__list_issues")?.version).toBeUndefined();
     });
 
     it("fails a call whose connection doesn't list its tools within 10 seconds, when validating and when calling", async () => {

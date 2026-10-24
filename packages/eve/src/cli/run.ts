@@ -23,10 +23,6 @@ import type { ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
-  registerRuntimeInvokeCommand,
-  type InvokeCliRuntimeDependencies,
-} from "#cli/invoke/command.js";
-import {
   parseAgentNamesOption,
   parsePortOption,
   parseReasoningOption,
@@ -66,7 +62,6 @@ interface CliRuntimeDependencies {
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
-  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
@@ -294,7 +289,6 @@ export function createCliProgram(
 
   const remote = program.command("remote").description("Connect to an existing eve agent.");
   registerRemoteCommands({ applicationContext, logger, program: remote, runtime, telemetry });
-  registerRuntimeInvokeCommand({ applicationContext, logger, program: remote, runtime });
 
   registerAcpCommand({
     applicationContext,

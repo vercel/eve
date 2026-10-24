@@ -13,26 +13,24 @@ export default defineEval({
   timeoutMs: 90_000,
   async test(t) {
     const started = await t.send("RELAY-budget-child Alice records the release step.");
-    const { request, session } = await waitForRelayed(
-      t,
-      started.session,
-      "session_limit_continuation",
-    );
-    if (request.requestId.startsWith(`${session.sessionId}:`)) {
+    const { request, session } = await waitForRelayed(t, started.session, "budget");
+    if (request.interactionId.startsWith(`${session.id}:`)) {
       throw new Error("Expected the child's budget question, not the parent's.");
     }
 
-    const stopped = await session.respond([{ optionId: "stop", requestId: request.requestId }]);
-    stopped.event("input.resolved", {
+    const stopped = await session.respond([
+      { optionId: "deny", interactionId: request.interactionId },
+    ]);
+    stopped.event("interaction.settled", {
       count: 1,
       data: {
-        resolutions: [
-          { outcome: "answered", requestId: request.requestId, response: { optionId: "stop" } },
-        ],
+        interactionId: request.interactionId,
+        outcome: "declined",
+        response: { optionId: "deny" },
       },
     });
-    stopped.event("turn.cancelled", { count: 1 });
-    stopped.notEvent("turn.failed");
-    stopped.notEvent("message.completed", { data: { message: /RELAY-RESULT/u } });
+    stopped.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    stopped.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopped.notEvent("content.completed", { data: { phase: "reply", value: /RELAY-RESULT/u } });
   },
 });

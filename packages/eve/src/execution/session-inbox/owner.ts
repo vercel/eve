@@ -63,11 +63,14 @@ export async function assertRunnableSessionInbox(token: string): Promise<void> {
   if (holder !== undefined) await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
-/** {@link assertRunnableSessionInbox} for a hook the caller already looked up. */
-export async function assertRunnableSessionOwner(hook: Hook): Promise<void> {
+/** {@link assertRunnableSessionInbox} for a holder the caller already looked up. */
+export async function assertRunnableSessionOwner(holder: {
+  readonly runId: string;
+  readonly hook?: Hook;
+}): Promise<void> {
   const world = await getWorld();
   if (routesToOwnerDeployment(world)) return;
-  await assertRunnableOwner(world, hook.runId, hook);
+  await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
 /**

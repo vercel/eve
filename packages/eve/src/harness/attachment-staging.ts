@@ -5,7 +5,7 @@ import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } fr
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import { buildSessionHandle } from "#channel/session.js";
+import { buildChannelContext } from "#channel/session.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { SandboxKey, SessionIdKey } from "#context/keys.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
@@ -145,7 +145,7 @@ export async function stageAttachmentsToSandbox(
     : {
         ctx: container,
         state: {},
-        session: buildSessionHandle(container),
+        session: buildChannelContext(container).session,
       };
 
   return stageAttachmentsForAdapter(message, sandbox, adapterCtx);

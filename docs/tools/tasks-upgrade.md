@@ -4,6 +4,9 @@ description: "Move workflow tools, agent calls, clients, hooks, and evals from b
 url: /tools/tasks-upgrade
 ---
 
+> This guide names session events as they were before stream version 27. To move those events to
+> v27 facts, see [Upgrade to v27 session events](/docs/concepts/upgrade-to-v27-events).
+
 This release replaces background tasks with [tasks](/docs/tools/tasks). Every change below breaks
 the previous API. Work through the sections that apply to your agent. A workflow tool that uses
 none of `execution: "background"`, `dismissible`, or `ctx.agent` keeps its code: `execute(input,
@@ -141,7 +144,7 @@ Hooks subscribe the same way:
 +      if (event.data.status !== "completed") return;
 ```
 
-The eval assertion `t.calledSubagent(name, { status })` keeps its API and reads task events.
+The eval assertion `t.calledAgent(name, { status })` keeps its API and reads task events.
 
 ## Handle open turns in clients
 
@@ -204,3 +207,8 @@ Upgrade a caller after every remote agent it calls. A caller on this release acc
 remote agent's results and failures, but that remote agent's approvals and sign-in requests don't
 reach the caller. Any other protocol mismatch fails the call at start, with an error that names
 both versions.
+
+Upgrade a caller and its remote agents together, or let the remote agents' in-flight work finish
+first. A remote agent's callbacks go to the caller's current production deployment, so approvals,
+questions, and sign-ins that an earlier remote agent sends after the caller upgrades are rejected
+and never reach the caller. The caller's own sessions stay on the deployment that started them.

@@ -80,7 +80,7 @@ export async function compileFromMemory(
       loadNamespace: async () => ({
         default: defineSkill({
           description: skill.description,
-          markdown: skill.markdown ?? `# ${skill.name}\n`,
+          content: skill.markdown ?? `# ${skill.name}\n`,
         }),
       }),
       logicalPath: `skills/${skill.name}.ts`,

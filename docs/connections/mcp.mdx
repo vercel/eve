@@ -119,7 +119,7 @@ Use the shared `approval` option to gate every tool served by an MCP connection.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
 
 This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
 
@@ -141,7 +141,7 @@ export default defineMcpClientConnection({
   url: "https://mcp.example.com/mcp",
   description: "Social publishing: draft, schedule, and manage posts.",
   auth: {
-    credentialOwner: "app",
+    principalType: "app",
     getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }),
   },
   approval: ({ toolName, toolInput }) => {
@@ -182,7 +182,7 @@ export default defineMcpClientConnection({
 
 Annotations are hints from the server, not guarantees. Trust them only as far as you trust the server that sent them.
 
-[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
+[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, scoped approval state and `session.auth`, and how a gated call pauses and resumes durably.
 
 ## Forward the caller to an eve agent
 
@@ -221,7 +221,7 @@ Requirements:
 
 ### Handle events
 
-Add `experimental_events` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email then starts a turn in the same conversation, with instructions to triage it:
+Add `experimental: { events: { ... } }` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email then starts a turn in the same conversation, with instructions to triage it:
 
 ```ts title="agent/connections/bird.ts"
 import { connect } from "@vercel/connect/eve";
@@ -231,19 +231,21 @@ export default defineMcpClientConnection({
   url: "https://mcp.bird.com/",
   description: "Bird: email, SMS, and contacts. Can watch a mailbox for new mail.",
   auth: connect("bird/bird"),
-  experimental_events: {
-    async onEvent({ event, origin, auth, attachSession }) {
-      if (event.name !== "email_mailbox.message_received") return;
-      await attachSession(origin.sessionId).send(
-        [
-          "A new email arrived in the mailbox you are watching:",
-          JSON.stringify(event.data),
-          "If it is a bug report, look up the sender's earlier threads, draft a reply " +
-            "that says what we know and what happens next, and ask me before sending it. " +
-            "Otherwise, summarize it in one line.",
-        ].join("\n\n"),
-        { auth, turnPolicy: "queue" },
-      );
+  experimental: {
+    events: {
+      async onEvent({ event, origin, auth, attachSession }) {
+        if (event.name !== "email_mailbox.message_received") return;
+        await attachSession(origin.sessionId).send(
+          [
+            "A new email arrived in the mailbox you are watching:",
+            JSON.stringify(event.data),
+            "If it is a bug report, look up the sender's earlier threads, draft a reply " +
+              "that says what we know and what happens next, and ask me before sending it. " +
+              "Otherwise, summarize it in one line.",
+          ].join("\n\n"),
+          { auth, turnPolicy: "queue" },
+        );
+      },
     },
   },
 });
@@ -270,23 +272,25 @@ async onEvent({ event, deliveryId }) {
 ### Handle missed events and ended subscriptions
 
 ```ts
-experimental_events: {
-  async onEvent({ event }) {
-    // ...
-  },
-  async onGap({ origin, auth, attachSession }) {
-    // The server could not deliver every event. Re-read the source.
-    await attachSession(origin.sessionId).send(
-      "Some Bird events were missed. Re-check the mailbox.",
-      { auth },
-    );
-  },
-  async onTerminated({ origin, auth, error, attachSession }) {
-    // The upstream subscription ended. The watch ends when this returns.
-    await attachSession(origin.sessionId).send(
-      `The Bird watch ended: ${error.message}`,
-      { auth },
-    );
+experimental: {
+  events: {
+    async onEvent({ event }) {
+      // ...
+    },
+    async onGap({ origin, auth, attachSession }) {
+      // The server could not deliver every event. Re-read the source.
+      await attachSession(origin.sessionId).send(
+        "Some Bird events were missed. Re-check the mailbox.",
+        { auth },
+      );
+    },
+    async onTerminated({ origin, auth, error, attachSession }) {
+      // The upstream subscription ended. The watch ends when this returns.
+      await attachSession(origin.sessionId).send(
+        `The Bird watch ended: ${error.message}`,
+        { auth },
+      );
+    },
   },
 },
 ```

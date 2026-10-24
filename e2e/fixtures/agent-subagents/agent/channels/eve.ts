@@ -1,6 +1,9 @@
-import type { AuthFn } from "eve/channels/auth";
+import { ForbiddenError, type AuthFn } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
+
+import { TENANT_AUTHORIZATIONS, type Tenant } from "../../constants";
+import { streamedSessionId, tenantSessions } from "../lib/tenant-sessions.js";
 
 /**
  * Authored eve channel for the remote principal-forwarding eval. Four
@@ -50,9 +53,40 @@ const authenticateObserver: AuthFn<Request> = (request) => {
   return createFixtureUserPrincipal("e2e-observer");
 };
 
+/** A tenant-remote call runs as the service principal of the tenant whose bearer it carries. */
+const authenticateTenant: AuthFn<Request> = (request) => {
+  const authorization = request.headers.get("authorization");
+  const tenant = (Object.keys(TENANT_AUTHORIZATIONS) as Tenant[]).find(
+    (candidate) => TENANT_AUTHORIZATIONS[candidate] === authorization,
+  );
+  if (tenant === undefined) return null;
+  return {
+    attributes: {},
+    authenticator: "e2e-bearer",
+    principalId: `tenant-${tenant}`,
+    principalType: "service",
+  };
+};
+
+/** A tenant's session streams only to a tenant's bearer, never to the anonymous default user. */
+const guardTenantStreams: AuthFn<Request> = (request) => {
+  const sessionId = streamedSessionId(request);
+  if (sessionId !== undefined && tenantSessions.has(sessionId)) {
+    throw new ForbiddenError({ message: "A tenant's session streams only with its credentials." });
+  }
+  return null;
+};
+
 const authenticateDefaultUser: AuthFn<Request> = () => createFixtureUserPrincipal("e2e-user");
 
 export default eveChannel({
-  auth: [authenticateRouter, authenticateBob, authenticateObserver, authenticateDefaultUser],
+  auth: [
+    authenticateRouter,
+    authenticateBob,
+    authenticateObserver,
+    authenticateTenant,
+    guardTenantStreams,
+    authenticateDefaultUser,
+  ],
   trustedForwarders: (forwarder) => forwarder.principalId === "router-app",
 });

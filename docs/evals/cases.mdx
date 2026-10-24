@@ -105,22 +105,22 @@ export default defineEval({
 
 Every `t.session()` or `t.send()` creates a new independent conversation. Continue an existing conversation through its session handle. Events from all sessions feed the same run-level assertions.
 
-- `t.session(options?)` creates a session without starting a turn or consuming its stream. It resolves on `202 Accepted` with an `EveEvalSession` whose `.sessionId` and `.state` are available. Options accept per-request `headers` and `signal`; creation uses the eval timeout signal by default.
+- `t.session(options?)` creates a session without starting a turn or consuming its stream. It resolves on `202 Accepted` with an `EveEvalSession` whose `.id` and `.state` are available. Options accept per-request `headers` and `signal`; creation uses the eval timeout signal by default.
 - `t.send(message, options?)` creates a new session with its first message in one request and waits for the turn to settle. The returned turn carries `.session`, `.message`, and `.expectOk()`.
 - `session.send(message, options?)` sends a follow-up on that session and waits for it to settle.
 - `session.start(message, options?)` starts a text turn and returns as soon as the server accepts it. The live turn exposes `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`.
-- `session.cancel()` requests cooperative cancellation of that session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
-- `session.compact()` compacts that session's history between turns and waits for it to finish. It resolves to the captured events from `compaction.requested` through `session.waiting`, so assertions such as `.event("compaction.completed")` work on the result. It throws when the session is no longer active.
+- `session.cancel()` returns a delivery for cooperative cancellation. A live idle session also accepts a no-op cancellation; an inactive session throws `SessionNotActiveError`.
+- `session.compact()` compacts that session's history between turns and waits for it to finish. It resolves to the captured events of the compaction, a context change, so assertions such as `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })` work on the result. It throws when the session is no longer active.
 - `session.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
-- `session.agent(started).stream(options?)` follows a delegated child's stream through the parent with the eval client's credentials. Pass an `agent.started` event from that session. It also reaches children on another deployment, which `t.target.watchTurn(...)` cannot address.
-- `session.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
+- `session.agent(opened).stream(options?)` follows a delegated child's stream through the parent with the eval client's credentials. Pass a `child.opened` event from that session. It also reaches children on another deployment, which `t.target.attach(...).watch()` cannot address.
+- `session.requireInteraction(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
 - `session.respond(responses, options?)` answers specific pending input requests and sends them as the next turn. `session.startRespond(...)` returns a live turn for the same operation.
 - `session.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
 - `session.events` contains the events captured for that session. `session.transcript` formats its observed user and assistant messages in turn order.
 
 The transcript uses `User:` and `Assistant:` labels separated by blank lines. It excludes reasoning, tool calls, tool results, and messages from other sessions. It updates after each turn settles, so read it after `await session.send(...)`, `await session.respond(...)`, or `await live.result()`.
 
-Each `send` (and `respond`/`respondAll`) resolves to a turn with `.message`, `.data`, `.events`, `.inputRequests`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. Turn results retain their captured output and events; `.session` references the live conversation handle. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
+Each `send` (and `respond`/`respondAll`) resolves to a turn with `.reply`, `.data`, `.events`, `.interactions`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. Turn results retain their captured output and events; `.session` references the live conversation handle. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
 
 ## Prewarming a session
 
@@ -134,7 +134,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session();
     const turn = await session.send("Greet Alice briefly.");
-    await t.require(turn.sessionId, equals(session.sessionId));
+    await t.require(turn.sessionId, equals(session.id));
     turn.event("session.started", { count: 1 });
     turn.event("turn.started", { count: 1, data: { turnId: "turn_0" } });
     t.succeeded();
@@ -154,7 +154,7 @@ Replace `t.newSession()` and `t.prewarm()` with `const session = await t.session
 Replace consecutive `t.send()` calls with `session.send()` calls, or continue the first
 returned turn through `turn.session.send()`. Read identity, cursor, events, and transcript
 from `session`; read replies from `turn.message`. Session operations such as `respond()`,
-`requireInputRequest()`, and `cancel()` also move from `t` to `session`.
+`requireInteraction()`, and `cancel()` also move from `t` to `session`.
 
 ## In-flight turns
 
@@ -168,18 +168,13 @@ export default defineEval({
     const session = await t.session();
     const live = await session.start("Run the long operation.");
 
-    await live.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some(
-            (action) => action.kind === "tool-call" && action.toolName === "long_operation",
-          ),
-      },
+    await live.waitForEvent("call.requested", {
+      data: { capability: { kind: "tool", name: "long_operation" } },
     });
 
     await live.cancel();
     const turn = await live.result();
-    turn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
+    turn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
   },
 });
 ```
@@ -190,7 +185,7 @@ Use `expectOk()` only when the next operation depends on that intermediate turn 
 
 To intentionally omit an eval for the current target, call `t.skip(reason)` before creating sessions, sending messages, or recording assertions. Skipped evals are reported separately and do not affect the exit code.
 
-Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.signal` is an `AbortSignal` that fires on timeout.
+Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.abortSignal` is an `AbortSignal` that fires on timeout.
 
 For driving sessions created outside the eval, by a channel webhook or a schedule, see [Targets](./targets).
 

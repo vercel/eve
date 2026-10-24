@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eveChannel } from "#eve-channel/index.js";
-import type { EveChannelInput } from "#eve-channel/types.js";
+import type { EveChannelConfig } from "#eve-channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
@@ -178,7 +178,7 @@ describe("tool stub verification", () => {
 });
 
 async function request(
-  config: EveChannelInput,
+  config: EveChannelConfig,
   method: string,
   path: string,
   params: Record<string, string>,

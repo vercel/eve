@@ -1,13 +1,15 @@
+import type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
+export type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
   createTwilioFetchFile,
@@ -16,7 +18,6 @@ import {
   updateTwilioCall,
   type TwilioApiOptions,
   type TwilioApiResponse,
-  type TwilioCredentials,
 } from "#public/channels/twilio/api.js";
 import {
   defaultEvents,
@@ -45,14 +46,11 @@ import {
   verifyTwilioInbound,
   type TwilioRoutes,
 } from "#public/channels/twilio/routing.js";
-import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
+import { type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("twilio.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Twilio context passed to the inbound text, voice, and voice-transcription hooks. */
 export interface TwilioContext {
@@ -60,7 +58,7 @@ export interface TwilioContext {
 }
 
 /** Channel-owned Twilio context returned by `context()`. */
-interface TwilioChannelContext extends TwilioContext {
+export interface TwilioChannelContext extends TwilioContext {
   state: TwilioChannelState;
 }
 
@@ -77,6 +75,8 @@ export interface TwilioChannelState extends PromptQueueState {
   lastMessageSid?: string | null;
   /** Most recent inbound Call SID when this session was started by voice. */
   lastCallSid?: string | null;
+  /** The sign-ins the default flow sent a prompt for, by connection name. */
+  pendingSignIns?: Record<string, string>;
 }
 
 /** Per-session instrumentation snapshot for Twilio runtime telemetry. Reports the active phone-number pair and the most recent message and call SIDs. */
@@ -88,9 +88,6 @@ export interface TwilioInstrumentationMetadata extends Record<string, unknown> {
 }
 
 /** Twilio channel credentials. `authToken` also verifies inbound webhook signatures. */
-export interface TwilioChannelCredentials extends TwilioCredentials {
-  readonly authToken?: TwilioAuthToken;
-}
 
 /** Target accepted by `receive(twilio, { target })` for proactive phone-number sessions. */
 export interface TwilioReceiveTarget {
@@ -107,7 +104,6 @@ export type TwilioInboundResult = {
 } | null;
 
 /** Sync or async {@link TwilioInboundResult}. */
-export type TwilioInboundResultOrPromise = TwilioInboundResult | Promise<TwilioInboundResult>;
 
 /** Phone-number allow list for inbound Twilio webhook triggers. `"*"` allows every sender. */
 export type TwilioAllowFrom =
@@ -139,42 +135,26 @@ export interface TwilioVoiceResult {
 }
 
 /** Sync or async {@link TwilioVoiceResult}. */
-export type TwilioVoiceResultOrPromise =
-  | TwilioVoiceResult
-  | null
-  | undefined
-  | Promise<TwilioVoiceResult | null | undefined>;
 
-type TwilioEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: TwilioEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type TwilioSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TwilioEventContext,
+type TwilioEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TwilioEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `twilioChannel({ events })`. */
 export interface TwilioChannelEvents {
   readonly "turn.started"?: TwilioEventHandler<"turn.started">;
-  readonly "actions.requested"?: TwilioEventHandler<"actions.requested">;
-  readonly "action.partial"?: TwilioEventHandler<"action.partial">;
-  readonly "action.result"?: TwilioEventHandler<"action.result">;
-  readonly "message.completed"?: TwilioEventHandler<"message.completed">;
-  readonly "message.appended"?: TwilioEventHandler<"message.appended">;
-  readonly "input.requested"?: TwilioEventHandler<"input.requested">;
-  readonly "input.resolved"?: TwilioEventHandler<"input.resolved">;
-  readonly "approval.settled"?: TwilioEventHandler<"approval.settled">;
-  readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TwilioEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TwilioSessionFailedHandler;
-  readonly "session.completed"?: TwilioEventHandler<"session.completed">;
-  readonly "session.waiting"?: TwilioEventHandler<"session.waiting">;
-  readonly "authorization.required"?: TwilioEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TwilioEventHandler<"authorization.completed">;
+  readonly "call.requested"?: TwilioEventHandler<"call.requested">;
+  readonly "call.progress"?: TwilioEventHandler<"call.progress">;
+  readonly "call.settled"?: TwilioEventHandler<"call.settled">;
+  readonly "content.completed"?: TwilioEventHandler<"content.completed">;
+  readonly "content.delta"?: TwilioEventHandler<"content.delta">;
+  readonly "interaction.opened"?: TwilioEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TwilioEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: TwilioEventHandler<"response.admitted">;
+  readonly "turn.settled"?: TwilioEventHandler<"turn.settled">;
+  readonly "session.ended"?: TwilioEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TwilioEventHandler<"delivery.settled">;
 }
 
 /** SMS/Messaging defaults for Twilio outbound replies. */
@@ -236,14 +216,20 @@ export interface TwilioChannelConfig {
   readonly api?: Omit<TwilioApiOptions, "credentials">;
 
   /** Inbound text hook. Defaults to phone-number auth and dispatch. */
-  onText?(ctx: TwilioContext, message: TwilioTextMessage): TwilioInboundResultOrPromise;
+  onText?(
+    ctx: TwilioContext,
+    message: TwilioTextMessage,
+  ): TwilioInboundResult | Promise<TwilioInboundResult>;
   /** Inbound voice hook. Return `null` to reject the call before gathering speech. */
-  onVoice?(ctx: TwilioContext, call: TwilioVoiceCall): TwilioVoiceResultOrPromise;
+  onVoice?(
+    ctx: TwilioContext,
+    call: TwilioVoiceCall,
+  ): TwilioVoiceResult | null | undefined | Promise<TwilioVoiceResult | null | undefined>;
   /** Inbound voice transcription hook. Defaults to phone-number auth and dispatch. */
   onVoiceTranscription?(
     ctx: TwilioContext,
     transcription: TwilioVoiceTranscription,
-  ): TwilioInboundResultOrPromise;
+  ): TwilioInboundResult | Promise<TwilioInboundResult>;
 
   readonly events?: TwilioChannelEvents;
 }
@@ -304,7 +290,6 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     TwilioReceiveTarget,
     TwilioInstrumentationMetadata
   >({
-    kindHint: "twilio",
     turnPolicy: config.turnPolicy,
     state: {
       from: null as string | null,
@@ -342,18 +327,17 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
         throw new Error("twilioChannel().receive requires target.phoneNumber.");
       }
       const senderNumber = readNonEmptyString(input.target.from) ?? config.messaging?.from ?? null;
-      return from(twilioContinuationToken(phoneNumber, senderNumber ?? undefined)).send(
-        input.message,
-        {
-          auth: input.auth,
-          state: {
-            from: phoneNumber,
-            lastCallSid: null,
-            lastMessageSid: null,
-            to: senderNumber,
-          },
+      return from(
+        twilioContinuationToken({ from: phoneNumber, to: senderNumber ?? undefined }),
+      ).send(input.message, {
+        auth: input.auth,
+        state: {
+          from: phoneNumber,
+          lastCallSid: null,
+          lastMessageSid: null,
+          to: senderNumber,
         },
-      );
+      });
     },
 
     events: mergedEvents,
@@ -465,7 +449,7 @@ function handleTwilioTranscription(input: {
 
 function rebuildTwilioContext(
   state: TwilioChannelState,
-  _session: SessionHandle,
+  _session: ChannelContext,
   config: TwilioChannelConfig,
 ): TwilioChannelContext {
   return {
@@ -570,7 +554,7 @@ async function dispatchText(input: {
 
   try {
     await input
-      .from(twilioContinuationToken(message.from, message.to))
+      .from(twilioContinuationToken({ from: message.from, to: message.to }))
       .send(twilioMessageContent(message), {
         auth: result.auth,
         context: [contextBlock],
@@ -644,7 +628,7 @@ async function dispatchVoiceTranscription(input: {
 
   try {
     await input
-      .from(twilioContinuationToken(transcription.from, transcription.to))
+      .from(twilioContinuationToken({ from: transcription.from, to: transcription.to }))
       .send(transcription.text, {
         auth: result.auth,
         context: [contextBlock],

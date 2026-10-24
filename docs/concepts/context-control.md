@@ -52,22 +52,19 @@ See [Subagents](../subagents) for the distinction between root-agent copies and 
 
 ## Dynamic context with `defineDynamic`
 
-Use `defineDynamic` when instructions, skills, tools, subagents, or the model depend on the active principal, tenant, channel, or feature state. Dynamic resolvers can read session auth and channel metadata before returning the capabilities available to that session.
+Use `defineDynamic` when instructions, skills, tools, subagents, or the model depend on the active principal, tenant, channel, conversation, or feature state. The function reads the committed session and returns the capability or `null`. eve evaluates it before each ordinary model call; `ctx.memo(key, fn)` keeps JSON observations across evaluations.
 
-See [Dynamic capabilities](../guides/dynamic-capabilities) for the resolver API, supported slots, and execution order.
+See [Dynamic capabilities](../guides/dynamic-capabilities) for the context, memo rules, supported folders, and evaluation timing.
 
 ## Compaction and clear
 
-Before a model call, eve checks the projected history together with the effective system instructions and advertised tool schemas. The check runs after `step.started` resolves dynamic capabilities. When the provider reports input usage, eve adds estimates for new messages and growth in the instructions and tool catalog to that count; unchanged schemas are not counted again.
+Before a model call, eve checks the projected history together with the effective system instructions and advertised tool schemas. The check runs after eve evaluates dynamic capabilities for that call. When the provider reports input usage, eve adds estimates for new messages and growth in the instructions and tool catalog to that count; unchanged schemas are not counted again.
 
 Compaction reserves space for those instructions and tools while reducing conversation history. It cannot shrink the instructions or tool catalog themselves, so keep them within the selected model's context window.
 
-User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without rerunning their static definitions or dynamic resolvers. System-role instructions remain outside history and continue to apply after either operation.
+User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without rerunning their static definitions or dynamic definitions. System-role instructions remain outside history and continue to apply after either operation.
 
-Recalled memory also uses user-role messages, but eve keeps their attribution
-separate. Compaction excludes them from the summary, preserves their canonical
-records, and recalls again after the checkpoint. Clear removes those session
-records without deleting the provider's external data.
+Recalled memory stays outside history too. eve recalls before the first model call of each turn, and every later model call reads that turn's recall just ahead of the turn's input. Compaction does not summarize it; a provider can capture before compaction rewrites history. Clear drops what earlier turns recalled, though not the provider's external data, and the next turn recalls again.
 
 ## What to read next
 

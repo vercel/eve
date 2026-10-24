@@ -103,7 +103,7 @@ async function writeRuntimeLoaderFixture(agentRoot: string): Promise<void> {
     [
       'import { instructionsMarkdown } from "./lib/instructions-copy.mjs";',
       "",
-      "export default { markdown: instructionsMarkdown };\n",
+      "export default { content: instructionsMarkdown };\n",
     ].join("\n"),
   );
   await writeFile(
@@ -112,11 +112,11 @@ async function writeRuntimeLoaderFixture(agentRoot: string): Promise<void> {
   );
   await writeFile(
     join(agentRoot, "schedules", "daily-digest.mjs"),
-    'export default { cron: "0 8 * * *", markdown: "Send a weather digest." };\n',
+    'export default { cron: "0 8 * * *", content: "Send a weather digest." };\n',
   );
   await writeFile(
     join(agentRoot, "skills", "route-weather.mjs"),
-    'export default { description: "Route weather questions.", markdown: "Route weather questions to the weather tool." };\n',
+    'export default { description: "Route weather questions.", content: "Route weather questions to the weather tool." };\n',
   );
   await writeFile(
     join(agentRoot, "tools", "get_weather.mjs"),
@@ -406,7 +406,7 @@ describe("runtime compiled artifact loaders", () => {
       {
         description: "Route weather questions.",
         logicalPath: "skills/route-weather.mjs",
-        markdown: "Route weather questions to the weather tool.",
+        content: "Route weather questions to the weather tool.",
         name: "route-weather",
         sourceId: "skills/route-weather.mjs",
         sourceKind: "module",
