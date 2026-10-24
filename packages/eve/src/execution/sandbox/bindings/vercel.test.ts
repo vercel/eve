@@ -1715,7 +1715,7 @@ describe("createVercelSandbox", () => {
   });
 
   // https://github.com/vercel/eve/issues/5301
-  it.fails("kills a running command when its abortSignal fires", async () => {
+  it("kills a running command when its abortSignal fires", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     // Like the SDK's detached Command, the `runCommand` signal only covers the
     // start request: `wait` and `logs` honor their own signal, and only
