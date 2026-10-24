@@ -15,7 +15,7 @@ Pass commands as simple argv with ordinary quoting. Do not use environment assig
 
 Determine the repositories needed to complete the task through source discovery and investigation, even when the requester does not name them. Do not ask the requester to enumerate repositories that can be discovered, and never default to the current agent's repository. The agent may select additional repositories as the work reveals them. Each authenticated command declares exactly one target repository and mints a credential lease for that repository at the moment it is needed, so cross-repository work uses separate scoped commands and leases.
 
-Clone with \`gh repo clone owner/name\`. Use authenticated \`git fetch\`, \`git pull\`, \`git push\`, and \`git ls-remote\` through the \`gh\` tool too. Local \`git status\`, \`diff\`, \`add\`, \`commit\`, and \`rebase\` remain ordinary \`bash\` commands because they need no GitHub credential.
+To create a new clone of a repository, use \`gh repo clone owner/name\`. Use authenticated \`git fetch\`, \`git pull\`, \`git push\`, and \`git ls-remote\` through the \`gh\` tool too. Local \`git status\`, \`diff\`, \`add\`, \`commit\`, and \`rebase\` remain ordinary \`bash\` commands because they need no GitHub credential.
 
 Use GitHub CLI commands through the \`gh\` tool for issues, pull requests, reviews, Actions, CI, authentication status, configuration, aliases, extensions, and API requests. Common commands include \`gh pr create --draft\`, \`gh pr checks\`, \`gh run rerun --failed\`, and \`gh pr review\`, but they are not restrictions.
 

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { SelfModificationSetupOperations } from "#self-modification/setup.js";
+import type {
+  BranchProtectionStatus,
+  SelfModificationSetupOperations,
+} from "#self-modification/setup.js";
 import { headlessAsker, interactiveAsker, withAnswers } from "#setup/ask.js";
 import type { ProjectResolution } from "#setup/project-resolution.js";
 
@@ -11,19 +14,22 @@ import {
   applySelfModificationSetup,
   prepareLocalSelfModificationSetup,
   prepareSelfModificationSetup,
-  SELF_MODIFICATION_PRODUCTION_SETUP,
   SELF_MODIFICATION_SETUP,
-  type SelfModificationApplyDependencies,
 } from "./setup.js";
 
-function operations(config?: string): SelfModificationSetupOperations & {
+function operations(
+  config?: string,
+  branchProtection: BranchProtectionStatus = "pull-request-required",
+): SelfModificationSetupOperations & {
   attachConnector: ReturnType<typeof vi.fn>;
+  checkBranchProtection: ReturnType<typeof vi.fn>;
   findOrCreateConnector: ReturnType<typeof vi.fn>;
   writeConfig: ReturnType<typeof vi.fn>;
 } {
   return {
     attachConnector: vi.fn(async () => {}),
-    detectChannelNames: vi.fn(async () => ["eve", "slack"]),
+    checkBranchProtection: vi.fn(async () => branchProtection),
+    detectChannelNames: vi.fn(async () => ["slack"]),
     detectGitRepository: vi.fn(async () => ({
       branch: "main",
       directory: "apps/support",
@@ -35,23 +41,6 @@ function operations(config?: string): SelfModificationSetupOperations & {
     readConfig: vi.fn(async () => config),
     readLocalConfig: vi.fn(async () => config),
     writeConfig: vi.fn(async () => {}),
-  };
-}
-
-function applyDependencies(): SelfModificationApplyDependencies & {
-  ensurePackageDependencies: ReturnType<typeof vi.fn>;
-  installScaffoldDependencies: ReturnType<typeof vi.fn>;
-} {
-  return {
-    ensurePackageDependencies: vi.fn(async () => [
-      {
-        dependencies: ["@vercel/connect"],
-        devDependencies: [],
-        path: "/project/package.json",
-        scripts: [],
-      },
-    ]),
-    installScaffoldDependencies: vi.fn(async () => {}),
   };
 }
 
@@ -69,25 +58,31 @@ function contexts(
       prompter: fake.prompter,
       resolveVercelProject,
     }),
-    note: fake.prompter.note,
+    note: vi.mocked(fake.prompter.note),
     resolveVercelProject,
   };
 }
 
+const deployedAnswers = {
+  "self-modification-mode": "deployed",
+  "self-modification-repository-owner": "acme",
+  "self-modification-repository-name": "agents",
+  "self-modification-repository-directory": "apps/support",
+  "self-modification-target-branch": "main",
+  "self-modification-confirm": true,
+};
+
 describe("self-modification integration setup", () => {
   it("keeps the default setup local without mutation", async () => {
     const effects = operations();
-    const deps = applyDependencies();
     const ctx = contexts({});
 
     const plan = await prepareLocalSelfModificationSetup(ctx.prepare, effects);
-    await expect(applySelfModificationSetup(plan, ctx.apply, effects, deps)).resolves.toEqual({
+    await expect(applySelfModificationSetup(plan, ctx.apply, effects)).resolves.toEqual({
       facts: [],
     });
     expect(effects.findOrCreateConnector).not.toHaveBeenCalled();
     expect(effects.writeConfig).not.toHaveBeenCalled();
-    expect(deps.ensurePackageDependencies).not.toHaveBeenCalled();
-    expect(deps.installScaffoldDependencies).not.toHaveBeenCalled();
   });
 
   it("offers deployed and local modes before collecting deployed settings", async () => {
@@ -116,31 +111,24 @@ describe("self-modification integration setup", () => {
       kind: "local",
     });
     expect(effects.detectGitRepository).not.toHaveBeenCalled();
-    expect(effects.detectChannelNames).not.toHaveBeenCalled();
   });
 
   it("prepares deployed configuration before applying connector effects", async () => {
     const effects = operations();
-    const deps = applyDependencies();
-    const ctx = contexts(
-      {
-        "self-modification-mode": "deployed",
-        "self-modification-repository-owner": "acme",
-        "self-modification-repository-name": "agents",
-        "self-modification-repository-directory": "apps/support",
-        "self-modification-target-branch": "main",
-        "self-modification-confirm": true,
-      },
-      { kind: "linked", projectId: "project" },
-    );
+    const ctx = contexts(deployedAnswers, { kind: "linked", projectId: "project" });
 
     const plan = await prepareSelfModificationSetup(ctx.prepare, effects);
     expect(effects.findOrCreateConnector).not.toHaveBeenCalled();
-    await expect(applySelfModificationSetup(plan, ctx.apply, effects, deps)).resolves.toMatchObject(
-      {
-        deploymentRequired: true,
-      },
-    );
+    expect(effects.checkBranchProtection).toHaveBeenCalledWith("acme/agents", "main");
+    expect(ctx.note).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      tone: "warning",
+    });
+    await expect(applySelfModificationSetup(plan, ctx.apply, effects)).resolves.toMatchObject({
+      deploymentRequired: true,
+      facts: expect.arrayContaining([
+        { label: "Branch protection", value: "pull requests required" },
+      ]),
+    });
     expect(ctx.resolveVercelProject).toHaveBeenCalledWith("self-modification");
     expect(effects.findOrCreateConnector).toHaveBeenCalledWith("selfmod-acme-agents", {
       orgId: "team",
@@ -150,58 +138,61 @@ describe("self-modification integration setup", () => {
       orgId: "team",
       projectId: "project",
     });
-    expect(deps.ensurePackageDependencies).toHaveBeenCalledWith({
-      dependencies: { "@vercel/connect": "2.5.2" },
-      projectRoot: "/project",
-    });
-    expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(
-      expect.objectContaining({ changed: true, projectPath: "/project" }),
-    );
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('import selfModification from "eve/self-modification/remote"'),
     );
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining('repository: "github.com/acme/agents"'),
-    );
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining('case "channel:slack"'),
-    );
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining('import { getToken } from "@vercel/connect"'),
-    );
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining("async resolve({ capability, repository })"),
-    );
-    expect(ctx.note).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "After deployment, try self-modification by running `eve dev <deployment-url>`",
-      ),
-      "Next steps",
-      { tone: "success" },
-    );
+    const configured = effects.writeConfig.mock.calls[0]?.[0] as string;
+    expect(configured).toContain('repository: "acme/agents"');
+    expect(configured).toContain('case "http"');
+    expect(configured).toContain('case "channel:slack"');
+    expect(configured).not.toContain("authorize: () => true");
+    const nextSteps = ctx.note.mock.calls.find(([, title]) => title === "Next steps")?.[0];
+    expect(nextSteps).toContain("The generated policy admits its Vercel OIDC identity over HTTP");
+    expect(nextSteps).not.toContain("ruleset");
   });
+
+  it.each([
+    [
+      "unprotected",
+      "Protect main before deploying (strongly recommended)",
+      "has no branch protection",
+    ],
+    ["unknown", "Protect main before deploying (strongly recommended)", "`gh auth login`"],
+    ["protected", "Confirm that main requires pull requests", "only repository administrators"],
+  ] as const)(
+    "strongly recommends a pull request ruleset when the base branch is %s",
+    async (status, title, detail) => {
+      const effects = operations(undefined, status);
+      const ctx = contexts(deployedAnswers);
+
+      const plan = await prepareSelfModificationSetup(ctx.prepare, effects);
+      const warning = ctx.note.mock.calls.find(([, t]) => t === title);
+      expect(warning?.[2]).toEqual({ tone: "warning" });
+      expect(warning?.[0]).toContain(detail);
+      expect(warning?.[0]).toContain(
+        "does not list the Vercel Connect GitHub App as a bypass actor",
+      );
+      const result = await applySelfModificationSetup(plan, ctx.apply, effects);
+      expect(result.facts).toContainEqual({
+        label: "Branch protection",
+        value: expect.stringContaining(status === "protected" ? "not verified" : "strongly"),
+      });
+      const nextSteps = ctx.note.mock.calls.find(([, t]) => t === "Next steps")?.[0];
+      expect(nextSteps).toContain("Strongly recommended: Add a repository ruleset");
+    },
+  );
 
   it("resolves a Vercel project before configuring deployed self-modification", async () => {
     const effects = operations();
-    const ctx = contexts({
-      "self-modification-mode": "deployed",
-      "self-modification-repository-owner": "acme",
-      "self-modification-repository-name": "agents",
-      "self-modification-repository-directory": "apps/support",
-      "self-modification-target-branch": "main",
-      "self-modification-confirm": true,
-    });
+    const ctx = contexts(deployedAnswers);
 
     const plan = await prepareSelfModificationSetup(ctx.prepare, effects);
     await applySelfModificationSetup(plan, ctx.apply, effects);
 
     expect(ctx.resolveVercelProject).toHaveBeenCalledWith("self-modification");
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
-  });
-
-  it("registers the production setup separately from local setup", () => {
-    expect(SELF_MODIFICATION_PRODUCTION_SETUP.kind).toBe("self-modification-production");
+    expect(effects.writeConfig).toHaveBeenCalledWith(
+      expect.stringContaining('connector: "github/selfmod-acme-agents"'),
+    );
   });
 
   it("describes unavailable Vercel setup without suggesting portable credentials", () => {
