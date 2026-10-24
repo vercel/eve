@@ -170,14 +170,14 @@ describe.each(["static", "dynamic"] as const)(
       ]);
     });
 
-    it("preserves Plain's version error when discovery has no supported legacy version", async () => {
+    it.each([
+      ["no legacy version overlaps", { requested: "2026-07-28", supported: ["2026-07-28"] }],
+      ["supported is not a list", { requested: "2026-07-28", supported: "2025-11-25" }],
+      ["data is missing", undefined],
+    ])("keeps -32022 fatal when %s", async (_case, data) => {
       await createClient();
-      discoveryError = {
-        code: -32022,
-        data: { requested: "2026-07-28", supported: ["2026-07-28"] },
-        message: "Unsupported protocol version",
-      };
-      await expect(client.connect()).rejects.toMatchObject(discoveryError);
+      discoveryError = { code: -32022, data, message: "Unsupported protocol version" };
+      await expect(client.connect()).rejects.toMatchObject({ code: -32022 });
       expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
     });
 
@@ -188,7 +188,21 @@ describe.each(["static", "dynamic"] as const)(
       expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
     });
 
-    it("falls back to initialize when discovery rejects a supported protocol version", async () => {
+    it("initializes at the latest legacy version when the server lacks discovery", async () => {
+      await createClient();
+      discoveryError = { code: -32601, message: "Method not found" };
+      await expect(client.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({ name: "getMyUser" }),
+      ]);
+      expect(requests).toEqual([
+        { method: "server/discover", protocolVersion: "2026-07-28" },
+        { method: "initialize", protocolVersion: "2025-11-25" },
+        { method: "notifications/initialized", protocolVersion: "2025-11-25" },
+        { method: "tools/list", protocolVersion: "2025-11-25" },
+      ]);
+    });
+
+    it("falls back to initialize when Plain-style discovery rejects a supported protocol version", async () => {
       await createClient();
       await expect(client.getToolMetadata()).resolves.toEqual([
         expect.objectContaining({ name: "getMyUser" }),
