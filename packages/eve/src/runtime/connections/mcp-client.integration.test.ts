@@ -174,6 +174,19 @@ describe.each(["static", "dynamic"] as const)(
       expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
     });
 
+    it.fails("falls back to initialize when discovery rejects a supported protocol version", async () => {
+      await createClient();
+      await expect(client.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({ name: "getMyUser" }),
+      ]);
+      expect(requests).toEqual([
+        { method: "server/discover", protocolVersion: "2026-07-28" },
+        { method: "initialize", protocolVersion: "2025-11-25" },
+        { method: "notifications/initialized", protocolVersion: "2025-11-25" },
+        { method: "tools/list", protocolVersion: "2025-11-25" },
+      ]);
+    });
+
     it("stays on the modern protocol when a modern-only server answers discovery slowly", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       await createClient();
