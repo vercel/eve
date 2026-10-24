@@ -16,7 +16,7 @@ const plan = {
   registry: {
     attempts: 1,
     mock_attempts: 1,
-    dev_startup: { runs: 2, subjects: [{ name: "minimal", tools: 0 }] },
+    dev_startup: { runs: 2, subjects: [{ name: "minimal", tools: 0, digest: "b".repeat(40) }] },
     models: [{ name: "alpha", id: "acme/alpha", release: "2026-09-22" }],
     mock_worlds: ["local"],
     fixtures: [
@@ -252,7 +252,10 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     schemaVersion: 1,
     target: "local",
     durationMs,
-    phases: [{ name: "compile", durationMs: durationMs / 2 }],
+    phases: [
+      { name: "compile", durationMs: durationMs / 2 },
+      { name: "sandbox.prewarm", durationMs: durationMs / 4 },
+    ],
   });
   writeFileSync(join(leg, "probes", "build-profile.json"), JSON.stringify(profile(4000)));
   const devStartupDir = mkdtempSync(join(tmpdir(), "eve-dev-startup-"));
@@ -262,13 +265,13 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     join(devStartupDir, "minimal.jsonl"),
     [
       { root: "/tmp/x", toolCount: 0 },
-      { run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, status: 200 },
+      { run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, firstTurnMs: 1100 },
       { run: 1, mode: "build", wallMs: 3000, profile: profile(2800) },
       {
         run: 1,
         mode: "start",
         wallMs: 600,
-        probes: { attempts: 20, timedOut: 0, refused: 19, stalledMs: 0 },
+        probes: { attempts: 20, timedOut: 0, refused: 19 },
       },
       { mode: "dev", medianMs: 900 },
     ]
@@ -283,26 +286,34 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     githubRunId: "123",
     runAttempt: 1,
   });
-  const summary = records.map((r) => [r.probe, r.subject, r.world, r.attempt, r.missing]);
+  const summary = records.map((r) => [r.probe, r.subject, r.world, r.attempt, r.cold, r.missing]);
+  // Every mock-leg probe and each agent's first run start from an empty project.
   assert.deepEqual(summary, [
-    ["build", "agent-tools", "postgres", 1, null],
-    ["start", "agent-tools", "postgres", 1, "probe-missing"],
-    ["dev-startup", "minimal", "local", 1, null],
-    ["build", "minimal", "local", 1, null],
-    ["start", "minimal", "local", 1, null],
-    ["dev-startup", "minimal", "local", 2, "run-missing"],
-    ["build", "minimal", "local", 2, "run-missing"],
-    ["start", "minimal", "local", 2, "run-missing"],
+    ["build", "agent-tools", "postgres", 1, true, null],
+    ["start", "agent-tools", "postgres", 1, true, "probe-missing"],
+    ["dev-startup", "minimal", "local", 1, true, null],
+    ["build", "minimal", "local", 1, true, null],
+    ["start", "minimal", "local", 1, true, null],
+    ["dev-startup", "minimal", "local", 2, false, "run-missing"],
+    ["build", "minimal", "local", 2, false, "run-missing"],
+    ["start", "minimal", "local", 2, false, "run-missing"],
   ]);
+  assert.deepEqual(
+    [records[0].subject_digest, records[2].subject_digest],
+    ["f".repeat(64), "b".repeat(40)],
+  );
   assert.deepEqual(records[4].metrics, { "start.ready_ms": { status: "measured", value: 600 } });
   assert.deepEqual(records[0].metrics, {
     "build.total_ms": { status: "measured", value: 4000 },
+    "build.without_sandbox_prewarm_ms": { status: "measured", value: 3000 },
     "build.phase_ms.compile": { status: "measured", value: 2000 },
+    "build.phase_ms.sandbox.prewarm": { status: "measured", value: 1000 },
   });
   assert.equal(records[0].artifact_path, "raw/agent-tools/mock/postgres/1");
-  assert.deepEqual(records[2].metrics["dev_startup.session_accepted_ms"], {
-    status: "measured",
-    value: 950,
+  assert.deepEqual(records[2].metrics, {
+    "dev_startup.ready_ms": { status: "measured", value: 900 },
+    "dev_startup.session_accepted_ms": { status: "measured", value: 950 },
+    "dev_startup.first_turn_ms": { status: "measured", value: 1100 },
   });
   assert.equal(
     buildFrameworkRecords({

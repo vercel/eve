@@ -1,8 +1,14 @@
 // Derives framework-records.jsonl: run-level framework metrics that belong to
 // a commit and a fixture, not to an eval attempt. Each record is one probe
 // sample, keyed by (github_run_id, run_attempt, probe, subject, world,
-// attempt), and comparable across runs when (probe, subject, world,
-// runner_os) match. Records carry no model fields.
+// attempt), and comparable across runs when (probe, subject, subject_digest,
+// world, runner_os, cold) match. Records carry no model fields.
+//
+// `subject_digest` identifies what was measured: the fixture digest for a
+// fixture, or the startup script's blob id for an agent it generates. `cold`
+// marks a sample from an empty project: every mock-leg probe (a fresh runner)
+// and run 1 of each dev-startup agent. One-time setup, such as preparing
+// sandbox images, lands there, so warm and cold samples never pool.
 //
 //   build        `eve build --profile` on mock legs with a production server
 //                (leg probes/build-profile.json), and the dev-startup job's
@@ -10,7 +16,7 @@
 //   start        `eve start` → first `/eve/v1/health` 200 on the same legs
 //                (leg probes/start.json: { readyMs }), and on the
 //                dev-startup job's builds of its benchmark agents
-//   dev-startup  `eve dev` ready and idle session accepted, from
+//   dev-startup  `eve dev` ready, then a first turn accepted and completed, from
 //                packages/eve/scripts/benchmark-startup.mjs
 //                (<dev-startup-dir>/<subject>.jsonl: its stdout)
 //
@@ -33,9 +39,13 @@ const framework = (unit) => ({ unit, direction: "lower", scope: "framework", poo
 export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   "build.total_ms": framework("ms"),
   "build.phase_ms.*": framework("ms"),
+  // Sandbox preparation depends mostly on the runner and network, and
+  // dominates cold builds; this is the rest of the build.
+  "build.without_sandbox_prewarm_ms": framework("ms"),
   "start.ready_ms": framework("ms"),
   "dev_startup.ready_ms": framework("ms"),
   "dev_startup.session_accepted_ms": framework("ms"),
+  "dev_startup.first_turn_ms": framework("ms"),
 });
 
 /** Legs that build and start a local production server, and so carry build and start probes. */
@@ -53,14 +63,27 @@ export function probedLegs(legs) {
  * }} input
  */
 export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, runAttempt }) {
-  const record = ({ probe, subject, world, attempt, runnerOs, missing, metrics, path }) => ({
+  const record = ({
+    probe,
+    subject,
+    subjectDigest,
+    world,
+    attempt,
+    cold,
+    runnerOs,
+    missing,
+    metrics,
+    path,
+  }) => ({
     schema_version: FRAMEWORK_RECORD_SCHEMA_VERSION,
     github_run_id: String(githubRunId),
     run_attempt: runAttempt,
     probe,
     subject,
+    subject_digest: subjectDigest ?? null,
     world,
     attempt,
+    cold,
     sha: plan.sha,
     runner_os: runnerOs ?? null,
     missing: missing ?? null,
@@ -68,9 +91,16 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
     artifact_path: path ?? null,
   });
 
+  const digests = new Map(plan.registry.fixtures.map((fixture) => [fixture.name, fixture.digest]));
   const records = [];
   for (const { leg, dir, meta } of probedLegs(legs)) {
-    const base = { subject: leg.fixture, world: leg.world, attempt: leg.attempt };
+    const base = {
+      subject: leg.fixture,
+      subjectDigest: digests.get(leg.fixture),
+      world: leg.world,
+      attempt: leg.attempt,
+      cold: true,
+    };
     const runnerOs = meta?.runner_os;
     const path = dir === undefined ? undefined : legArtifactPath(leg);
     const read = (name) => {
@@ -112,10 +142,17 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
     const meta = readOptionalJson(devStartupDir && join(devStartupDir, "meta.json"));
     if (meta !== undefined && meta.sha !== plan.sha)
       throw new Error(`dev-startup ran at ${meta.sha}, but the plan is for ${plan.sha}.`);
-    for (const { name } of devStartup.subjects) {
+    for (const { name, digest } of devStartup.subjects) {
       const lines = readJsonLines(devStartupDir && join(devStartupDir, `${name}.jsonl`));
       for (let run = 1; run <= devStartup.runs; run += 1) {
-        const base = { subject: name, world: "local", attempt: run, runnerOs: meta?.runner_os };
+        const base = {
+          subject: name,
+          subjectDigest: digest,
+          world: "local",
+          attempt: run,
+          cold: run === 1,
+          runnerOs: meta?.runner_os,
+        };
         const missingReason =
           meta === undefined
             ? "job-missing"
@@ -133,6 +170,7 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
                 metrics: {
                   "dev_startup.ready_ms": duration(dev.wallMs),
                   "dev_startup.session_accepted_ms": duration(dev.sessionAcceptedMs),
+                  "dev_startup.first_turn_ms": duration(dev.firstTurnMs),
                 },
               }),
         );
@@ -171,10 +209,13 @@ function buildMetrics(value) {
   try {
     profile = readBuildProfile(value, "build profile");
   } catch {
-    return { "build.total_ms": { status: "unavailable", reason: "invalid-build-profile" } };
+    const invalid = { status: "unavailable", reason: "invalid-build-profile" };
+    return { "build.total_ms": invalid, "build.without_sandbox_prewarm_ms": invalid };
   }
+  const prewarm = profile.phases.find((phase) => phase.name === "sandbox.prewarm");
   return {
     "build.total_ms": duration(profile.durationMs),
+    "build.without_sandbox_prewarm_ms": duration(profile.durationMs - (prewarm?.durationMs ?? 0)),
     ...Object.fromEntries(
       profile.phases.map((phase) => [`build.phase_ms.${phase.name}`, duration(phase.durationMs)]),
     ),

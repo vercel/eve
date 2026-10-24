@@ -13,7 +13,7 @@ const registry = {
   mockWorlds: ["local", "postgres"],
   attempts: 2,
   mockAttempts: 2,
-  devStartup: { runs: 3, toolCounts: [0, 20] },
+  devStartup: { runs: 3, subjects: ["minimal"] },
   concurrency: { legs: 3, evalsPerLeg: 1 },
 };
 const matrix = {
@@ -39,13 +39,7 @@ const select = (overrides = {}, narrow = {}) =>
 test("expands fixtures × models × attempts and mock worlds the fixture selects", () => {
   const selection = select();
   assert.deepEqual(selection.concurrency, { legs: 3, evalsPerLeg: 1 });
-  assert.deepEqual(selection.devStartup, {
-    runs: 3,
-    subjects: [
-      { name: "minimal", tools: 0 },
-      { name: "tools-20", tools: 20 },
-    ],
-  });
+  assert.deepEqual(selection.devStartup, { runs: 3, subjects: [{ name: "minimal", tools: 0 }] });
   const { live, mock } = planLegs(selection);
   assert.equal(live.length, 2 * 2 * 2);
   // Models vary fastest so legs started together spread across models, and
@@ -171,7 +165,11 @@ test("registry errors name the offending entry", () => {
     [{ concurrency: undefined }, /"concurrency.legs" must be an integer from 1 to 50/],
     [{ mockAttempts: 0 }, /"mockAttempts" must be an integer from 1 to 10/],
     [{ mockFixtures: ["agent-three"] }, /fixture "agent-three" was not found/],
-    [{ devStartup: { runs: 1, toolCounts: [0, 0] } }, /"devStartup.toolCounts" must be distinct/],
+    [
+      { devStartup: { runs: 3, subjects: ["kitchen-sink"] } },
+      /unknown "devStartup.subjects" kitchen-sink/,
+    ],
+    [{ devStartup: { runs: 1, subjects: ["minimal"] } }, /must include a warm run/],
     [
       { concurrency: { legs: 5, evalsPerLeg: 0 } },
       /"concurrency.evalsPerLeg" must be an integer from 1 to 16/,

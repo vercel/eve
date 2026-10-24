@@ -11,7 +11,7 @@
 //   hosted_matrix  the mock legs on a hosted world (a preview deployment
 //                each), run one at a time so they don't contend for the
 //                same deployment backend
-//   dev_startup  `eve dev` startup probe settings (runs and agent sizes) for
+//   dev_startup  `eve dev` startup probe settings (runs and named agents) for
 //                the dev-startup job, or null when the registry has none
 //   plan.json    the resolved registry snapshot (models pinned to their AI
 //                Gateway release, fixture digests, expected eval ids) plus
@@ -37,7 +37,10 @@ const NAME = /^[a-z0-9-]+$/;
 const MAX_ATTEMPTS = 10;
 const MAX_PARALLEL_LEGS = 50;
 const MAX_EVALS_PER_LEG = 16;
-const MAX_STARTUP_TOOLS = 1000;
+const MAX_STARTUP_RUNS = 10;
+// Agents packages/eve/scripts/benchmark-startup.mjs generates, by registry name.
+const STARTUP_SCRIPT = "packages/eve/scripts/benchmark-startup.mjs";
+const STARTUP_SUBJECTS = { minimal: { tools: 0 } };
 
 /**
  * Validate the registry and apply dispatch narrowing. Pure apart from the
@@ -214,26 +217,28 @@ function leg({ kind, fixture, model_name, model_id, world = { name: "local" }, a
   };
 }
 
-/** Startup probe subjects are named by agent size: `minimal`, or `tools-<n>`. */
+/**
+ * Startup probe subjects are agents the startup script generates, by name.
+ * Run 1 of each starts from an empty project (cold); later runs reuse its
+ * caches (warm), so `runs` must leave at least one warm run.
+ */
 function readDevStartup(value) {
-  const runs = positiveInteger(value?.runs, 'e2e/benchmark.json: "devStartup.runs"');
-  const toolCounts = value?.toolCounts;
-  if (
-    !Array.isArray(toolCounts) ||
-    toolCounts.length === 0 ||
-    toolCounts.some((n) => !Number.isInteger(n) || n < 0 || n > MAX_STARTUP_TOOLS) ||
-    new Set(toolCounts).size !== toolCounts.length
-  )
+  const runs = boundedInteger(
+    value?.runs,
+    MAX_STARTUP_RUNS,
+    'e2e/benchmark.json: "devStartup.runs"',
+  );
+  if (runs < 2)
     throw new Error(
-      `e2e/benchmark.json: "devStartup.toolCounts" must be distinct integers from 0 to ${MAX_STARTUP_TOOLS}.`,
+      'e2e/benchmark.json: "devStartup.runs" must include a warm run after the cold one.',
     );
-  return {
-    runs,
-    subjects: toolCounts.map((tools) => ({
-      name: tools === 0 ? "minimal" : `tools-${tools}`,
-      tools,
-    })),
-  };
+  const subjects = names(value?.subjects, "devStartup.subjects");
+  const unknown = subjects.filter((name) => !Object.hasOwn(STARTUP_SUBJECTS, name));
+  if (unknown.length > 0)
+    throw new Error(
+      `e2e/benchmark.json: unknown "devStartup.subjects" ${unknown.join(", ")}; choose from ${Object.keys(STARTUP_SUBJECTS).join(", ")}.`,
+    );
+  return { runs, subjects: subjects.map((name) => ({ name, ...STARTUP_SUBJECTS[name] })) };
 }
 
 function namedEntries(entries, key) {
@@ -337,7 +342,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     registry: {
       attempts: selection.attempts,
       mock_attempts: selection.mockAttempts,
-      dev_startup: selection.devStartup,
+      // The startup script defines its agents, so its blob id is their digest.
+      dev_startup:
+        selection.devStartup === null
+          ? null
+          : {
+              ...selection.devStartup,
+              subjects: selection.devStartup.subjects.map((subject) => ({
+                ...subject,
+                digest: execFileSync("git", ["rev-parse", `${sha}:${STARTUP_SCRIPT}`], {
+                  encoding: "utf8",
+                }).trim(),
+              })),
+            },
       // Concurrency changes measured latency, so every manifest records it.
       concurrency: {
         legs: selection.concurrency.legs,
