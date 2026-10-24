@@ -37,11 +37,15 @@ const UPLOAD_CONCURRENCY = 8;
  * @typedef {{
  *   put: (pathname: string, body: Buffer, contentType: string) => Promise<void>,
  *   read: (pathname: string) => Promise<Buffer | null>,
+ *   list?: (prefix: string) => Promise<string[]>,
  * }} ImmutableStore `put` must reject with an "already exists" error rather than overwrite.
  */
 
 /**
- * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, frameworkRecordsJsonl: string, devStartupDir?: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore }} input
+ * `root` and `source` let an importer publish runs it did not execute (see
+ * import-stress-artifacts.mjs) outside `runs/`, saying where they came from.
+ *
+ * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, frameworkRecordsJsonl: string, devStartupDir?: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore, root?: string, source?: object }} input
  */
 export async function publishRun({
   plan,
@@ -53,6 +57,8 @@ export async function publishRun({
   runAttempt,
   eveVersion,
   store,
+  root = "runs",
+  source,
 }) {
   const parse = (jsonl) =>
     jsonl
@@ -68,7 +74,7 @@ export async function publishRun({
       );
   }
 
-  const prefix = `runs/${githubRunId}/${runAttempt}`;
+  const prefix = `${root}/${githubRunId}/${runAttempt}`;
   const tree = (dir, artifactPath) =>
     listFiles(dir).map((path) => ({
       pathname: `${prefix}/${artifactPath}/${relative(dir, path).replaceAll("\\", "/")}`,
@@ -101,6 +107,7 @@ export async function publishRun({
     sha: plan.sha,
     eve_version: eveVersion,
     planned_at: plan.planned_at,
+    ...(source === undefined ? {} : { source }),
     registry: plan.registry,
     legs: legs.map(({ leg, dir }) => ({ ...leg, uploaded: dir !== undefined })),
     record_count: records.length,
@@ -178,7 +185,7 @@ async function mapLimit(items, limit, task) {
 
 /** Private, immutable Blob store backed by @vercel/blob. */
 export async function vercelBlobStore(token) {
-  const { get, put } = await import("@vercel/blob");
+  const { get, list, put } = await import("@vercel/blob");
   return {
     async put(pathname, body, contentType) {
       await put(pathname, body, {
@@ -193,6 +200,17 @@ export async function vercelBlobStore(token) {
     async read(pathname) {
       const result = await get(pathname, { token, access: "private", useCache: false });
       return result === null ? null : Buffer.from(await new Response(result.stream).arrayBuffer());
+    },
+    async list(prefix) {
+      const pathnames = [];
+      let cursor;
+      for (let page = 0; page < 100; page += 1) {
+        const result = await list({ token, prefix, cursor, limit: 1000 });
+        pathnames.push(...result.blobs.map((blob) => blob.pathname));
+        if (!result.hasMore) return pathnames;
+        cursor = result.cursor;
+      }
+      throw new Error(`More than 100 pages of blobs under ${prefix}.`);
     },
   };
 }

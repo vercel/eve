@@ -2,20 +2,23 @@ name: Mirror Stress Artifacts
 
 # Copies e2e-vercel's release-PR `workflow-stress-performance` artifacts to the
 # benchmark Blob store before GitHub's 30-day retention deletes them
-# (scripts/eval-benchmark/mirror-stress-artifacts.mjs). Re-runs skip what is
-# already mirrored, so a daily run keeps every release build.
+# (scripts/eval-benchmark/mirror-stress-artifacts.mjs), then derives a
+# benchmark run from each release build
+# (scripts/eval-benchmark/import-stress-artifacts.mjs). Both skip what they
+# already wrote, so a daily run keeps every release build.
 on:
   schedule:
     - cron: "41 6 * * *"
   workflow_dispatch:
   # TEMPORARY: lets this PR mirror archives that expire before it can merge.
   # Same-repo pull_request runs receive repository secrets, so this hands the
-  # Blob token to PR code; the job's `if` limits it to this branch. Remove
-  # before merge.
+  # Blob token to PR code; the job's `if` limits it to this branch, and the
+  # import only dry-runs so PR code never publishes runs. Remove before merge.
   pull_request:
     paths:
       - .github/workflows/mirror-stress-artifacts.yml
       - scripts/eval-benchmark/mirror-stress-artifacts.mjs
+      - scripts/eval-benchmark/import-stress-artifacts.mjs
 
 concurrency:
   group: mirror-stress-artifacts
@@ -36,6 +39,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The import reads each release's merge commit on main.
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -54,3 +59,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
         run: node scripts/eval-benchmark/mirror-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY"
+
+      - name: Import release builds as benchmark runs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' && '--dry-run' || '' }}
+        run: node scripts/eval-benchmark/import-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY" $DRY_RUN
