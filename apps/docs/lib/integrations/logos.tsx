@@ -84,6 +84,26 @@ export const voiceLogo = (props: LogoProps) => (
   </svg>
 );
 
+const stacktreeLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <defs>
+      <linearGradient
+        id="stacktree-logo"
+        x1="0"
+        y1="0"
+        x2="0"
+        y2="64"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset="0" stopColor="#BD9AF4" />
+        <stop offset="1" stopColor="#4A32F9" />
+      </linearGradient>
+    </defs>
+    <path d="m32 26 22 16-22 16L10 42l22-16Z" fill="url(#stacktree-logo)" opacity=".55" />
+    <path d="m32 6 22 16-22 16L10 22 32 6Z" fill="url(#stacktree-logo)" opacity=".95" />
+  </svg>
+);
+
 const browserUseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -932,6 +952,7 @@ const shopifyLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
+  stacktree: stacktreeLogo,
   "browser-use": browserUseLogo,
   waydock: waydockLogo,
   github: githubLogo,

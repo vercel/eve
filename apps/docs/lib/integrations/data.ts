@@ -2072,6 +2072,37 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "unlisted link", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/stacktree.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/stacktree.ts
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://api.stacktr.ee/mcp",
+  description:
+    "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
+  approval: always(),
+  headers: () => ({
+    authorization: \`Bearer \${process.env.STACKTREE_API_KEY!}\`,
+  }),
+});
+\`\`\`
+
+eve requires approval for every Stacktree tool call because the server can publish, change access, and delete pages.`,
+    configureNote:
+      "Create an API key in the [Stacktree dashboard](https://app.stacktr.ee/api-keys). eve sends it as an Authorization Bearer token. Pages are unlisted, so anyone with the link can view them. Use Stacktree's optional passcode or email gate when access must be restricted.",
+  },
   waydock: {
     logo: "waydock",
     docsHref: "https://waydock.ai/docs/quickstart",

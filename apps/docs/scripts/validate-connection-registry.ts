@@ -47,6 +47,7 @@ const API_KEY_CONNECTIONS: Readonly<Record<string, readonly string[]>> = {
   "browser-use": ["BROWSER_USE_API_KEY"],
   dataforseo: ["DATAFORSEO_USERNAME", "DATAFORSEO_PASSWORD"],
   firecrawl: ["FIRECRAWL_API_KEY"],
+  stacktree: ["STACKTREE_API_KEY"],
   waydock: ["WAYDOCK_MCP_KEY"],
 };
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
