@@ -21,7 +21,7 @@ export function authoringExperiment(options: {
     agent: `vercel-ai-gateway/${harnessId(options.benchmark.harness)}`,
     model: nativeModel(options.benchmark),
     evals:
-      process.env.EVE_BENCHMARK_EVAL ??
+      process.env.EVE_BENCHMARK_EVAL?.split(",") ??
       (options.evals ? [...options.evals] : [...publishedBenchmark.caseIds]),
     scripts: ["typecheck", "build"],
     runs: options.runs ?? 1,

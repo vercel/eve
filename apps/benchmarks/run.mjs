@@ -40,23 +40,27 @@ if (values.help) {
   usage();
   process.exit(0);
 }
-if (positionals.length > 1) throw new Error("Expected at most one <eval-name>.");
 const runs = parseRuns(values.runs);
-const selectedEval = positionals[0];
+// Cases may be separate arguments or comma-separated, so CI can pass one list.
+const selectedEvals = [
+  ...new Set(positionals.flatMap((value) => value.split(",")).filter(Boolean)),
+];
 const treatment = parseAuthoringTreatment(values.treatment);
 const benchmark = findBenchmarkModel(values.model);
-if (values.verbose && (selectedEval === undefined || runs !== 1)) {
+if (values.verbose && (selectedEvals.length !== 1 || runs !== 1)) {
   throw new Error("--verbose requires one eval and one run.");
 }
-if (selectedEval !== undefined && !existsSync(join(evalsRoot, selectedEval, "CASE.ts"))) {
-  throw new Error(`Unknown eval ${JSON.stringify(selectedEval)}.`);
+for (const selectedEval of selectedEvals) {
+  if (!existsSync(join(evalsRoot, selectedEval, "CASE.ts"))) {
+    throw new Error(`Unknown eval ${JSON.stringify(selectedEval)}.`);
+  }
 }
 
 const subjects = [canarySubject(values.canary, "current")];
 await prepareFixtures(
   evalsRoot,
   subjects[0],
-  selectedEval === undefined ? publishedBenchmark.caseIds : [selectedEval],
+  selectedEvals.length === 0 ? publishedBenchmark.caseIds : selectedEvals,
 );
 mkdirSync(join(appRoot, "results"), { recursive: true });
 writeExperiments(subjects, runs, benchmark, treatment, values.verbose ?? false);
@@ -71,7 +75,9 @@ const result = spawnSync(executable, args, {
   cwd: appRoot,
   stdio: "inherit",
   env:
-    selectedEval === undefined ? process.env : { ...process.env, EVE_BENCHMARK_EVAL: selectedEval },
+    selectedEvals.length === 0
+      ? process.env
+      : { ...process.env, EVE_BENCHMARK_EVAL: selectedEvals.join(",") },
 });
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);
@@ -100,5 +106,5 @@ function parseRuns(value) {
 
 function usage() {
   console.log(`Usage:
-  pnpm benchmark [eval-name] [--canary main] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry] [--verbose] [--keep-failures]`);
+  pnpm benchmark [eval-name...] [--canary main] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry] [--verbose] [--keep-failures]`);
 }

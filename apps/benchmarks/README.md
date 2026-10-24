@@ -2,7 +2,24 @@
 
 This private workspace measures how coding agents create and modify eve projects. It uses
 `@vercel/agent-eval`, Vercel Sandbox, and deterministic Vitest graders. These benchmarks do not
-run in CI or as part of `pnpm test`.
+run automatically in CI or as part of `pnpm test`.
+
+To benchmark a same-repository pull request, add the `run-authoring-benchmark` label. The
+[Authoring Benchmark workflow](../../.github/workflows/authoring-benchmark.yml) uses the branch's
+runner and cases, and the PR's `pkg.eve.dev` package (or `main`'s when the PR does not affect the
+eve package). The label only runs a benchmark when the PR body has a line naming what to run:
+
+```text
+authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-008-restock-agent runs=3
+```
+
+`models` is required, and `models=all` selects every supported model. `cases` defaults to the
+published cases and `runs` to 1. Each model runs as its own job with its own summary
+and results artifact. Remove and re-add the label to run again. The workflow can also be
+dispatched from the Actions tab on a branch with the same options as inputs.
+
+Locally, pass several cases as separate or comma-separated arguments:
+`pnpm benchmark author-001-weather-tool,author-005-conditional-approval`.
 
 ## Run
 
