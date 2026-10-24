@@ -15,8 +15,7 @@
 // whose head_sha is the release PR's final head commit; a cancelled or failed
 // final run uploads nothing, so the latest archive is not always that build.
 //
-// Run by hand: nothing schedules it, so release archives created after the
-// last run expire unless someone runs it again.
+// .github/workflows/mirror-stress-artifacts.yml runs it daily.
 //
 // Usage: node scripts/eval-benchmark/mirror-stress-artifacts.mjs [--dry-run] [--repo vercel/eve] [--branch changeset-release/main]
 // Requires a GitHub token with actions:read (GITHUB_TOKEN, GH_TOKEN, or `gh auth login`)
