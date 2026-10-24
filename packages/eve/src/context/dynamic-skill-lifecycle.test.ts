@@ -17,7 +17,7 @@ import {
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createTurnStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
@@ -218,6 +218,57 @@ function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
 }
 
 describe("dispatchDynamicSkillEvent", () => {
+  it.fails("rejects a failed turn refresh without applying another resolver's update", async () => {
+    const { ctx, sandbox } = createCtx();
+    const cause = new Error("skill source is unavailable");
+    let playbookAvailable = true;
+    let supportDescription = "Original support";
+    const playbookResolver = createResolver("playbook", () => {
+      if (!playbookAvailable) throw cause;
+      return makeSkill("Playbook");
+    });
+    const playbook = {
+      ...playbookResolver,
+      eventNames: ["session.started", "turn.started"],
+      events: {
+        ...playbookResolver.events,
+        "turn.started": playbookResolver.events["session.started"]!,
+      },
+    } satisfies ResolvedDynamicSkillResolver;
+    const supportResolver = createResolver("support", () => makeSkill(supportDescription));
+    const support = {
+      ...supportResolver,
+      eventNames: ["session.started", "turn.started"],
+      events: {
+        ...supportResolver.events,
+        "turn.started": supportResolver.events["session.started"]!,
+      },
+    } satisfies ResolvedDynamicSkillResolver;
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [support, playbook],
+    });
+    const manifestBeforeFailedRefresh = ctx.get(DynamicSkillManifestKey);
+    const writesBeforeFailedRefresh = sandbox.writes.length;
+
+    playbookAvailable = false;
+    supportDescription = "Updated support";
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+        messages: [],
+        resolvers: [support, playbook],
+      }),
+    ).rejects.toMatchObject({ cause, name: "BoundaryHookError" });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual(manifestBeforeFailedRefresh);
+    expect(sandbox.writes).toHaveLength(writesBeforeFailedRefresh);
+  });
+
   it("stores SKILL.md as authored, including frontmatter", async () => {
     const { ctx } = createCtx();
     await dispatch(
