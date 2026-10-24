@@ -25,6 +25,7 @@ agent/
 - **Delegation.** `code__worker` is a read-only subagent for independent slices of a task. The root `agent` tool is disabled so all writes stay in one session.
 - **Credentials.** Each `gh` command gets a token scoped to one repository, minted by [Vercel Connect](https://vercel.com/docs/connect). The sandbox only sees a placeholder. `lib/github.ts` swaps it in at the sandbox firewall for that command and removes it afterward. The GitHub channel's checkout attaches a broader token to `github.com`, so `hooks/reset-github-egress.ts` removes it before the model runs.
 - **GitHub.** The triggering repository is checked out at `/workspace` before each GitHub turn, and pull request turns include the diff. Only comments from owners, members, and collaborators start a turn, so strangers on a public repository cannot drive the agent.
+- **Trust boundary.** The agent acts with the GitHub App's permissions, not the caller's. Every admitted caller, whether a Slack user who can mention the app or a collaborator on any one installed repository, can ask it to read or change any repository the app is installed on, regardless of their own access. Install the app only on repositories that everyone who can invoke the agent may access, and restrict who can invoke it accordingly.
 
 ## Getting started
 
