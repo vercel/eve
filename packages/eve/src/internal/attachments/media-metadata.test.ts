@@ -1,3 +1,5 @@
+import { deflateSync } from "node:zlib";
+
 import { describe, expect, it } from "vitest";
 
 import { estimateMediaTokens, readMediaMetadata } from "#internal/attachments/media-metadata.js";
@@ -59,6 +61,24 @@ describe("readMediaMetadata", () => {
       "%PDF-1.4\n1 0 obj << /Type /Pages /Count 2 >>\n2 0 obj << /Type /Page >>\n3 0 obj << /Type/Page >>",
       "latin1",
     );
+
+    expect(readMediaMetadata(pdf, "application/pdf")).toMatchObject({ pages: 2 });
+  });
+
+  it.fails("counts PDF page objects packed in a compressed object stream", () => {
+    // PDF 1.5+ writers such as pdf-lib and most scanners store page objects in
+    // FlateDecode object streams, so `/Type /Page` never appears in the raw bytes.
+    const objects = deflateSync(
+      "2 0 3 48 4 80\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\n<< /Type /Page /Parent 2 0 R >>\n<< /Type /Page /Parent 2 0 R >>",
+    );
+    const pdf = Buffer.concat([
+      Buffer.from(
+        `%PDF-1.5\n1 0 obj\n<< /Type /ObjStm /N 3 /First 14 /Filter /FlateDecode /Length ${objects.byteLength} >>\nstream\n`,
+        "latin1",
+      ),
+      objects,
+      Buffer.from("\nendstream\nendobj\n", "latin1"),
+    ]);
 
     expect(readMediaMetadata(pdf, "application/pdf")).toMatchObject({ pages: 2 });
   });
