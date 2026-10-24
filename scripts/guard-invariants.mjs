@@ -154,6 +154,10 @@
  *             `execution/legacy-session/`, only the ingress files that import
  *             protocol-1 sessions may import it, so current execution
  *             consumes only normalized session state.
+ *   rule 54 — Compaction strategies are closed behind their entry. Outside
+ *             `harness/compaction/strategies/`, a strategy is reached only
+ *             through its `index.js`; its engine, prompt and other internals
+ *             stay private, so a strategy can change without core edits.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -277,6 +281,7 @@ function isTsLike(relPath) {
  *   rule51: Violation[];
  *   rule52: Violation[];
  *   rule53: Violation[];
+ *   rule54: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -307,6 +312,7 @@ async function scanRepo(state) {
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
     checkRule53(posix, lines, state.rule53);
+    checkRule54(posix, lines, state.rule54);
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
@@ -421,6 +427,28 @@ function checkRule53(posix, lines, violations) {
         message:
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
+  });
+}
+
+// ---------- Rule 54: compaction strategies are reached through their index ----------
+
+const COMPACTION_STRATEGIES_DIR = "packages/eve/src/harness/compaction/strategies/";
+const COMPACTION_STRATEGY_INTERNAL_RE =
+  /(?:from\s+|import\s*\()["']#harness\/compaction\/strategies\/[^"']+\/(?!index\.js["'])[^"'/]+["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule54(posix, lines, violations) {
+  if (posix.startsWith(COMPACTION_STRATEGIES_DIR)) return;
+  if (/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
+  lines.forEach((line, index) => {
+    if (!COMPACTION_STRATEGY_INTERNAL_RE.test(line)) return;
+    violations.push({
+      rule: 54,
+      file: posix,
+      line: index + 1,
+      message:
+        "Compaction strategies are reached only through their index.js; their engine, prompt and helpers are private so a strategy can change without core edits.",
+    });
   });
 }
 
@@ -1774,6 +1802,7 @@ async function main() {
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
     rule53: /** @type {Violation[]} */ ([]),
+    rule54: /** @type {Violation[]} */ ([]),
     rule45: {
       allowlist: new Set(baseline.rule45_providedToolPrivateImportAllowlist),
       violations: /** @type {Violation[]} */ ([]),
@@ -1900,6 +1929,7 @@ async function main() {
   violations.push(...state.rule51);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
+  violations.push(...state.rule54);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

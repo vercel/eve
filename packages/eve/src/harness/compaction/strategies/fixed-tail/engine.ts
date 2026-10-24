@@ -10,10 +10,12 @@ import {
   sliceUtf16Safe,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
-} from "#harness/compaction/prompt.js";
+} from "#harness/compaction/strategies/fixed-tail/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
+import type { CompactionFacts } from "#harness/compaction/strategy.js";
+import { getInputTokenCount } from "#harness/compaction/measure.js";
 import type { CompactionConfig } from "#harness/types.js";
 
 /**
@@ -39,52 +41,11 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
 ] satisfies ModelMessage[]);
 
 /**
- * Best available input-token count: the model-reported count from the last
- * step, plus a rough character-based estimate of whatever messages have been
- * appended since.
+ * Returns true when the measured input and the fixed compaction-prompt
+ * envelope exceed the compaction threshold.
  */
-export function getInputTokenCount(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-  requestEnvelopeTokens = 0,
-  previousEnvelopeTokens = 0,
-): number {
-  const prior = config.lastKnownInputTokens;
-  const priorCount = config.lastKnownPromptMessageCount;
-
-  if (
-    prior === undefined ||
-    priorCount === undefined ||
-    !Number.isInteger(priorCount) ||
-    priorCount < 0 ||
-    priorCount > messages.length
-  ) {
-    return estimateTokens(messages) + requestEnvelopeTokens;
-  }
-
-  return (
-    prior +
-    estimateTokens(messages.slice(priorCount)) +
-    Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
-  );
-}
-
-/**
- * Returns true when the message history and fixed compaction-prompt envelope
- * exceed the compaction threshold.
- */
-export function shouldCompact(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-  requestEnvelopeTokens = 0,
-  previousEnvelopeTokens = 0,
-): boolean {
-  return (
-    messages.length > 0 &&
-    getInputTokenCount(messages, config, requestEnvelopeTokens, previousEnvelopeTokens) +
-      COMPACTION_PROMPT_OVERHEAD_TOKENS >
-      config.threshold
-  );
+export function shouldCompact(facts: CompactionFacts): boolean {
+  return facts.inputTokens + COMPACTION_PROMPT_OVERHEAD_TOKENS > facts.threshold;
 }
 
 /** Summarizes one compaction prompt with the compaction model, returning the summary text. */

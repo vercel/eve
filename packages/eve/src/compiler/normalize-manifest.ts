@@ -22,6 +22,7 @@ import {
   type CompiledDynamicSkillDefinition,
   type CompiledDynamicToolDefinition,
   type CompiledInstructionsDefinition,
+  type CompiledCompactionDefinition,
   type CompiledMemoryDefinition,
   type CompiledHookDefinition,
   type CompiledRemoteAgentNode,
@@ -55,6 +56,7 @@ import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-
 import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
+import { compileCompactionDefinition } from "#compiler/normalize-compaction.js";
 import { compileMemoryDefinition } from "#compiler/normalize-memory.js";
 import { createMemoryWrapperCandidates } from "#compiler/memory-wrapper-candidates.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
@@ -488,6 +490,7 @@ class AgentGraphCompiler {
     const schedules: CompiledScheduleDefinition[] = [];
     const scheduleCollections: CompiledScheduleCollectionDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
+    let compaction: CompiledCompactionDefinition | null = null;
     let sandbox: CompiledSandboxDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
@@ -566,6 +569,13 @@ class AgentGraphCompiler {
               loadNamespace,
             }),
           );
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          break;
+        case "compaction":
+          compaction = await compileCompactionDefinition(entry.source, {
+            binding: binding!,
+            loadNamespace,
+          });
           state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         case "sandbox":
@@ -681,6 +691,7 @@ class AgentGraphCompiler {
       extensionMounts,
       hooks,
       memories,
+      compaction,
       instructions,
       sandbox,
       sandboxWorkspaces: input.manifest.sandboxWorkspaces.map((workspace) => ({

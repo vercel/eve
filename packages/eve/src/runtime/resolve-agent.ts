@@ -16,6 +16,7 @@ import { resolveDynamicInstructionsDefinition } from "#runtime/resolve-dynamic-i
 import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js";
 import { resolveDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
+import { resolveCompactionDefinition } from "#runtime/resolve-compaction.js";
 import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
@@ -103,6 +104,10 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       resolveMemoryDefinition(definition, input.moduleMap, input.nodeId),
     ),
   );
+  const resolvedCompaction =
+    input.manifest.compaction === null
+      ? undefined
+      : await resolveCompactionDefinition(input.manifest.compaction, input.moduleMap, input.nodeId);
   const authoredSandbox = await resolveSandboxDefinition(
     input.manifest.sandbox,
     input.moduleMap,
@@ -127,6 +132,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
     memories: resolvedMemories,
+    compaction: resolvedCompaction,
     sandbox: authoredSandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,

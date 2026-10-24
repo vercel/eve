@@ -24,6 +24,8 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
+To change how the history is shortened, export your own strategy from `compaction.ts`. See [Compaction strategies](./compaction-strategies).
+
 First-class [memory](../memory) participates in a separate lifecycle. eve asks
 providers to capture before compaction, excludes attributed recalled records
 from the summarizer, keeps their canonical latest values, and recalls again

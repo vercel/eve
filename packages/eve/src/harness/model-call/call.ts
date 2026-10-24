@@ -53,6 +53,7 @@ import { requireSessionModelReference, type StepResult } from "#harness/types.js
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { defaultCompactionStrategy } from "#harness/compaction/default-strategy.js";
 import { maybeCompact } from "#harness/compaction/step.js";
 import { reportCompactionFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
@@ -287,6 +288,7 @@ export class ModelCaller {
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
+        strategy: config.compactionStrategy ?? defaultCompactionStrategy,
         telemetry: step.instrumentation?.telemetry(),
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
