@@ -909,6 +909,19 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "tinyfish",
+    name: "TinyFish",
+    kind: "connection",
+    tagline:
+      "Search the web, fetch content, and run browser automation through TinyFish's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "TinyFish: search the web, fetch page content, and run browser automation and research.",
+      mcp: { url: "https://agent.tinyfish.ai/mcp" },
+    },
+  },
+  {
     slug: "todoist",
     name: "Todoist",
     kind: "connection",
