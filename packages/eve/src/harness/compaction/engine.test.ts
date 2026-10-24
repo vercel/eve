@@ -1240,17 +1240,30 @@ describe("compactMessages: fixed kept-tail budget", () => {
   });
 
   it("never splits a surrogate pair at either edge of the cut", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const history: ModelMessage[] = [
-      user("\u{1F600}".repeat(20_000)),
-      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
-    ];
-
-    const result = await compactMessages(history, config(history), summarizer);
-
     const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-    expect(lone.test(JSON.stringify(result.map((message) => message.content)))).toBe(false);
-    expect(lone.test(String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content))).toBe(false);
+    // Padding shifts the pairs against the cut, so across the combinations the
+    // start and the end each land mid-pair at least once.
+    for (const before of ["", "a", "ab"]) {
+      for (const after of ["", "a", "ab"]) {
+        const summarizer = summarizeWith("checkpoint text");
+        const history: ModelMessage[] = [
+          user(`${before}${"\u{1F600}".repeat(20_000)}${after}`),
+          ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+        ];
+
+        const result = await compactMessages(history, config(history), summarizer);
+
+        const replayed = result.flatMap((message) =>
+          typeof message.content === "string"
+            ? [message.content]
+            : message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+        );
+        expect(replayed.some((text) => lone.test(text))).toBe(false);
+        expect(lone.test(String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content))).toBe(
+          false,
+        );
+      }
+    }
   });
 
   it("cuts the text part of a request that carries an attachment", async () => {

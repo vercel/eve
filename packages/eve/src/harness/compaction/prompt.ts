@@ -110,7 +110,7 @@ function degradeOversizedTranscript(
     }
 
     // Cut only what the budget still needs, never below the floor: a single large
-    // entry (the cut head of an oversized message) keeps as much as fits. The
+    // entry (the cut-out middle of an oversized message) keeps as much as fits. The
     // slack absorbs the estimate's rounding so a sliver of excess does not
     // reach into the next entry.
     const limit = Math.max(

@@ -7,6 +7,7 @@ import {
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   serializeToolResultOutput,
+  sliceUtf16Safe,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
@@ -198,8 +199,8 @@ export async function compactMessages(
   const planTail = (history: readonly ModelMessage[]) => {
     const index = findLastRealUserIndex(history);
     const current = history[index];
-    const cut = current === undefined ? undefined : fitCurrentMessage(current, budget);
-    const replay = cut?.replay ?? current;
+    const fit = current === undefined ? undefined : fitCurrentMessage(current, budget);
+    const replay = fit?.replay ?? current;
     let keep = selectRecentWindowSize(history, recentConfig, budget);
     if (replay !== undefined && index < history.length - keep) {
       // The window leaves the request out, so it is replayed after the summary.
@@ -209,11 +210,11 @@ export async function compactMessages(
         Math.max(0, budget - estimateTokens([replay])),
       );
     }
-    return { currentIndex: index, cut, keep, replay };
+    return { currentIndex: index, fit, keep, replay };
   };
 
   const first = planTail(conversation);
-  if (!forceSummary && first.cut === undefined) {
+  if (!forceSummary && first.fit === undefined) {
     const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
@@ -245,7 +246,7 @@ export async function compactMessages(
   // file read would otherwise take the whole tail budget.
   const cappedConversation = capToolResults(conversation);
   const summaryPlan = planTail(cappedConversation);
-  const { currentIndex, cut, replay } = summaryPlan;
+  const { currentIndex, fit, replay } = summaryPlan;
   let { keep } = summaryPlan;
 
   while (true) {
@@ -253,9 +254,9 @@ export async function compactMessages(
 
     const summaryPrompt = createCompactionPrompt({
       messages:
-        cut === undefined
+        fit === undefined
           ? older
-          : older.map((message, index) => (index === currentIndex ? cut.head : message)),
+          : older.map((message, index) => (index === currentIndex ? fit.cut : message)),
       previousCheckpoint,
       transcriptBudgetTokens: config.threshold,
     });
@@ -396,7 +397,7 @@ function withResumptionGuard(
 /**
  * Splits `message` when it exceeds the tail budget, or returns `undefined`
  * when it already fits. `replay` keeps the start (a fifth of the budget) and
- * the end of its text, behind a note where the middle was cut; `head` is that
+ * the end of its text, behind a note where the middle was cut; `cut` is that
  * middle, which the summarizer receives in full. Instructions sit at the
  * start or the end of a request and bulk pasted text in the middle. Non-text
  * parts (files) stay on the replay.
@@ -404,7 +405,7 @@ function withResumptionGuard(
 function fitCurrentMessage(
   message: ModelMessage,
   budget: number,
-): { readonly head: ModelMessage; readonly replay: ModelMessage } | undefined {
+): { readonly cut: ModelMessage; readonly replay: ModelMessage } | undefined {
   const text = messageText(message);
   // The replay keeps the message's file parts, so when they alone take the
   // budget, cutting its text frees nothing.
@@ -413,19 +414,15 @@ function fitCurrentMessage(
   }
 
   const note = (omitted: number) =>
-    `[eve: ${omitted} characters from the middle of this message were cut during context compaction to fit the context window.]\n\n`;
+    `\n\n[eve: ${omitted} characters from the middle of this message were cut during context compaction to fit the context window.]\n\n`;
   const split = (start: number, end: number) =>
     splitMessageText(message, start, end, note(end - start));
   let keptChars = Math.floor(budget * 4);
   while (keptChars > 0) {
     keptChars = Math.min(keptChars, text.length);
     const lead = Math.floor(keptChars * 0.2);
-    let start = lead;
+    const start = sliceUtf16Safe(text, lead).length;
     let end = text.length - (keptChars - lead);
-    const before = text.charCodeAt(start - 1);
-    if (before >= 0xd800 && before <= 0xdbff) {
-      start -= 1;
-    }
     const after = text.charCodeAt(end);
     if (after >= 0xdc00 && after <= 0xdfff) {
       end += 1;
@@ -453,7 +450,7 @@ function messageText(message: ModelMessage): string | undefined {
 type MessagePart = Exclude<ModelMessage["content"], string>[number];
 
 /**
- * Cuts characters `start` to `end` of {@link messageText}: `head` keeps only
+ * Cuts characters `start` to `end` of {@link messageText}: `cut` keeps only
  * that middle, `replay` keeps the rest with `note` at the cut. Non-text parts
  * stay on both.
  */
@@ -462,10 +459,10 @@ function splitMessageText(
   start: number,
   end: number,
   note: string,
-): { readonly head: ModelMessage; readonly replay: ModelMessage } {
+): { readonly cut: ModelMessage; readonly replay: ModelMessage } {
   if (typeof message.content === "string") {
     return {
-      head: { ...message, content: message.content.slice(start, end) } as ModelMessage,
+      cut: { ...message, content: message.content.slice(start, end) } as ModelMessage,
       replay: {
         ...message,
         content: `${message.content.slice(0, start)}${note}${message.content.slice(end)}`,
@@ -474,11 +471,11 @@ function splitMessageText(
   }
   let offset = 0;
   let noted = false;
-  const head: MessagePart[] = [];
+  const cutParts: MessagePart[] = [];
   const replay: MessagePart[] = [];
   for (const part of message.content) {
     if (part.type !== "text") {
-      head.push(part);
+      cutParts.push(part);
       replay.push(part);
       continue;
     }
@@ -486,7 +483,7 @@ function splitMessageText(
     const to = Math.max(from, Math.min(part.text.length, end - offset));
     offset += part.text.length;
     if (to > from) {
-      head.push({ ...part, text: part.text.slice(from, to) });
+      cutParts.push({ ...part, text: part.text.slice(from, to) });
     }
     const before = part.text.slice(0, from);
     const after = part.text.slice(to);
@@ -503,7 +500,7 @@ function splitMessageText(
     replay.push({ type: "text", text: note });
   }
   return {
-    head: { ...message, content: head } as ModelMessage,
+    cut: { ...message, content: cutParts } as ModelMessage,
     replay: { ...message, content: replay } as ModelMessage,
   };
 }
