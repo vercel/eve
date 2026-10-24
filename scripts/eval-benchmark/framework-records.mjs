@@ -37,9 +37,9 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   "dev_startup.session_accepted_ms": framework("ms"),
 });
 
-/** Legs that build and start a production server, and so carry build and start probes. */
+/** Legs that build and start a local production server, and so carry build and start probes. */
 export function probedLegs(legs) {
-  return legs.filter(({ leg }) => leg.kind === "mock" && leg.world !== "local");
+  return legs.filter(({ leg }) => leg.kind === "mock" && leg.world !== "local" && !leg.hosted);
 }
 
 /**
