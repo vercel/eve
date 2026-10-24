@@ -140,7 +140,7 @@ export async function publishRun({
   };
 }
 
-async function putImmutable(store, pathname, body, contentType) {
+export async function putImmutable(store, pathname, body, contentType) {
   try {
     await store.put(pathname, body, contentType);
   } catch (error) {
