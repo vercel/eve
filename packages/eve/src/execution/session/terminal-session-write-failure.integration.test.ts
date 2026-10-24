@@ -31,8 +31,7 @@ afterEach(() => {
 
 // On Vercel, a session's stream stays on its first run. Once that run's deployment is deleted,
 // its run key is gone and every write fails as a FatalError, the way this test injects it.
-// Expected failure until #5261 is fixed: the expired session is reported as failed.
-it.fails("does not report an expired session as failed when its terminal stream write fails", async () => {
+it("does not report an expired session as failed when its terminal stream write fails", async () => {
   const runtime = await createTestRuntime({
     agent: { name: "terminal-session-write-failure" },
     modules: [
