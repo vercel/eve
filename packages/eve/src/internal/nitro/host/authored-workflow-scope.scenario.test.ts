@@ -126,8 +126,7 @@ describe("authored workflow scope", () => {
     }
   });
 
-  // Expected failure until #5269 is fixed: workflow bundles lack the asset import plugin.
-  it.fails("embeds ?raw assets imported by workflow and step modules", async () => {
+  it("embeds ?raw assets imported by workflow and step modules", async () => {
     const app = await scenarioApp({
       name: "workflow-raw-assets",
       installDependencies: true,

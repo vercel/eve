@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
+import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -633,6 +634,11 @@ function createApplicationNitroBundlerConfiguration(
       extensionOverridePaths(preparedHost.compileResult.manifest),
     ),
     extensionScopePlugin,
+    // Workflow step modules reach Nitro as authored source, not prebundled.
+    createAuthoredAssetImportPlugin({
+      authoredSourceOnly: true,
+      packageRoot: preparedHost.appRoot,
+    }),
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
     // Keep dependency filtering out of Rolldown's JS callback bridge.

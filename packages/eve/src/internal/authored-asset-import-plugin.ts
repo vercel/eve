@@ -2,6 +2,8 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
+import { isNodeModulesPath } from "#internal/authored-package-boundary.js";
+
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".ts",
   ".tsx",
@@ -22,12 +24,24 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
  */
 export function createAuthoredAssetImportPlugin(input: {
   readonly packageRoot: string;
+  /**
+   * Handles only importers and assets inside the package root and outside
+   * `node_modules`. Set it for bundles that also bundle dependencies, such as
+   * the Nitro server and the workflow driver, so dependency imports stay with
+   * the host bundler.
+   */
+  readonly authoredSourceOnly?: boolean;
 }): Record<string, unknown> {
   const packageRoot = toCanonicalPath(input.packageRoot);
+  const handles = (path: string): boolean =>
+    input.authoredSourceOnly !== true ||
+    (isAbsolute(path) &&
+      !isNodeModulesPath(path) &&
+      isPathInsideOrEqual(toCanonicalPath(path), packageRoot));
   return {
     name: "eve-authored-asset-import",
     resolveId(source: string, importer: string | undefined) {
-      if (!isPotentialAuthoredAssetImport(source) || importer === undefined) {
+      if (!isPotentialAuthoredAssetImport(source) || importer === undefined || !handles(importer)) {
         return undefined;
       }
 
@@ -45,7 +59,7 @@ export function createAuthoredAssetImportPlugin(input: {
     async load(id: string) {
       const { path, suffix } = splitImportSuffix(id);
 
-      if (!isPotentialAuthoredAssetImport(path)) {
+      if (!isPotentialAuthoredAssetImport(path) || !handles(path)) {
         return undefined;
       }
 
