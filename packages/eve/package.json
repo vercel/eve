@@ -516,6 +516,11 @@
       "import": "./dist/src/public/channels/twilio/index.js",
       "default": "./dist/src/public/channels/twilio/index.js"
     },
+    "./channels/recall": {
+      "types": "./dist/src/public/channels/recall/index.d.ts",
+      "import": "./dist/src/public/channels/recall/index.js",
+      "default": "./dist/src/public/channels/recall/index.js"
+    },
     "./channels/telegram": {
       "types": "./dist/src/public/channels/telegram/index.d.ts",
       "import": "./dist/src/public/channels/telegram/index.js",
