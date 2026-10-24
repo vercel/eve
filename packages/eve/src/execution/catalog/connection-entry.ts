@@ -200,7 +200,7 @@ async function executeWithDeadline(
   } catch (error) {
     if (!deadline.signal.aborted || turn?.aborted === true) throw error;
     throw new Error(
-      `"${connectionName}" did not answer ${toolName} within ${CALL_TIMEOUT_MS / 60_000} minutes. Try again later.`,
+      `"${connectionName}" did not answer ${toolName} within ${CALL_TIMEOUT_MS / 60_000} minutes. It may still have run, so check before you retry.`,
       { cause: error },
     );
   } finally {
