@@ -254,6 +254,8 @@ The run picks back up exactly where it parked. Because the pause is durable, not
 
 When a subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
+A message from the parent agent to a subagent never answers the subagent's tool approval or session-limit request, even when its text matches an option such as `approve` or `continue`. Only a person's structured answer, routed through the parent session, settles these requests. The subagent still receives the parent's message as an ordinary message. It steers the turn past a pending approval, which resolves as `ignored`, and waits behind a session-limit request until a person answers it.
+
 Approval is consent only. An approved tool call runs with the requesting user's identity, connections, and credentials, including its policy recheck. The approver's access is never lent to the call. Subsequent tool calls in the turn also stay with the original owner.
 
 A `defineTool` tool can still act on the approver's behalf when it chooses to. While an approved `defineTool` call runs, `ctx.approval.responder` is the principal who approved it, and `ctx.approval.responder.getToken(provider)` resolves that person's token for an inline provider, as `ctx.getToken(provider)` does for the requester. `ctx.session.auth.current` stays the requester. `ctx.approval` is absent for calls that needed no approval, and workflow tools don't receive it. `ctx.approval.responder.getToken(provider)` never starts a sign-in: when the approver has no token, it throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"`.
