@@ -44,7 +44,7 @@ import {
   renderRetiredInputRequest,
 } from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
-import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
+import { isNotImplemented, recordEditFailure } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
   GET,
@@ -85,6 +85,11 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
    * the rest of the session.
    */
   editSupported?: boolean;
+  /**
+   * An edit to the in-flight streamed post failed, so that post stops being
+   * edited and the completed reply is posted as a new message.
+   */
+  anchorEditFailed?: boolean | null;
   /** Epoch ms of the last streaming edit, used to throttle edits. */
   lastEditAtMs?: number | null;
   /** Buffered first line of a tool-call message, surfaced as typing status. */
@@ -509,19 +514,20 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
         const sent = await channel.thread.post({ markdown: message });
         channel.state.anchorMessageId = sent.id;
+        channel.state.anchorEditFailed = null;
         channel.state.streamStepIndex = event.stepIndex;
         channel.state.lastEditAtMs = Date.now();
         return;
       }
+      if (channel.state.anchorEditFailed) return;
       const lastEdit = channel.state.lastEditAtMs ?? 0;
       if (Date.now() - lastEdit < channel.streamingEditIntervalMs) return;
       try {
         await editMessage(channel.thread, anchor, message);
         channel.state.lastEditAtMs = Date.now();
       } catch (error) {
-        if (!isNotImplemented(error)) throw error;
-        channel.state.editSupported = false;
-        clearStream(channel.state);
+        recordEditFailure(channel.state, error, log);
+        channel.state.anchorEditFailed = true;
       }
     },
     // Some adapters show only text, where a reply can answer only the request
@@ -592,7 +598,7 @@ async function safeStartTyping(thread: Thread | null, status?: string): Promise<
 /**
  * Edits a previously posted message in place via the adapter. Rendered as
  * markdown so streamed edits match the completed-message formatting. Callers
- * handle {@link isNotImplemented} to fall back to a fresh post.
+ * post a new message when it fails; see {@link recordEditFailure}.
  */
 async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
   await thread.adapter.editMessage(thread.id, messageId, { markdown });
@@ -634,12 +640,11 @@ async function finalizeStreamedMessage(
     return;
   }
   const anchor = channel.state.anchorMessageId;
-  if (canStream(channel) && anchor) {
+  if (canStream(channel) && anchor && !channel.state.anchorEditFailed) {
     try {
       await editMessage(thread, anchor, message);
     } catch (error) {
-      if (!isNotImplemented(error)) throw error;
-      channel.state.editSupported = false;
+      recordEditFailure(channel.state, error, log);
       if (postWhenNoAnchor) await thread.post({ markdown: message });
     }
   } else if (postWhenNoAnchor) {
@@ -656,6 +661,7 @@ function canStream(channel: ChatSdkChannelContext): boolean {
 /** Resets the streaming anchor so the next step starts a fresh message. */
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
+  state.anchorEditFailed = null;
   state.lastEditAtMs = null;
   state.streamStepIndex = null;
   streamTextByState.delete(state);

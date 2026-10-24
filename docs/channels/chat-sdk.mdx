@@ -160,7 +160,7 @@ Typing indicators post automatically where the adapter supports them: `Workingâ€
 
 ### Optional capabilities degrade gracefully
 
-Adapters do not all implement every operation. When an adapter's `startTyping` or `editMessage` throws a `NotImplementedError` (or an error with code `NOT_IMPLEMENTED`), the channel swallows it: typing indicators are skipped, and a streaming edit falls back to a single final post for the rest of the session. You never have to guard optional capabilities in your own handlers. The same predicate is exported as `isNotImplemented` if you want it in custom `events`:
+Adapters do not all implement every operation. When an adapter's `startTyping` or `editMessage` throws a `NotImplementedError` (or an error with code `NOT_IMPLEMENTED`), the channel swallows it: typing indicators are skipped, and edits stop for the rest of the session. When an edit to a completed reply or a sign-in's result fails with any other error, the channel posts that update as a new message instead and keeps editing later messages. A streamed reply's first chunk is already posted by then, so set `streaming: false` on a channel whose adapters can't edit; the option applies to every adapter in the channel. You never have to guard optional capabilities in your own handlers. The same predicate is exported as `isNotImplemented` if you want it in custom `events`:
 
 ```ts
 import { isNotImplemented } from "eve/channels/chat-sdk";
