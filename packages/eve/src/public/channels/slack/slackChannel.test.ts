@@ -4769,6 +4769,45 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(triggerIds).toEqual(["13345224609.738474920.8088930838d88f008e0"]);
   });
 
+  it("passes an ephemeral click's response_url to onInteraction", async () => {
+    const clicks: { messageTs?: string; responseUrl?: string }[] = [];
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onInteraction(action) {
+        clicks.push({ messageTs: action.messageTs, responseUrl: action.responseUrl });
+      },
+    });
+
+    // Slack omits `message` for clicks on ephemeral messages and reports
+    // the hosting message only through `container`.
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        trigger_id: "trigger-123",
+        response_url: "https://hooks.slack.com/actions/T01/1/abc",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        container: {
+          type: "message",
+          message_ts: "1700000000.000010",
+          channel_id: "C01",
+          is_ephemeral: true,
+          thread_ts: "1700000000.000001",
+        },
+        actions: [{ action_id: "dismiss", text: { type: "plain_text", text: "Dismiss" } }],
+      }),
+    );
+
+    expect(clicks).toEqual([
+      {
+        messageTs: "1700000000.000010",
+        responseUrl: "https://hooks.slack.com/actions/T01/1/abc",
+      },
+    ]);
+  });
+
   it("gives a Slack Connect user one principal across messages and button clicks", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     fetchMock.mockImplementation(

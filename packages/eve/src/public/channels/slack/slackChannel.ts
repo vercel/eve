@@ -502,6 +502,14 @@ export interface SlackInteractionAction {
    */
   readonly triggerId?: string;
   /**
+   * Slack `response_url` of the click. POST to it to replace or delete the
+   * message hosting the clicked component, for example
+   * `{ delete_original: true }`. This is the only way to change an ephemeral
+   * message, which `chat.update` and `chat.delete` cannot reach. Slack
+   * accepts up to five requests within 30 minutes.
+   */
+  readonly responseUrl?: string;
+  /**
    * Display label of the clicked widget: `text.text` for buttons,
    * `selected_option.text.text` for radio/static_select. Renders the
    * "answered" card without re-fetching the original request.
