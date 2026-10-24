@@ -147,6 +147,10 @@ await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
 ```
 
+A following `getEventStream()` rejects before it returns a stream when the session does not exist
+or its recorded history has expired, so a route can answer with an error status before it sends any
+bytes.
+
 For a stranded session, `Session.send()`, `Session.respond()`, and a following
 `Session.getEventStream()` throw `SessionStrandedError` from `eve/channels` and deliver nothing.
 `getEventStream({ follow: false })` still reads the recorded history up to the current tail without
