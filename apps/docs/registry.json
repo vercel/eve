@@ -813,7 +813,7 @@
       "name": "connection/agentcard",
       "type": "registry:item",
       "title": "Agentcard",
-      "description": "let agents buy online",
+      "description": "Shop real merchants and pay with single-use virtual cards.",
       "meta": {
         "eve": {
           "setup": {
@@ -1084,7 +1084,7 @@
       "name": "connection/context",
       "type": "registry:item",
       "title": "context.dev",
-      "description": "search, scrape, extract, and monitor live web data.",
+      "description": "Search, scrape, extract, and monitor live web data.",
       "meta": {
         "eve": {
           "setup": {
