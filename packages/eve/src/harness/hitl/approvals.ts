@@ -195,13 +195,23 @@ export function admitAnswers(
   }
   for (const responseId of check.admit) responses.admit(responseId);
   const refusal = check.refused.map(({ reason }) => reason).join("\n");
-  const refused: SessionEvent[] =
-    check.refused.length === 0
-      ? []
-      : (delivery?.deliveries ?? []).map(({ deliveryId }) => ({
-          data: { deliveryId, outcome: "refused", reason: refusal },
-          type: "delivery.settled",
-        }));
+  // The step's input can join an earlier delivery whose answer waits for the rest of its batch:
+  // only the deliveries that carried a refused answer, and haven't settled, are refused.
+  const refusedIds = new Set(check.refused.map(({ responseId }) => responseId));
+  const carriers = (delivery?.answers ?? [])
+    .filter(({ responseId }) => refusedIds.has(responseId))
+    .map(({ deliveryId }) => deliveryId);
+  const traced =
+    carriers.length === check.refused.length && carriers.every((id) => id !== undefined);
+  const refusedDeliveries = new Set(
+    traced ? carriers : (delivery?.deliveries ?? []).map(({ deliveryId }) => deliveryId),
+  );
+  const refused: SessionEvent[] = [...refusedDeliveries]
+    .filter((deliveryId) => tables.deliveries[deliveryId]?.status !== "settled")
+    .map((deliveryId) => ({
+      data: { deliveryId, outcome: "refused", reason: refusal },
+      type: "delivery.settled",
+    }));
   return {
     events: [...responses.facts(), ...refused],
     responders: check.weigh,

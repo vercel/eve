@@ -173,6 +173,81 @@ describe("workflow hook cancellation", () => {
     });
   }, 60_000);
 
+  it("ignores the session's own part of a delivery whose routed answer a hook cancels", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-guarded-answer-with-note",
+      execute: confirmDeployWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/guard.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "delivery.consumed"(event, ctx) {
+                  if (
+                    event.data.parts.some((part) => part.kind === "text" && part.text === "Deploy")
+                  )
+                    ctx.cancel();
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-guarded-answer-with-note",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        await stream.nextTurn();
+        // Alice answers the deploy question and, in the same delivery, adds a note for the agent.
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          deliveryMetadata: [
+            {
+              channelKind: "http",
+              channelName: "test",
+              deliveryId: "delivery-answer",
+              payloadIndex: 0,
+            },
+            {
+              channelKind: "http",
+              channelName: "test",
+              deliveryId: "delivery-note",
+              payloadIndex: 1,
+            },
+          ],
+          kind: "deliver",
+          payloads: [{ message: "Deploy" }, { message: "Thanks, and please post the summary." }],
+        });
+
+        const answered = await stream.nextUntil(
+          (event) => event.type === "turn.settled" && event.data.outcome === "cancelled",
+        );
+        expect(filterEventsByType(answered, "delivery.settled")).toContainEqual(
+          expect.objectContaining({
+            data: expect.objectContaining({ deliveryId: "delivery-note", outcome: "ignored" }),
+          }),
+        );
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("lets a call.progress hook cancel the turn waiting on the reporting run", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-guarded-progress",

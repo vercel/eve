@@ -1,4 +1,5 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import type { SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
@@ -7,7 +8,6 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { conversationOf } from "#client/conversation.js";
-import type { SessionParent } from "#channel/types.js";
 import type { EveToolPart } from "#client/message-types.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { workflowEntry } from "#execution/session/entry.js";
@@ -261,7 +261,11 @@ interface Session {
   ) => Promise<Stage>;
   readonly send: (message: string) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
-  readonly answer: (interactionId: string, optionId: string) => Promise<void>;
+  readonly answer: (
+    interactionId: string,
+    optionId: string,
+    auth?: SessionAuthContext,
+  ) => Promise<void>;
   readonly answerAndSend: (interactionId: string, message: string) => Promise<string>;
   readonly control: (
     kind: "cancel" | "clear" | "compact" | "reset",
@@ -390,9 +394,9 @@ async function withSession(
               ? [event.data.interactionId]
               : [],
           ),
-        async answer(interactionId, optionId) {
+        async answer(interactionId, optionId, auth = ALICE) {
           await resumeHook(commandInbox, {
-            auth: ALICE,
+            auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { answers: [{ interactionId, optionId }] },
@@ -1079,6 +1083,52 @@ describe("approvals off the happy path", () => {
     ]);
     expect(settlements(events)).toEqual(["call_deploy:rejected", "call_deploy_2:completed"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("keeps the owner's standing answer through repeated refusals of another person's batch answer", async () => {
+    const { events, ran } = await withSession(
+      "edge-refused-batch",
+      {
+        message: "Deploy twice.",
+        model: scriptedModel(({ results }) =>
+          results.length === 0
+            ? [
+                { toolName: "deploy", toolCallId: "call_a" },
+                { toolName: "deploy", toolCallId: "call_b" },
+              ]
+            : "Deployed.",
+        ),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the approvals");
+        const [first, second] = session.approvals();
+        await session.answer(first!, "approve");
+        await session.until(
+          "the owner's answer stands",
+          (event) => event.type === "response.admitted",
+        );
+        for (const attempt of ["first", "second"]) {
+          await session.answer(second!, "approve", BOB);
+          await session.until(
+            `Bob's ${attempt} answer is refused`,
+            (event) => event.type === "delivery.settled" && event.data.outcome === "refused",
+          );
+        }
+        await session.answer(second!, "approve");
+        await session.until(
+          "the approved turn finishes",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+    expect(ran).toEqual(["deploy", "deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    const refused = ofType(events, "delivery.settled").filter(
+      (event) => event.data.outcome === "refused",
+    );
+    expect(refused).toHaveLength(2);
+    expect(new Set(refused.map((event) => event.data.deliveryId)).size).toBe(2);
   });
 
   it("waits on the next approvals after a message steered past the last ones", async () => {

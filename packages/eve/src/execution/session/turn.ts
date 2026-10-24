@@ -114,6 +114,7 @@ export class SessionExecution {
       this.input,
       {
         caller: options.caller,
+        control: delivery?.control !== undefined,
         principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
       },
       options.control,

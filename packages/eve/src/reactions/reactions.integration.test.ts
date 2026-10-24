@@ -386,6 +386,104 @@ describe("reactions", () => {
     expect(log).not.toContain("context:compaction:completed");
   }, 90_000);
 
+  it("finishes a compaction that a cancel arrives during, and ignores the cancel", async () => {
+    const log: string[] = [];
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = scriptedModel(log, prompts);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({ model, modelContextWindowTokens: 200_000 } as never),
+        name: "cancel-during-compaction",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineMemory({
+              provider: {
+                capture: {
+                  "compaction.requested": async () => {
+                    log.push("capture:compaction");
+                    await released;
+                  },
+                },
+                recall: { "turn.started": () => null },
+              },
+              scope: "test",
+            }),
+          }),
+          logicalPath: "memory/notes.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineDynamic(() => ({
+              lookup: defineTool({
+                description: "Look something up.",
+                execute: async () => ({ found: true }),
+                inputSchema: {},
+              }),
+            })),
+          }),
+          logicalPath: "tools/lookup.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "context.settled": (fact) => {
+                  log.push(`context:${fact.data.kind}:${fact.data.outcome}`);
+                },
+                "delivery.settled": (fact) => {
+                  log.push(`settled:${fact.data.deliveryId}:${fact.data.outcome}`);
+                },
+                "turn.settled": (fact) => {
+                  log.push(`turn:${fact.data.outcome}`);
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+    const continuationToken = "http:cancel-during-compaction";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Look up the first thing." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken,
+          }),
+        },
+      ]);
+      const inbox = sessionInboxHookToken(continuationToken);
+      try {
+        await until(log, "turn:completed", 1);
+        await resumeHook(inbox, { kind: "compact", deliveryId: "compact" });
+        await until(log, "capture:compaction", 1);
+        // Alice cancels while the compaction is still capturing memory.
+        await resumeHook(inbox, { kind: "cancel", deliveryId: "cancel" });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        release();
+        await until(log, "settled:cancel:ignored", 1);
+        await until(log, "settled:compact:applied", 1);
+      } finally {
+        release();
+        await run.cancel().catch(() => {});
+      }
+    });
+
+    expect(log).toContain("context:compaction:completed");
+  }, 90_000);
+
   it("gives memory tools the scope recall resolved for the same turn", async () => {
     const log: string[] = [];
     const prompts: LanguageModelV4Prompt[] = [];

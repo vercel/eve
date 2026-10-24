@@ -30,7 +30,8 @@ import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { readHitlState } from "#harness/hitl/index.js";
-import { commitSessionStep } from "#execution/publish-session-events.js";
+import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
+import { fact } from "#harness/facts.js";
 import type { Answer } from "#shared/input.js";
 
 export type RoutedDeliverResult =
@@ -223,7 +224,36 @@ async function routeProxiedDeliver(
             },
           },
         );
-  if (cancelled) return { ...admitted, kind: "cancel-turn" };
+  if (cancelled) {
+    // The turn the answer resumed stopped, so what the delivery left for this session starts no
+    // turn of its own.
+    const view = storedProjection(readDurableSession(admitted.sessionState).state).view;
+    const ignored = (sourceDelivery.deliveryMetadata ?? []).filter(
+      ({ deliveryId, payloadIndex }) =>
+        parentPayloads.has(payloadIndex) && view.deliveries[deliveryId]?.status !== "settled",
+    );
+    if (ignored.length === 0) return { ...admitted, kind: "cancel-turn" };
+    const settled = await publishSessionEvents(
+      { ...admitted, sessionWritable: input.sessionWritable },
+      ignored.flatMap(({ channelKind, deliveryId }) => [
+        ...(view.deliveries[deliveryId] === undefined
+          ? [
+              fact("delivery.admitted", {
+                deliveryId,
+                principal: principalOf(sourceDelivery.auth),
+                source: channelKind === undefined ? undefined : { channel: channelKind },
+              }),
+            ]
+          : []),
+        fact("delivery.settled", { deliveryId, outcome: "ignored" }),
+      ]),
+    );
+    return {
+      kind: "cancel-turn",
+      serializedContext: settled.serializedContext,
+      sessionState: settled.sessionState,
+    };
+  }
 
   // A workflow run publishes nothing of its own: the session settles its questions as it answers.
   const decided: { answer: Answer; outcome: "accepted" | "declined" }[] = [];

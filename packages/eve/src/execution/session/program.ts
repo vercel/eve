@@ -1,4 +1,5 @@
-import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
+import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
@@ -237,6 +238,29 @@ async function runSessionLoop(
   let prewarmSettled = true;
   // What it prepared is kept only while the owner still waits for its first input.
   let awaitingFirstInput = false;
+  // Controls to a prewarmed session change nothing, and settle once it has started: nothing
+  // precedes `session.started`.
+  const unstarted: ControlSettlement[] = [];
+  const started = () =>
+    storedProjection(cursor.sessionState.snapshot.session.state).view.session.status !== "new";
+  const ignore = async (settlement: ControlSettlement): Promise<void> => {
+    if (!started()) {
+      unstarted.push(settlement);
+      return;
+    }
+    await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+  };
+  const settleUnstarted = async (): Promise<void> => {
+    if (!started()) return;
+    for (const settlement of unstarted.splice(0))
+      await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+  };
+  // A session that ends before it started settles them in its end's commit.
+  const expired = (control?: ControlDelivery): SessionTerminalOutcome => ({
+    kind: "expired",
+    ...(control && { control }),
+    ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
+  });
 
   const nextParkedActivity = async (): Promise<
     | Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "prewarm" }>
@@ -246,6 +270,7 @@ async function runSessionLoop(
       const next = await nextTurnDelivery({
         cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
+        ignore,
         inbox,
         queue,
       });
@@ -278,10 +303,9 @@ async function runSessionLoop(
         if (next.origin !== undefined) {
           const control = controlDeliveryOf(next.origin);
           await cursor.advance((state) =>
-            settleCancelDeliveryStep({
+            settleControlDeliveryStep({
               ...state,
-              control,
-              outcome: "applied",
+              settlement: { control, outcome: "applied", source: "cancel" },
             }),
           );
         }
@@ -361,17 +385,26 @@ async function runSessionLoop(
       awaitingFirstInput = false;
       switch (next.kind) {
         case "reset":
-          return { kind: "terminal", outcome: resetOutcome(next.origin) };
+          return {
+            kind: "terminal",
+            outcome: expired(next.origin && controlDeliveryOf(next.origin)),
+          };
         case "closed":
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
-          return { kind: "terminal", outcome: { kind: "expired" } };
+          return { kind: "terminal", outcome: expired() };
         case "transferred":
           return next;
         case "expired":
-          return { kind: "terminal", outcome: { kind: "expired" } };
+          return { kind: "terminal", outcome: expired() };
         case "clear":
         case "compact":
+          if (next.origin !== undefined)
+            await ignore({
+              control: controlDeliveryOf(next.origin),
+              outcome: "ignored",
+              source: next.kind,
+            });
           continue;
         case "turn":
           return await runDeliveredTurn(next);
@@ -424,9 +457,11 @@ async function runSessionLoop(
     let action = initial.action;
 
     while (true) {
+      // A first turn that ended the session left no commit after its start for them.
       if (action.kind === "done") {
         return { kind: "terminal", outcome: { action, kind: "done" } };
       }
+      await settleUnstarted();
 
       if (action.cancelled === true) {
         const { caller } = progress;

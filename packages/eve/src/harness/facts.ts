@@ -66,6 +66,8 @@ export function sessionEndedFacts(
     readonly cause?: Cause;
     /** The reset control that ends the session: admitted first, applied before the end. */
     readonly control?: ControlDelivery;
+    /** Controls that arrived before the session started, which settle as it starts. */
+    readonly settles?: readonly ControlSettlement[];
     readonly error?: ErrorInfo;
   },
 ): SessionEvent[] {
@@ -75,6 +77,7 @@ export function sessionEndedFacts(
   if (projection !== undefined && projection.view.session.status === "new") {
     facts.push(fact("session.started", {}));
   }
+  for (const settlement of ending.settles ?? []) facts.push(...controlSettled(settlement));
   const { control } = ending;
   if (control !== undefined) {
     facts.push(controlAdmitted(control, "reset"), deliveryApplied(control.deliveryId));
@@ -179,6 +182,21 @@ export function controlAdmitted(delivery: ControlDelivery, control: string): Ses
     source: { control },
   };
   return fact("delivery.admitted", data);
+}
+
+export interface ControlSettlement {
+  readonly control: ControlDelivery;
+  readonly source: "cancel" | "clear" | "compact";
+  readonly outcome: "ignored" | "applied";
+}
+
+/** A control that finishes without a step of its own, admitted and settled together. */
+export function controlSettled(settlement: ControlSettlement): SessionEvent[] {
+  const { control, outcome, source } = settlement;
+  return [
+    controlAdmitted(control, source),
+    fact("delivery.settled", { deliveryId: control.deliveryId, outcome }),
+  ];
 }
 
 /** A control or callback delivery's settlement once what it asked has happened. */

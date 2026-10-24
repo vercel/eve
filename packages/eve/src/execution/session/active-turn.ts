@@ -1,5 +1,5 @@
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
+import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
@@ -61,6 +61,7 @@ export class ActiveTurn {
   private readonly controller: AbortController;
   /** The cancel control that stopped this turn, when it named its delivery. */
   #cancelledBy: ControlOrigin | undefined;
+  readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
@@ -75,13 +76,19 @@ export class ActiveTurn {
 
   constructor(
     input: SessionExecutionInput,
-    owner: { readonly caller: TurnCaller | undefined; readonly principal: string },
+    owner: {
+      readonly caller: TurnCaller | undefined;
+      /** A clear or a compact runs, not a turn: a cancel, which stops turns, leaves it to finish. */
+      readonly control?: boolean;
+      readonly principal: string;
+    },
     control: TurnControl = createTurnControl(),
   ) {
     this.controller = control.cancellation;
     this.steeringController = control.steering;
     this.input = input;
     this.caller = owner.caller;
+    this.#control = owner.control === true;
     this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
     this.expectedTurnId = activeTurnId(
       turnPosition(storedProjection(readDurableSession(input.cursor.sessionState).state)),
@@ -268,7 +275,7 @@ export class ActiveTurn {
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
     if (payload.kind === "reset" || payload.kind === "session-failure") return true;
-    if (payload.kind !== "cancel") return false;
+    if (payload.kind !== "cancel" || this.#control) return false;
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
@@ -299,10 +306,9 @@ export class ActiveTurn {
         } else if (admitted.origin !== undefined) {
           const control = controlDeliveryOf(admitted.origin);
           await this.input.cursor.advance((state) =>
-            settleCancelDeliveryStep({
+            settleControlDeliveryStep({
               ...state,
-              control,
-              outcome: "ignored",
+              settlement: { control, outcome: "ignored", source: "cancel" },
             }),
           );
         }

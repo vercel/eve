@@ -1,7 +1,7 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { openRequests } from "#protocol/session-projection/reader.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
@@ -35,6 +35,8 @@ export async function nextTurnDelivery(input: {
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
+  /** Settles a control that changes nothing; a session that hasn't started defers it. */
+  readonly ignore: (settlement: ControlSettlement) => Promise<void>;
 }): Promise<NextTurnInstruction> {
   const { inbox, cursor, queue } = input;
   // A delivery admitted while the owner was fully idle (nothing queued, nothing
@@ -85,15 +87,11 @@ export async function nextTurnDelivery(input: {
     if (!stale && input.hasWorkingTasks()) {
       return { kind: "cancel-working-tasks", origin: admitted.origin };
     }
-    if (admitted.origin !== undefined) {
-      const control = controlDeliveryOf(admitted.origin);
-      await cursor.advance((state) =>
-        settleCancelDeliveryStep({
-          ...state,
-          control,
-          outcome: "ignored",
-        }),
-      );
-    }
+    if (admitted.origin !== undefined)
+      await input.ignore({
+        control: controlDeliveryOf(admitted.origin),
+        outcome: "ignored",
+        source: "cancel",
+      });
   }
 }

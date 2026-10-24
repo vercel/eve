@@ -91,6 +91,7 @@ function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     hasWorkingTasks: () => false,
+    ignore: async () => {},
     inbox: inbox,
     cursor,
     queue: new SessionInputQueue([]),

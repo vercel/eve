@@ -1,5 +1,6 @@
 type HarnessTurnRef = { readonly id: string; readonly sequence: number };
 import type { ControlDelivery } from "#harness/types.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
@@ -17,12 +18,13 @@ export async function emitTerminalSessionCompletionStep(input: {
   readonly sessionState?: DurableSessionState;
   /** The reset control that ends the session, when it named its delivery. */
   readonly control?: ControlDelivery;
+  readonly settles?: readonly ControlSettlement[];
 }): Promise<void> {
   "use step";
 
-  const { control, ...rest } = input;
+  const { control, settles, ...rest } = input;
   await publishTerminalSessionEvent({
     ...rest,
-    ending: control === undefined ? { outcome: "completed" } : { control, outcome: "completed" },
+    ending: { control, settles, outcome: "completed" },
   });
 }
