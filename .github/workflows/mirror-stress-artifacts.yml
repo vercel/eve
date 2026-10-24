@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
   # TEMPORARY: lets this PR mirror archives that expire before it can merge.
   # Same-repo pull_request runs receive repository secrets, so this hands the
-  # Blob token to PR code; the job's `if` limits it to this branch, and the
-  # import only dry-runs so PR code never publishes runs. Remove before merge.
+  # Blob token to PR code; the job's `if` limits it to this branch. Remove
+  # before merge.
   pull_request:
     paths:
       - .github/workflows/mirror-stress-artifacts.yml
@@ -64,5 +64,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
-          DRY_RUN: ${{ github.event_name == 'pull_request' && '--dry-run' || '' }}
-        run: node scripts/eval-benchmark/import-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY" $DRY_RUN
+        run: node scripts/eval-benchmark/import-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY"
