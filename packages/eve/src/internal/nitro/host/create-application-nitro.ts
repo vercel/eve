@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { resolveAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -635,9 +636,10 @@ function createApplicationNitroBundlerConfiguration(
     ),
     extensionScopePlugin,
     // Workflow step modules reach Nitro as authored source, not prebundled.
+    // A workspace member without its own package.json shares the enclosing package.
     createAuthoredAssetImportPlugin({
       authoredSourceOnly: true,
-      packageRoot: preparedHost.appRoot,
+      packageRoot: resolveAuthoredPackageRoot(join(preparedHost.appRoot, "package.json")),
     }),
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {

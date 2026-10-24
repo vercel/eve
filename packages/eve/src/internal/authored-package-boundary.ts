@@ -484,6 +484,24 @@ export function isNodeModulesPath(path: string): boolean {
   return path.replaceAll("\\", "/").includes("/node_modules/");
 }
 
+export function resolveAuthoredPackageRoot(modulePath: string): string {
+  let currentDirectory = dirname(modulePath);
+
+  while (true) {
+    if (existsSync(join(currentDirectory, "package.json"))) {
+      return realpathSync(currentDirectory);
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
+    }
+
+    currentDirectory = parentDirectory;
+  }
+}
+
 function toCanonicalPath(path: string): string {
   try {
     return realpathSync(path);

@@ -126,15 +126,19 @@ describe("authored workflow scope", () => {
     }
   });
 
-  it("embeds ?raw assets imported by workflow and step modules", async () => {
+  // A workspace member without its own package.json shares the enclosing
+  // package, so its workflow may import modules and assets from outside the app root.
+  it.each([
+    { layout: "a standalone app", member: "", toPackageRoot: "../.." },
+    { layout: "a workspace member", member: "agents/probe/", toPackageRoot: "../../../.." },
+  ])("embeds ?raw assets imported by workflow and step modules in $layout", async (input) => {
     const app = await scenarioApp({
       name: "workflow-raw-assets",
       installDependencies: true,
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
-        "agent/instructions.md": "Call the probe tool.",
-        "agent/tools/probe.ts":
-          'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+        [`${input.member}agent/agent.ts`]: 'export default { model: "openai/gpt-5.4" };',
+        [`${input.member}agent/instructions.md`]: "Call the probe tool.",
+        [`${input.member}agent/tools/probe.ts`]: `import { defineWorkflowTool } from "eve/tools"; import { run } from "${input.toPackageRoot}/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });`,
         "lib/run.ts":
           'import header from "../prompts/workflow.txt?raw"; import { readPrompt } from "./step"; export async function run() { "use workflow"; return header + (await readPrompt()); }',
         "lib/step.ts":
@@ -143,7 +147,7 @@ describe("authored workflow scope", () => {
         "prompts/step.md": STEP_ASSET_MARKER,
       },
     });
-    const appRoot = await realpath(app.appRoot);
+    const appRoot = join(await realpath(app.appRoot), input.member);
     const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
     const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
     const serverCode = await Promise.all(

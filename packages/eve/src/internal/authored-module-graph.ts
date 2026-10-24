@@ -9,11 +9,11 @@ import {
   AUTHORED_BUNDLED_MODULE_EXTENSION,
   AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
   createAuthoredWorkflowDirectivePlugin,
-  resolveAuthoredPackageRoot,
 } from "#internal/authored-module-loader.js";
 import {
   createRuntimeLoaderPackageBoundaryPlugin,
   normalizeExternalDependencies,
+  resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
 import { buildWithNitroRolldown } from "#internal/bundler/nitro-rolldown.js";
 
