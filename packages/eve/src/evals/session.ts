@@ -358,7 +358,9 @@ export class EvalSessionDriver implements EveEvalSession {
     this.#receivedAt.push(...input.receivedAt);
     this.#pendingInputRequests = input.status === "waiting" ? openInputRequests(this.#events) : [];
 
-    const derived = deriveRunFacts(input.events, { sessionId: input.sessionId });
+    const segment = deriveRunFacts(input.events, { sessionId: input.sessionId });
+    // A partial answer parks the turn again without re-raising the open requests in its segment.
+    const derived = { ...segment, parked: segment.parked || this.#pendingInputRequests.length > 0 };
     const turn = new EvalTurn({
       collector: this.#collector,
       data: input.data,

@@ -561,6 +561,21 @@ describe("deriveRunFacts", () => {
     expect(facts.parked).toBe(false);
   });
 
+  it("marks the run parked on a request a child relays during a later parent turn", () => {
+    // The relay keeps the child's own `turnId`, which does not match the parent's turn.
+    const relayed = inputRequested(["child_approval"]);
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t0", 0),
+      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
+      turnStarted("t1", 1),
+      { ...relayed, data: { ...relayed.data, callId: "call_child", turnId: "turn_0" } },
+      { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t1" } },
+    ] as UnstampedMessageStreamEvent[];
+
+    const facts = derive(events);
+    expect(facts.parked).toBe(true);
+  });
+
   it("does not mark the run parked on an answered request whose responder must sign in", () => {
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),

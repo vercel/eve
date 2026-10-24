@@ -7,6 +7,7 @@ import { MessageResponse } from "#client/message-response.js";
 import { ClientSession } from "#client/session.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createEvalContext } from "#evals/context.js";
+import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { stampTestEvents } from "#internal/testing/events.js";
@@ -155,7 +156,7 @@ describe("eval session clock", () => {
 describe("eval session partial respond", () => {
   // https://github.com/vercel/eve/issues/5157
   it("keeps the unanswered request pending", async () => {
-    const session = await answerOneOfTwoApprovals();
+    const { session } = await answerOneOfTwoApprovals();
 
     expect(session.pendingInputRequests.map((request) => request.requestId)).toEqual([
       "approval_web",
@@ -163,10 +164,24 @@ describe("eval session partial respond", () => {
   });
 
   // https://github.com/vercel/eve/issues/5157
-  it("reports the run as parked on the unanswered request", async () => {
-    const session = await answerOneOfTwoApprovals();
+  it("reports the run and the respond turn as parked on the unanswered request", async () => {
+    const { collector, session, turn } = await answerOneOfTwoApprovals();
+    turn.parked();
+    turn.succeeded();
 
     expect(session.snapshot().derived.parked).toBe(true);
+    const outcomes = await collector.finalize({
+      derived: createEmptyDerivedFacts(),
+      events: [],
+      finalMessage: null,
+      output: null,
+      status: "completed",
+      traceContexts: [],
+    });
+    expect(outcomes.map(({ name, passed }) => ({ name, passed }))).toEqual([
+      { name: "parked", passed: true },
+      { name: "succeeded", passed: false },
+    ]);
   });
 });
 
@@ -175,7 +190,7 @@ describe("eval session partial respond", () => {
  * same turn again on the second without re-raising it: `approval.settled`, `turn.waiting`.
  */
 async function answerOneOfTwoApprovals() {
-  const { session } = await setup();
+  const { collector, session } = await setup();
   vi.mocked(ClientSession.prototype.send).mockImplementation(async () =>
     response(async function* () {
       yield* stampTestEvents([
@@ -222,8 +237,8 @@ async function answerOneOfTwoApprovals() {
   );
 
   await session.send("Deploy Alice's api and web services.");
-  await session.respond([{ requestId: "approval_api", optionId: "approve" }]);
-  return session;
+  const turn = await session.respond([{ requestId: "approval_api", optionId: "approve" }]);
+  return { collector, session, turn };
 }
 
 async function setup() {
@@ -253,7 +268,7 @@ async function setup() {
     judge: { model: "openai/gpt-5.4-mini" },
     log: () => {},
   });
-  return { context, session: await manager.session() };
+  return { collector, context, session: await manager.session() };
 }
 
 function response(createStream: () => AsyncGenerator<MessageStreamEvent> = events) {

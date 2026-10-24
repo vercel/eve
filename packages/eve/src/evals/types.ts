@@ -377,7 +377,7 @@ interface EveEvalSessionDriver {
    * this to a judge's `on` option to grade the complete conversation.
    */
   readonly transcript: string;
-  /** Input requests still open when the last turn parked, including ones an earlier turn raised. */
+  /** Input requests still open when the last turn parked, including ones raised before a partial `respond()`. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
   readonly state: ClientSessionState;
