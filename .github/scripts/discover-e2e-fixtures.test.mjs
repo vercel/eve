@@ -168,3 +168,22 @@ test("model shards reject discovered evals that are unassigned", () => {
     /does not assign discovered eval: two/u,
   );
 });
+
+test("manual fixtures are excluded from every matrix", () => {
+  const result = discover({}, [
+    { name: "manual", dir: "fixtures/manual", packageJson: { e2e: { manual: true } } },
+  ]);
+
+  assert.deepEqual(
+    result.modelMatrix.map(({ name }) => name),
+    ["fixture"],
+  );
+  assert.deepEqual(worldMatrix(result, "vercel"), [{ name: "fixture", dir: "fixtures/fixture" }]);
+  assert.deepEqual(worldMatrix(result, "postgres"), [
+    { name: "fixture", dir: "fixtures/fixture", world_package: "world-postgres" },
+  ]);
+});
+
+test("a non-boolean e2e.manual is rejected", () => {
+  assert.throws(() => discover({ e2e: { manual: "yes" } }), /e2e\.manual must be a boolean/u);
+});
