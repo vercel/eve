@@ -116,6 +116,8 @@ interface Durable {
   readonly prewarmed: boolean;
   /** Every delivery the session routed to its children, by id. */
   readonly routed: readonly string[];
+  /** A step ended the session, so nothing may follow `session.ended`. */
+  readonly ended?: true;
 }
 
 type CallStatus = "created" | "running" | "reported" | "read";
@@ -237,6 +239,9 @@ function settle(world: Omit<World, "asks">, findings: Finding[], event?: Schedul
       const asks = decision.asks;
       current = { ...current, scheduler: decision.state };
       checkAsks({ ...current, asks }, findings);
+      // Closing the turn's signals writes nothing.
+      if (current.durable.ended === true && asks.kind !== "end" && asks.kind !== "end-turn")
+        findings.push({ finding: `${asks.kind} follows session.ended`, trail: current.trail });
       const done = perform(current, asks);
       if (done === undefined) return { ...current, asks };
       current = done.world;
@@ -640,8 +645,8 @@ function stepMovesTaking(
         { arrivals, kind: "stepped", result: end },
       );
       // The pump's urgent signal and the boundary agree: what stops the step stops the turn, and
-      // nothing else does.
-      if (turn !== undefined && !turn.stopping) {
+      // nothing else does. A step that ended the session anyway leaves no turn to stop.
+      if (turn !== undefined && !turn.stopping && end.action !== "done") {
         const boundary = turnOf(on(world.scheduler, { arrivals, kind: "stepped", result: end }));
         if (boundary !== undefined && boundary.stopping !== stops)
           findings.push({
@@ -720,17 +725,7 @@ function stepResults(
   const results: StepOutcome[] = [];
   const add = (label: string, end: StepEnd, after: Durable = durable, mintedAfter = minted) =>
     results.push({ durable: after, end, label, minted: mintedAfter });
-  // Open: a cancel that stops a clear's or a compact's step leaves that control unadmitted and
-  // unsettled. This PR leaves that decision open, so the checker forgets the control it stops.
-  const control = asks.input?.control === undefined ? undefined : asks.input.controlDelivery;
-  if (stopped)
-    add(
-      "cancelled",
-      { action: "cancelled" },
-      control === undefined
-        ? durable
-        : { ...durable, sent: durable.sent.filter((id) => id !== control.deliveryId) },
-    );
+  if (stopped) add("cancelled", { action: "cancelled" });
   if (asks.input?.control !== undefined) {
     const id = asks.input.controlDelivery?.deliveryId;
     const cleared =
@@ -749,7 +744,12 @@ function stepResults(
   const asked = Object.keys(durable.interactions).length + Object.keys(durable.attempts).length;
   const canAsk = asked < bounds.asks;
   const last = world.steps + 1 >= bounds.steps;
-  if (has("ends")) add("ends the session", { action: "done", output: "Done." }, endTurn(durable));
+  if (has("ends"))
+    add(
+      "ends the session",
+      { action: "done", output: "Done." },
+      { ...endTurn(durable), ended: true },
+    );
   // A turn that asks still waits on what it asked.
   if (open.length > 0 || attempts.length > 0) {
     add("waits on what it asked", {

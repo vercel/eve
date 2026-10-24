@@ -36,6 +36,7 @@ const CASES: readonly { readonly name: string; readonly bounds: Bounds }[] = [
   { bounds: { ...CORE, features: ["budget", "controls"], sends: 2 + WIDEN }, name: "budgets" },
   { bounds: { ...CORE, features: ["handoff", "ends"] }, name: "hand-offs and the session ending" },
   { bounds: { ...CORE, features: ["policies"] }, name: "answers a response policy weighs" },
+  { bounds: { ...CORE, features: ["controls", "ends"] }, name: "controls as the session ends" },
 ];
 
 describe("the scheduler, checked to a bound", () => {
