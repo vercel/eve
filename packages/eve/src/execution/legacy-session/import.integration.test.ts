@@ -128,6 +128,36 @@ describe("legacy session import", () => {
       ).toEqual([]);
     },
   );
+
+  // Drivers before eve 0.69 wrote no `eve.stateLayout` and still saved run mode (#5213).
+  it.fails("imports a driver context that still carries run mode", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "legacy-run-mode" } });
+    await runtime.run(async () => {
+      const { "eve.stateLayout": _layout, ...context } = legacyContext();
+      const driver = await start(legacySessionDriverWorkflow, [
+        {
+          alias: "",
+          inboxVersion: 7,
+          sessionTimeoutMs: false,
+          serializedContext: { ...context, "eve.mode": "conversation" },
+        },
+      ]);
+      const stream = captureTurnEvents(driver);
+      try {
+        await waitForHook(driver, { token: `eve:session:${driver.runId}:inbox` });
+        await resumeSessionInbox(
+          { sessionId: driver.runId },
+          { kind: "send", payload: { message: "Alice continues the conversation." } },
+        );
+        const events = await stream.nextTurn();
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
+        expect(filterEventsByType(events, "turn.completed")).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        if ((await driver.status) === "running") await driver.cancel();
+      }
+    });
+  });
 });
 
 describe("unsupported drivers", () => {
