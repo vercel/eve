@@ -44,20 +44,10 @@ it("does not report an expired session as failed when its terminal stream write 
 
   await runtime.run(async () => {
     const world = await getWorld();
-    const run = await startSessionOwner(workflowEntry, [
-      {
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        input: { message: "Say hello." },
-        serializedContext: buildSerializedContext({
-          channelKind: "channel:terminal-write-failure",
-        }),
-        sessionTimeoutMs: 25,
-      },
-    ]);
+    let anchorRunId: string | undefined;
     let failedStreamWrites = 0;
     const failAnchorWrite = async (runId: string | Promise<string>): Promise<boolean> => {
-      if (!failAnchorStreamWrites || (await runId) !== run.runId) return false;
+      if (!failAnchorStreamWrites || (await runId) !== anchorRunId) return false;
       failedStreamWrites += 1;
       return true;
     };
@@ -79,8 +69,21 @@ it("does not report an expired session as failed when its terminal stream write 
       });
     }
 
+    const run = await startSessionOwner(workflowEntry, [
+      {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Say hello." },
+        serializedContext: buildSerializedContext({
+          channelKind: "channel:terminal-write-failure",
+        }),
+        sessionTimeoutMs: 25,
+      },
+    ]);
+    anchorRunId = run.runId;
+
     try {
-      await run.returnValue.catch(() => undefined);
+      await expect(run.returnValue).rejects.toThrow("Agent workflow failed");
       expect(failedStreamWrites).toBeGreaterThan(0);
       expect(terminalEvents).toEqual(["session.completed"]);
     } finally {

@@ -122,6 +122,7 @@ export async function runPreparedSession(
   });
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
+  let finalizing = false;
   try {
     result = await withStubPlayback(scope, boot.sessionId, async () => {
       try {
@@ -134,6 +135,7 @@ export async function runPreparedSession(
         result = await handoff.awaitAnchoredResult();
         return result;
       }
+      finalizing = true;
       result = await finalizeSession(loop.outcome, {
         caller: progress.caller,
         cursor,
@@ -143,9 +145,9 @@ export async function runPreparedSession(
     });
     return result;
   } catch (error) {
-    // Once the loop decides how the session ends, failing to finalize it must not report a
-    // different outcome. The channel may already have handled the decided terminal event.
-    if (loop?.kind !== "terminal") {
+    // Once finalization of the decided outcome starts, failing it must not report a different
+    // outcome. The channel may already have handled the decided terminal event.
+    if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
         { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
