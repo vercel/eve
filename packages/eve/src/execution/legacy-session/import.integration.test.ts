@@ -130,7 +130,7 @@ describe("legacy session import", () => {
   );
 
   // Drivers before eve 0.69 wrote no `eve.stateLayout` and still saved run mode (#5213).
-  it.fails("imports a driver context that still carries run mode", async () => {
+  it("imports a driver context that still carries run mode", async () => {
     const runtime = await createTestRuntime({ agent: { name: "legacy-run-mode" } });
     await runtime.run(async () => {
       const { "eve.stateLayout": _layout, ...context } = legacyContext();
