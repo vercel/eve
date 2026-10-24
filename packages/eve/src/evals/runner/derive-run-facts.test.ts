@@ -188,6 +188,48 @@ describe("deriveRunFacts", () => {
     expect(facts.toolCallCount).toBe(2);
   });
 
+  // Bug #5063: agent calls drop the input the model sent. Remove `.fails` with the fix.
+  it.fails("records the input the model sent an agent tool", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "c1",
+              description: "Research agent",
+              input: { message: "Find three sources" },
+              kind: "subagent-call",
+              name: "research",
+              nodeId: "subagents/research",
+              subagentName: "research",
+            },
+            {
+              callId: "c2",
+              description: "Weather agent",
+              input: { message: "Forecast for Brooklyn" },
+              kind: "remote-agent-call",
+              name: "weather",
+              nodeId: "remote-agents/weather",
+              remoteAgentName: "weather",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      actionResult({ callId: "c1", toolName: "research", output: "Three sources" }),
+      actionResult({ callId: "c2", toolName: "weather", output: "Sunny" }),
+    ]);
+
+    expect(facts.toolCalls.map(({ input, name }) => ({ input, name }))).toEqual([
+      { input: { message: "Find three sources" }, name: "research" },
+      { input: { message: "Forecast for Brooklyn" }, name: "weather" },
+    ]);
+  });
+
   it("uses the normalized failed lifecycle status for error results", () => {
     const events: UnstampedMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),
