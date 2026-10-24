@@ -14,7 +14,8 @@ import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.j
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
-import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
+import { verifyMediaType } from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
 import {
   DEFAULT_UPLOAD_POLICY,
   isMediaTypeAllowed,
