@@ -7,7 +7,7 @@ export default defineCompaction({
   async compact(history) {
     const tail = history.slice(-KEPT_MESSAGES);
     const firstUser = tail.findIndex((message) => message.role === "user");
-    return { checkpoint: [], kept: firstUser === -1 ? tail : tail.slice(firstUser) };
+    return firstUser === -1 ? tail : tail.slice(firstUser);
   },
   shouldCompact: (facts) => facts.inputTokens > facts.threshold,
 });

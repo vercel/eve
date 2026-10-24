@@ -1,11 +1,9 @@
-import type { ModelMessage } from "ai";
-
-import type { CompactedHistory, CompactionStrategy } from "#harness/compaction/strategy.js";
+import type { CompactionStrategy } from "#harness/compaction/strategy.js";
 import {
   compactMessages,
   shouldCompact,
 } from "#harness/compaction/strategies/fixed-tail/engine.js";
-import { COMPACTION_CHECKPOINT_MARKER } from "#harness/compaction/strategies/fixed-tail/prompt.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 
 /**
  * The default strategy: when the history nears the context window, a summary
@@ -25,21 +23,8 @@ export function fixedTail(): CompactionStrategy {
         context.reason === "manual",
         Math.max(0, context.inputTokens - context.requestEnvelopeTokens),
       );
-      return splitCheckpoint(messages);
+      return validateHarnessModelMessages(messages);
     },
     shouldCompact,
   };
-}
-
-/** The summary's marker and text lead the history when a summary replaced it. */
-function splitCheckpoint(messages: readonly ModelMessage[]): CompactedHistory {
-  const [marker] = messages;
-  const hasCheckpoint =
-    marker !== undefined &&
-    marker.role === "user" &&
-    marker.content === COMPACTION_CHECKPOINT_MARKER &&
-    messages[1]?.role === "assistant";
-  return hasCheckpoint
-    ? { checkpoint: messages.slice(0, 2), kept: messages.slice(2) }
-    : { checkpoint: [], kept: messages };
 }

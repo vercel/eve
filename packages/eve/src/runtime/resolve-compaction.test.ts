@@ -25,7 +25,7 @@ describe("resolveCompactionDefinition", () => {
   it("resolves the authored strategy with its source ref", async () => {
     const strategy = defineCompaction({
       async compact() {
-        return { checkpoint: [], kept: [] };
+        return [];
       },
       shouldCompact: () => false,
     });

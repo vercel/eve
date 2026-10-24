@@ -27,7 +27,6 @@ import {
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
 import { getInputTokenCount } from "#harness/compaction/measure.js";
 import type {
-  CompactedHistory,
   CompactionContext,
   CompactionFacts,
   CompactionStrategy,
@@ -42,11 +41,7 @@ import {
 import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
-import {
-  extractGatewayCostUsd,
-  extractTokenUsageDelta,
-  gatewayModelId,
-} from "#harness/model-call/usage.js";
+import { extractGatewayCostUsd, extractTokenUsageDelta } from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
 import {
   addTurnUsage,
@@ -201,28 +196,35 @@ export async function maybeCompact(input: {
 
   const modelReference = requireSessionModelReference(session);
   const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
-  const model =
-    compactionModelReference === modelReference
-      ? input.model
-      : await input.resolveModel(compactionModelReference);
-  const profile = resolveModelProfile(model);
-  const providerOptions = resolveCallProviderOptions({
-    auth: input.auth,
-    profile,
-    providerOptions: compactionModelReference.providerOptions,
-    session,
-  }) as Parameters<typeof streamText>[0]["providerOptions"];
-  const call = {
-    abortSignal: input.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
-    providerOptions,
-    telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+  // Resolved on the first summary, so a strategy that never summarizes needs no compaction model.
+  let summaryCall: Promise<SummaryCall> | undefined;
+  const resolveSummaryCall = () => {
+    summaryCall ??= (async (): Promise<SummaryCall> => {
+      const model =
+        compactionModelReference === modelReference
+          ? input.model
+          : await input.resolveModel(compactionModelReference);
+      const profile = resolveModelProfile(model);
+      const providerOptions = resolveCallProviderOptions({
+        auth: input.auth,
+        profile,
+        providerOptions: compactionModelReference.providerOptions,
+        session,
+      }) as Parameters<typeof streamText>[0]["providerOptions"];
+      return {
+        abortSignal: input.abortSignal,
+        headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
+        model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
+        providerOptions,
+        telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+      };
+    })();
+    return summaryCall;
   };
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const summarize = async (prompt: CompactionSummaryPrompt) => {
     const summary = await runModelCallWithRetries(
-      () => streamCompactionSummary({ ...call, ...prompt }),
+      async () => streamCompactionSummary({ ...(await resolveSummaryCall()), ...prompt }),
       { sessionId: session.sessionId, turnId: emissionState.turnId },
       input.abortSignal,
     );
@@ -242,7 +244,7 @@ export async function maybeCompact(input: {
     }
     await publish(
       createCompactionRequestedEvent({
-        modelId: gatewayModelId(model) ?? "unknown",
+        modelId: compactionModelReference.id,
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
@@ -258,13 +260,13 @@ export async function maybeCompact(input: {
     input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
       canonical.ordinary,
   );
-  let compacted: CompactedHistory = { checkpoint: [], kept: ordinary };
+  let compacted: readonly ModelMessage[] = ordinary;
   let failure: { readonly error: unknown } | undefined;
   try {
     if (needsSummary) {
       const context: CompactionContext = {
         ...facts,
-        abortSignal: input.abortSignal ?? new AbortController().signal,
+        abortSignal: input.abortSignal,
         estimateTokens,
         summarize,
       };
@@ -282,11 +284,7 @@ export async function maybeCompact(input: {
   if (failure !== undefined) {
     return { compacted: false, failure, messages: input.messages, session };
   }
-  messages = validateHarnessModelMessages([
-    ...canonical.memory,
-    ...compacted.checkpoint,
-    ...compacted.kept,
-  ]);
+  messages = validateHarnessModelMessages([...canonical.memory, ...compacted]);
 
   {
     const ctx = contextStorage.getStore();
@@ -295,7 +293,7 @@ export async function maybeCompact(input: {
     }
     await publish(
       createCompactionCompletedEvent({
-        modelId: gatewayModelId(model) ?? "unknown",
+        modelId: compactionModelReference.id,
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
@@ -335,18 +333,16 @@ function placeRecalledMemory(
 }
 
 type CompactionSummaryPrompt = Parameters<CompactionContext["summarize"]>[0];
+type SummaryCall = Pick<
+  Parameters<typeof streamText>[0],
+  "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+>;
 
 /**
  * Calls the compaction model the way a step calls its model: streamed, with stream errors
  * thrown in the same shape, so the caller's retries classify them alike.
  */
-async function streamCompactionSummary(
-  input: CompactionSummaryPrompt &
-    Pick<
-      Parameters<typeof streamText>[0],
-      "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
-    >,
-): Promise<{
+async function streamCompactionSummary(input: CompactionSummaryPrompt & SummaryCall): Promise<{
   readonly finishReason: string;
   readonly text: string;
   readonly usage: TokenUsageDelta | undefined;

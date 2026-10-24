@@ -15,7 +15,6 @@ import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/mes
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionFacts } from "#harness/compaction/strategy.js";
-import { getInputTokenCount } from "#harness/compaction/measure.js";
 import type { CompactionConfig } from "#harness/types.js";
 
 /**
@@ -148,8 +147,8 @@ export async function compactMessages(
   messages: ModelMessage[],
   config: CompactionConfig,
   summarize: CompactionSummarizer,
-  forceSummary = false,
-  historyInputTokenCount?: number,
+  forceSummary: boolean,
+  historyInputTokenCount: number,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const budget = keptTailBudget(config);
@@ -184,10 +183,7 @@ export async function compactMessages(
     // Capping preserves most of the measured prompt. Retain any known
     // underestimate while crediting only the estimated tokens it removes.
     // A new summary replaces that prompt, so it uses its own estimate below.
-    const tokenEstimateAdjustment = Math.max(
-      0,
-      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
-    );
+    const tokenEstimateAdjustment = Math.max(0, historyInputTokenCount - estimateTokens(messages));
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
         config,

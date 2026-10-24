@@ -1,5 +1,13 @@
 import type { ModelMessage } from "ai";
 
+import type { HarnessModelMessage } from "#harness/messages.js";
+
+/**
+ * A message a strategy returns. A user message needs a `kind`; build one with
+ * `createCompactionUserMessage`.
+ */
+export type CompactionMessage = HarnessModelMessage;
+
 /**
  * What the core measured for the next model call. A strategy decides from
  * these numbers; it never reads session state.
@@ -18,22 +26,11 @@ export interface CompactionFacts {
 }
 
 export interface CompactionContext extends CompactionFacts {
-  readonly abortSignal: AbortSignal;
+  readonly abortSignal?: AbortSignal;
   /** Estimates tokens the way the core measures the history. */
   estimateTokens(messages: readonly ModelMessage[]): number;
   /** Runs the compaction model over `messages`, billed to the session. */
   summarize(input: { readonly messages: ModelMessage[]; readonly system: string }): Promise<string>;
-}
-
-/**
- * A replacement history in two parts. The core puts memory records ahead of
- * both, so a strategy never sees or reorders them.
- */
-export interface CompactedHistory {
-  /** What replaces the compacted history: a summary, a marker, or nothing. */
-  readonly checkpoint: readonly ModelMessage[];
-  /** What stays word for word after the checkpoint. */
-  readonly kept: readonly ModelMessage[];
 }
 
 /**
@@ -43,9 +40,13 @@ export interface CompactedHistory {
  */
 export interface CompactionStrategy {
   /**
-   * Compacts `history` (the conversation, without memory records). Throws
+   * Returns the replacement for `history` (the conversation, without memory
+   * records, which eve places ahead of the result). Throws
    * `CompactionOverLimitError` when no history it could return fits.
    */
-  compact(history: readonly ModelMessage[], context: CompactionContext): Promise<CompactedHistory>;
+  compact(
+    history: readonly CompactionMessage[],
+    context: CompactionContext,
+  ): Promise<readonly CompactionMessage[]>;
   shouldCompact(facts: CompactionFacts): boolean;
 }

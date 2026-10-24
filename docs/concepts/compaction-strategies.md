@@ -11,7 +11,7 @@ import { defineCompaction } from "eve/compaction";
 export default defineCompaction({
   shouldCompact: (facts) => facts.inputTokens > facts.threshold,
   async compact(history) {
-    return { checkpoint: [], kept: history.slice(-6) };
+    return history.slice(-6);
   },
 });
 ```
@@ -20,14 +20,14 @@ export default defineCompaction({
 
 eve measures the next request, decides when compaction can run, and owns everything around it: the `compaction.requested` and `compaction.completed` events, [memory](../memory) capture and recall, failure, and billing of the summary call. A strategy owns two decisions.
 
-| Member                  | Decides                                                                          |
-| ----------------------- | -------------------------------------------------------------------------------- |
-| `shouldCompact(facts)`  | Whether the next request needs compacting, from the numbers eve measured.        |
-| `compact(history, ctx)` | The compacted history: a `checkpoint` that replaces it and the `kept` messages.  |
+| Member                  | Decides                                                                   |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `shouldCompact(facts)`  | Whether the next request needs compacting, from the numbers eve measured. |
+| `compact(history, ctx)` | The messages that replace `history`.                                      |
 
-`facts` holds `inputTokens`, `requestEnvelopeTokens`, `threshold`, `recentWindowSize` and `reason`. A user-requested compaction (`reason: "manual"`) runs whatever `shouldCompact` returns. `history` is the conversation without memory records; eve places recalled memory ahead of the result, so a strategy never sees or reorders it.
+`facts` holds `inputTokens`, `requestEnvelopeTokens`, `threshold`, `recentWindowSize` and `reason`. A user-requested compaction (`reason: "manual"`) runs whatever `shouldCompact` returns. `history` is the conversation without memory records; eve places recalled memory ahead of the result, so a strategy never sees or reorders it. A user message you return needs a `kind`; build one with `createCompactionUserMessage(content)` from `eve/compaction`, for example to mark a checkpoint.
 
-`ctx` adds `summarize({ messages, system })`, which runs the compaction model and bills the session, `estimateTokens(messages)`, and an `abortSignal`. A strategy that never summarizes makes no model call.
+`ctx` adds `summarize({ messages, system })`, which runs the compaction model and bills the session, `estimateTokens(messages)`, and, when the turn can be cancelled, an `abortSignal`. A strategy that never summarizes makes no model call.
 
 ## Failure
 

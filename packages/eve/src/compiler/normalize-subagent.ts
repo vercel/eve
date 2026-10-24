@@ -90,6 +90,7 @@ export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(
 ): void {
   const manifest = source.manifest;
   const extraEntries = [
+    manifest.compaction !== null ? "compaction.ts" : undefined,
     manifest.connections.length > 0 ? "connections/" : undefined,
     manifest.hooks.length > 0 ? "hooks/" : undefined,
     manifest.instructions.length > 0 ? "instructions" : undefined,

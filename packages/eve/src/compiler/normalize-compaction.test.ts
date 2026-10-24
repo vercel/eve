@@ -10,7 +10,7 @@ const message = "Invalid compaction definition.";
 function createStrategy() {
   return {
     async compact() {
-      return { checkpoint: [], kept: [] };
+      return [];
     },
     shouldCompact: () => true,
   };

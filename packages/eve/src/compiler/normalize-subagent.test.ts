@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
+import type { LocalSubagentSourceRef } from "#discover/manifest.js";
+import {
+  assertRemoteAgentDefinitionHasNoLocalPackageEntries,
+  normalizeSubagentConfig,
+} from "#compiler/normalize-subagent.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 
@@ -73,5 +77,30 @@ describe("normalizeSubagentConfig", () => {
         "Invalid subagent.",
       ),
     ).toMatchObject({ kind: "remote", tool: false });
+  });
+});
+
+describe("assertRemoteAgentDefinitionHasNoLocalPackageEntries", () => {
+  it("rejects a compaction.ts next to a remote agent definition", () => {
+    const source = {
+      logicalPath: "subagents/remote.ts",
+      manifest: {
+        compaction: { logicalPath: "subagents/remote/compaction.ts" },
+        connections: [],
+        hooks: [],
+        instructions: [],
+        lib: [],
+        sandbox: null,
+        sandboxWorkspaces: [],
+        schedules: [],
+        skills: [],
+        subagents: [],
+        tools: [],
+      },
+    } as unknown as LocalSubagentSourceRef;
+
+    expect(() => assertRemoteAgentDefinitionHasNoLocalPackageEntries(source)).toThrow(
+      /Remove unsupported entries: compaction\.ts\./,
+    );
   });
 });

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/strategies/fixed-tail/prompt.js";
 import { getInputTokenCount } from "#harness/compaction/measure.js";
 import {
-  compactMessages,
+  compactMessages as compactWithMeasure,
   shouldCompact as exceedsThreshold,
 } from "#harness/compaction/strategies/fixed-tail/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
@@ -34,6 +34,22 @@ function shouldCompact(
       requestEnvelopeTokens,
       threshold: config.threshold,
     })
+  );
+}
+
+/** Compacts with the history's own token count, as the strategy does when nothing was measured. */
+function compactMessages(
+  messages: ModelMessage[],
+  config: CompactionConfig,
+  summarize: Parameters<typeof compactWithMeasure>[2],
+  forceSummary = false,
+) {
+  return compactWithMeasure(
+    messages,
+    config,
+    summarize,
+    forceSummary,
+    getInputTokenCount(messages, config),
   );
 }
 
