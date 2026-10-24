@@ -74,6 +74,10 @@ export interface SlackHitlRoute {
  * groups stay readable up to ~6 items).
  */
 const RADIO_SELECT_OPTION_LIMIT = 6;
+/** Slack rejects a `card` block with more than 3 actions (`invalid_blocks`). */
+const CARD_ACTION_LIMIT = 3;
+/** Longer labels get cut off on a card button, so those options render as a picker. */
+const CARD_BUTTON_LABEL_MAX_LENGTH = 24;
 const BUTTON_ACTION_ID_RE = /^(?:(?<kind>tool-approval):)?(?<requestId>.+):button:\d+$/u;
 const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
 const TOOL_INPUT_CODE_PREFIX = "```\n";
@@ -229,7 +233,7 @@ export function renderInputRequestBlocks(
   const options = request.options;
   const acceptsFreeform = request.allowFreeform === true || !options || options.length === 0;
 
-  if (options && options.length > 0 && request.display === "select") {
+  if (options && options.length > 0 && (request.display === "select" || !fitsCard(options))) {
     const widget =
       options.length <= RADIO_SELECT_OPTION_LIMIT
         ? { type: "radio_buttons", action_id: actionId, options: options.map(buildOption) }
@@ -269,6 +273,20 @@ export function renderInputRequestBlocks(
   }
 
   return [prompt];
+}
+
+/**
+ * Whether options read well as card buttons. A button shows only a short
+ * label, so long labels and descriptions read better in a picker.
+ */
+function fitsCard(options: readonly InputRequestOption[]): boolean {
+  return (
+    options.length <= CARD_ACTION_LIMIT &&
+    options.every(
+      (option) =>
+        option.description === undefined && option.label.length <= CARD_BUTTON_LABEL_MAX_LENGTH,
+    )
+  );
 }
 
 export interface SlackInputRequestPostPart {
