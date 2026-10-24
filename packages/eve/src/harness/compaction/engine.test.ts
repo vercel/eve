@@ -1176,10 +1176,10 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
   }
 
-  it("keeps the newest part of an oversized request and says the rest was cut", async () => {
+  it("keeps the start and end of an oversized request and says the middle was cut", async () => {
     const summarizer = summarizeWith("checkpoint text");
     const history: ModelMessage[] = [
-      user(bigTaskText().repeat(2) + "FINAL SENTINEL"),
+      user("INSTRUCTION FIRST. " + bigTaskText().repeat(2) + "FINAL SENTINEL"),
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
     ];
 
@@ -1189,7 +1189,9 @@ describe("compactMessages: fixed kept-tail budget", () => {
     expect(kept).toHaveLength(1);
     const content = String(kept[0]?.content);
     expect(content).toContain("FINAL SENTINEL");
-    expect(content).toMatch(/^\[eve: the first \d+ characters of this message were cut/);
+    expect(content).toMatch(
+      /^INSTRUCTION FIRST\. [\s\S]*\[eve: \d+ characters from the middle of this message were cut/,
+    );
     expect(estimateTokens(kept)).toBeLessThanOrEqual(BUDGET);
     expect(summarizer).toHaveBeenCalledOnce();
   });
@@ -1207,17 +1209,22 @@ describe("compactMessages: fixed kept-tail budget", () => {
     expect(result).toContainEqual(task);
   });
 
-  it("sends the whole cut-off head of the request to the summarizer", async () => {
+  it("keeps the start and end of a request and sends the cut middle to the summarizer", async () => {
     const summarizer = summarizeWith("checkpoint text");
-    const task = user(`${"a".repeat(8_000)}MIDDLE MARKER${"b".repeat(26_000)}END SENTINEL`);
+    const task = user(
+      `START SENTINEL${"a".repeat(8_000)}MIDDLE MARKER${"b".repeat(26_000)}END SENTINEL`,
+    );
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
     const result = await compactMessages(history, config(history), summarizer);
 
     const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
     expect(prompt).toContain("MIDDLE MARKER");
+    expect(prompt).not.toContain("START SENTINEL");
     expect(prompt).not.toContain("END SENTINEL");
+    expect(JSON.stringify(result)).toContain("START SENTINEL");
     expect(JSON.stringify(result)).toContain("END SENTINEL");
+    expect(JSON.stringify(result)).not.toContain("MIDDLE MARKER");
   });
 
   it("gives the summarizer as much of an oversized head as the budget holds", async () => {
@@ -1230,6 +1237,20 @@ describe("compactMessages: fixed kept-tail budget", () => {
     const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
     expect(prompt).toContain("EARLY MARKER");
     expect(prompt).not.toContain("END SENTINEL");
+  });
+
+  it("never splits a surrogate pair at either edge of the cut", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const history: ModelMessage[] = [
+      user("\u{1F600}".repeat(20_000)),
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+
+    const result = await compactMessages(history, config(history), summarizer);
+
+    const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    expect(lone.test(JSON.stringify(result.map((message) => message.content)))).toBe(false);
+    expect(lone.test(String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content))).toBe(false);
   });
 
   it("cuts the text part of a request that carries an attachment", async () => {
