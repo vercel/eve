@@ -34,6 +34,8 @@ export interface AuthoringCase {
   readonly startingPoint: AuthoringStartingPoint;
   /** Directory created by the agent, relative to the starting workspace. */
   readonly projectDirectory?: string;
+  /** Agent time limit for large cases. A run uses the longest limit among its selected cases. */
+  readonly timeoutSeconds?: number;
   readonly setup?: AuthoringSetup;
   readonly interact: (context: AuthoringInteractionContext) => Promise<void>;
 }

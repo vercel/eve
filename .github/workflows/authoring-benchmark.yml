@@ -117,8 +117,8 @@ jobs:
     needs: request
     if: needs.request.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # Each case can take up to EVE_BENCHMARK_TIMEOUT (15 minutes) plus sandbox
-    # setup, and cases run sequentially within a model.
+    # Each case can take up to its agent time limit (15 minutes by default, longer
+    # for cases that set timeoutSeconds) plus sandbox setup.
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -168,13 +168,17 @@ jobs:
             echo
             echo "eve canary \`${CANARY_REF:0:12}\`, ${RUNS} run(s) per case"
             echo
-            echo "| Case | Passed | Pass rate |"
-            echo "| --- | --- | --- |"
+            echo "| Case | Passed | Pass rate | Mean checks |"
+            echo "| --- | --- | --- | --- |"
             for summary in results/current/*/*/summary.json; do
               [ -f "$summary" ] || continue
-              case_id=$(basename "$(dirname "$summary")")
-              jq -r --arg case "$case_id" \
-                '"| \($case) | \(.passedRuns)/\(.totalRuns) | \(.passRate) |"' "$summary"
+              case_dir=$(dirname "$summary")
+              case_id=$(basename "$case_dir")
+              # Share of grader tests passed, averaged over runs: partial credit for runs that fail.
+              checks=$(cat "$case_dir"/run-*/result.json 2>/dev/null | jq -rs \
+                '[.[].analysis.checks.score | numbers] | if length == 0 then "n/a" else "\((add / length * 100 | round))%" end')
+              jq -r --arg case "$case_id" --arg checks "${checks:-n/a}" \
+                '"| \($case) | \(.passedRuns)/\(.totalRuns) | \(.passRate) | \($checks) |"' "$summary"
             done
           } >> "$GITHUB_STEP_SUMMARY"
 

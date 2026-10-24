@@ -6,6 +6,7 @@ import {
   type AuthoringTreatment,
   publishedBenchmark,
 } from "./benchmark-config.js";
+import { recordGraderChecks } from "./checks.js";
 import { createNativeAuthoringSetup } from "./native-authoring-setup.js";
 
 export function authoringExperiment(options: {
@@ -13,6 +14,7 @@ export function authoringExperiment(options: {
   readonly packageSpec: string;
   readonly runs?: number;
   readonly evals?: readonly string[];
+  readonly timeoutSeconds?: number;
   readonly benchmark: AuthoringBenchmarkModel;
   readonly treatment: AuthoringTreatment;
   readonly verbose?: boolean;
@@ -28,7 +30,7 @@ export function authoringExperiment(options: {
     earlyExit: false,
     // Lower this when iterating on a case that stalls, so a hung turn surfaces
     // in minutes instead of consuming the full budget.
-    timeout: Number(process.env.EVE_BENCHMARK_TIMEOUT ?? 900),
+    timeout: Number(process.env.EVE_BENCHMARK_TIMEOUT ?? options.timeoutSeconds ?? 900),
     sandbox: "vercel",
     copyFiles: "changed",
     setup: createNativeAuthoringSetup({
@@ -36,6 +38,7 @@ export function authoringExperiment(options: {
       revision: options.revision,
       treatment: options.treatment,
     }),
+    onRunComplete: recordGraderChecks,
     agentOptions: {
       cliPackage:
         options.benchmark.harness === "Claude Code"

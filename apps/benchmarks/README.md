@@ -10,7 +10,7 @@ runner and cases, and the PR's `pkg.eve.dev` package (or `main`'s when the PR do
 eve package). The label only runs a benchmark when the PR body has a line naming what to run:
 
 ```text
-authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-008-restock-agent runs=3
+authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-010-ops-agent runs=3
 ```
 
 `models` is required, and `models=all` selects every supported model. `cases` defaults to the
@@ -80,7 +80,7 @@ Without `--models`, publication covers the complete configured model matrix. Use
 publish or refresh selected model rows. The published suite currently includes weather-tool,
 new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
 schedule cases. The iMessage case remains available for local runs but is excluded from the
-published matrix. Each
+published matrix, and so are the company-brain and ops-agent cases. Each
 cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
 when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
@@ -112,3 +112,11 @@ export default defineAuthoringCase({
 Use `simpleProject` for the selected canary's `eve init` output and `emptyProject` for a project
 the coding agent creates. Put reusable setup under `lib/setups/`. Native runs support one-turn
 cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
+
+## Partial credit
+
+A run passes only when every grader test passes. Each run's `result.json` also records
+`analysis.checks` (`passed`, `total`, and `score`, the share of grader tests that passed), and the
+PR-label workflow reports the mean per case. Use it to hill-climb large cases such as
+`author-009-company-brain` and `author-010-ops-agent`, where each test grades one requirement independently, so fixing one
+requirement moves the score before the whole case passes.
