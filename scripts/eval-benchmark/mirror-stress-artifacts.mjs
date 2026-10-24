@@ -11,8 +11,12 @@
 // out of them until something derives records from these archives. Objects
 // are immutable and metadata.json is deterministic, so re-running skips what
 // is mirrored and retries what is not. A release PR runs once per push, so
-// several archives can carry one eve version; the last one created before
-// that version's npm publish time is the release build.
+// several archives can carry one eve version. The release build is the one
+// whose head_sha is the release PR's final head commit; a cancelled or failed
+// final run uploads nothing, so the latest archive is not always that build.
+//
+// Run by hand: nothing schedules it, so release archives created after the
+// last run expire unless someone runs it again.
 //
 // Usage: node scripts/eval-benchmark/mirror-stress-artifacts.mjs [--dry-run] [--repo vercel/eve] [--branch changeset-release/main]
 // Requires a GitHub token with actions:read (GITHUB_TOKEN, GH_TOKEN, or `gh auth login`)
@@ -27,7 +31,7 @@ import { parseArgs } from "node:util";
 
 import { putImmutable, vercelBlobStore } from "./publish.mjs";
 
-export const MIRROR_SCHEMA_VERSION = 1;
+const MIRROR_SCHEMA_VERSION = 1;
 const ARTIFACT_NAME = "workflow-stress-performance";
 const PREFIX = "imports/workflow-stress";
 const REPORT_PATH = ".artifacts/workflow-stress-report.json";
@@ -47,8 +51,14 @@ async function listArtifacts({ repo, branch, token }) {
     if (page === MAX_PAGES)
       throw new Error(`More than ${MAX_PAGES} pages of ${ARTIFACT_NAME} artifacts.`);
   }
+  // A fork can name its branch changeset-release/main too; only same-repository runs are release builds.
   return artifacts
-    .filter((artifact) => !artifact.expired && artifact.workflow_run?.head_branch === branch)
+    .filter(
+      (artifact) =>
+        !artifact.expired &&
+        artifact.workflow_run?.head_branch === branch &&
+        artifact.workflow_run.head_repository_id === artifact.workflow_run.repository_id,
+    )
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
@@ -77,9 +87,9 @@ async function downloadArchive(artifact, token) {
   if (archive.length > MAX_ARCHIVE_BYTES)
     throw new Error(`Artifact ${artifact.id} downloaded ${archive.length} bytes, over the cap.`);
   const sha256 = createHash("sha256").update(archive).digest("hex");
-  if (artifact.digest && artifact.digest !== `sha256:${sha256}`)
+  if (artifact.digest !== `sha256:${sha256}`)
     throw new Error(
-      `Artifact ${artifact.id} digest is sha256:${sha256}, but GitHub reports ${artifact.digest}.`,
+      `Artifact ${artifact.id} digest is sha256:${sha256}, but GitHub reports ${artifact.digest ?? "no digest"}.`,
     );
   return { archive, sha256 };
 }
