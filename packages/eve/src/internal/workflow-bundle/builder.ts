@@ -12,7 +12,7 @@ import {
 } from "#internal/application/cache-metadata.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
-import { resolveAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
@@ -334,7 +334,8 @@ export class WorkflowBundleBuilder {
         createAuthoredAssetImportPlugin({
           authoredSourceOnly: true,
           // A workspace member without its own package.json shares the enclosing package.
-          packageRoot: resolveAuthoredPackageRoot(join(this.transformProjectRoot, "package.json")),
+          packageRoot:
+            findAuthoredPackageRoot(this.transformProjectRoot) ?? this.transformProjectRoot,
         }),
         createAuthoredPackageTsConfigPathsPlugin({
           appPackageRoot: this.transformProjectRoot,

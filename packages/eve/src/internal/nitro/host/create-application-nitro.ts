@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
-import { resolveAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -639,7 +639,7 @@ function createApplicationNitroBundlerConfiguration(
     // A workspace member without its own package.json shares the enclosing package.
     createAuthoredAssetImportPlugin({
       authoredSourceOnly: true,
-      packageRoot: resolveAuthoredPackageRoot(join(preparedHost.appRoot, "package.json")),
+      packageRoot: findAuthoredPackageRoot(preparedHost.appRoot) ?? preparedHost.appRoot,
     }),
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {

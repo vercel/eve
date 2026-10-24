@@ -485,7 +485,16 @@ export function isNodeModulesPath(path: string): boolean {
 }
 
 export function resolveAuthoredPackageRoot(modulePath: string): string {
-  let currentDirectory = dirname(modulePath);
+  const packageRoot = findAuthoredPackageRoot(dirname(modulePath));
+  if (packageRoot === undefined) {
+    throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
+  }
+  return packageRoot;
+}
+
+/** Returns the nearest directory at or above `directory` that has a `package.json`. */
+export function findAuthoredPackageRoot(directory: string): string | undefined {
+  let currentDirectory = directory;
 
   while (true) {
     if (existsSync(join(currentDirectory, "package.json"))) {
@@ -495,7 +504,7 @@ export function resolveAuthoredPackageRoot(modulePath: string): string {
     const parentDirectory = dirname(currentDirectory);
 
     if (parentDirectory === currentDirectory) {
-      throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
+      return undefined;
     }
 
     currentDirectory = parentDirectory;
