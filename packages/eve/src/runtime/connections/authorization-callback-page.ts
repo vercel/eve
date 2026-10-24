@@ -8,13 +8,13 @@
  * no external assets, no script, so it renders identically regardless
  * of where the runtime serves the callback from.
  */
-export function buildAuthorizationCompletePage(): Response {
+export function buildAuthorizationCallbackPage(): Response {
   const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Authorization complete</title>
+    <title>Sign-in response received</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -91,15 +91,17 @@ export function buildAuthorizationCompletePage(): Response {
     <main class="screen" aria-labelledby="authorization-title">
       <div class="content">
         <div class="header">
-          <h1 id="authorization-title">Authorization complete</h1>
+          <h1 id="authorization-title">Sign-in response received</h1>
           <div class="icon" aria-hidden="true">
             <svg viewBox="0 0 16 16" fill="none">
-              <path fill="currentColor" fill-rule="evenodd" d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-4.47-1.47.53-.53L11 4.94l-.53.53L6.5 9.44l-.97-.97L5 7.94 3.94 9l.53.53 1.5 1.5c.3.3.77.3 1.06 0z" clip-rule="evenodd" />
+              <circle cx="8" cy="8" r="7.25" stroke="currentColor" stroke-width="1.5" />
+              <path d="M8 7v4" stroke="currentColor" stroke-width="1.5" />
+              <circle cx="8" cy="4.5" r="0.75" fill="currentColor" />
             </svg>
           </div>
         </div>
         <div style="height: 0.5rem" aria-hidden="true"></div>
-        <p>You can close this tab and return to your app.</p>
+        <p>Return to your app to check whether sign-in succeeded. You can close this tab.</p>
       </div>
     </main>
   </body>

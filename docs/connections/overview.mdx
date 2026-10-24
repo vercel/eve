@@ -317,6 +317,8 @@ export default defineMcpClientConnection({
 
 Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
 
+The browser landing page acknowledges that eve received the sign-in response. It does not confirm that authorization succeeded: `completeAuthorization` still needs to validate the response and return a token. Return to the app to check the result.
+
 The callback URL never carries `VERCEL_AUTOMATION_BYPASS_SECRET`, because the user's browser and the provider both see it. On a deployment behind [Deployment Protection](https://vercel.com/docs/deployment-protection), the person signing in must pass protection on their own, for example through Vercel Authentication or a [Deployment Protection Exception](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/deployment-protection-exceptions).
 
 `displayName` is presentation-only. The connection's resolved name still keys
