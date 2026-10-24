@@ -1,5 +1,17 @@
 # eve
 
+## 0.83.1
+
+### Patch Changes
+
+- 25c9fff: Dynamic tools now accept an `endsTurn` function, as static tools do. eve replays it from a durable descriptor like `execute`, so a tool returned by a `defineDynamic` resolver can decide from its output whether the call ends the turn.
+- eda6122: Eval artifacts now record client timing for each captured session: when each request was sent and accepted (including time spent retrying `session_not_ready`) and when each event arrived. `eve eval --keep-state` keeps the local eval server's state, including its Workflow data, after the run.
+- 77f4473: `eve eval --repeat <n>` and the `repeat` option in `evals.config.ts` run every eval `n` times to measure repeatability. Each attempt is reported as its own result with a 1-based `attempt`, with its own artifact files, Braintrust row, JUnit test case, and Datadog run iteration, and the console summary shows a per-eval pass rate such as `3/5 passed`.
+- 6f551a7: Model calls no longer resume the session sandbox just to render attachment labels. Images and PDFs that eve staged or already read for the session are served from a bounded in-memory cache, so the sandbox is resumed only when eve needs bytes it doesn't already hold.
+- d77462d: Non-module files under `agent/lib/`, such as a JSON file imported by a helper, no longer fail discovery. eve ignores them like it does in `tools/`, `channels/`, and `hooks/`, and the bundler resolves them when imported.
+- 3fbef89: Sandbox work no longer delays the model call. Prewarmed sessions start the sandbox in the background, turns resume a sandbox the session already uses as they begin, and dynamic skill files are written in the background; a tool that uses the sandbox waits only for what remains. A first message sent to a prewarmed session no longer waits for prewarming, and its `defineSandbox()` selector runs with the auth of the request that created the session.
+- 0a9f857: Add correlated OpenTelemetry events for session handover forwarding and inbox unblocking. Receiver observations include a replay-stable Workflow timestamp and are exported by the next existing turn step without adding tracing-only Workflow steps.
+
 ## 0.83.0
 
 ### Minor Changes
