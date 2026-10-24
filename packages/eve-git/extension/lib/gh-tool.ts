@@ -27,10 +27,11 @@ const ghOutputSchema = z.object({
 /**
  * The Connect-brokered `gh` tool, bound to one extension's GitHub config.
  *
- * Callers in eve's dist are not transformed, so each callback declares its own
- * durable descriptor. The closures stay empty because the config holds
- * functions. `github` is boot-time wiring, not per-tool data: a fresh process
- * reruns the dynamic resolver before replay, which binds a new getter.
+ * Callbacks declare durable descriptors with empty closures: eve's transform
+ * would capture the `github` getter, which is not JSON, and imports through
+ * `eve/extensions/git/sandbox` are not transformed. The getter is boot-time
+ * wiring, not per-tool data; a fresh process reruns the dynamic resolver
+ * before replay, which binds a new getter.
  */
 export function defineGhTool(
   github: () => GitHubConfig | undefined,

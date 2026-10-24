@@ -77,7 +77,7 @@ test("built extension mounts as git with only session-resolved GitHub contributi
   assert.ok(!manifest.tools.some((tool) => tool.name.startsWith("git__")));
 });
 
-test("git__gh registers at session start when github is configured", async () => {
+test("git__gh resolves with replayable callbacks when github is configured", async () => {
   const { appRoot, manifest } = await compileConsumer(
     "git-gh-consumer",
     '{ github: { connector: "github/acme-bot", org: "acme", async broker() {} } }',
@@ -98,7 +98,7 @@ test("git__gh registers at session start when github is configured", async () =>
 
   // #4986: session start drops a tool that fails this check.
   validateDurableDynamicToolCallbacks("git__gh", tool, {
-    entryKey: "gh",
+    entryKey: "_single",
     name: "git__gh",
     resolverSlug: resolver.slug,
     scope: "session",

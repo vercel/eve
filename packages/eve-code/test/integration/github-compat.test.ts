@@ -44,7 +44,7 @@ test("deprecated code({ github }) keeps the gh tool, GitHub instructions, and si
   // transform eve/extensions/git/sandbox, so the tool must be replayable as shipped.
   const entry = tool as Parameters<typeof validateDurableDynamicToolCallbacks>[1];
   validateDurableDynamicToolCallbacks("code__gh", entry, {
-    entryKey: "gh",
+    entryKey: "_single",
     name: "code__gh",
     resolverSlug: "code__gh",
     scope: "session",
