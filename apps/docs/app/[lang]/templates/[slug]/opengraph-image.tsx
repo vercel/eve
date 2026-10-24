@@ -20,7 +20,7 @@ const TemplateOpenGraphImage = async ({
     notFound();
   }
 
-  return createTemplateOgImage(template.title);
+  return createTemplateOgImage(template);
 };
 
 export default TemplateOpenGraphImage;

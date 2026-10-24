@@ -16,7 +16,7 @@ import { getTemplateEntry, type TemplateEntry, type TemplateFile } from "@/lib/t
 import { templateManifest } from "@/lib/templates/manifest";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { cn } from "@/lib/utils";
-import { integrationIcons } from "../integration-icons";
+import { grayscaleIntegrationIcons } from "../integration-icons";
 import { FileViewer, type HighlightedTemplateFile } from "./file-viewer";
 import { TemplateActions } from "./template-actions";
 import { TemplateReadme } from "./template-readme";
@@ -227,7 +227,7 @@ const IntegrationList = ({ entry }: { entry: TemplateEntry }) => (
     className="mt-5 grid w-full grid-cols-2 gap-x-4 gap-y-3 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2"
   >
     {entry.integrations.map((integration) => {
-      const Icon = integrationIcons[integration];
+      const Icon = grayscaleIntegrationIcons[integration];
       return (
         <li
           className="inline-flex items-center justify-self-center gap-1.5 text-gray-900 text-label-13 sm:justify-self-auto"
