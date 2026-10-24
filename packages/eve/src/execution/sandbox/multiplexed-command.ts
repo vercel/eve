@@ -73,9 +73,11 @@ export function adaptMultiplexedCommandToSandboxProcess<
       stdout.close();
       stderr.close();
     } catch (error) {
-      stdout.error(error);
-      stderr.error(error);
-      throw error;
+      // The SDK aborts its log request without the caller's abort reason.
+      const cause = signal?.aborted ? signal.reason : error;
+      stdout.error(cause);
+      stderr.error(cause);
+      throw cause;
     }
   })();
 
@@ -86,12 +88,13 @@ export function adaptMultiplexedCommandToSandboxProcess<
   // A detached command outlives the signal that started it. The kill is
   // best-effort: the command may already be gone.
   const killOnAbort = () => void kill().catch(() => undefined);
+  const disarmKill = () => signal?.removeEventListener("abort", killOnAbort);
   if (signal?.aborted) killOnAbort();
   signal?.addEventListener("abort", killOnAbort, { once: true });
-  // The streams surface log failures immediately; retain the rejection for wait().
-  void logsDone
-    .catch(() => undefined)
-    .finally(() => signal?.removeEventListener("abort", killOnAbort));
+  // Logs end when the command exits. A failed log stream says nothing about
+  // the command, so the kill stays armed. The streams surface log failures
+  // immediately; retain the rejection for wait().
+  void logsDone.then(disarmKill, () => undefined);
 
   return {
     stderr: stderr.stream,
@@ -99,6 +102,7 @@ export function adaptMultiplexedCommandToSandboxProcess<
     wait() {
       return (waitPromise ??= Promise.resolve().then(async () => {
         const finished = await command.wait({ signal });
+        disarmKill();
         await logsDone;
         return { exitCode: finished.exitCode };
       }));

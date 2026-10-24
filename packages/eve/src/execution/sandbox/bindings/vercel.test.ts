@@ -1728,9 +1728,12 @@ describe("createVercelSandbox", () => {
       });
     const command = {
       kill: vi.fn(async () => exited.resolve()),
+      // The SDK aborts its log request without the caller's reason.
       async *logs(params?: { signal?: AbortSignal }) {
         yield { data: "started\n", stream: "stdout" } as const;
-        await untilExitOrAbort(params?.signal);
+        await untilExitOrAbort(params?.signal).catch(() => {
+          throw new DOMException("This operation was aborted", "AbortError");
+        });
       },
       wait: vi.fn(async (params?: { signal?: AbortSignal }) => {
         await untilExitOrAbort(params?.signal);
