@@ -479,11 +479,17 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const historyBeforeCompaction = driver.session.history;
 
     // Compaction replaces history; the next request starts a fresh baseline.
-    // Any real history exceeds a threshold of 1, so the next step compacts.
+    // Compaction refuses a result that stays over the threshold, so the
+    // threshold must leave room for the summary. Old filler, appended after
+    // the last provider-measured prompt, pushes the history over it.
     const compactionStep = mark();
     driver.session = {
       ...driver.session,
-      compaction: { ...driver.session.compaction, threshold: 1 },
+      compaction: { ...driver.session.compaction, threshold: 2_000 },
+      history: [
+        ...driver.session.history,
+        { content: "Earlier context. ".repeat(1_000), kind: "user", role: "user" },
+      ],
     };
     reply(text("Ready for the next request."));
     await drive({ message: "Alice asks what is next." });

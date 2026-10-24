@@ -7,14 +7,23 @@ import {
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   serializeToolResultOutput,
+  sliceUtf16Safe,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
-const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
+/**
+ * Most of the conversation kept word for word next to a compaction summary.
+ * A fixed budget, not a share of the context window: the history after a
+ * compaction is the summary plus at most this much, however far the character
+ * estimate sits below the provider's count (about 1.6x on URL- and JSON-heavy
+ * text), so the next compaction is far off.
+ */
+const KEPT_TAIL_TOKENS = 20_000;
 
 /**
  * Element type of a non-string `ModelMessage.content` array.
@@ -87,10 +96,10 @@ export type CompactionSummarizer = (prompt: {
 /** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
   readonly config: CompactionConfig;
-  readonly conversation: readonly ModelMessage[];
   readonly older: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
+  readonly replay: ModelMessage | undefined;
   readonly tokenEstimateAdjustment: number;
 }
 
@@ -129,7 +138,7 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
         ];
   const capped = withResumptionGuard(
     [...checkpointHead, ...capToolResults(input.older), ...input.recent],
-    input.conversation,
+    input.replay,
     input.config.threshold,
   );
 
@@ -182,11 +191,31 @@ export async function compactMessages(
   historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
-  let keep = selectRecentWindowSize(conversation, recentConfig);
 
-  if (!forceSummary) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+  // The current request is replayed after every compaction. One over the tail
+  // budget keeps its start and end; the cut-out middle goes to the summarizer.
+  const planTail = (history: readonly ModelMessage[]) => {
+    const index = findLastRealUserIndex(history);
+    const current = history[index];
+    const fit = current === undefined ? undefined : fitCurrentMessage(current, budget);
+    const replay = fit?.replay ?? current;
+    let keep = selectRecentWindowSize(history, recentConfig, budget);
+    if (replay !== undefined && index < history.length - keep) {
+      // The window leaves the request out, so it is replayed after the summary.
+      keep = selectRecentWindowSize(
+        history,
+        recentConfig,
+        Math.max(0, budget - estimateTokens([replay])),
+      );
+    }
+    return { currentIndex: index, fit, keep, replay };
+  };
+
+  const first = planTail(conversation);
+  if (!forceSummary && first.fit === undefined) {
+    const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
     }
@@ -201,10 +230,10 @@ export async function compactMessages(
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
         config,
-        conversation,
         older,
         previousCheckpoint,
         recent,
+        replay: first.replay,
         tokenEstimateAdjustment,
       });
       if (outcome.type === "within-limit") {
@@ -213,11 +242,21 @@ export async function compactMessages(
     }
   }
 
+  // Tool results in the kept tail are shortened on this path only: one large
+  // file read would otherwise take the whole tail budget.
+  const cappedConversation = capToolResults(conversation);
+  const summaryPlan = planTail(cappedConversation);
+  const { currentIndex, fit, replay } = summaryPlan;
+  let { keep } = summaryPlan;
+
   while (true) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+    const { older, recent } = splitMessagesForCompaction(cappedConversation, keep);
 
     const summaryPrompt = createCompactionPrompt({
-      messages: older,
+      messages:
+        fit === undefined
+          ? older
+          : older.map((message, index) => (index === currentIndex ? fit.cut : message)),
       previousCheckpoint,
       transcriptBudgetTokens: config.threshold,
     });
@@ -235,22 +274,25 @@ export async function compactMessages(
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard(
-      [...summaryHead, ...recent],
-      conversation,
-      config.threshold,
-    );
+    const verbatim = withResumptionGuard([...summaryHead, ...recent], replay, config.threshold);
     if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
 
     const stripped = withResumptionGuard(
       [...summaryHead, ...keepNonToolResultMessages(recent)],
-      conversation,
+      replay,
       config.threshold,
     );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+    const evaluation = evaluateThreshold(stripped, config, "estimate");
+    if (evaluation.type === "within-limit") {
       return stripped;
+    }
+    if (keep === 0) {
+      // Retrying would summarize the same history again: end the step with the reason.
+      throw new CompactionOverLimitError(
+        `Context compaction could not bring the conversation under its limit: it is still about ${Math.round(evaluation.estimatedTokens)} tokens against a ${config.threshold}-token limit. Start a new session, or send a smaller message.`,
+      );
     }
 
     keep -= 1;
@@ -322,11 +364,10 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
  */
 function withResumptionGuard(
   messages: ModelMessage[],
-  conversation: readonly ModelMessage[],
+  replay: ModelMessage | undefined,
   threshold: number,
 ): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  const replay = findLastRealUserMessage(conversation);
   const alreadyKept =
     replay !== undefined &&
     messages.some((message) => message.role === "user" && message.content === replay.content);
@@ -354,21 +395,125 @@ function withResumptionGuard(
 }
 
 /**
- * Latest user message authored by the user rather than the framework.
+ * Splits `message` when it exceeds the tail budget, or returns `undefined`
+ * when it already fits. `replay` keeps the start (a fifth of the budget) and
+ * the end of its text, behind a note where the middle was cut; `cut` is that
+ * middle, which the summarizer receives in full. Instructions sit at the
+ * start or the end of a request and bulk pasted text in the middle. Non-text
+ * parts (files) stay on the replay.
  */
-function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
-  for (let index = conversation.length - 1; index >= 0; index -= 1) {
-    const message = conversation[index];
-    if (message?.role !== "user" || typeof message.content !== "string") {
-      continue;
-    }
-    if (isFrameworkUserMessage(message)) {
-      continue;
-    }
-    return message;
+function fitCurrentMessage(
+  message: ModelMessage,
+  budget: number,
+): { readonly cut: ModelMessage; readonly replay: ModelMessage } | undefined {
+  const text = messageText(message);
+  // The replay keeps the message's file parts, so when they alone take the
+  // budget, cutting its text frees nothing.
+  if (text === undefined || budget <= 0 || estimateTokens([message]) <= budget) {
+    return undefined;
   }
 
-  return undefined;
+  const note = (omitted: number) =>
+    `\n\n[eve: ${omitted} characters from the middle of this message were cut during context compaction to fit the context window.]\n\n`;
+  const split = (start: number, end: number) =>
+    splitMessageText(message, start, end, note(end - start));
+  let keptChars = Math.floor(budget * 4);
+  while (keptChars > 0) {
+    keptChars = Math.min(keptChars, text.length);
+    const lead = Math.floor(keptChars * 0.2);
+    const start = sliceUtf16Safe(text, lead).length;
+    let end = text.length - (keptChars - lead);
+    const after = text.charCodeAt(end);
+    if (after >= 0xdc00 && after <= 0xdfff) {
+      end += 1;
+    }
+    if (start < end) {
+      const fitted = split(start, end);
+      if (estimateTokens([fitted.replay]) <= budget) {
+        return fitted;
+      }
+    }
+    keptChars = Math.floor(keptChars * 0.9) - 1;
+  }
+  return split(0, text.length);
+}
+
+/** The text a user message can be cut by: its string content, or its text parts joined in order. */
+function messageText(message: ModelMessage): string | undefined {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  const texts = message.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
+  return texts.length === 0 ? undefined : texts.join("");
+}
+
+type MessagePart = Exclude<ModelMessage["content"], string>[number];
+
+/**
+ * Cuts characters `start` to `end` of {@link messageText}: `cut` keeps only
+ * that middle, `replay` keeps the rest with `note` at the cut. Non-text parts
+ * stay on both.
+ */
+function splitMessageText(
+  message: ModelMessage,
+  start: number,
+  end: number,
+  note: string,
+): { readonly cut: ModelMessage; readonly replay: ModelMessage } {
+  if (typeof message.content === "string") {
+    return {
+      cut: { ...message, content: message.content.slice(start, end) } as ModelMessage,
+      replay: {
+        ...message,
+        content: `${message.content.slice(0, start)}${note}${message.content.slice(end)}`,
+      } as ModelMessage,
+    };
+  }
+  let offset = 0;
+  let noted = false;
+  const cutParts: MessagePart[] = [];
+  const replay: MessagePart[] = [];
+  for (const part of message.content) {
+    if (part.type !== "text") {
+      cutParts.push(part);
+      replay.push(part);
+      continue;
+    }
+    const from = Math.max(0, Math.min(part.text.length, start - offset));
+    const to = Math.max(from, Math.min(part.text.length, end - offset));
+    offset += part.text.length;
+    if (to > from) {
+      cutParts.push({ ...part, text: part.text.slice(from, to) });
+    }
+    const before = part.text.slice(0, from);
+    const after = part.text.slice(to);
+    const cutHere: boolean = to > from && !noted;
+    if (cutHere) {
+      noted = true;
+    }
+    const text = `${before}${cutHere ? note : ""}${after}`;
+    if (text.length > 0) {
+      replay.push({ ...part, text });
+    }
+  }
+  if (!noted) {
+    replay.push({ type: "text", text: note });
+  }
+  return {
+    cut: { ...message, content: cutParts } as ModelMessage,
+    replay: { ...message, content: replay } as ModelMessage,
+  };
+}
+
+function findLastRealUserIndex(conversation: readonly ModelMessage[]): number {
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index];
+    if (message?.role === "user" && !isFrameworkUserMessage(message)) {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
@@ -439,12 +584,16 @@ function assistantMessageText(message: ModelMessage): string {
     .trim();
 }
 
+function keptTailBudget(config: CompactionConfig): number {
+  return Math.min(KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
+}
+
 function selectRecentWindowSize(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  budget: number,
 ): number {
   const maxKeep = Math.min(config.recentWindowSize, Math.max(messages.length - 1, 0));
-  const reserve = resolveCompactionSummaryReserve(config);
   let keep = 0;
   let recentTokens = 0;
 
@@ -455,7 +604,7 @@ function selectRecentWindowSize(
     }
 
     const messageTokens = estimateTokens([message]);
-    if (recentTokens + messageTokens + reserve > config.threshold) {
+    if (recentTokens + messageTokens > budget) {
       break;
     }
 
@@ -464,13 +613,6 @@ function selectRecentWindowSize(
   }
 
   return keep;
-}
-
-function resolveCompactionSummaryReserve(config: CompactionConfig): number {
-  return Math.min(
-    COMPACTION_SUMMARY_RESERVE_TOKENS,
-    Math.max(64, Math.floor(config.threshold / 4)),
-  );
 }
 
 function splitMessagesForCompaction(
