@@ -34,7 +34,6 @@ import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellati
 import type {
   HarnessEmitFn,
   HarnessSession,
-  StepFn,
   HarnessStepInput,
   StepResult,
   ToolLoopHarnessConfig,
@@ -56,7 +55,6 @@ export interface Step {
   readonly config: ToolLoopHarnessConfig;
   /** The step's context; direct harness tests may run without one. */
   readonly ctx: AlsContext | undefined;
-  readonly runStep: StepFn;
   readonly publish: Publish;
   /** The caller's event handler. Without one, a failure throws instead of being reported. */
   readonly emit: HarnessEmitFn | undefined;
@@ -84,7 +82,6 @@ export function createStep(input: {
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
   readonly live: StepProjection;
   readonly publish: Publish;
-  readonly runStep: StepFn;
   readonly session: HarnessSession;
 }): Step {
   const { ctx, live } = input;
@@ -95,7 +92,6 @@ export function createStep(input: {
     frameworkToolNames: new Set(),
     config: input.config,
     ctx,
-    runStep: input.runStep,
     publish: input.publish,
     emit: input.emit,
     instrumentation: input.instrumentation,
@@ -207,7 +203,6 @@ async function failTurn(step: Step, error: unknown, code: string): Promise<StepR
   });
   await step.apply(fail(step.view(), { code, details: { errorId }, message }));
   return {
-    next: null,
     session: step.session,
     settledTurn: { isError: true, output: message },
   };
@@ -245,9 +240,7 @@ export async function failModelSelection(step: Step, error: unknown): Promise<St
     }),
   );
   return {
-    next: step.hasDelegatedCaller
-      ? { done: true, isError: true, output: message }
-      : { done: true, output: "" },
+    ended: step.hasDelegatedCaller ? { isError: true, output: message } : { output: "" },
     session: step.session,
   };
 }

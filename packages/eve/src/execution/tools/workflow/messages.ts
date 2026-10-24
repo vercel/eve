@@ -1,4 +1,17 @@
 import type { Principal } from "#protocol/session-events/envelope.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
+
+export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is AppliedRunMessage {
+  return (
+    message.kind === "agent-started" ||
+    message.kind === "report" ||
+    (message.from.taskId !== undefined &&
+      (message.kind === "started" ||
+        message.kind === "reply" ||
+        message.kind === "usage" ||
+        message.kind === "outcome"))
+  );
+}
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";

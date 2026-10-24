@@ -131,6 +131,8 @@ export interface CallRow extends Introduced, Ended {
   readonly status: "requested" | "running" | "settled";
   readonly clearedBy?: ClearedBy;
   readonly taskId?: string;
+  /** A blocking workflow run executes the call outside the session's own steps. */
+  readonly workflow?: true;
   readonly outcome?: CallOutcome;
   readonly output?: JsonValue;
   readonly outputRef?: ValueReference;

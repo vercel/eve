@@ -94,7 +94,7 @@ describe("saved tool history", () => {
         },
       );
       const first = await run(initial);
-      expect(first.next).toBeNull();
+      expect(first.unreadInput).toBeUndefined();
       expect(results(first.session.history)).toEqual(
         partial ? [sibling, unknownResult] : [unknownResult],
       );

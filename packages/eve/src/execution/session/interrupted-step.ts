@@ -180,8 +180,7 @@ export async function recoverInterruptedStep(input: {
 
   if (attempt.sessionEnded !== undefined) {
     return finish({
-      next: {
-        done: true,
+      ended: {
         isError: attempt.sessionEnded === "failed",
         output: attempt.settledTurn?.text ?? "",
       },
@@ -218,7 +217,7 @@ export async function recoverInterruptedStep(input: {
         }),
       ]);
     }
-    return finish({ next: null, session });
+    return finish({ session });
   }
 
   const { settledTurn } = attempt;
@@ -239,7 +238,6 @@ export async function recoverInterruptedStep(input: {
       };
     }
     return finish({
-      next: null,
       session,
       settledTurn: { isError: settledTurn.failed, output: settledTurn.text ?? "" },
     });
@@ -294,7 +292,7 @@ export async function recoverInterruptedStep(input: {
   );
   if (deliveries.length > 0) await publish(receive(view(), { deliveries }).events);
   const failing = activeTurnIdOf(currentProjection(ctx));
-  if (failing === undefined) return finish({ next: null, session });
+  if (failing === undefined) return finish({ session });
   session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
   const failure =
     input.failed === undefined
@@ -311,7 +309,7 @@ export async function recoverInterruptedStep(input: {
     turnId: failing,
   });
   session = await applyTransition(session, fail(view(), failure), publish);
-  return finish({ next: null, session, settledTurn: { isError: true, output: failure.message } });
+  return finish({ session, settledTurn: { isError: true, output: failure.message } });
 }
 
 /** What closing reads of an open row. */

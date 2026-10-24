@@ -1,5 +1,4 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
-import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
+import { type LanguageModel, type ModelMessage, streamText } from "ai";
 
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
@@ -8,13 +7,11 @@ import {
   type HarnessSession,
   requireSessionModelReference,
   type StepResult,
-  type ToolLoopHarnessConfig,
 } from "#harness/types.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import type { Publish } from "#harness/session-machine/commit.js";
-import type { SessionAuthContext } from "#channel/types.js";
 import type { Step } from "#harness/step/context.js";
-import type { TurnPosition } from "#harness/session-machine/view.js";
+import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
@@ -25,11 +22,12 @@ import {
   type CompactionSummarizer,
   getInputTokenCount,
   shouldCompact,
+  withoutPromptMeasurement,
 } from "#harness/compaction/engine.js";
 import { contextStorage } from "#context/container.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, Usage } from "#protocol/session-events/envelope.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
@@ -59,11 +57,7 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 
 const log = createLogger("harness.tool-loop");
-/**
- * Processes the step result: extracts input requests, decides whether to
- * park, continue the tool loop, or terminate.
- */
-/** What a step needs from the machine after its model call. */
+
 /**
  * `session.compact()`: summarizes the history now, then the session waits. The control is a
  * delivery: it's admitted with the change, and applied once the change completes.
@@ -76,7 +70,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const changeId = nextChangeId(projection);
   if (step.session.history.length === 0) {
     await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
-    return { next: null, session: step.session };
+    return { session: step.session };
   }
   const messages = validateHarnessModelMessages(step.session.history);
   await step.apply(
@@ -99,31 +93,17 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     const summaryModel =
       step.session.agent.compactionModelReference ?? requireSessionModelReference(step.session);
     await step.publish(runStarted({ attempt: 0, modelId: summaryModel.id, runId }));
-    const compacted = await maybeCompact({
-      abortSignal: config.abortSignal,
-      auth: step.ctx?.get(AuthKey) ?? null,
+    await summarize(step, {
       betweenTurns: true,
-      change: { announced: true, changeId, summaryRunId: runId },
-      ctx: step.ctx,
-      emissionState: step.position(),
-      force: true,
+      change: { changeId, runId, runOpen: true },
       messages: [...step.session.history],
-      model: resolvedModel.model,
-      publish: step.publish,
-      view: () => step.view().projection.view,
+      model: await compactionModel(step, resolvedModel.model),
       requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
-      resolveModel: config.resolveModel,
-      runtimeIdentity: config.runtimeIdentity,
-      session: step.session,
-      prepareTelemetry: (runId) =>
-        step.instrumentation?.prepareAttempt({ runId, attempt: 0 }).telemetry,
-      traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
+      trigger: "forced",
     });
-    step.session = compacted.session;
-    // The summary run and its change already settled failed.
-    if (compacted.failure !== undefined) throw compacted.failure.error;
   } catch (error) {
     outcome = "failed";
+    // A summary that failed closed its run and change; this closes them when setup failed.
     const facts = summaryFailed(step.view().projection.view, { changeId, error });
     if (facts.length > 0) await step.publish(facts);
     logError(log, "manual session compaction failed", error, {
@@ -133,7 +113,71 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   // Applied, not only published: the step's applied session is the compacted one.
   const reason = outcome === "failed" ? "compaction-failed" : undefined;
   await step.apply([fact("delivery.settled", { deliveryId, outcome, reason })]);
-  return { next: null, session: step.session };
+  return { session: step.session };
+}
+
+/**
+ * Compacts a turn's prompt before its model call when the prompt is over the threshold, and
+ * returns the compacted durable messages. `undefined` when the prompt fits.
+ *
+ * Kept in the tool loop (rather than the AI SDK's `prepareStep` hook) so the compacted messages
+ * flow through the same `messages` the harness uses to rebuild `session.history` after the step.
+ */
+export async function compactIfDue(
+  step: Step,
+  input: {
+    /** The durable messages a compaction rewrites. */
+    readonly messages: readonly HarnessModelMessage[];
+    /** The prompt as the model reads it, which decides whether the history needs compaction. */
+    readonly promptMessages: readonly HarnessModelMessage[];
+    readonly model: LanguageModel;
+    readonly requestEnvelopeTokens: number;
+  },
+): Promise<HarnessModelMessage[] | undefined> {
+  const prompt = validateHarnessModelMessages(input.promptMessages);
+  const { compaction } = step.session;
+  const previousEnvelopeTokens = step.session.compaction.requestEnvelopeTokens;
+  if (!shouldCompact(prompt, compaction, input.requestEnvelopeTokens, previousEnvelopeTokens))
+    return undefined;
+  const inputTokens = getInputTokenCount(
+    prompt,
+    compaction,
+    input.requestEnvelopeTokens,
+    previousEnvelopeTokens,
+  );
+  const { projection } = step.view();
+  const change = { changeId: nextChangeId(projection), runId: nextRunId(projection) };
+  const model = await compactionModel(step, input.model);
+  await step.publish(
+    contextStarted({
+      changeId: change.changeId,
+      kind: "compaction",
+      trigger: { inputTokens },
+      turnId: step.position().turnId,
+    }),
+    prompt,
+  );
+  return await summarize(step, {
+    change: { ...change, runOpen: false },
+    messages: [...input.messages],
+    model,
+    requestEnvelopeTokens: input.requestEnvelopeTokens,
+    telemetryTurnId: activeTurnId(step.position()),
+    trigger: { historyInputTokens: Math.max(0, inputTokens - input.requestEnvelopeTokens) },
+  });
+}
+
+/** The model that writes summaries: the agent's compaction model, or the turn's. */
+async function compactionModel(
+  step: Step,
+  turnModel: LanguageModel,
+): Promise<{ readonly model: LanguageModel; readonly reference: RuntimeModelReference }> {
+  const turnReference = requireSessionModelReference(step.session);
+  const reference = step.session.agent.compactionModelReference ?? turnReference;
+  return {
+    model: reference === turnReference ? turnModel : await step.config.resolveModel(reference),
+    reference,
+  };
 }
 
 /** What a compaction's summary calls spent, together, as the summary run records it. */
@@ -183,249 +227,166 @@ export function replaceSessionHistory(
   history: HarnessModelMessage[],
 ): HarnessSession {
   contextStorage.getStore()?.delete(HistoryStateKey);
-  return {
-    ...session,
-    history,
-    compaction: withoutPromptMeasurement(session.compaction),
-  };
+  return { ...session, history, compaction: withoutPromptMeasurement(session.compaction) };
 }
 
 /**
- * Runs the compaction pipeline once if the session's input-token estimate
- * is over the configured threshold. Mutates neither input; returns the new
- * messages array and (possibly updated) session.
- *
- * Kept in the tool-loop (rather than the AI SDK's `prepareStep` hook) so
- * the compacted messages flow through the same `messages` variable the
- * harness uses to rebuild `session.history` after the step.
+ * Rewrites `messages` under an announced change, then settles it and its summary run and replaces
+ * the session's history. The run opens with its first summary call unless it's already open: the
+ * history may compact without one. A failure settles both failed, keeps the history, and is
+ * rethrown; either way `step.session` counts the summary calls that finished.
  */
-export async function maybeCompact(
-  input: Parameters<typeof compactOnce>[0],
-): ReturnType<typeof compactOnce> {
+async function summarize(
+  step: Step,
+  input: {
+    /** A manual compaction runs between turns, so no turn's usage reports its summary calls. */
+    readonly betweenTurns?: true;
+    readonly change: {
+      readonly changeId: string;
+      readonly runId: string;
+      readonly runOpen: boolean;
+    };
+    readonly messages: HarnessModelMessage[];
+    readonly model: { readonly model: LanguageModel; readonly reference: RuntimeModelReference };
+    readonly requestEnvelopeTokens: number | undefined;
+    readonly telemetryTurnId?: string;
+    /**
+     * `forced` always writes a summary. A due compaction first tries model-free heuristics,
+     * crediting what the history measured beyond its estimate.
+     */
+    readonly trigger: "forced" | { readonly historyInputTokens: number };
+  },
+): Promise<HarnessModelMessage[]> {
+  const { change, model } = input;
+  const { config } = step;
+  const summaryUsage: (TokenUsageDelta | undefined)[] = [];
+  let runOpen = change.runOpen;
+  let compacted: ModelMessage[];
   try {
-    return await compactOnce(input);
+    // A memory capture before compaction ran in the commit that started it. When it failed, the
+    // compaction fails before it rewrites the history the capture couldn't keep.
+    const captureFailure = takeCompactionCaptureFailure(step.ctx);
+    if (captureFailure !== undefined) throw captureFailure;
+    const profile = resolveModelProfile(model.model);
+    const call = {
+      abortSignal: config.abortSignal,
+      headers: buildGatewayAttributionHeaders(profile, config.runtimeIdentity),
+      model: withGatewayTraceContext(
+        model.model,
+        profile,
+        step.instrumentation?.gatewayTraceContextHeaders,
+      ),
+      providerOptions: resolveCallProviderOptions({
+        auth: step.ctx?.get(AuthKey) ?? null,
+        profile,
+        providerOptions: model.reference.providerOptions,
+        session: step.session,
+      }) as Parameters<typeof streamText>[0]["providerOptions"],
+      telemetry: step.instrumentation?.prepareAttempt({
+        attempt: 0,
+        runId: change.runId,
+        ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
+      }).telemetry,
+    };
+    const retryScope = { sessionId: step.session.sessionId, turnId: step.position().turnId };
+    compacted = await compactMessages(
+      validateHarnessModelMessages(input.messages),
+      historyCompactionConfig(step.session, input.requestEnvelopeTokens),
+      async (prompt) => {
+        if (!runOpen) {
+          runOpen = true;
+          await step.publish([
+            runRequested({ changeId: change.changeId }, change.runId),
+            runStarted({
+              attempt: 0,
+              modelId: gatewayModelId(model.model) ?? "unknown",
+              runId: change.runId,
+            }),
+          ]);
+        }
+        const summary = await runModelCallWithRetries(
+          () => streamCompactionSummary({ ...call, ...prompt }),
+          retryScope,
+          config.abortSignal,
+        );
+        summaryUsage.push(summary.usage);
+        if (summary.text.trim().length === 0) {
+          throw new Error(
+            `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
+          );
+        }
+        return summary.text;
+      },
+      input.trigger === "forced",
+      input.trigger === "forced" ? undefined : input.trigger.historyInputTokens,
+    );
   } catch (error) {
-    // Setup, model resolution and history/memory preparation can fail outside the summary
-    // retry loop. Close only entities actually introduced, using the latest committed view.
-    const facts = summaryFailed(input.view(), { changeId: input.change.changeId, error });
-    if (facts.length > 0) await input.publish(facts);
+    const usage = summaryUsageOf(summaryUsage);
+    countSummaryUsage(step, input.betweenTurns, usage);
+    await step.publish(
+      summaryFailed(step.view().projection.view, {
+        changeId: change.changeId,
+        error,
+        ...(usage !== undefined && { spent: { runId: change.runId, usage } }),
+      }),
+    );
     throw error;
   }
+  // What the summary calls spent belongs to the summary run, in the commit that settles it.
+  const usage = summaryUsageOf(summaryUsage);
+  countSummaryUsage(step, input.betweenTurns, usage);
+  const messages = validateHarnessModelMessages(compacted);
+  await step.publish(
+    [
+      // Every summary call that returned left an entry, even without usage.
+      ...(summaryUsage.length > 0
+        ? runSettledFacts({
+            finishReason: "stop",
+            outcome: "completed",
+            runId: change.runId,
+            usage,
+          })
+        : runOpen
+          ? runSettledFacts({ outcome: "abandoned", runId: change.runId })
+          : []),
+      {
+        data: { changeId: change.changeId, kind: "compaction", outcome: "completed" },
+        type: "context.settled",
+      },
+    ],
+    messages,
+  );
+  step.session = replaceSessionHistory(step.session, messages);
+  return messages;
 }
 
-async function compactOnce(input: {
-  readonly abortSignal?: AbortSignal;
-  readonly auth: SessionAuthContext | null;
-  /** A manual compaction runs between turns, so no turn's usage reports its summary calls. */
-  readonly betweenTurns?: boolean;
-  /**
-   * The change a compaction makes, and the run that writes its summary. `announced` when the
-   * caller already published the change's start and the run's request and start.
-   */
-  readonly change: {
-    readonly changeId: string;
-    readonly summaryRunId: string;
-    readonly announced?: boolean;
-    readonly turnId?: string;
-    readonly cause?: Cause;
-  };
-  /** The step's context, where a memory capture before the compaction reports failing. */
-  readonly ctx?: object;
-  readonly emissionState: TurnPosition;
-  readonly force?: boolean;
-  readonly messages: HarnessModelMessage[];
-  readonly model: LanguageModel;
-  readonly publish: Publish;
-  readonly view: () => SessionView;
-  /** Model-visible prompt used only to decide whether durable history needs compaction. */
-  readonly promptMessages?: readonly HarnessModelMessage[];
-  readonly requestEnvelopeTokens?: number;
-  readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
-  readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
-  readonly session: HarnessSession;
-  readonly telemetry?: TelemetryOptions;
-  readonly prepareTelemetry?: (runId: string) => TelemetryOptions | undefined;
-  readonly traceContextHeaders?: () => Record<string, string> | undefined;
-}): Promise<{
-  readonly compacted: boolean;
-  /** The summary failed; `session` still counts the summary calls that finished. */
-  readonly failure?: { readonly error: unknown };
-  readonly messages: HarnessModelMessage[];
-  readonly session: HarnessSession;
-}> {
-  const { emissionState, publish } = input;
-  let messages = input.messages;
-  let session = input.session;
-  const promptMessages = input.promptMessages ?? messages;
-  const projectedPromptMessages = validateHarnessModelMessages(promptMessages);
-  const needsSummary =
-    input.force === true ||
-    shouldCompact(
-      projectedPromptMessages,
-      session.compaction,
-      input.requestEnvelopeTokens,
-      session.compaction.requestEnvelopeTokens,
-    );
-  if (!needsSummary) {
-    return { compacted: false, messages, session };
-  }
+/** Spent between turns, no turn's report to a parent claims the summary calls. */
+function countSummaryUsage(step: Step, betweenTurns: true | undefined, usage: Usage | undefined) {
+  if (usage !== undefined && betweenTurns === true)
+    step.session = markUsageReported(step.session, usage);
+}
 
-  const modelReference = requireSessionModelReference(session);
-  const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
-  const model =
-    compactionModelReference === modelReference
-      ? input.model
-      : await input.resolveModel(compactionModelReference);
-  const profile = resolveModelProfile(model);
-  const providerOptions = resolveCallProviderOptions({
-    auth: input.auth,
-    profile,
-    providerOptions: compactionModelReference.providerOptions,
-    session,
-  }) as Parameters<typeof streamText>[0]["providerOptions"];
-  const call = {
-    abortSignal: input.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
-    providerOptions,
-    telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
-  };
-  let summaryTelemetry: TelemetryOptions | undefined;
-  const summaryUsage: (TokenUsageDelta | undefined)[] = [];
-  const { change } = input;
-  // The summary run starts with its first call: `compactMessages` can keep the history without one.
-  let summaryRunOpen = change.announced === true;
-  const summarize = async (prompt: CompactionSummaryPrompt) => {
-    if (!summaryRunOpen) {
-      summaryRunOpen = true;
-      await publish([
-        runRequested({ changeId: change.changeId }, change.summaryRunId),
-        runStarted({
-          attempt: 0,
-          modelId: gatewayModelId(model) ?? "unknown",
-          runId: change.summaryRunId,
-        }),
-      ]);
-    }
-    const summary = await runModelCallWithRetries(
-      () =>
-        streamCompactionSummary({
-          ...call,
-          telemetry: summaryTelemetry ?? call.telemetry,
-          ...prompt,
-        }),
-      { sessionId: session.sessionId, turnId: emissionState.turnId },
-      input.abortSignal,
-    );
-    summaryUsage.push(summary.usage);
-    if (summary.text.trim().length === 0) {
-      throw new Error(
-        `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
-      );
-    }
-    return summary.text;
-  };
-
-  {
-    if (change.announced !== true) {
-      const inputTokens = getInputTokenCount(
-        projectedPromptMessages,
-        session.compaction,
-        input.requestEnvelopeTokens,
-        session.compaction.requestEnvelopeTokens,
-      );
-      await publish(
-        contextStarted({
-          cause: change.cause,
-          changeId: change.changeId,
-          kind: "compaction",
-          trigger: input.force === true || inputTokens === null ? undefined : { inputTokens },
-          turnId: change.turnId,
-        }),
-        projectedPromptMessages,
-      );
-    }
-  }
-
-  if (needsSummary) summaryTelemetry = input.prepareTelemetry?.(change.summaryRunId);
-
-  const ordinary = validateHarnessModelMessages(messages);
-  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
-  const historyCompaction: CompactionConfig = {
-    ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens),
+/**
+ * The threshold and measurement for the history alone: the request envelope around it is not
+ * the history's to shrink.
+ */
+function historyCompactionConfig(
+  session: HarnessSession,
+  requestEnvelopeTokens = 0,
+): CompactionConfig {
+  const { compaction } = session;
+  return {
+    ...compaction,
+    threshold: Math.max(1, compaction.threshold - requestEnvelopeTokens),
     lastKnownInputTokens:
-      session.compaction.lastKnownInputTokens === undefined
+      compaction.lastKnownInputTokens === undefined
         ? undefined
         : Math.max(
             0,
-            session.compaction.lastKnownInputTokens -
+            compaction.lastKnownInputTokens -
               Math.min(session.compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
           ),
   };
-  let compactedOrdinary: ModelMessage[] = [...ordinary];
-  // A memory capture before compaction ran in the commit that started it. When it failed, the
-  // compaction fails before it rewrites the history the capture couldn't keep.
-  const captureFailure = takeCompactionCaptureFailure(input.ctx);
-  let failure: { readonly error: unknown } | undefined =
-    captureFailure === undefined ? undefined : { error: captureFailure };
-  try {
-    if (needsSummary && failure === undefined) {
-      compactedOrdinary = await compactMessages(
-        [...ordinary],
-        historyCompaction,
-        summarize,
-        input.force === true,
-        input.requestEnvelopeTokens === undefined
-          ? undefined
-          : Math.max(
-              0,
-              getInputTokenCount(
-                projectedPromptMessages,
-                session.compaction,
-                requestEnvelopeTokens,
-                session.compaction.requestEnvelopeTokens,
-              ) - requestEnvelopeTokens,
-            ),
-      );
-    }
-  } catch (error) {
-    failure = { error };
-  }
-  // What the summary calls spent belongs to the summary run, in the commit that settles it. Spent
-  // between turns, no turn's report to a parent claims it.
-  const usage = needsSummary ? summaryUsageOf(summaryUsage) : undefined;
-  if (usage !== undefined && input.betweenTurns === true)
-    session = markUsageReported(session, usage);
-  const runId = change.summaryRunId;
-  if (failure !== undefined) {
-    await publish(
-      summaryFailed(input.view(), {
-        changeId: change.changeId,
-        error: failure.error,
-        ...(usage !== undefined && { spent: { runId, usage } }),
-      }),
-    );
-    return { compacted: false, failure, messages: input.messages, session };
-  }
-  messages = validateHarnessModelMessages(compactedOrdinary);
-
-  {
-    // Every summary call that returned left an entry, even without usage.
-    const settled: SessionEvent[] =
-      summaryUsage.length > 0
-        ? runSettledFacts({ finishReason: "stop", outcome: "completed", runId, usage })
-        : summaryRunOpen
-          ? runSettledFacts({ outcome: "abandoned", runId })
-          : [];
-    settled.push({
-      data: { changeId: change.changeId, kind: "compaction", outcome: "completed" },
-      type: "context.settled",
-    });
-    await publish(settled, messages);
-  }
-
-  return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
 }
 
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];

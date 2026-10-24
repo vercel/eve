@@ -426,6 +426,13 @@ describe("approval caller", () => {
     );
 
     expect(outputsOf(stages, "call-report_caller")).toEqual([{ caller: "alice" }]);
+    expect(
+      stages
+        .flat()
+        .filter(
+          (event) => event.type === "call.started" && event.data.callId === "call-report_caller",
+        ),
+    ).toMatchObject([{ data: { workflow: true } }]);
   }, 60_000);
 
   it("keeps the rest of another person's delivery out of the turn their answer resumes", async () => {

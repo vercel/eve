@@ -6,7 +6,7 @@ import { endsTurn } from "#client/session-utils.js";
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
 import { classifyRecord } from "#protocol/session-events/envelope.js";
 import { createEventReader } from "#protocol/session-lines.js";
-import { idle } from "#protocol/session-projection/selectors.js";
+import { activeTurn, idle, waiting as waitingOn } from "#protocol/session-projection/selectors.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
@@ -1156,9 +1156,10 @@ async function waitForStepsToFinish(sessions: readonly Session[], wait: Wait): P
 const REST_QUIET_MS = 250;
 
 /**
- * Waits until each session's stream ends waiting on its next message or on a
- * person, with no step running, and stays that way. A response just delivered
- * may not have reached the stream yet, so one quiet read is not enough.
+ * Waits until each session, as its folded stream reads, waits on its next message or on a
+ * person, with no step running, and stays that way. Held deliveries can end the stream without
+ * repeating the pause. A response just delivered may not have reached the stream yet, so one
+ * quiet read is not enough.
  */
 async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<void> {
   const world = await getWorld();
@@ -1170,7 +1171,9 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
       const states = await Promise.all(
         sessions.map(async (session) => {
           const tail = await internalSession(session).getStreamTailIndex();
-          const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
+          const view = viewOfEvents(await readThroughTail(session)).view;
+          const turn = activeTurn(view);
+          const waiting = turn === undefined || waitingOn(view, turn.turnId)?.on === "interaction";
           const steps = await world.steps.list({ resolveData: "none", runId: session.id });
           const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
           return { resting: waiting && idle, tail };

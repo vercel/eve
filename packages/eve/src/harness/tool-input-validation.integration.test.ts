@@ -103,20 +103,17 @@ describe("framework tool input validation (real AI SDK)", () => {
 
     const invalidStep = await runStep(session, { message: "Finish the task." });
 
-    expect(typeof invalidStep.next).toBe("function");
+    expect(invalidStep.unreadInput).toBe(true);
     expect(findToolResult(invalidStep.session.history, invalidCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
       toolName: REPLY_TOOL_NAME,
     });
 
-    if (typeof invalidStep.next !== "function") {
-      throw new TypeError("Expected invalid final output to continue the tool loop.");
-    }
-    const validStep = await invalidStep.next(invalidStep.session);
+    const validStep = await runStep(invalidStep.session);
 
     expect(model.doStreamCalls).toHaveLength(2);
     expect(findToolResult(model.doStreamCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
-    expect(validStep.next).toBeNull();
+    expect(validStep.unreadInput).toBeUndefined();
     expect(validStep.settledTurn).toEqual({ output: { answer: "done" } });
   });
 
@@ -180,9 +177,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     };
 
     const cutShortStep = await runStep(session, { message: "Read Alice's and Bob's notes." });
-    if (typeof cutShortStep.next !== "function") {
-      throw new TypeError("Expected the cut-short step to continue the tool loop.");
-    }
+    expect(cutShortStep.unreadInput).toBe(true);
     const expectedResult = {
       output: {
         type: "error-text",
@@ -192,7 +187,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     expect(findToolResult(cutShortStep.session.history, skippedCallId)).toMatchObject(
       expectedResult,
     );
-    const nextStep = await cutShortStep.next(cutShortStep.session);
+    const nextStep = await runStep(cutShortStep.session);
 
     expect(execute).not.toHaveBeenCalled();
     expect(model.doStreamCalls).toHaveLength(2);
@@ -201,7 +196,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     for (const call of truncated) {
       expect(findToolResult(retryPrompt, call.toolCallId)).toBeDefined();
     }
-    expect(nextStep.next).toBeNull();
+    expect(nextStep.unreadInput).toBeUndefined();
   });
 
   it("settles a streamed call cut short at the output limit before the step completes", async () => {

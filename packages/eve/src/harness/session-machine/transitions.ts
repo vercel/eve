@@ -577,7 +577,7 @@ function forwardedAnswer(
 
 /**
  * Answers to requests this session relays went on to their askers. Each delivery that carried
- * such answers is admitted here, with the answers it forwarded. An answer joins the open turn
+ * such answers is taken here, admitting it only if needed. An answer joins the open turn
  * that asked; a delivery that also carries input for this session goes on to its turn. Between
  * turns, forwarding alone applies the delivery. A question this session decides settles now; an
  * approval stays open until its asker settles it.
@@ -609,13 +609,15 @@ export function routeAnswer(
 ): Transition {
   const tables = view.projection.view;
   const events: SessionEvent[] = [];
-  const admitted = new Set<string>();
+  const taken = new Set<string>();
   for (const delivery of input.deliveries) {
-    if (tables.deliveries[delivery.deliveryId] !== undefined || admitted.has(delivery.deliveryId))
+    const row = tables.deliveries[delivery.deliveryId];
+    if (taken.has(delivery.deliveryId) || (row !== undefined && row.status !== "admitted"))
       continue;
-    admitted.add(delivery.deliveryId);
+    taken.add(delivery.deliveryId);
     const { deliveryId, principal, source } = delivery;
-    events.push(fact("delivery.admitted", { deliveryId, principal, source }));
+    if (row === undefined)
+      events.push(fact("delivery.admitted", { deliveryId, principal, source }));
     if (delivery.consumed !== undefined) {
       events.push(
         consumed({ deliveryId, parts: delivery.consumed.parts }, delivery.consumed.turnId),
@@ -623,7 +625,7 @@ export function routeAnswer(
     }
   }
   const known = (deliveryId: string) =>
-    admitted.has(deliveryId) || tables.deliveries[deliveryId] !== undefined;
+    taken.has(deliveryId) || tables.deliveries[deliveryId] !== undefined;
   const submitted = new Map<string, ResponseSubmittedData>();
   for (const binding of input.forwarded) {
     if (tables.responses[binding.responseId] !== undefined) continue;
@@ -657,7 +659,7 @@ export function routeAnswer(
     if (
       delivery.consumed !== undefined ||
       delivery.continues === true ||
-      !admitted.has(delivery.deliveryId)
+      !taken.has(delivery.deliveryId)
     )
       continue;
     events.push(deliveryApplied(delivery.deliveryId));

@@ -181,6 +181,48 @@ export function answeredInteractionIds(view: SessionView): ReadonlySet<string> {
   );
 }
 
+/** A relayed answer is weighed by its asker, not by this session or the person again. */
+export function forwardedInteractionIds(view: SessionView): ReadonlySet<string> {
+  return new Set(
+    Object.values(view.responses).flatMap((response) =>
+      response.status === "submitted" &&
+      view.interactions[response.interactionId]?.status === "open" &&
+      view.interactions[response.interactionId]?.origin !== undefined
+        ? [response.interactionId]
+        : [],
+    ),
+  );
+}
+
+/** Submitted answers this session can weigh now, excluding relays and responder sign-ins. */
+export function hasUnweighedAnswers(
+  view: SessionView,
+  open: Pick<OpenWork, "interactions" | "responses">,
+): boolean {
+  const signingIn = new Set(
+    open.interactions.flatMap((row) =>
+      "responseId" in row.subject ? [row.subject.responseId] : [],
+    ),
+  );
+  return open.responses.some(
+    (response) =>
+      response.status === "submitted" &&
+      !signingIn.has(response.responseId) &&
+      view.interactions[response.interactionId]?.origin === undefined,
+  );
+}
+
+export function unansweredInteractions(
+  view: SessionView,
+  filter: { readonly kind?: string; readonly about?: InteractionSubject } = {},
+): readonly InteractionRow[] {
+  const answered = answeredInteractionIds(view);
+  const forwarded = forwardedInteractionIds(view);
+  return openInteractions(view, filter).filter(
+    (row) => !answered.has(row.interactionId) && !forwarded.has(row.interactionId),
+  );
+}
+
 /** Deliveries admitted but not yet consumed or settled, in arrival order. */
 export function queue(view: SessionView): readonly DeliveryRow[] {
   if (view.session.status === "ended") return [];
@@ -231,18 +273,8 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   if (row === undefined || row.status === "settled") return undefined;
   const open = openWork(view, { turnId });
   if (open.runs.length > 0 || open.changes.length > 0) return { on: "session" };
-  // An answer the session hasn't weighed is its work, unless its responder must sign in first.
-  const signingIn = new Set(
-    open.interactions.flatMap((row) =>
-      "responseId" in row.subject ? [row.subject.responseId] : [],
-    ),
-  );
-  if (
-    open.responses.some(
-      (response) => response.status === "submitted" && !signingIn.has(response.responseId),
-    )
-  )
-    return { on: "session" };
+  if (hasUnweighedAnswers(view, open)) return { on: "session" };
+  const forwarded = forwardedInteractionIds(view);
   // Input consumed after the session last requested a model, asked someone, or weighed an
   // answer is still its work. A forwarded answer admitted by its asker has already been read.
   const decided = Math.max(
@@ -258,7 +290,7 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     ...Object.values(view.responses)
       .filter(
         (response) =>
-          response.status !== "submitted" &&
+          (response.status !== "submitted" || forwarded.has(response.interactionId)) &&
           view.deliveries[response.deliveryId]?.turnId === turnId,
       )
       .map((response) => response.introducedAt),
@@ -305,13 +337,14 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
       row.subject.turnId === turnId &&
       !answered.has(row.interactionId),
   );
-  // A running call no task serves runs in the session itself, which commits again once it ends,
+  // A running call no task or workflow serves runs in the session, which commits again once it ends,
   // unless it opened an interaction: then it waits on that answer.
   if (
     !signInHolds &&
     calls.some(
       (entry) =>
         entry.taskId === undefined &&
+        entry.workflow !== true &&
         entry.capability.name !== "eve__task_wait" &&
         !asked.has(entry.callId),
     )
@@ -335,9 +368,8 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   // task this turn's call started belongs to the task, but the turn still waits on its interaction.
   // A question about a call that already ended, such as a cancelled stretch's before its run
   // withdraws it, holds nothing.
-  const interactionsWaiting = openInteractions(view).filter(
+  const interactionsWaiting = unansweredInteractions(view).filter(
     (entry) =>
-      !answered.has(entry.interactionId) &&
       !("callId" in entry.subject && view.calls[entry.subject.callId]?.status === "settled") &&
       (interactionOwner(view, entry).turnId === turnId || subjectTurn(view, entry) === turnId),
   );
@@ -405,10 +437,7 @@ export function callState(view: SessionView, callId: string): CallState | undefi
         return "failed";
     }
   }
-  const answered = answeredInteractionIds(view);
-  const waits = openInteractions(view, { about: { callId } }).filter(
-    (entry) => !answered.has(entry.interactionId),
-  );
+  const waits = unansweredInteractions(view, { about: { callId } });
   if (waits.length > 0) {
     const own = ownApproval(view, callId);
     return waits.some((entry) => entry === own) ? "approval" : "blocked";

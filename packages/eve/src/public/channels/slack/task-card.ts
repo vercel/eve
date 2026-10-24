@@ -5,7 +5,7 @@ import {
   callLabel,
   callOutputSource,
   callState,
-  openInteractions,
+  unansweredInteractions,
 } from "#protocol/session-projection/selectors.js";
 import type { CallRow, InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
@@ -94,7 +94,9 @@ export function renderDefaultSlackTaskCard(snapshot: TaskCard): SlackTaskCard | 
 function planTitle(card: RenderCard, tasks: readonly CallRow[]): string {
   const { view } = card;
   if (card.state === "blocked") {
-    const asked = tasks.flatMap((row) => openInteractions(view, { about: { callId: row.callId } }));
+    const asked = tasks.flatMap((row) =>
+      unansweredInteractions(view, { about: { callId: row.callId } }),
+    );
     return waitingText(asked[0]?.request.kind);
   }
   const total = tasks.length;
@@ -197,7 +199,7 @@ function toSlackTask(card: RenderCard, row: CallRow): SlackTaskObject {
     task_id: slackTaskId(row.callId),
     title: truncate(callLabel(row), MAX_TITLE_LENGTH),
   };
-  const asked = openInteractions(view, { about: { callId: row.callId } }).at(-1);
+  const asked = unansweredInteractions(view, { about: { callId: row.callId } }).at(-1);
   if (asked !== undefined) slackTask.details = richText(blockerLine(card, asked));
   const output = outputLine(card, row);
   if (output !== undefined) slackTask.output = richText(output);

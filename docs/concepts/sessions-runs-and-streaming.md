@@ -109,6 +109,10 @@ Call labels use `capability.label` before execution, `call.progress.data.label` 
 snapshot, and `call.settled.data.label` at completion. The fold keeps the final label as
 `call(view, callId)?.label`. A prompt's heading remains `request.title`.
 
+A workflow tool's blocking `execute` call publishes `call.started` with `workflow: true`.
+It runs outside the session's own steps without creating a task. Once the session waits
+for its result, `waiting(view, turnId)` reports `on: "work"`, not `on: "session"`.
+
 The full catalog, its outcome sets, and TypeScript types are exported from `eve/events`, along with the shared fold and queries over [opaque session snapshots](#query-session-state):
 
 ```ts
@@ -179,6 +183,10 @@ To follow an accepted receipt in a client view, use `delivery(view, receipt.deli
 | `status: "consumed"` | A turn took the input; `turnId` identifies it.                                            |
 | `status: "settled"`  | The delivery ended; `outcome` says how.                                                   |
 
+While a turn waits, eve can admit deliveries held for a later turn. They appear in
+`queue(view)` without running the channel's `deliver` hook or rebinding the active turn's
+caller. Those effects occur when eve takes the delivery.
+
 A `session.ended` event also ends the wait. After a degraded termination that could not record
 all closures, a retained delivery may still say `admitted` or `consumed`; do not wait for another
 `delivery.settled` on a closed stream.
@@ -190,6 +198,10 @@ Client views retain observed history; hook and channel views can prune older set
 A turn doesn't end while it waits on an interaction; it pauses. `turn.paused.data.awaiting` names the interactions it waits on, as `{ interactionId }`. Nothing announces the turn resuming: the next fact under it, such as its next `model.requested`, shows it's running again, and only `turn.settled` ends it. A turn waiting on its own work, such as its tasks, stays running without pausing. The same pause can be reported more than once, such as when a message arrives that doesn't resume the turn. Each `turn.paused` describes what the turn waits on now, so to notify someone once per pause, compare `awaiting` with the last one you saw.
 
 Questions, approvals, and sign-ins raised by the turn or its calls all pause the turn. An answer arrives in a new delivery; `response.submitted` records it, and `interaction.settled` confirms the decision. Relayed requests carry `origin` coordinates for the asking call. Steering can withdraw a pending request; cancellation interrupts it. A submitted answer is not necessarily applied: check `response.settled` and `interaction.settled`. Each answer's `response.settled` reports what became of it: `applied` when it decided its interaction, `refused` when a response policy rejected it, `withdrawn` or `abandoned` when the interaction settled another way, and `expired` or `failed` otherwise.
+
+A forwarded answer is not work for the parent to weigh or a request for the person to
+answer again. Its interaction remains open while the asker weighs it. If the asker
+refuses the answer, the interaction waits for another response.
 
 ### Task facts
 

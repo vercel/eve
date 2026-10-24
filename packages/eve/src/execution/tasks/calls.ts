@@ -74,6 +74,23 @@ export type TaskWaitResult =
     }
   | { readonly status: "timeout" | "interrupt"; readonly working: readonly string[] };
 
+/** The task values a wait reads, without the private task table. */
+export interface TaskSummary {
+  readonly settled: Extract<TaskWaitResult, { readonly status: "settled" }>["settled"];
+  readonly working: readonly string[];
+}
+
+export function taskWaitResult(
+  tasks: TaskSummary,
+  wake: { readonly interrupted: boolean; readonly timedOut: boolean },
+): TaskWaitResult | undefined {
+  const { settled, working } = tasks;
+  if (settled.length > 0 || working.length === 0) return { settled, status: "settled", working };
+  if (wake.interrupted) return { status: "interrupt", working };
+  if (wake.timedOut) return { status: "timeout", working };
+  return undefined;
+}
+
 export interface TaskCancelResult {
   readonly resumable: boolean;
   readonly status: "cancelled" | "already_finished";

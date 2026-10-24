@@ -1,0 +1,3 @@
+# Apalache's and TLC's working files, and the edges `pnpm spec:conformance` explores.
+_apalache-out/
+.edges

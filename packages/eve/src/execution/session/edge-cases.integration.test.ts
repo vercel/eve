@@ -259,7 +259,7 @@ interface Session {
     label: string,
     matches: (event: SessionStreamEvent) => boolean,
   ) => Promise<Stage>;
-  readonly send: (message: string) => Promise<void>;
+  readonly send: (message: string, auth?: SessionAuthContext) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
   readonly answer: (
     interactionId: string,
@@ -445,9 +445,9 @@ async function withSession(
           });
         },
         next: (label) => read(label, stream.nextTurn()),
-        async send(message) {
+        async send(message, auth = ALICE) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
-            auth: ALICE,
+            auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { message },
@@ -960,6 +960,77 @@ describe("approvals off the happy path", () => {
       return [{ toolName: "deploy", toolCallId: "call_deploy" }];
     });
   const deployTools: ToolSpec[] = [{ approval: true, name: "deploy" }];
+
+  it("admits another person's queued message without repeating the held turn's pause", async () => {
+    const { events, ran } = await withSession(
+      "edge-held-message-admission",
+      {
+        message: "Deploy Alice's release.",
+        model: scriptedModel(({ said, results }) =>
+          said("Bob asks for a status update.")
+            ? "The release is ready."
+            : results.length > 0
+              ? "Alice's release finished."
+              : [{ toolName: "deploy", toolCallId: "call_deploy" }],
+        ),
+        tools: deployTools,
+      },
+      async (session) => {
+        await session.next("Alice's approval");
+        const request = session.approvals()[0]!;
+        await session.send("Bob asks for a status update.", BOB);
+        await session.until(
+          "Bob's admitted message",
+          (event) => event.type === "delivery.admitted" && event.data.principal?.id === "bob",
+        );
+        await session.answer(request, "approve");
+        const alice = await session.next("Alice's completed turn");
+        expect(turnOutcomes(alice)).toEqual(["turn_0:completed"]);
+        await session.until(
+          "Bob's completed turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+    expect(ran).toEqual(["deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    expect(ofType(events, "turn.paused")).toHaveLength(1);
+  });
+
+  it("admits a held clear once and applies it after the approved turn ends", async () => {
+    const { events, ran } = await withSession(
+      "edge-held-clear-admission",
+      { message: "Deploy Alice's release.", model: deployModel(), tools: deployTools },
+      async (session) => {
+        await session.next("Alice's approval");
+        const request = session.approvals()[0]!;
+        await session.control("clear");
+        await session.until(
+          "the held clear",
+          (event) => event.type === "delivery.admitted" && event.data.deliveryId === "control_0",
+        );
+        await session.answer(request, "approve");
+        await session.until(
+          "the applied clear",
+          (event) => event.type === "context.settled" && event.data.kind === "clear",
+        );
+        await session.until(
+          "the clear receipt",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === "control_0",
+        );
+      },
+    );
+    expect(ran).toEqual(["deploy"]);
+    expect(
+      ofType(events, "delivery.admitted").filter((event) => event.data.deliveryId === "control_0"),
+    ).toHaveLength(1);
+    expect(
+      ofType(events, "delivery.settled")
+        .filter((event) => event.data.deliveryId === "control_0")
+        .map((event) => event.data.outcome),
+    ).toEqual(["applied"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
 
   it("rejects a call its approver cancels, and the model hears it didn't run", async () => {
     const { events, ran } = await withSession(

@@ -3,6 +3,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
+import { decideStep } from "#execution/session/step-decision.js";
+import { readStepState } from "#execution/session/step-reading.js";
 import { contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -129,7 +131,8 @@ describe("approval answers (real AI SDK)", () => {
         },
       ],
     });
-    while (typeof resumed.next === "function") resumed = await fixture.step(resumed.session);
+    while (decideStep(readStepState(resumed.session, resumed.unreadInput)).kind === "run")
+      resumed = await fixture.step(resumed.session);
 
     const prompt = JSON.stringify(fixture.model.doStreamCalls.at(-1)?.prompt);
     const history = JSON.stringify(resumed.session.history);
@@ -165,7 +168,7 @@ describe("approval answers (real AI SDK)", () => {
     };
 
     const first = await fixture.step(parked.session, approve);
-    expect(typeof first.next).toBe("function");
+    expect(decideStep(readStepState(first.session, first.unreadInput)).kind).toBe("run");
     const result = await fixture.step(first.session, approve);
 
     expect(response).toHaveBeenCalledOnce();
@@ -190,7 +193,7 @@ describe("approval answers (real AI SDK)", () => {
         },
       ],
     });
-    expect(typeof first.next).toBe("function");
+    expect(decideStep(readStepState(first.session, first.unreadInput)).kind).toBe("run");
     const result = await fixture.step(first.session, {
       answers: [
         {
@@ -233,7 +236,8 @@ describe("approval answers (real AI SDK)", () => {
         answer("r-bob-notify", "notify", "bob"),
       ],
     });
-    while (typeof result.next === "function") result = await fixture.step(result.session);
+    while (decideStep(readStepState(result.session, result.unreadInput)).kind === "run")
+      result = await fixture.step(result.session);
 
     const weighed = response.mock.calls.map(([input]) => [
       input.request.toolName,

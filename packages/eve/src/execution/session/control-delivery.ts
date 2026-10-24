@@ -1,4 +1,4 @@
-import type { ControlOrigin } from "#execution/session/input-queue.js";
+import type { ControlOrigin } from "#execution/session/scheduler/held.js";
 import { principalOf } from "#execution/session/delivery-facts.js";
 import type { ControlDelivery } from "#harness/types.js";
 

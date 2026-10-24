@@ -1,6 +1,11 @@
 import { expect, it } from "vitest";
 
-import { resolveTextInput } from "#harness/hitl/delivery.js";
+import { deliver, resolveTextInput } from "#harness/hitl/delivery.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import type { HarnessSession } from "#harness/types.js";
+import { withOpenTurn, withPublished, withQueuedInput } from "#internal/testing/session-machine.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
 
 it.each([
@@ -99,4 +104,72 @@ it("drops the history a typed answer brought, from its input and its deliveries"
   expect(result?.deliveries).toEqual([
     { deliveryId: "incoming", parts: [{ kind: "text", text: "approve" }] },
   ]);
+});
+
+it.each([
+  { asker: "this session", answered: true },
+  { asker: "a child session", answered: false },
+])("typed text behind queued input answers a budget prompt $asker asked", ({ answered }) => {
+  const base: HarnessSession = {
+    agent: { modelReference: { id: "test" }, system: "", tools: [] },
+    compaction: { recentWindowSize: 10, threshold: 0.8 },
+    continuationToken: "alice",
+    history: [],
+    sessionId: "alice",
+  };
+  const turn = withOpenTurn(base, { sequence: 0, stepIndex: 0, turnId: "turn_0" });
+  const relayed = !answered;
+  const session = withQueuedInput(
+    withPublished(turn, [
+      ...(relayed
+        ? ([
+            {
+              data: { owner: { turnId: "turn_0" }, runId: "run_0" },
+              scope: { turnId: "turn_0" },
+              type: "model.requested",
+            },
+            {
+              data: {
+                callId: "call_reviewer",
+                capability: { kind: "agent", name: "reviewer" },
+                input: {},
+                owner: { runId: "run_0" },
+              },
+              scope: { turnId: "turn_0" },
+              type: "call.requested",
+            },
+          ] as SessionEvent[])
+        : []),
+      {
+        data: {
+          interactionId: "budget",
+          ...(relayed && { origin: { interactionId: "child-budget", sessionId: "bob" } }),
+          request: {
+            kind: "budget",
+            options: [{ id: "approve", label: "approve" }],
+            prompt: "Keep going?",
+          },
+          subject: relayed ? { callId: "call_reviewer" } : { turnId: "turn_0" },
+        },
+        scope: { turnId: "turn_0" },
+        type: "interaction.opened",
+      },
+    ]),
+    { message: "Alice also wants the summary." },
+  );
+
+  const delivered = deliver(
+    sessionView(storedProjection(session.state), session.state),
+    { deliveries: [{ deliveryId: "incoming", parts: [] }], message: "approve" },
+    { takeQueued: true },
+  );
+
+  // A child's prompt takes typed text only through the relay proxy, which checks who typed it.
+  // Here the text stays with the queued message instead of vanishing as a stale answer.
+  expect(
+    delivered.input?.answers?.map(({ interactionId, optionId }) => [interactionId, optionId]),
+  ).toEqual(answered ? [["budget", "approve"]] : undefined);
+  expect(delivered.input?.message).toBe(
+    answered ? "Alice also wants the summary." : "Alice also wants the summary.\n\napprove",
+  );
 });

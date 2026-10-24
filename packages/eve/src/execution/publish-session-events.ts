@@ -111,7 +111,7 @@ export interface PublishedSessionEvents {
 export async function publishSessionEvents(
   target: SessionStepState,
   events: readonly SessionEvent[],
-  options?: { readonly canCancelTurn?: boolean },
+  options?: { readonly canCancelTurn?: boolean; readonly announce?: boolean },
 ): Promise<PublishedSessionEvents & { readonly cancelled: boolean }> {
   let cancelled = false;
   const published = await publishEventsFromStep(
@@ -123,6 +123,7 @@ export async function publishSessionEvents(
           cancelled = true;
         }
       : undefined,
+    options?.announce,
   );
   return { ...published, cancelled };
 }
@@ -132,6 +133,7 @@ async function publishEventsFromStep(
   origin: SessionEventOrigin,
   events: readonly SessionEvent[],
   cancelTurn?: () => void,
+  announce?: boolean,
 ): Promise<PublishedSessionEvents> {
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
@@ -139,6 +141,7 @@ async function publishEventsFromStep(
   const restored = await restoreSessionStep(target);
   const { published } = await publishFromSessionStep(restored, {
     cancelTurn,
+    announce,
     origin,
     async publish(emit) {
       await emit(events);
@@ -175,6 +178,8 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
 export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
   /** A hook stops this publication's running turn; its owner adopts the cancellation after commit. */
   readonly cancelTurn?: () => void;
+  /** Admission-only steps record input without claiming the held turn made progress. */
+  readonly announce?: boolean;
   readonly origin: SessionEventOrigin;
   /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
   readonly inputSource?: string;
@@ -287,7 +292,7 @@ async function publishInSessionScope<T>(
       const emit =
         instrumentation?.createHandleEvent({ handleEvent: publisher.publish }) ?? publisher.publish;
       const result = await publication.publish(emit, enrichedSession);
-      await publisher.finish();
+      await publisher.finish({ announce: publication.announce });
       return { result, session: enrichedSession };
     });
   } finally {

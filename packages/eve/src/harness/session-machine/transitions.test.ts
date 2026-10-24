@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { requireSignIn, settleLimit } from "#harness/hitl/approvals.js";
+import { requireSignIn } from "#harness/hitl/approvals.js";
+import { settleLimit } from "#harness/hitl/budget.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { dropClosedRecords, saveTransition, sessionView } from "#harness/session-machine/commit.js";
 import { readHitlState } from "#harness/hitl/requests.js";
@@ -681,8 +682,15 @@ describe("routing answers", () => {
     }
   });
 
-  it("submits a forwarded answer only for an open request and a delivery it knows", () => {
-    const session = waitingTurn();
+  it.each([false, true])("takes a forwarded answer once (previously admitted: %s)", (admitted) => {
+    const session = admitted
+      ? withPublished(waitingTurn(), [
+          {
+            data: { deliveryId: "d-answer" },
+            type: "delivery.admitted",
+          },
+        ])
+      : waitingTurn();
     const { events } = routeAnswer(viewOf(session), {
       decided: [],
       deliveries: [{ deliveryId: "d-answer" }],
@@ -696,6 +704,13 @@ describe("routing answers", () => {
     expect(
       events.filter((event) => event.type === "response.submitted").map((event) => event.data),
     ).toEqual([{ deliveryId: "d-answer", interactionId: "approval-1", responseId: "r-1" }]);
+    expect(events.filter((event) => event.type === "delivery.admitted")).toHaveLength(
+      admitted ? 0 : 1,
+    );
+    expect(events).toContainEqual({
+      data: { deliveryId: "d-answer", outcome: "applied" },
+      type: "delivery.settled",
+    });
     expect(accepted(session, events)).toEqual([]);
   });
 

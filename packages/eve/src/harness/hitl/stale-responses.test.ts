@@ -3,10 +3,7 @@ import { expect, it } from "vitest";
 import { tablesOf } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
-import {
-  convertStaleResponsesToUserMessage,
-  dropStaleSessionLimitContinuationResponses,
-} from "#harness/hitl/stale-responses.js";
+import { convertStaleResponsesToUserMessage } from "#harness/hitl/stale-responses.js";
 
 /** The tables of a session that asked to approve a call, which closed. */
 const knownApproval = tablesOf([
@@ -168,76 +165,4 @@ it("returns unchanged when every response matches the pending batch", () => {
 
   expect(result.kind).toBe("unchanged");
   expect(result.stepInput).toBe(stepInput);
-});
-
-it("drops a stale session-limit continuation answer and keeps the rest of the input", () => {
-  const stepInput = dropStaleSessionLimitContinuationResponses({
-    pendingRequestIds: new Set(),
-    stepInput: {
-      answers: [submitted("sess-1:0:limit:input:12", "deny")],
-      message: "also do this",
-    },
-  });
-
-  // Nothing model-visible: a stale "Stop" must not read as prose, and a
-  // stale grant must not extend any budget.
-  expect(stepInput?.answers).toBeUndefined();
-  expect(stepInput?.message).toBe("also do this");
-});
-
-it("keeps pending and non-continuation responses while dropping stale continuation answers", () => {
-  const stepInput = dropStaleSessionLimitContinuationResponses({
-    pendingRequestIds: new Set(["question-1", "sess-1:0:limit:input:20"]),
-    stepInput: {
-      answers: [
-        submitted("question-1", "candidate"),
-        submitted("sess-1:0:limit:input:12", "approve"),
-        submitted("sess-1:0:limit:input:20", "deny"),
-      ],
-    },
-  });
-
-  // The stale grant is dropped; the pending question answer and the answer
-  // to the currently pending continuation prompt pass through.
-  expect(stepInput?.answers).toEqual([
-    submitted("question-1", "candidate"),
-    submitted("sess-1:0:limit:input:20", "deny"),
-  ]);
-});
-
-it("returns the input unchanged when nothing is dropped", () => {
-  const stepInput = {
-    answers: [submitted("question-1", "candidate")],
-  };
-
-  expect(
-    dropStaleSessionLimitContinuationResponses({
-      pendingRequestIds: new Set(),
-      stepInput,
-    }),
-  ).toBe(stepInput);
-});
-
-it("converts remaining stale responses after the drop pass", () => {
-  const pendingRequestIds = new Set<string>();
-  const stepInput = dropStaleSessionLimitContinuationResponses({
-    pendingRequestIds,
-    stepInput: {
-      answers: [submitted("question-1", "candidate"), submitted("sess-1:0:limit:input:12", "deny")],
-    },
-  });
-  const result = convertStaleResponsesToUserMessage({
-    view: unknown,
-    pendingRequestIds,
-    stepInput,
-  });
-
-  expect(result.kind).toBe("converted");
-  if (result.kind !== "converted") {
-    throw new Error("Expected the stale response to be converted.");
-  }
-
-  expect(result.stepInput.answers).toBeUndefined();
-  expect(result.stepInput.message).toEqual(expect.stringContaining("question-1"));
-  expect(result.stepInput.message).not.toEqual(expect.stringContaining("limit:input"));
 });

@@ -122,8 +122,8 @@
  *             `execution/tasks/render.ts`, which holds all of the tasks'
  *             model text.
  *   rule 47 — A caller hears from its session only at a turn's real end.
- *             Only `execution/session/program.ts` sends the caller's reply,
- *             after the turn loop returns, and `execution/session/finalization.ts`
+ *             Only `execution/session/session-loop.ts` sends the caller's reply,
+ *             after the turn ends, and `execution/session/finalization.ts`
  *             when the session ends. A held turn is still open, so nothing
  *             inside the turn loop or the harness may reply.
  *   rule 48 — Retired: remote agent protocol 1 and its directory were removed.
@@ -160,6 +160,8 @@
  *             value: schemas serve tests and development only.
  *
  *   rule 55 — Public named exports match checker-generated per-entry lists.
+ *   rule 56 — Session and step decisions load only host-free helpers and read
+ *             explicit values, never private session records.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -617,7 +619,7 @@ function checkRule46(posix, lines, violations) {
 
 const CALLER_REPLY_DEFINITION_FILE = "packages/eve/src/subagents/parent-notification.ts";
 const CALLER_REPLY_FILES = new Set([
-  "packages/eve/src/execution/session/program.ts",
+  "packages/eve/src/execution/session/session-loop.ts",
   "packages/eve/src/execution/session/finalization.ts",
 ]);
 const CALLER_REPLY_CALL_RE = /\b(?:notifyTurnCallerStep|notifyCancelledTaskCallerStep)\(/;
@@ -637,7 +639,7 @@ function checkRule47(posix, lines, violations) {
       file: posix,
       line: idx + 1,
       message:
-        "sends a caller's reply outside execution/session/program.ts and execution/session/finalization.ts. A turn replies to its caller only at its real end, which the session program owns; finalization replies when the session ends.",
+        "sends a caller's reply outside execution/session/session-loop.ts and execution/session/finalization.ts. A turn replies to its caller only at its real end, which the session scheduler owns; finalization replies when the session ends.",
     });
   });
 }
@@ -1587,9 +1589,119 @@ const PHASE_BOUNDARY_DIRS = [
 const PHASE_IMPORT_RE =
   /(from\s+|import\s+)(?:type\s+)?['"]phase(?:\/[^'"]*)?['"]|require\(\s*['"]phase(?:\/[^'")]*)?['"]\s*\)|import\(\s*['"]phase(?:\/[^'")]*)?['"]\s*\)/;
 
-/**
- * @returns {Promise<Violation[]>}
- */
+const SESSION_DECISION_ENTRIES = [
+  "packages/eve/src/execution/session/scheduler/next.ts",
+  "packages/eve/src/execution/session/scheduler/events.ts",
+  "packages/eve/src/execution/session/step-decision.ts",
+];
+
+function runtimeSpecifiers(source, fileName) {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false);
+  const found = [];
+  const add = (node, literal) =>
+    found.push({
+      specifier: literal.text,
+      line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+    });
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const clause = node.importClause;
+      const named = clause?.namedBindings;
+      const typeOnly =
+        clause?.isTypeOnly === true ||
+        (clause !== undefined &&
+          clause.name === undefined &&
+          named !== undefined &&
+          ts.isNamedImports(named) &&
+          named.elements.length > 0 &&
+          named.elements.every((element) => element.isTypeOnly));
+      if (!typeOnly) add(node, node.moduleSpecifier);
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier !== undefined &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      !node.isTypeOnly
+    ) {
+      const named = node.exportClause;
+      if (
+        !(
+          named !== undefined &&
+          ts.isNamedExports(named) &&
+          named.elements.length > 0 &&
+          named.elements.every((element) => element.isTypeOnly)
+        )
+      )
+        add(node, node.moduleSpecifier);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments[0] !== undefined &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      add(node, node.arguments[0]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
+
+async function checkRule56DecisionsLoadNoHost() {
+  const violations = [];
+  const via = new Map();
+  const queue = SESSION_DECISION_ENTRIES.map((path) => join(REPO_ROOT, path));
+  for (const entry of queue) via.set(entry, undefined);
+  const chainOf = (abs) => {
+    const chain = [];
+    for (let at = abs; at !== undefined; at = via.get(at))
+      chain.unshift(toPosix(relative(REPO_ROOT, at)));
+    return chain.join(" -> ");
+  };
+  while (queue.length > 0) {
+    const abs = queue.shift();
+    const source = await readFile(abs, "utf8");
+    const records = /\b(?:SessionStateMap|DurableSessionState)\b/.exec(source);
+    if (records !== null)
+      violations.push({
+        rule: 56,
+        file: toPosix(relative(REPO_ROOT, abs)),
+        line: source.slice(0, records.index).split("\n").length,
+        message: `names private records (${records[0]}) in a decision's runtime closure (${chainOf(abs)}). Sample those records in session-reading.ts or step-reading.ts instead.`,
+      });
+    for (const { specifier, line } of runtimeSpecifiers(source, abs)) {
+      const base =
+        specifier.startsWith("#") && !specifier.startsWith("#compiled/")
+          ? join(REPO_ROOT, "packages/eve/src", specifier.slice(1))
+          : specifier.startsWith(".")
+            ? resolve(dirname(abs), specifier)
+            : undefined;
+      let target;
+      if (base !== undefined) {
+        const stem = base.replace(/\.js$/, "");
+        for (const candidate of [`${stem}.ts`, join(stem, "index.ts")]) {
+          try {
+            if ((await lstat(candidate)).isFile()) target = candidate;
+          } catch {}
+          if (target !== undefined) break;
+        }
+      }
+      if (target === undefined)
+        violations.push({
+          rule: 56,
+          file: toPosix(relative(REPO_ROOT, abs)),
+          line,
+          message: `loads "${specifier}" outside eve's source, so a decision loads it too (${chainOf(abs)}). Use an import type, an explicit observation, or a host-free helper.`,
+        });
+      else if (!via.has(target)) {
+        via.set(target, abs);
+        queue.push(target);
+      }
+    }
+  }
+  return violations;
+}
+
+/** @returns {Promise<Violation[]>} */
 async function checkRule34PhaseBoundary() {
   /** @type {Violation[]} */
   const violations = [];
@@ -1940,6 +2052,8 @@ async function main() {
   violations.push(...state.rule51);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
+
+  violations.push(...(await checkRule56DecisionsLoadNoHost()));
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

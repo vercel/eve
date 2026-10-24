@@ -10,7 +10,12 @@ import {
   openInteractions,
   waiting,
 } from "#protocol/session-projection/selectors.js";
-import { callPlace, interaction, runPlace } from "#protocol/session-projection/reader.js";
+import {
+  callPlace,
+  interaction,
+  runPlace,
+  promptQueueHead,
+} from "#protocol/session-projection/reader.js";
 
 const at = "2026-10-10T00:00:00.000Z";
 
@@ -233,6 +238,51 @@ describe("where a call stands", () => {
       { data: { outcome: "failed", error: { code: "x", message: "x" } }, type: "session.ended" },
     ]);
     expect(openInteractions(ended, { about: { turnId: "turn_0" } })).toEqual([]);
+  });
+
+  it("waits on a forwarded answer's asker without asking the person again", () => {
+    const opening = [
+      ...asked,
+      runSettled("run_0", "turn_0"),
+      { data: { callId: "c_0", workflow: true }, type: "call.started" },
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "relayed",
+          subject: { callId: "c_0" },
+          origin: {
+            call: { callId: "c_0", name: "helper" },
+            interactionId: "child",
+            sessionId: "child",
+          },
+          request: { kind: "approval", prompt: "Approve the release?" },
+        },
+      },
+    ];
+    const forwarded = [
+      { data: { deliveryId: "answer" }, type: "delivery.admitted" },
+      { data: { deliveryId: "answer", parts: [], turnId: "turn_0" }, type: "delivery.consumed" },
+      {
+        type: "response.submitted",
+        data: {
+          deliveryId: "answer",
+          interactionId: "relayed",
+          responseId: "response",
+          value: { optionId: "approve" },
+        },
+      },
+    ];
+    const view = viewOf(started, opening, forwarded);
+    expect(waiting(view, "turn_0")?.on).toBe("work");
+    expect(callState(view, "c_0")).toBe("running");
+    expect(promptQueueHead(view)).toBeUndefined();
+    expect(openInteractions(view)).toHaveLength(1);
+    const refused = viewOf(started, opening, forwarded, [
+      { type: "response.settled", data: { responseId: "response", outcome: "refused" } },
+    ]);
+    expect(waiting(refused, "turn_0")?.on).toBe("interaction");
+    expect(callState(refused, "c_0")).toBe("blocked");
+    expect(promptQueueHead(refused)?.interactionId).toBe("relayed");
   });
 
   it("labels a call by its tool's label, its progress while running, then its name", () => {

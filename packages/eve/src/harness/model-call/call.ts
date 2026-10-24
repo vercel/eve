@@ -1,4 +1,3 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
   isStepCount,
@@ -52,8 +51,7 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { maybeCompact } from "#harness/compaction/step.js";
-import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
+import { compactIfDue } from "#harness/compaction/step.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
   isEmptyModelResponse,
@@ -234,7 +232,7 @@ export class ModelCaller {
       );
     }
     return {
-      next: step.runStep,
+      unreadInput: true,
       session: { ...step.session, history: [...this.request.history] },
       steered: true,
     };
@@ -283,50 +281,20 @@ export class ModelCaller {
   /** Compacts the prompt when it's over the threshold, then rebuilds what depends on it. */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
-    const { config } = step;
-    let compaction: Awaited<ReturnType<typeof maybeCompact>>;
+    let messages: HarnessModelMessage[] | undefined;
     try {
-      const { projection } = step.view();
-      compaction = await maybeCompact({
-        abortSignal: config.abortSignal,
-        auth: step.ctx?.get(AuthKey) ?? null,
-        change: {
-          changeId: nextChangeId(projection),
-          summaryRunId: nextRunId(projection),
-          turnId: step.position().turnId,
-        },
-        ctx: step.ctx,
-        emissionState: step.position(),
-        // A hook's compact intent compacts before this call, once.
-        messages: [...prompt.messages],
+      messages = await compactIfDue(step, {
+        messages: prompt.messages,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
-        publish: step.publish,
-        view: () => step.view().projection.view,
         requestEnvelopeTokens: this.requestEnvelopeTokens,
-        resolveModel: config.resolveModel,
-        runtimeIdentity: config.runtimeIdentity,
-        session: step.session,
-        prepareTelemetry: (runId) =>
-          step.instrumentation?.prepareAttempt({
-            runId,
-            attempt: 0,
-            turnId: activeTurnId(step.position()),
-          }).telemetry,
-        traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
-      step.session = compaction.session;
-      if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
-    if (!compaction.compacted) return tools;
-    compactPrompt(step, prompt, compaction.messages);
-    step.session = {
-      ...step.session,
-      compaction: withoutPromptMeasurement(step.session.compaction),
-    };
+    if (messages === undefined) return tools;
+    compactPrompt(step, prompt, messages);
     this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
   }

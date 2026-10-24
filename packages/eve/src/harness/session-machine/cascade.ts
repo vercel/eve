@@ -64,6 +64,12 @@ export function cascade(view: SessionView, events: readonly SessionEvent[]): Ses
   const cascaded = (refs: readonly Ref[]) =>
     refs.filter((ref) => !explicit.has(`${ref.family}:${ref.id}`));
   for (const event of events) {
+    // Taking a held delivery may repeat its admission, but the wire introduces it only once.
+    if (
+      event.type === "delivery.admitted" &&
+      scratch.deliveries[event.data.deliveryId] !== undefined
+    )
+      continue;
     const owner = endedBy(scratch, event);
     if (owner === undefined) {
       apply(event);

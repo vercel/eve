@@ -3,10 +3,8 @@ import { openRequests, promptQueueHead } from "#protocol/session-projection/read
 
 import { answerFromText } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import {
-  convertStaleResponsesToUserMessage,
-  dropStaleSessionLimitContinuationResponses,
-} from "#harness/hitl/stale-responses.js";
+import { openLimit, withoutStaleBudgetAnswers } from "#harness/hitl/budget.js";
+import { convertStaleResponsesToUserMessage } from "#harness/hitl/stale-responses.js";
 import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
@@ -34,10 +32,10 @@ export function deliver(
   readonly takeQueued: boolean;
 } {
   const queued = options.takeQueued ? view.turn.queued : undefined;
-  const limit = openRequests(view.projection.view).find((row) => row.request.kind === "budget");
-  // Match the new typed answer before queued messages join it.
+  // Match the new typed answer before queued messages join it. A child's prompt takes typed text
+  // only through the relay proxy, which checks who typed it.
   const incoming =
-    queued !== undefined && limit !== undefined
+    queued !== undefined && openLimit(view) !== undefined
       ? resolveTextInput(view.projection.view, input)
       : input;
   const merged =
@@ -61,7 +59,7 @@ export function deliver(
   const converted = convertStaleResponsesToUserMessage({
     pendingRequestIds,
     view: tables,
-    stepInput: dropStaleSessionLimitContinuationResponses({ pendingRequestIds, stepInput: merged }),
+    stepInput: withoutStaleBudgetAnswers({ pendingRequestIds, stepInput: merged, tables }),
   });
   return converted.kind === "converted"
     ? {

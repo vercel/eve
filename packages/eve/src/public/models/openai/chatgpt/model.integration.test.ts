@@ -73,7 +73,7 @@ describe("ChatGPT streamed reasoning replay", () => {
 
     const first = await runStep(session, { message: "Check the invoice total." });
     expect(execute).toHaveBeenCalledOnce();
-    if (typeof first.next !== "function") throw new Error("Expected a second model step.");
+    expect(first.unreadInput).toBe(true);
 
     const stored: ReturnType<typeof createDurableSessionValues> = JSON.parse(
       JSON.stringify(createDurableSessionValues(first.session)),
@@ -94,8 +94,8 @@ describe("ChatGPT streamed reasoning replay", () => {
       },
     ]);
 
-    const second = await first.next({ ...first.session, history });
-    expect(second.next).toBeNull();
+    const second = await runStep({ ...first.session, history });
+    expect(second.settledTurn).toEqual({ output: "The total is 42." });
     expect(JSON.stringify(second.session.history)).toContain("The total is 42.");
     expect(requests).toHaveLength(2);
     expect(requests[1]?.input).toEqual(
@@ -121,7 +121,7 @@ describe("ChatGPT streamed reasoning replay", () => {
       { ...second.session, history: JSON.parse(JSON.stringify(second.session.history)) },
       { message: "Confirm the total." },
     );
-    expect(followup.next).toBeNull();
+    expect(followup.settledTurn).toEqual({ output: "The total is 42." });
     expect(requests).toHaveLength(3);
     const replayedReasoning = (request: RecordedRequest | undefined) =>
       request?.input.filter((item) => item.type === "reasoning");

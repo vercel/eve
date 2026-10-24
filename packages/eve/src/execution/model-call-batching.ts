@@ -1,5 +1,5 @@
-import { storedProjection } from "#harness/session-machine/view.js";
-import { waitsOnAnything } from "#execution/session/pending-turn-state.js";
+import { decideStep } from "#execution/session/step-decision.js";
+import { readStepState } from "#execution/session/step-reading.js";
 import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
 
 export async function runModelCallBatch(input: {
@@ -45,13 +45,6 @@ function shouldRunAnotherModelCall(input: {
   readonly modelCallsPerStep: number;
   readonly result: StepResult;
 }): boolean {
-  if (
-    input.completedModelCalls >= input.modelCallsPerStep ||
-    typeof input.result.next !== "function"
-  ) {
-    return false;
-  }
-
-  // Each step saves the lifecycle it published with its result.
-  return !waitsOnAnything(input.result.session, storedProjection(input.result.session.state));
+  if (input.completedModelCalls >= input.modelCallsPerStep) return false;
+  return decideStep(readStepState(input.result.session, input.result.unreadInput)).kind === "run";
 }

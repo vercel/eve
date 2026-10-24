@@ -1,14 +1,12 @@
-import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
-import { fail } from "#harness/session-machine/transitions.js";
+import { suspendStep } from "#harness/session-machine/transitions.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -18,15 +16,7 @@ import type {
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
-import {
-  askApprovals,
-  approvalMemory,
-  pendingApprovals,
-  openLimit,
-  requestLimit,
-  requireSignIn,
-} from "./approvals.js";
-import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
+import { askApprovals, approvalMemory, pendingApprovals, requireSignIn } from "./approvals.js";
 import { isEmptyInput } from "./delivery.js";
 
 // The session's human-in-the-loop rules, behind the few points where the rest of the harness
@@ -34,16 +24,18 @@ import { isEmptyInput } from "./delivery.js";
 // (`admitHumanInput`, `settleHumanInput`), the work they decided once the turn has the delivery
 // (`applyHumanDecisions`), a model step's gated calls and sign-ins, the budget gate before each
 // model call, and what the model reads about pending approvals. Outside readers use only the
-// read-only requests view exported here. Nothing here pauses the turn; the step's `park` does.
+// read-only requests view exported here. Step decisions derive waiting from the recorded state.
 
 export {
   admitHumanInput,
   applyHumanDecisions,
   settleHumanInput,
+  takeAnswers,
   type HumanDecisions,
   type HumanInputIntake,
 } from "./intake.js";
 export { openDeferredApprovals, queueInput } from "./approvals.js";
+export { enforceBudget } from "./budget.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 
@@ -63,14 +55,27 @@ export async function askStepApprovals(
   },
 ): Promise<void> {
   const transition = askApprovals(step.view(), {
-    event: input.event,
-    messages: input.messages,
-    requests: input.requests,
+    ...input,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
-    tasks: input.tasks,
   });
   await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
+}
+
+/** Holds a model response on the calls eve gated: approvals, a sign-in, or the runtime's work. */
+export async function holdStep(
+  step: Step,
+  input: Parameters<typeof askStepApprovals>[1] & {
+    readonly signIn?: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
+  },
+): Promise<StepResult> {
+  // Catalogs contain callbacks; only continuation data belongs in the saved step.
+  const { tools, requests, signIn, ...response } = input;
+  if (requests.length > 0) await askStepApprovals(step, { ...response, requests, tools });
+  else await step.apply(suspendStep(step.view(), response));
+  // Approval precedes sign-in for the same call, not an executing sibling.
+  if (signIn !== undefined) return stopForToolSignIn(step, signIn);
+  return { session: step.session };
 }
 
 /**
@@ -88,44 +93,7 @@ export async function stopForToolSignIn(
     }),
     step.session.history,
   );
-  return park(step);
-}
-
-/**
- * The gate before each model call. A spent budget asks whether to continue when someone can
- * answer, and fails the session otherwise. `messages` are the step's: they park with the prompt,
- * so the input that triggered it survives into the turn that resumes.
- */
-export async function enforceBudget(
-  step: Step,
-  messages: readonly ModelMessage[],
-): Promise<StepResult | undefined> {
-  const limit = checkSessionUsageLimit({
-    canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
-    limit: step.config.sessionUsageLimit ?? DEFAULT_SESSION_USAGE_LIMIT,
-    session: step.session,
-    turnSequence: step.position().sequence,
-    usage: step.view().projection.view.usage.total,
-    window: step.view().projection.usageWindow,
-  });
-  if (limit.kind === "within") return undefined;
-  if (limit.kind === "ask") {
-    step.session = { ...step.session, history: validateHarnessModelMessages([...messages]) };
-    // The prompt is asked once; a gate that finds it open still waits on it.
-    if (openLimit(step.view())?.row.interactionId !== limit.ask.interactionId)
-      await step.apply(requestLimit(step.view(), limit.ask), step.session.history);
-    // The turn waits on the prompt; the answer resumes it or cancels it.
-    return park(step);
-  }
-  await step.apply(
-    fail(step.view(), {
-      code: limit.code,
-      details: limit.details,
-      message: limit.message,
-      terminal: true,
-    }),
-  );
-  return { next: { done: true, output: "" }, session: step.session };
+  return { session: step.session };
 }
 
 /**

@@ -8,6 +8,9 @@ import type { HarnessSession } from "#harness/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 
+// The harness runs outside a workflow body here, where run attributes cannot be written.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
 
@@ -65,6 +68,110 @@ async function compactWith(
     tools: new Map(),
   })(session, {});
 }
+
+const replyStream = (): StreamResult =>
+  streamOf([
+    { type: "stream-start", warnings: [] },
+    { id: "reply", type: "text-start" },
+    { delta: "Here is the report.", id: "reply", type: "text-delta" },
+    { id: "reply", type: "text-end" },
+    {
+      finishReason: { raw: undefined, unified: "stop" },
+      type: "finish",
+      usage: {
+        inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 300, total: 300 },
+        outputTokens: { reasoning: 0, text: 5, total: 5 },
+      },
+    },
+  ]);
+
+const failedSummaryStream = (): StreamResult =>
+  streamOf([
+    { type: "stream-start", warnings: [] },
+    { type: "error", error: new Error("The summary request is invalid.") },
+  ]);
+
+const isSummaryPrompt = (prompt: unknown) =>
+  JSON.stringify(prompt).includes("CONTEXT CHECKPOINT COMPACTION");
+
+/** Runs Alice's next turn over a long conversation that no longer fits the threshold. */
+async function runLongTurn(summary: () => StreamResult) {
+  const prompts: unknown[] = [];
+  const model = new MockLanguageModelV3({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt);
+      return isSummaryPrompt(prompt) ? summary() : replyStream();
+    },
+  });
+  const notes = (label: string) => `${label}: ${"quarterly figures and notes ".repeat(80)}`;
+  const session: HarnessSession = {
+    agent: { modelReference: { id: "turn-model" }, system: "You help Alice.", tools: [] },
+    compaction: { recentWindowSize: 2, threshold: 1_500 },
+    continuationToken: "http:turn-compaction",
+    history: [
+      { content: notes("January"), kind: "user", role: "user" },
+      { content: notes("February"), role: "assistant" },
+      { content: notes("March"), kind: "user", role: "user" },
+      { content: "Noted.", role: "assistant" },
+    ],
+    sessionId: "turn-compaction",
+  };
+  const events: SessionEvent[] = [];
+  const run = createToolLoopHarness({
+    handleEvent: async (publication) => {
+      events.push(...eventsOf(publication));
+    },
+    resolveModel: async () => model,
+    tools: new Map(),
+  });
+  const result = run(session, { message: "Alice asks for the quarterly report." });
+  return { events, prompts, result };
+}
+
+const lifecycleOf = (events: readonly SessionEvent[]) =>
+  events.flatMap(({ data, type }) =>
+    type.startsWith("context.") || type.startsWith("model.")
+      ? [{ type, ...("outcome" in data && { outcome: data.outcome }) }]
+      : [],
+  );
+
+describe("compaction before a turn's model call", () => {
+  it("summarizes a prompt over the threshold, and the model reads the summary", async () => {
+    const { events, prompts, result } = await runLongTurn(summaryStream);
+    await result;
+
+    expect(lifecycleOf(events)).toEqual([
+      { type: "model.requested" },
+      { type: "context.started" },
+      { type: "model.requested" },
+      { type: "model.started" },
+      { outcome: "completed", type: "model.settled" },
+      { outcome: "completed", type: "context.settled" },
+      { type: "model.started" },
+      { outcome: "completed", type: "model.settled" },
+    ]);
+    expect(events.find((event) => event.type === "context.started")?.data).toMatchObject({
+      kind: "compaction",
+      trigger: { inputTokens: expect.any(Number) },
+      turnId: "turn_0",
+    });
+    const turnPrompt = JSON.stringify(prompts.at(-1));
+    expect(turnPrompt).toContain("Alice asked for the quarterly report.");
+    expect(turnPrompt).not.toContain("January");
+  });
+
+  it("fails the step without calling the model when the summary fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { events, prompts, result } = await runLongTurn(failedSummaryStream);
+
+    await expect(result).rejects.toThrow("The summary request is invalid.");
+    expect(prompts.filter((prompt) => !isSummaryPrompt(prompt))).toEqual([]);
+    expect(lifecycleOf(events).slice(-2)).toEqual([
+      { outcome: "failed", type: "model.settled" },
+      { outcome: "failed", type: "context.settled" },
+    ]);
+  });
+});
 
 describe("compaction summary call", () => {
   it("settles a failed manual compaction and its summary run exactly once", async () => {

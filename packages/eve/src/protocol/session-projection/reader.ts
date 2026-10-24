@@ -11,7 +11,7 @@ import type {
 import type { Answer } from "#protocol/session-events/families/response.js";
 import type { JsonValue } from "#protocol/session-events/envelope.js";
 import {
-  answeredInteractionIds,
+  unansweredInteractions,
   callRun,
   callTurn,
   interactionOwner,
@@ -209,9 +209,8 @@ export function promptQueueHead(
   view: SessionView,
   answered: (interactionId: string) => boolean = () => false,
 ): InteractionRow | undefined {
-  const admitted = answeredInteractionIds(view);
-  const open = openRequests(view).filter(
-    (row) => !answered(row.interactionId) && !admitted.has(row.interactionId),
+  const open = unansweredInteractions(view).filter(
+    (row) => row.request.kind !== "sign-in" && !answered(row.interactionId),
   );
   return open.find((row) => row.request.kind === "budget") ?? open[0];
 }

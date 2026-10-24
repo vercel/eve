@@ -58,6 +58,8 @@ export interface CallStartedData {
   readonly clearedBy?: ClearedBy;
   /** The task that serves the call. */
   readonly taskId?: string;
+  /** A blocking workflow run executes the call outside the session's own steps. */
+  readonly workflow?: true;
 }
 
 /** A bounded snapshot of a call's output so far; the latest replaces earlier ones. */
@@ -138,7 +140,12 @@ export const callSchemas = {
   "call.started": envelopeOf(
     "call.started",
     conforming<CallStartedData>()(
-      z.object({ callId: id, clearedBy: clearedBySchema.optional(), taskId: id.optional() }),
+      z.object({
+        callId: id,
+        clearedBy: clearedBySchema.optional(),
+        taskId: id.optional(),
+        workflow: z.literal(true).optional(),
+      }),
     ),
   ),
 };

@@ -2,7 +2,7 @@ import type { ControlDelivery } from "#harness/types.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
-import type { TurnPause } from "#execution/session/pending-turn-state.js";
+import type { TurnPause } from "#execution/session/step-decision.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";

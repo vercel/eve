@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "#harness/hitl/budget.js";
+import {
+  checkSessionUsageLimit,
+  createSessionLimitContinuationRequest,
+  DEFAULT_SESSION_USAGE_LIMIT,
+  limitDecision,
+  withoutStaleBudgetAnswers,
+} from "#harness/hitl/budget.js";
 import { NO_USAGE } from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionUsageLimit } from "#shared/agent-definition.js";
+import { interactionOpened, interactionSettled } from "#harness/interaction-facts.js";
+import { tablesOf } from "#internal/testing/session-machine.js";
 import { acceptSessionBudget, withSessionUsage } from "#internal/testing/session-usage.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 const session = { sessionId: "alice", state: {} } as HarnessSession;
 
@@ -99,5 +108,86 @@ describe("session usage policy", () => {
         usage: { ...NO_USAGE, inputTokens: 100_000_000 },
       }).kind,
     ).toBe("within");
+  });
+});
+
+describe("session usage continuation", () => {
+  it("keeps the prompt stable within a turn and window, but changes it for either boundary", () => {
+    const input = { sessionId: "alice", turnSequence: 2, windowIndex: 3 };
+    const ask = createSessionLimitContinuationRequest(input);
+    expect(ask).toEqual(createSessionLimitContinuationRequest(input));
+    expect(ask.interactionId).toBe("alice:2:limit:usage:3");
+    expect(ask.request).toMatchObject({
+      kind: "budget",
+      allowFreeform: false,
+      options: [{ id: "approve" }, { id: "deny" }],
+    });
+    expect(
+      createSessionLimitContinuationRequest({ ...input, windowIndex: 4 }).interactionId,
+    ).not.toBe(ask.interactionId);
+    expect(
+      createSessionLimitContinuationRequest({ ...input, turnSequence: 3 }).interactionId,
+    ).not.toBe(ask.interactionId);
+  });
+
+  it("grants on approve, declines on deny, and leaves other responses unanswered", () => {
+    expect(limitDecision({ optionId: "approve" })).toEqual({ granted: true });
+    expect(limitDecision({ optionId: "deny" })).toEqual({ granted: false });
+    expect(limitDecision({})).toBeUndefined();
+  });
+});
+
+describe("stale budget answers", () => {
+  const prompt = {
+    kind: "budget",
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "?",
+  } as const;
+  const approval = { ...prompt, kind: "approval" } as const;
+  const tables = tablesOf([
+    { data: {}, type: "session.started" },
+    {
+      data: { cause: { deliveryId: "d0" }, follows: null, turnId: "turn_0" },
+      type: "turn.started",
+    },
+    interactionOpened({ interactionId: "earlier", request: prompt, subject: { turnId: "turn_0" } }),
+    interactionSettled("earlier", "accepted"),
+    interactionOpened({ interactionId: "current", request: prompt, subject: { turnId: "turn_0" } }),
+    interactionOpened({
+      interactionId: "approval",
+      request: approval,
+      subject: { turnId: "turn_0" },
+    }),
+    interactionSettled("approval", "accepted"),
+  ] as SessionEvent[]);
+  const answer = (interactionId: string, optionId = "approve") => ({
+    deliveryId: "delivery",
+    interactionId,
+    optionId,
+    responseId: `response-${interactionId}`,
+  });
+
+  it("drops an answer to a closed budget prompt by its kind and keeps the rest", () => {
+    const stepInput = withoutStaleBudgetAnswers({
+      pendingRequestIds: new Set(["current"]),
+      stepInput: {
+        answers: [answer("earlier", "deny"), answer("current"), answer("approval"), answer("gone")],
+        message: "also do this",
+      },
+      tables,
+    });
+
+    // The current prompt's answer stands; other stale answers become text later, never grants.
+    expect(stepInput).toEqual({
+      answers: [answer("current"), answer("approval"), answer("gone")],
+      message: "also do this",
+    });
+  });
+
+  it("returns the input unchanged when no stale budget answer arrives", () => {
+    const stepInput = { answers: [answer("current"), answer("approval")] };
+    expect(
+      withoutStaleBudgetAnswers({ pendingRequestIds: new Set(["current"]), stepInput, tables }),
+    ).toBe(stepInput);
   });
 });

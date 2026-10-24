@@ -1,6 +1,5 @@
 import { appendMessage, normalizeMessage } from "#harness/messages.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { isSessionLimitContinuationRequestId } from "#harness/hitl/budget-request.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { askedCall } from "#protocol/session-projection/reader.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -18,33 +17,6 @@ type StaleResponseConversion =
     };
 
 /**
- * Filter pass: removes stale answers to session-limit continuation prompts
- * from the step input before any stale handling runs.
- *
- * These are dropped rather than converted: surfacing a stale "Stop" as
- * conversational prose would read fail-open, and a stale grant must not
- * extend any budget — a currently pending prompt (if any) stays parked and
- * re-raises. Stripping the responses also keeps them from resolving (and
- * clearing) a pending batch they never answered. Answers to a currently
- * pending continuation prompt pass through untouched.
- */
-export function dropStaleSessionLimitContinuationResponses(input: {
-  readonly pendingRequestIds: ReadonlySet<string>;
-  readonly stepInput?: HarnessStepInput;
-}): HarnessStepInput | undefined {
-  if (input.stepInput === undefined) return undefined;
-  const answers = input.stepInput.answers ?? [];
-  const retained = answers.filter(
-    ({ interactionId }) =>
-      input.pendingRequestIds.has(interactionId) ||
-      !isSessionLimitContinuationRequestId(interactionId),
-  );
-  if (retained.length === answers.length) return input.stepInput;
-  const { answers: _answers, ...rest } = input.stepInput;
-  return retained.length === 0 ? rest : { ...rest, answers: retained };
-}
-
-/**
  * Transformation pass: a response is stale when its request ID is not in
  * the currently pending HITL batch — the request was already answered,
  * cleared by a follow-up message, or cancelled.
@@ -54,8 +26,7 @@ export function dropStaleSessionLimitContinuationResponses(input: {
  * processing, so a stale approval cannot authorize an earlier tool call.
  * Request details the session still knows are best-effort model context.
  *
- * Assumes {@link dropStaleSessionLimitContinuationResponses} already ran:
- * stale continuation answers must never reach this conversion.
+ * Assumes stale budget answers were already dropped: they must never reach this conversion.
  */
 export function convertStaleResponsesToUserMessage(input: {
   readonly pendingRequestIds: ReadonlySet<string>;

@@ -19,7 +19,7 @@ import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
 import { failTurnForReaction, type Step } from "#harness/step/context.js";
 import { turnSettled } from "#harness/facts.js";
-import { fail, suspendStep } from "#harness/session-machine/transitions.js";
+import { fail } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
@@ -27,8 +27,8 @@ import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
-import { hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { holdStep } from "#harness/hitl/index.js";
+import { hasQueuedTurnInput } from "#harness/step/park.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -143,14 +143,12 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         clearedBy: result.policyApprovals?.[task.callId],
       })),
     };
-    if (approvalRequests.length > 0) {
-      await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
-    } else {
-      await step.apply(suspendStep(step.view(), parked));
-    }
-    // Approval only precedes sign-in for the same call, not an executing sibling.
-    if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
-    return park(step);
+    return holdStep(step, {
+      ...parked,
+      requests: approvalRequests,
+      tools: input.catalog,
+      signIn: authorizationInterrupt,
+    });
   }
 
   // --- Continue or terminate ------------------------------------------------
@@ -158,7 +156,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // History grows by append only; nothing rewrites earlier messages mid-turn,
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
-  // history, and it runs before the model call (see `maybeCompact`).
+  // history, and it runs before the model call (see `compactIfDue`).
   step.session = {
     ...step.session,
     history: validateHarnessModelMessages([...promptMessages, ...responseMessages]),
@@ -186,11 +184,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
-  if (continueLoop) return { next: step.runStep, session: step.session };
+  if (continueLoop) return { unreadInput: true, session: step.session };
   // The turn rule: no turn ends while its tasks work. The session waits for
   // one to settle, then calls the model again in the same turn.
   if (workingTasks.length > 0) {
-    return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
+    return { session: step.session };
   }
 
   return settleTurn(step, {
@@ -340,7 +338,7 @@ async function settleTurn(
       turnSettled(step.view().projection, { outcome: "completed" }),
       step.session.history,
     );
-    return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
+    return { session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
   const structured = extractFinalOutput(result);
@@ -350,7 +348,6 @@ async function settleTurn(
     step.session = { ...step.session, outputSchema: undefined };
     await step.apply(fail(step.view(), OUTPUT_SCHEMA_NOT_FULFILLED));
     return {
-      next: null,
       session: step.session,
       settledTurn: { isError: true, output: OUTPUT_SCHEMA_NOT_FULFILLED.message },
     };
@@ -365,5 +362,5 @@ async function settleTurn(
     turnSettled(step.view().projection, { outcome: "completed" }),
     step.session.history,
   );
-  return { next: null, session: step.session, settledTurn: { output: structured } };
+  return { session: step.session, settledTurn: { output: structured } };
 }

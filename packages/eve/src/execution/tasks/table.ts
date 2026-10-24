@@ -1,4 +1,9 @@
-import type { TaskCancelResult, TaskWaitResult } from "#execution/tasks/calls.js";
+import {
+  taskWaitResult as decideTaskWait,
+  type TaskCancelResult,
+  type TaskSummary,
+  type TaskWaitResult,
+} from "#execution/tasks/calls.js";
 import type { WorkflowToolRunCall } from "#execution/tools/workflow/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { readRunningWork, writeRunningWork } from "#harness/running-work.js";
@@ -180,24 +185,21 @@ export function tasksWithResults(table: TaskTable): readonly TaskRecord[] {
   return table.tasks.filter((record) => record.results.length > 0);
 }
 
-/**
- * What a wait on the turn's tasks returns now, or `undefined` to keep
- * waiting. A waiting result, or nothing left working, ends it first;
- * cancelled work never does.
- */
+export function summarizeTasks(table: TaskTable): TaskSummary {
+  return {
+    settled: tasksWithResults(table).map((record) => ({
+      id: record.id,
+      status: record.results.at(-1)!.status,
+    })),
+    working: workingTasks(table).map((record) => record.id),
+  };
+}
+
 export function taskWaitResult(
   table: TaskTable,
   wake: { readonly interrupted: boolean; readonly timedOut: boolean },
 ): TaskWaitResult | undefined {
-  const settled = tasksWithResults(table).map((record) => ({
-    id: record.id,
-    status: record.results.at(-1)!.status,
-  }));
-  const working = workingTasks(table).map((record) => record.id);
-  if (settled.length > 0 || working.length === 0) return { settled, status: "settled", working };
-  if (wake.interrupted) return { status: "interrupt", working };
-  if (wake.timedOut) return { status: "timeout", working };
-  return undefined;
+  return decideTaskWait(summarizeTasks(table), wake);
 }
 
 /**

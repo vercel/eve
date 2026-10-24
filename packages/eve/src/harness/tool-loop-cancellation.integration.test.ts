@@ -263,7 +263,8 @@ describe("tool loop cancellation (real AI SDK)", () => {
       { message: "Hi" },
     );
 
-    expect(inertResult.next).toBe(bareResult.next);
+    expect(inertResult.settledTurn).toEqual({ output: "All done." });
+    expect(bareResult.settledTurn).toEqual({ output: "All done." });
     expect(inert.events.map((event) => event.type)).toEqual(bare.events.map((event) => event.type));
   });
 });

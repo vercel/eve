@@ -18,30 +18,18 @@ import {
   unavailableToolMessage,
 } from "#harness/approval-outcome.js";
 import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
-import { limitDecision, type LimitAsk } from "#harness/hitl/budget-request.js";
-import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
+import { responseLedger, responseOf, standingAnswers } from "./responses.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import {
   approvalOpened,
-  interactionOpened,
   interactionSettled,
-  responseAdmitted,
-  responseSettled,
-  responseSubmitted,
   signInInteractionId,
   signInOpened,
 } from "#harness/interaction-facts.js";
-import { interactionOwner } from "#protocol/session-projection/selectors.js";
-import { openRequests, SUPERSEDED_BY_MESSAGE } from "#protocol/session-projection/reader.js";
+import { SUPERSEDED_BY_MESSAGE } from "#protocol/session-projection/reader.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
-import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
-import type {
-  InteractionRow,
-  ResponseRow,
-  SessionView as PublicView,
-} from "#protocol/session-projection/tables.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { Answer } from "#shared/input.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { isEmptyInput, type ResolvedStepInput } from "./delivery.js";
 import type {
@@ -58,12 +46,7 @@ import {
   withoutApproved,
 } from "#harness/session-machine/transitions.js";
 import { stepCallIds, suspend, withResult } from "#harness/session-machine/suspended-steps.js";
-import {
-  ownOpenRequestIds,
-  runningTasks,
-  turnPosition,
-  type SessionView,
-} from "#harness/session-machine/view.js";
+import { runningTasks, turnPosition, type SessionView } from "#harness/session-machine/view.js";
 
 // The session's human-in-the-loop rules. Each reads the session and returns what changed; the
 // step runs them in order and parks once, when none of them leaves anything to run.
@@ -71,7 +54,7 @@ import {
 // A model step asks for the approvals its calls need (`askApprovals`). Answers are admitted as
 // they arrive and stand, revisable, as response rows (`admitAnswers`); a step's approvals settle
 // together once each has one, or when a message steers past them (`settleApprovals`). An
-// exhausted budget asks to continue (`requestLimit`, `settleLimit`), and a sign-in stops the
+// exhausted budget asks to continue (see `budget.ts`), and a sign-in stops the
 // calls that need it (`requireSignIn`). Nothing here pauses the turn: the step does, from what
 // is still open.
 
@@ -195,18 +178,8 @@ export function admitAnswers(
   }
   for (const responseId of check.admit) responses.admit(responseId);
   const refusal = check.refused.map(({ reason }) => reason).join("\n");
-  // The step's input can join an earlier delivery whose answer waits for the rest of its batch:
-  // only the deliveries that carried a refused answer, and haven't settled, are refused.
-  const refusedIds = new Set(check.refused.map(({ responseId }) => responseId));
-  const carriers = (delivery?.answers ?? [])
-    .filter(({ responseId }) => refusedIds.has(responseId))
-    .map(({ deliveryId }) => deliveryId);
-  const traced =
-    carriers.length === check.refused.length && carriers.every((id) => id !== undefined);
-  const refusedDeliveries = new Set(
-    traced ? carriers : (delivery?.deliveries ?? []).map(({ deliveryId }) => deliveryId),
-  );
-  const refused: SessionEvent[] = [...refusedDeliveries]
+  // Only the deliveries that carried a refused answer, and haven't settled already, are refused.
+  const refused: SessionEvent[] = [...refusedDeliveries(check, delivery)]
     .filter((deliveryId) => tables.deliveries[deliveryId]?.status !== "settled")
     .map((deliveryId) => ({
       data: { deliveryId, outcome: "refused", reason: refusal },
@@ -219,22 +192,16 @@ export function admitAnswers(
   };
 }
 
-/** The answer that stands for each open interaction: its latest admitted response. */
-function standingAnswers(tables: PublicView): ReadonlyMap<string, ResponseRow> {
-  const standing = new Map<string, ResponseRow>();
-  const rows = Object.values(tables.responses).sort((a, b) => a.introducedAt - b.introducedAt);
-  for (const row of rows) {
-    if (row.status === "admitted") standing.set(row.interactionId, row);
-  }
-  return standing;
-}
-
-function responseOf(interactionId: string, row: ResponseRow | undefined): Answer | undefined {
-  if (row?.value === undefined) return undefined;
-  const response: { interactionId: string; optionId?: string; text?: string } = { interactionId };
-  if (row.value.optionId !== undefined) response.optionId = row.value.optionId;
-  if (row.value.text !== undefined) response.text = row.value.text;
-  return response;
+export function refusedDeliveries(
+  check: ResponderCheck,
+  delivery: ResolvedStepInput | undefined,
+): ReadonlySet<string> {
+  const refused = new Set(check.refused.map(({ responseId }) => responseId));
+  return new Set(
+    (delivery?.answers ?? []).flatMap((answer) =>
+      refused.has(answer.responseId) && answer.deliveryId !== undefined ? [answer.deliveryId] : [],
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -406,78 +373,6 @@ export function approvalMemory(view: SessionView): ApprovalMemory {
 }
 
 // ---------------------------------------------------------------------------
-// The budget prompt
-// ---------------------------------------------------------------------------
-
-/** Why an answer to the budget prompt that is neither Continue nor Stop doesn't count. */
-const INVALID_BUDGET_ANSWER = "The budget prompt takes Continue or Stop.";
-
-/** The budget prompt the session waits on, with the turn it asked in, if any. */
-export function openLimit(
-  view: SessionView,
-): { readonly row: InteractionRow; readonly turnId?: string } | undefined {
-  const own = ownOpenRequestIds(view);
-  const tables = view.projection.view;
-  const row = openRequests(tables).find(
-    (open) => open.request.kind === "budget" && own.has(open.interactionId),
-  );
-  return row === undefined ? undefined : { row, turnId: interactionOwner(tables, row).turnId };
-}
-
-/**
- * The session spent its budget: it asks whether to continue instead of calling the model.
- * `settleLimit` grants a fresh budget or declines it.
- */
-export function requestLimit(view: SessionView, ask: LimitAsk): Transition {
-  const { turnId } = turnPosition(view.projection);
-  return {
-    events: [interactionOpened({ ...ask, subject: { turnId } })],
-    turn: view.turn,
-  };
-}
-
-/**
- * The budget prompt settles on its standing answer: Continue grants a fresh budget, and Stop
- * declines it. Any other answer is refused, and the prompt stays open for another.
- */
-export function settleLimit(view: SessionView): Transition & {
-  readonly limit?: { readonly granted: boolean };
-} {
-  const open = openLimit(view);
-  const tables = view.projection.view;
-  const interactionId = open?.row.interactionId;
-  const answer =
-    interactionId === undefined ? undefined : standingAnswers(tables).get(interactionId);
-  const response = interactionId === undefined ? undefined : responseOf(interactionId, answer);
-  if (
-    open === undefined ||
-    interactionId === undefined ||
-    answer === undefined ||
-    response === undefined
-  )
-    return { events: [], turn: view.turn };
-  const responses = responseLedger(tables);
-  const granted = limitDecision(response);
-  if (granted === undefined) {
-    responses.settle(answer.responseId, "refused", INVALID_BUDGET_ANSWER);
-    return { events: responses.facts(), turn: view.turn };
-  }
-  responses.settle(answer.responseId, "applied");
-  responses.closeOthers(interactionId, answer.responseId);
-  return {
-    events: [
-      ...responses.facts(),
-      interactionSettled(interactionId, granted.granted ? "accepted" : "declined", {
-        cause: { responseId: answer.responseId },
-        response,
-      }),
-    ],
-    limit: granted,
-    turn: view.turn,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Sign-ins
 // ---------------------------------------------------------------------------
 
@@ -561,83 +456,4 @@ export function requireSignIn(
           awaitSignIns(step, { challenges: input.challenges, stopped: calls }),
         );
   return { events, signIns, turn: { ...turn, suspended } };
-}
-
-// ---------------------------------------------------------------------------
-// The response ledger
-// ---------------------------------------------------------------------------
-
-/**
- * The responses a commit records: each answer submitted once, its checks, and how it settled.
- * Revising an admitted answer abandons the one it replaces; an interaction that settles
- * withdraws the open answers that didn't decide it.
- */
-interface ResponseLedger {
-  /** Records answers not seen yet; one to a request nobody can answer anymore is dropped. */
-  submit(answers: readonly SubmittedAnswer[]): void;
-  admit(responseId: string): void;
-  settle(responseId: string, outcome: ResponseOutcome, reason?: string): void;
-  /** Settles every other open answer to an interaction that `decidedBy` settles. */
-  closeOthers(interactionId: string, decidedBy: string | undefined): void;
-  facts(): SessionEvent[];
-}
-
-function responseLedger(tables: PublicView): ResponseLedger {
-  const facts: SessionEvent[] = [];
-  const fresh = new Map<string, SubmittedAnswer>();
-  const status = new Map<string, "submitted" | "admitted" | "settled">();
-  for (const row of Object.values(tables.responses)) status.set(row.responseId, row.status);
-  const submit = (answers: readonly SubmittedAnswer[]) => {
-    for (const answer of answers) {
-      const { deliveryId, interactionId, optionId, responseId, text } = answer;
-      if (status.has(responseId)) continue;
-      // An answer to a request nobody can answer anymore introduces nothing: it was converted
-      // or dropped before it got here.
-      if (tables.interactions[interactionId]?.status !== "open") continue;
-      fresh.set(responseId, answer);
-      status.set(responseId, "submitted");
-      const value: { optionId?: string; text?: string } = {};
-      if (optionId !== undefined) value.optionId = optionId;
-      if (text !== undefined) value.text = text;
-      facts.push(responseSubmitted({ deliveryId, interactionId, responseId, value }));
-    }
-  };
-  const interactionOf = (responseId: string) =>
-    fresh.get(responseId)?.interactionId ?? tables.responses[responseId]?.interactionId;
-  const order = (responseId: string) =>
-    tables.responses[responseId]?.introducedAt ?? Number.MAX_SAFE_INTEGER;
-  const openFor = (interactionId: string) =>
-    [...status]
-      .filter(([id, state]) => state !== "settled" && interactionOf(id) === interactionId)
-      .map(([id]) => id)
-      .sort((a, b) => order(a) - order(b));
-  const settle = (responseId: string, outcome: ResponseOutcome, reason?: string) => {
-    const current = status.get(responseId);
-    if (current === undefined || current === "settled") return;
-    status.set(responseId, "settled");
-    facts.push(responseSettled(responseId, outcome, reason));
-  };
-  return {
-    admit(responseId) {
-      if (status.get(responseId) !== "submitted") return;
-      const interactionId = interactionOf(responseId);
-      if (interactionId !== undefined) {
-        for (const other of openFor(interactionId)) {
-          if (other !== responseId && status.get(other) === "admitted")
-            settle(other, "abandoned", "revised");
-        }
-      }
-      status.set(responseId, "admitted");
-      facts.push(responseAdmitted(responseId));
-    },
-    closeOthers(interactionId, decidedBy) {
-      for (const other of openFor(interactionId)) {
-        if (other === decidedBy) continue;
-        settle(other, status.get(other) === "admitted" ? "abandoned" : "withdrawn");
-      }
-    },
-    facts: () => facts,
-    submit,
-    settle,
-  };
 }

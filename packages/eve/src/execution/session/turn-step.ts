@@ -68,6 +68,8 @@ import {
   recoverInterruptedStep,
 } from "#execution/session/interrupted-step.js";
 import { stepDisagreement } from "#execution/session/step-decision-check.js";
+import { announcesWaiting, decideStep } from "#execution/session/step-decision.js";
+import { readStepState } from "#execution/session/step-reading.js";
 import { createLogger } from "#internal/logging.js";
 import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
@@ -660,7 +662,11 @@ async function runSessionStepBody(
                 : undefined;
             const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
             // Only the step knows whether it stopped for an interaction; the tables say which.
-            await publisher.finish({ announce: stoppedForPerson(harnessResult) });
+            await publisher.finish({
+              announce: announcesWaiting(
+                decideStep(readStepState(harnessResult.session, harnessResult.unreadInput)),
+              ),
+            });
             return harnessResult;
           });
           // The waiting boundary may reach the client before this step returns.
@@ -710,15 +716,6 @@ async function runSessionStepBody(
   } finally {
     publisher.writer.release();
   }
-}
-
-/**
- * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's an interaction (`announceWaiting`).
- */
-function stoppedForPerson(result: StepResult): boolean {
-  if (result.held !== undefined) return result.held.kind === "request";
-  return result.next === null && result.settledTurn === undefined;
 }
 
 /** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */

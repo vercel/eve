@@ -11,16 +11,13 @@ import {
   type StepProjection,
 } from "#harness/session-machine/current.js";
 import {
-  admitHumanInput,
+  takeAnswers,
   applyHumanDecisions,
-  compactInput,
   openDeferredApprovals,
   queueInput,
-  settleHumanInput,
   turnInputOnly,
-  withoutTurnInput,
 } from "#harness/hitl/index.js";
-import { blocked, hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { blocked, hasQueuedTurnInput } from "#harness/step/park.js";
 import {
   clear,
   controlDeliveryFor,
@@ -118,7 +115,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       instrumentation,
       live,
       publish,
-      runStep,
       session: initialSession,
     });
 
@@ -130,7 +126,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // the answers approved runs, or the turn waits on people, or the model runs.
     const runtime = await runtimeResults(step, input);
     if ("ended" in runtime) return runtime.ended;
-    const answered = await answers(step, runtime);
+    const answered = await takeAnswers(step, runtime);
     if ("ended" in answered) return answered.ended;
     const turn = await turnInput(step, input, answered);
     if ("ended" in turn) return turn.ended;
@@ -138,13 +134,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
-    if (blocked(step.view(), step.session.state)) return park(step);
+    if (blocked(step.view(), step.session.state)) return { session: step.session };
     // Read input held behind approved calls before the model can ask for more work. The step's
     // own input waits as this step prepared it, its attachments already staged.
     if (hasQueuedTurnInput(step.view())) {
       const prepared = answered.input && { ...answered.input, message: turn.message };
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
-      return { next: step.runStep, session: step.session };
+      return { session: step.session };
     }
     return runModelStep(step, {
       generation,
@@ -166,34 +162,9 @@ interface Ended {
  */
 async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
   const runtime = await settleRuntimeWork(step, input);
-  if (runtime === undefined) return { ended: { next: null, session: step.session } } as Ended;
+  if (runtime === undefined) return { ended: { session: step.session } } as Ended;
   await step.apply(openDeferredApprovals(step.view()));
   return runtime;
-}
-
-/**
- * The delivery's answers are admitted, then decide what they answer. The model reads what they
- * decided before the delivery's own input, as the AI SDK ran it, so that input waits a step; and
- * when nothing they decided can run, it waits, unreceived, behind them.
- */
-async function answers(
-  step: Step,
-  runtime: NonNullable<Awaited<ReturnType<typeof settleRuntimeWork>>>,
-) {
-  const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
-  if (intake.kind === "stop") return { ended: intake.result } as Ended;
-  const decided = await settleHumanInput(step, intake);
-  let { input, message } = intake;
-  if (decided.approved.length > 0 || decided.settledApprovals) {
-    await step.apply(queueInput(step.view(), turnInputOnly(input)));
-    input = withoutTurnInput(input);
-    message = undefined;
-  }
-  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
-    await step.apply(queueInput(step.view(), compactInput(input)));
-    return { ended: await park(step) } as Ended;
-  }
-  return { decided, input, intake, message };
 }
 
 /**
@@ -203,7 +174,7 @@ async function answers(
 async function turnInput(
   step: Step,
   input: HarnessStepInput | undefined,
-  { input: received, intake, message }: Exclude<Awaited<ReturnType<typeof answers>>, Ended>,
+  { input: received, intake, message }: Exclude<Awaited<ReturnType<typeof takeAnswers>>, Ended>,
 ) {
   const turn = await prepareTurnInput(step, received, { consumedMessage: intake.consumedMessage });
   // A delivery an earlier step queued joins with the input the queue carried it in.
@@ -219,7 +190,7 @@ async function turnInput(
     await step.apply(join(step.view(), { deliveries }));
   }
   if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
-    return { ended: { next: null, session: step.session } } as Ended;
+    return { ended: { session: step.session } } as Ended;
   }
   return turn;
 }
@@ -231,7 +202,7 @@ async function turnInput(
 async function clearContext(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
-  return { next: null, session: replaceSessionHistory(step.session, []) };
+  return { session: replaceSessionHistory(step.session, []) };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

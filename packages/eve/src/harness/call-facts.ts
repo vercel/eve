@@ -66,9 +66,9 @@ export function callRequested(input: {
 /** A call was cleared and began running. */
 export function callStarted(
   callId: string,
-  options: { readonly clearedBy?: ClearedBy } = {},
+  options: { readonly clearedBy?: ClearedBy; readonly workflow?: true } = {},
 ): FactOf<"call.started"> {
-  return fact("call.started", { callId, clearedBy: options.clearedBy });
+  return fact("call.started", { callId, clearedBy: options.clearedBy, workflow: options.workflow });
 }
 
 /** A call settled from its runtime result: failed if the result says so, otherwise completed. */

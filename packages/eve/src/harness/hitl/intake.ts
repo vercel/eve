@@ -13,8 +13,9 @@ import {
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
+import { blocked } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { openLimit, settleLimit } from "./budget.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
@@ -22,18 +23,17 @@ import {
   admitAnswers,
   dispatch,
   approvalMemory,
-  openLimit,
   queueInput,
+  refusedDeliveries,
   requireSignIn,
   type RunnableCall,
   settleApprovals,
-  settleLimit,
   withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";
 import { runApprovedCalls } from "./approved-calls.js";
 import { publishDenial, type CallResult } from "#harness/call-executor.js";
-import { checkResponders, weighResponders } from "./responders.js";
+import { checkResponders, currentAnswering, weighResponders } from "./responders.js";
 import {
   compactInput,
   deliver,
@@ -41,6 +41,8 @@ import {
   resolveTypedApproval,
   type ResolvedStepInput,
   withoutResponses,
+  turnInputOnly,
+  withoutTurnInput,
 } from "./delivery.js";
 import { decideApproval } from "#harness/tools.js";
 import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
@@ -99,7 +101,7 @@ export async function admitHumanInput(
   }
   if (weighed.challenges.length > 0) {
     await step.apply(requireSignIn(step.view(), { challenges: weighed.challenges, queued: input }));
-    return { kind: "stop", result: await park(step) };
+    return { kind: "stop", result: { session: step.session } };
   }
   const delivered = deliver(step.view(), input, options);
   if (delivered.takeQueued && step.view().turn.queued !== undefined) {
@@ -122,18 +124,19 @@ export async function admitHumanInput(
     limit === undefined ? steered : resolveTextInput(step.view().projection.view, steered);
   // Who gave each answer decides whether it stands now, waits for a response policy, or is
   // refused.
-  const check = checkResponders(step.view(), answered, Date.now());
+  const check = checkResponders(step.view(), answered, currentAnswering());
   await step.apply(admitAnswers(step.view(), { check, delivery: answered }));
+  const received = withoutDeliveries(answered, refusedDeliveries(check, answered));
   if (Object.keys(check.weigh).length > 0) {
     // The answers are recorded before any policy runs: the next step weighs them, with the rest
     // of the delivery.
-    await step.apply(queueInput(step.view(), compactInput(withoutResponses(answered))));
-    return { kind: "stop", result: { next: step.runStep, session: step.session } };
+    await step.apply(queueInput(step.view(), compactInput(received)));
+    return { kind: "stop", result: { session: step.session } };
   }
   const consumedMessage = answered?.messageConsumed === true;
   return {
     consumedMessage,
-    input: withoutResponses(answered),
+    input: received,
     kind: "run",
     message: consumedMessage ? undefined : (delivered.displayMessage ?? delivered.input?.message),
     opensTurn: hasTurnInput(delivered.input) || hasTurnInput(steered),
@@ -150,6 +153,36 @@ export interface HumanDecisions {
   readonly approved: readonly RunnableCall[];
   /** Approvals settled on their answers: the model reads their results before the turn input. */
   readonly settledApprovals: boolean;
+}
+
+export type TakenAnswers =
+  | { readonly ended: StepResult }
+  | {
+      readonly decided: HumanDecisions;
+      readonly input: HarnessStepInput | undefined;
+      readonly intake: Extract<HumanInputIntake, { readonly kind: "run" }>;
+      readonly message: HarnessStepInput["message"];
+    };
+
+/** Answers settle before their message; every transition reads the live publication fold. */
+export async function takeAnswers(
+  step: Step,
+  runtime: { readonly input: HarnessStepInput | undefined; readonly waited: boolean },
+): Promise<TakenAnswers> {
+  const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
+  if (intake.kind === "stop") return { ended: intake.result };
+  const decided = await settleHumanInput(step, intake);
+  let { input, message } = intake;
+  if (decided.approved.length > 0 || decided.settledApprovals) {
+    await step.apply(queueInput(step.view(), turnInputOnly(input)));
+    input = withoutTurnInput(input);
+    message = undefined;
+  }
+  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+    await step.apply(queueInput(step.view(), compactInput(input)));
+    return { ended: { session: step.session } };
+  }
+  return { decided, input, intake, message };
 }
 
 /**
@@ -338,7 +371,7 @@ async function runApproved(
     }),
     step.session.history,
   );
-  return park(step);
+  return { session: step.session };
 }
 
 /**
@@ -419,7 +452,19 @@ async function withdrawSteeredSignIns(
   };
 }
 
-/** Whether the input carries user-facing turn input. */
+function withoutDeliveries(
+  input: ResolvedStepInput | undefined,
+  settled: ReadonlySet<string>,
+): HarnessStepInput | undefined {
+  const rest = withoutResponses(input);
+  if (rest === undefined || settled.size === 0) return rest;
+  const { deliveries, ...other } = rest;
+  const remaining = deliveries?.filter(({ deliveryId }) => !settled.has(deliveryId));
+  return remaining === undefined || remaining.length === 0
+    ? other
+    : { ...other, deliveries: remaining };
+}
+
 function hasTurnInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.answers?.length ?? 0) > 0;

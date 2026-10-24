@@ -22,6 +22,8 @@
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
+    "spec:scheduler-mutants": "pnpm --filter eve spec:scheduler-mutants",
+    "spec:scheduler-compare": "pnpm --filter eve spec:scheduler-compare",
     "sync:template-files": "node ./scripts/sync-template-files.mjs",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",

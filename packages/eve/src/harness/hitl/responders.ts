@@ -64,6 +64,18 @@ export interface ResponderCheck {
   readonly weigh: Readonly<Record<string, PendingResponder>>;
 }
 
+export interface Answering {
+  readonly now: number;
+  readonly caller: SessionAuthContext | null;
+  readonly sessionCaller: SessionAuthContext | null;
+}
+
+export function currentAnswering(): Answering {
+  const context = contextStorage.getStore();
+  const sessionCaller = context?.get(SessionKey)?.auth.current ?? null;
+  return { caller: context?.get(AuthKey) ?? sessionCaller, now: Date.now(), sessionCaller };
+}
+
 /**
  * Checks who gave each of a delivery's answers. An approval takes only Approve or Cancel. Without
  * a response policy, it takes only its requester's answer, or anyone's when its requester is
@@ -73,7 +85,7 @@ export interface ResponderCheck {
 export function checkResponders(
   view: SessionView,
   delivery: HarnessStepInput | undefined,
-  now: number,
+  answering: Answering,
 ): ResponderCheck {
   const admit: string[] = [];
   const refused: { responseId?: string; reason: string }[] = [];
@@ -100,7 +112,7 @@ export function checkResponders(
     const gated = step.responseAuthRequiredRequestIds?.includes(request.interactionId) === true;
     if (!gated) {
       // An answer attributed to nobody stays nobody's; only an unattributed one is the caller's.
-      const responder = auth !== undefined ? auth : currentResponder();
+      const responder = auth !== undefined ? auth : answering.caller;
       const requester = step.requester ?? null;
       if (requester !== null && responder === null) {
         refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
@@ -116,12 +128,12 @@ export function checkResponders(
     // A response policy decides Cancel as well as Approve, so a responder it rejects can
     // neither approve nor cancel someone else's request.
     if (responseId === undefined) continue;
-    const responder = auth !== undefined ? auth : buildCallbackContext().session.auth.current;
+    const responder = auth !== undefined ? auth : answering.sessionCaller;
     if (responder === null) {
       refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
       continue;
     }
-    weigh[responseId] = { expiresAt: now + RESPONSE_TTL_MS, responder };
+    weigh[responseId] = { expiresAt: answering.now + RESPONSE_TTL_MS, responder };
   }
   return { admit, refused, weigh };
 }
@@ -317,11 +329,6 @@ async function weigh(input: {
       return { challenges: authorization.challenges, kind: "sign-in" };
     return { kind: "failed", reason: FAILED_REASON };
   }
-}
-
-function currentResponder(): SessionAuthContext | null {
-  const context = contextStorage.getStore();
-  return context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null;
 }
 
 function decisionOf(response: Answer): "approve" | "deny" | undefined {

@@ -15,7 +15,7 @@ import type {
   SessionInboxHandle,
   SessionInboxPayload,
 } from "#execution/session-inbox/inbox.js";
-import type { TurnSelection } from "#execution/session/input-queue.js";
+import type { TurnSelection } from "#execution/session/scheduler/held.js";
 import type { SessionHandoffStart, WorkflowEntryResult } from "#execution/session/entry-input.js";
 import {
   hasRunEndedStep,

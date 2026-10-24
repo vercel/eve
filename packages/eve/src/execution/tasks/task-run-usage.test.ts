@@ -4,9 +4,12 @@ import type { DurableSession, DurableSessionState } from "#execution/durable-ses
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
-import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { SessionExecution } from "#execution/session/turn.js";
+import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
+import {
+  isAppliedRunMessage,
+  type WorkflowToolRunMessage,
+} from "#execution/tools/workflow/messages.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import {
   cancelTask,
@@ -83,7 +86,7 @@ function sessionWithTask(input: {
   readonly cancelled?: boolean;
 }): {
   readonly cursor: SessionStateCursor;
-  readonly execution: SessionExecution;
+  readonly execution: { handleWorkflowMessage(message: WorkflowToolRunMessage): Promise<unknown> };
   readonly from: WorkflowToolRunRef;
 } {
   const base = createTestSessionState({ sessionId: `${input.name}-parent` });
@@ -116,12 +119,12 @@ function sessionWithTask(input: {
     sessionState: { ...base, snapshot: { session: snapshot } },
     sessionWritable: new WritableStream<Uint8Array>(),
   });
-  const execution = new SessionExecution({
-    cursor,
-    inbox,
-    queue: new SessionInputQueue([]),
-    sessionId: base.sessionId,
-  });
+  const execution = {
+    handleWorkflowMessage(message: WorkflowToolRunMessage) {
+      if (!isAppliedRunMessage(message)) throw new Error("Expected a task run message.");
+      return cursor.advance((state) => applyRunMessagesStep({ ...state, messages: [message] }));
+    },
+  };
   const from: WorkflowToolRunRef = {
     callId: `${input.name}-call`,
     input: {},

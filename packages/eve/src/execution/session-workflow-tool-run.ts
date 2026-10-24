@@ -2,6 +2,7 @@ import { deliverWorkflowRelay } from "#execution/tools/workflow/owner.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import {
   runMessageBatchBudget,
+  isAppliedRunMessage,
   type WorkflowToolAskRequest,
   type WorkflowToolRunMessage,
   type WorkflowToolRunOutcomeMessage,
@@ -14,7 +15,6 @@ import {
 } from "#execution/tools/workflow/withdraw-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-inbox/inbox.js";
-import { isTaskRunMessage } from "#execution/tasks/session.js";
 import { isActiveTaskRun, readTaskTable } from "#execution/tasks/table.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import {
@@ -34,9 +34,7 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
-export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is AppliedRunMessage {
-  return message.kind === "agent-started" || message.kind === "report" || isTaskRunMessage(message);
-}
+export { isAppliedRunMessage } from "#execution/tools/workflow/messages.js";
 
 /**
  * Removes the applied run messages at the front of the inbox, in arrival
