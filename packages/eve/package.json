@@ -661,7 +661,8 @@
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
     "dd-trace": "^6.13.0",
-    "just-bash": "^3.1.0"
+    "just-bash": "^3.1.0",
+    "next": "^16.0.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
@@ -677,6 +678,9 @@
       "optional": true
     },
     "just-bash": {
+      "optional": true
+    },
+    "next": {
       "optional": true
     }
   },
