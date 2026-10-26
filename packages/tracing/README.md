@@ -1,20 +1,18 @@
-# Agent tracing
+# Agent run tracing
 
-`@eve/tracing` records agent execution with OpenTelemetry. It owns
-span topology, capture, completion, and durable checkpoints. The package is
-private and not published to npm. Its only runtime package dependency is
-`@opentelemetry/api`.
-
-eve vendors it: `pnpm --filter eve build:compiled` bundles the four
-entrypoints into `#compiled/@eve/tracing/` in the same chunk group as eve's
-vendored `@opentelemetry/api`, so both share one copy. eve imports only those
-entrypoints, never this workspace package. After changing the library, rerun
-`build:compiled` before running eve's tests.
-
-Run the library's own tests with `pnpm --filter @eve/tracing test:unit` and
-`test:integration`.
+`@vercel/agent-runs` records agent execution with OpenTelemetry. It owns
+span topology, capture, completion, and durable checkpoints. Its only required
+peer dependency is `@opentelemetry/api`.
 
 ## Setup
+
+Requires Node.js 24 or newer.
+
+Install the package and its OpenTelemetry peer dependency:
+
+```sh
+pnpm add @vercel/agent-runs @opentelemetry/api
+```
 
 Pass a telemetry object that writes spans and tracks the active trace context.
 `otelTelemetry()` adapts an OpenTelemetry tracer provider; it does not register
@@ -24,10 +22,12 @@ also installs the async context manager the library needs, or passes its own
 provider.
 
 ```ts
-import { createAgentTracing, otelTelemetry } from "@eve/tracing";
+import { createAgentRun, otelTelemetry } from "@vercel/agent-runs";
 
-const tracing = createAgentTracing({ telemetry: otelTelemetry({ provider }) });
+const run = createAgentRun({ telemetry: otelTelemetry({ provider }) });
 ```
+
+`createAgentRun` accepts `AgentRunOptions` and returns an `AgentRun`.
 
 On Vercel, `otelTelemetry()` adds `vercel.session_id` from `agent.run.id` so
 Agent Runs can find a run's spans. A `mapping` you pass replaces that default.
@@ -43,7 +43,7 @@ methods, which default to the provider's. Other backends implement
 Wrapped methods preserve the callback's value or error and complete their span.
 
 ```ts
-await tracing.turn({ agentName: "support", identity, sequence: 0 }, (turn) =>
+await run.turn({ agentName: "support", identity, sequence: 0 }, (turn) =>
   turn.attempt({ stepIndex: 0, attempt: 0 }, (attempt) =>
     attempt.tool({ callId: "lookup", name: "lookup" }, lookup),
   ),
@@ -69,7 +69,7 @@ Use `describe(value)` to map a callback result to an outcome or captured output.
 Omit the callback when execution starts and ends in different hooks.
 
 ```ts
-const turn = await tracing.turn({ identity, sequence: 0 });
+const turn = await run.turn({ identity, sequence: 0 });
 const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
 const tool = await attempt.tool({ callId: "lookup", name: "lookup" });
 try {
@@ -130,15 +130,13 @@ unchanged and never consumes it. Parent completion waits for that promise.
 calls, and tool executions, and runs model calls and tools inside their spans.
 
 ```ts
-import { aiSdkTelemetry } from "@eve/tracing/ai-sdk";
+import { aiSdkTelemetry } from "@vercel/agent-runs/ai-sdk";
 
 await generateText({
   model,
   prompt,
   telemetry: {
-    integrations: [
-      aiSdkTelemetry(tracing, { turn: { agentName: "support", identity, sequence: 0 } }),
-    ],
+    integrations: [aiSdkTelemetry(run, { turn: { agentName: "support", identity, sequence: 0 } })],
   },
 });
 ```
@@ -156,7 +154,7 @@ Remote calls need an explicit sender transport and authenticated receiver trust
 check.
 
 ```ts
-import { createAgentDelegationTransport } from "@eve/tracing/delegation";
+import { createAgentDelegationTransport } from "@vercel/agent-runs/delegation";
 const transport = createAgentDelegationTransport();
 const fetchAgent = transport.transport(approvedAgentFetch);
 await attempt.callRemoteAgent({ callId: "remote", agentName: "research" }, () =>
@@ -164,7 +162,7 @@ await attempt.callRemoteAgent({ callId: "remote", agentName: "research" }, () =>
 );
 
 transport.receive(request.headers, verifyAuthenticatedCaller, () =>
-  tracing.turn({ identity, sequence: 0 }, runAgent),
+  run.turn({ identity, sequence: 0 }, runAgent),
 );
 ```
 
@@ -184,7 +182,7 @@ example across workflow steps. Durable spans need stable IDs, so install an
 ```ts
 const idGenerator = new AgentSpanIdGenerator();
 const provider = new BasicTracerProvider({ idGenerator, spanProcessors });
-const tracing = createAgentTracing({
+const run = createAgentRun({
   telemetry: otelTelemetry({ provider, idGenerator }),
   checkpointer: { get, set, delete: remove },
 });
@@ -194,7 +192,7 @@ Resume by calling the same operations with the same identifiers. The library
 continues the saved turn instead of starting a new one:
 
 ```ts
-const turn = await tracing.turn({ identity, sequence: 0 });
+const turn = await run.turn({ identity, sequence: 0 });
 const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
 const tool = await attempt.tool({ callId: "lookup", name: "lookup" });
 const approval = await tool.approval({ requestId: "approval" });
@@ -203,14 +201,14 @@ await approval.complete({ outcome: "approved" });
 
 Turns are keyed by `runId` and `turnId`; attempts by step index
 and attempt; tool calls by `callId`; approvals by `requestId`. Model calls and
-memory finish within one process and are not resumed. `tracing.resume({ identity })`
+memory finish within one process and are not resumed. `run.resume({ identity })`
 returns a saved turn without starting one, for example to finish a tool call
 after its turn has completed. `turn.findTool(callId)`, `turn.findAttempt()`, and
 `tool.findApproval()` return open operations, or `undefined` once they have
 finished:
 
 ```ts
-const tool = (await tracing.resume({ identity }))?.findTool("lookup");
+const tool = (await run.resume({ identity }))?.findTool("lookup");
 await tool?.complete({ outcome: "completed" });
 ```
 
@@ -229,7 +227,7 @@ complete, so their spans carry the IDs their children already reference.
 
 ## OpenTelemetry plumbing
 
-`@eve/tracing/otel` exports helpers for hosts that run their own spans
+`@vercel/agent-runs/otel` exports helpers for hosts that run their own spans
 beside agent tracing: the active operation, capture context, content bounds,
 and MCP enrichment. Agent tracing itself needs only the package root.
 
@@ -241,3 +239,14 @@ operation at 64 KiB, and unfinished children at 10,000. `onError(error, context)
 tracing error channel. Trace output retains schema version 4.
 
 Local tests cover output and recovery. They do not prove live Agent Runs ingestion.
+
+## Development
+
+eve vendors this package: `pnpm --filter eve build:compiled` bundles the four
+entrypoints into `#compiled/@vercel/agent-runs/` in the same chunk group as eve's
+vendored `@opentelemetry/api`, so both share one copy. eve imports only those
+entrypoints, never this workspace package. After changing the library, rerun
+`build:compiled` before running eve's tests.
+
+Run the library's own tests with `pnpm --filter @vercel/agent-runs test:unit` and
+`pnpm --filter @vercel/agent-runs test:integration`.

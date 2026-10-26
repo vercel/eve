@@ -1,13 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import { createSessionWaitingEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { sessions } from "#public/server/index.js";
 
 const getRunMock = vi.fn();
+const getRunMetadataMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
+  getWorld: async () => ({ runs: { get: getRunMetadataMock } }),
 }));
 
 const encoder = new TextEncoder();
@@ -55,11 +58,45 @@ async function collect(iterable: AsyncIterable<MessageStreamEvent>) {
   return events;
 }
 
+beforeEach(() => {
+  getRunMetadataMock.mockResolvedValue({ status: "running" });
+});
+
 afterEach(() => {
   getRunMock.mockReset();
+  getRunMetadataMock.mockReset();
 });
 
 describe("sessions.attach().stream()", () => {
+  it("rejects expired run data even when the World still reports stored stream chunks", async () => {
+    const stream = mockSessionStream(storedEvents(2));
+    const expiredAt = new Date("2020-01-01T00:00:00.000Z");
+    getRunMetadataMock.mockResolvedValue({ status: "completed", expiredAt });
+
+    const read = collect(sessions.attach("wrun_1").stream({ follow: false }));
+    await expect(read).rejects.toBeInstanceOf(RunExpiredError);
+    await expect(read).rejects.toMatchObject({
+      runId: "wrun_1",
+      runStatus: "completed",
+      expiredAt,
+    });
+    expect(stream.startIndexes).toEqual([]);
+    expect(getRunMetadataMock).toHaveBeenCalledWith("wrun_1", { resolveData: "none" });
+  });
+
+  it("keeps completed history readable until its retention deadline", async () => {
+    const stored = storedEvents(2);
+    mockSessionStream(stored);
+    getRunMetadataMock.mockResolvedValue({
+      status: "completed",
+      expiredAt: new Date("2100-01-01T00:00:00.000Z"),
+    });
+
+    await expect(collect(sessions.attach("wrun_1").stream({ follow: false }))).resolves.toEqual(
+      stored,
+    );
+  });
+
   it("ends a bounded read at the tail observed when it opens", async () => {
     const stored = storedEvents(3);
     const stream = mockSessionStream(stored, { open: true });

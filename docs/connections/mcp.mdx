@@ -26,7 +26,7 @@ The `url` must speak Streamable HTTP or SSE. Write the `description` for the mod
 
 ## Configure protocol discovery
 
-eve discovers the server's MCP protocol by default. If a server requires the older `initialize` handshake, disable discovery for that connection:
+eve discovers the server's MCP protocol by default. If a server rejects discovery with an unsupported protocol version error (`-32022`) and lists a handshake-based version eve supports, eve falls back to `initialize` with the newest version both sides support. If a server requires the older `initialize` handshake and does not report a supported version, disable discovery for that connection:
 
 ```ts
 export default defineMcpClientConnection({
@@ -52,6 +52,10 @@ eve asks the user to sign in only when the MCP server asks for it. When a connec
 - **The server lists tools without a token.** `eve__search` returns its tools with no prompt, and `eve__tool` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
 
 After the user signs in, the turn resumes and the model makes the call again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
+
+eve resolves credentials before each MCP HTTP request, including requests on an existing client. When the cached token's `expiresAt` has passed, eve calls the token provider again. If the server rejects a bearer with HTTP `401`, eve evicts the cached token, asks the provider for another token, and retries the request once before asking for sign-in.
+
+Eviction clears eve's cached access token and calls the provider's optional `evict` hook. The provider controls whether it retains a refresh grant for silent renewal. Missing grants and rejected replacement tokens still use the normal authorization flow; HTTP `403` permission failures do not trigger token refresh or retries.
 
 A server that leaves protected tools out of its anonymous `tools/list` never triggers sign-in, because the model cannot find those tools. Servers that support anonymous use should list every tool and refuse the protected calls.
 
@@ -204,6 +208,111 @@ Authenticate the connection as this deployment, with a stable service credential
 An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
 
 When a remote tool returns more data than the model needs, narrow the result at the MCP server. Prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. If you do not control the server and an equivalent upstream API is available, replace only that operation with an authored tool that stores the full payload outside model context and projects the needed fields through `toModelOutput`. Block the original MCP operation through [`tools.block`](#tool-filters) so the model does not see duplicate tools.
+
+## Events (experimental)
+
+An MCP connection can watch the server's events and run your code when one arrives. Vercel Connect holds the upstream subscription and forwards each event to your agent; eve runs your callback.
+
+Requirements:
+
+- A statically authored MCP connection with a static `connect()` auth provider. Dynamic connections and auth resolvers are not supported.
+- `@vercel/connect@2.5.2` or later.
+- An MCP server that supports events over Streamable HTTP.
+
+### Handle events
+
+Add `experimental_events` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email then starts a turn in the same conversation, with instructions to triage it:
+
+```ts title="agent/connections/bird.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.bird.com/",
+  description: "Bird: email, SMS, and contacts. Can watch a mailbox for new mail.",
+  auth: connect("bird/bird"),
+  experimental_events: {
+    async onEvent({ event, origin, auth, attachSession }) {
+      if (event.name !== "email_mailbox.message_received") return;
+      await attachSession(origin.sessionId).send(
+        [
+          "A new email arrived in the mailbox you are watching:",
+          JSON.stringify(event.data),
+          "If it is a bug report, look up the sender's earlier threads, draft a reply " +
+            "that says what we know and what happens next, and ask me before sending it. " +
+            "Otherwise, summarize it in one line.",
+        ].join("\n\n"),
+        { auth, turnPolicy: "queue" },
+      );
+    },
+  },
+});
+```
+
+The model does the work with the connection's own tools: it reads the thread, drafts the reply, and waits for the user's approval in the conversation. `turnPolicy: "queue"` lets a burst of emails run one turn after another instead of interrupting the user.
+
+`onEvent` is required. Defining it does not subscribe to anything: the model subscribes at runtime.
+
+Callbacks run outside any conversation, as the user who subscribed (`auth`). Nothing enters a session unless you call `attachSession(sessionId).send(...)`, and `attachSession` never creates a session.
+
+Each delivery runs in its own durable workflow, so callbacks can run concurrently, out of order, and more than once. Use `deliveryId` to deduplicate side effects:
+
+```ts
+async onEvent({ event, deliveryId }) {
+  await fetch("https://crm.example/notes", {
+    method: "POST",
+    headers: { "Idempotency-Key": deliveryId },
+    body: JSON.stringify(event.data),
+  });
+},
+```
+
+### Handle missed events and ended subscriptions
+
+```ts
+experimental_events: {
+  async onEvent({ event }) {
+    // ...
+  },
+  async onGap({ origin, auth, attachSession }) {
+    // The server could not deliver every event. Re-read the source.
+    await attachSession(origin.sessionId).send(
+      "Some Bird events were missed. Re-check the mailbox.",
+      { auth },
+    );
+  },
+  async onTerminated({ origin, auth, error, attachSession }) {
+    // The upstream subscription ended. The watch ends when this returns.
+    await attachSession(origin.sessionId).send(
+      `The Bird watch ended: ${error.message}`,
+      { auth },
+    );
+  },
+},
+```
+
+### What the model can call
+
+`eve__search` lists three kinds of actions for the connection:
+
+| Action                    | Input                  | Result                                  |
+| ------------------------- | ---------------------- | --------------------------------------- |
+| `events_subscribe_<hash>` | `{ arguments, ttlMs }` | `{ id, status, expiresAt, ... }`        |
+| `events_get_subscription` | `{ id }`               | The subscription, or unknown once ended |
+| `events_unsubscribe`      | `{ id }`               | `{ id, status: "stopping" }`            |
+
+There is one subscribe action per event the server offers; its description names the event. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` to watch until stopped. `expiresAt` is the resulting deadline, or `null`.
+
+- **Pending.** If Connect has not confirmed in time, subscribe returns the `id` with `status: "pending"`. Call get with that `id` later.
+- **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing watch. Another session gets its own watch.
+- **Stopping.** Get and stop accept the `id` from any of the creator's sessions. After stop, eve keeps retrying Connect's unsubscribe until cleanup completes; until then get still reports the watch and stop can be called again.
+- **Lifetime.** A watch outlives the session that created it. It ends on stop, at `expiresAt`, or when the upstream subscription terminates.
+
+`tools.allow` and `tools.block` apply to these actions. An allow list hides any event action it does not name, so copy the exact `events_subscribe_<hash>` names from `eve__search`. `toolCall.providedArguments` does not apply to event actions.
+
+### Receiver
+
+eve mounts `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only Connect's delivery token and only deliveries for a live watch's subscription; it answers `410` once the watch has ended. The callback's identity always comes from the saved watch, never from the event payload.
 
 ## Troubleshooting
 

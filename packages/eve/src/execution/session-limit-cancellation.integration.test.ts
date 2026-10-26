@@ -84,7 +84,10 @@ function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[])
 describe("session-limit continuation decline integration", () => {
   it("cancels the turn and keeps the session resumable when the user declines", async () => {
     const runtime = await createTestRuntime({
-      agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-root" },
+      agent: {
+        limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+        name: "limit-decline-root",
+      },
     });
     const continuationToken = "http:limit-decline-root";
 

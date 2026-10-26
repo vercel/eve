@@ -267,7 +267,9 @@ export interface SlackThread {
 
   /**
    * Post an ephemeral reply (Slack's `chat.postEphemeral`) visible only
-   * to one user in this thread. Accepts the same bare forms and
+   * to one user in this thread. Slack hides threaded ephemerals until the
+   * thread has a reply, so on a fresh top-level message it posts to the
+   * channel instead. Accepts the same bare forms and
    * {@link SlackPostInput} variants as {@link post}. The `files` field is
    * ignored: Slack does not support file uploads on ephemeral messages.
    */
@@ -428,6 +430,11 @@ export async function fetchSlackThreadWindow(
  * live `threadTs` and firing `onThreadTsChanged` so the caller can
  * persist the anchor. Ephemerals and upload-only file posts do not
  * anchor.
+ *
+ * `onPosted` fires after each reply this binding posts into its existing
+ * thread, through `thread.post`, `uploadFiles`, or
+ * `request("chat.postMessage")`. A post that anchors a new thread is its
+ * root, not a reply, so it does not fire.
  */
 export function buildSlackBinding(input: {
   /** Slack app id used to identify this app's fetched thread replies. */
@@ -438,18 +445,39 @@ export function buildSlackBinding(input: {
   readonly botUserId?: string;
   readonly channelId: string;
   readonly threadTs: string;
+  /**
+   * Whether `threadTs` already has replies; Slack hides threaded
+   * ephemerals until it does. Defaults to true when `threadTs` is set.
+   */
+  readonly threadHasReplies?: boolean;
   /** Workspace whose app installation supplies the bot token. */
   readonly installationTeamId?: string;
   /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
+  readonly onPosted?: () => void;
 }): SlackBinding {
   const context = { teamId: input.installationTeamId };
   const token = () => resolveSlackBotToken(input.botToken, context);
   const apiOptions = slackApiOptions(input.api, token);
-  const request = createSlackRequester(input.api, input.botToken, context);
+  const send = createSlackRequester(input.api, input.botToken, context);
+  const request: SlackHandle["request"] = async (operation, body) => {
+    const response = await send(operation, body);
+    if (operation === "chat.postMessage" && response.ok === true) {
+      const target = body as { readonly channel?: unknown; readonly thread_ts?: unknown };
+      if (
+        currentThreadTs &&
+        target.channel === input.channelId &&
+        target.thread_ts === currentThreadTs
+      ) {
+        input.onPosted?.();
+      }
+    }
+    return response;
+  };
   let messages: readonly SlackThreadMessage[] = [];
   let currentThreadTs = input.threadTs;
+  let threadHasReplies = input.threadHasReplies ?? currentThreadTs !== "";
   let refreshInFlight: Promise<void> | undefined;
 
   function handleMessageTs(ts: string): void {
@@ -465,12 +493,16 @@ export function buildSlackBinding(input: {
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
     const uploads = files.map((file) => toSlackFileUpload(file, options?.snippetType));
-    return uploadSlackFiles(uploads, {
+    const result = await uploadSlackFiles(uploads, {
       ...apiOptions,
       channelId: channelId || undefined,
       initialComment: options?.initialComment,
       threadTs: threadTs || undefined,
     });
+    if (threadTs && channelId === input.channelId && threadTs === currentThreadTs) {
+      input.onPosted?.();
+    }
+    return result;
   }
 
   function refreshMessages(): Promise<void> {
@@ -566,6 +598,7 @@ export function buildSlackBinding(input: {
       if (files.length > 0 && !shouldPostBeforeFiles) {
         const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
+        if (currentThreadTs) threadHasReplies = true;
         const id =
           Array.isArray(result.raw.files) && result.raw.files.length > 0
             ? String((result.raw.files[0] as { id?: unknown }).id ?? "")
@@ -573,10 +606,13 @@ export function buildSlackBinding(input: {
         return { id, raw: result.raw };
       }
 
+      const replyTo = currentThreadTs;
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, input.channelId, currentThreadTs, apiOptions),
+        buildPostMessageOptions(message, input.channelId, replyTo, apiOptions),
       );
       const id = response.id;
+      if (replyTo) input.onPosted?.();
+      if (currentThreadTs) threadHasReplies = true;
       handleMessageTs(id);
 
       // markdown / blocks / card + files: message lands first, then
@@ -592,8 +628,9 @@ export function buildSlackBinding(input: {
     },
     async postEphemeral(userId, rawMessage) {
       const message = normalizePostInput(rawMessage);
+      const threadTs = threadHasReplies ? currentThreadTs : "";
       const response = await postSlackEphemeral({
-        ...buildPostMessageOptions(message, input.channelId, currentThreadTs, apiOptions),
+        ...buildPostMessageOptions(message, input.channelId, threadTs, apiOptions),
         user: userId,
       });
       return { id: response.id, raw: response.raw };

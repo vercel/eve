@@ -41,8 +41,11 @@ export interface CompiledRuntimeAgentBundle {
 
 const isCacheDisabled = process.env.EVE_DISABLE_AGENT_CACHE === "1";
 
+const DEVELOPMENT_RUNTIME_SNAPSHOT_SEGMENT =
+  /\/\.eve\/(?:eval-servers\/[^/]+\/)?dev-runtime\/snapshots\//;
+
 function isDevelopmentRuntimeSnapshotRoot(appRoot: string): boolean {
-  return appRoot.replaceAll("\\", "/").includes("/.eve/dev-runtime/snapshots/");
+  return DEVELOPMENT_RUNTIME_SNAPSHOT_SEGMENT.test(appRoot.replaceAll("\\", "/"));
 }
 
 function normalizeCompiledArtifactsSource(

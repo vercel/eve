@@ -24,7 +24,7 @@ async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unkn
 
 export default defineEval({
   description:
-    "Session TTL lets an active turn settle, then the same channel thread starts a new session.",
+    "Session idle timeout waits out an active turn, then the same channel thread starts a new session.",
 
   async test(t) {
     const threadId = crypto.randomUUID();

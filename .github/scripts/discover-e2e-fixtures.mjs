@@ -146,7 +146,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   else process.stdout.write(result.lines);
 }
 
-function discoverEvalIds(root) {
+export function discoverEvalIds(root) {
   const evalIds = [];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>

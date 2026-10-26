@@ -1,3 +1,4 @@
+import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type {
@@ -37,16 +38,22 @@ export interface ResumedSessionInboxHook {
 }
 
 /**
- * Resumes the current owner with the current command shape. During a
- * deployment handoff the address is briefly unowned; the releasing owner
- * leaves a marker for that interval, so delivery retries instead of
+ * Resumes the current owner with the current command shape. Owners on
+ * handoff version 3 never leave an address unowned. An older owner releases
+ * its hooks before its successor claims them and leaves a marker for that
+ * interval, so delivery retries instead of
  * reporting the session gone and letting a channel start a replacement.
  * The retry window bounds this request, not the handoff: a marker that
  * outlives it throws {@link SessionHandoffPendingError}.
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | SessionFailurePayload,
+  command:
+    | DeliverHookPayload
+    | SessionCommand
+    | SessionTimeoutHookPayload
+    | SessionFailurePayload
+    | SessionPrewarmPayload,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
@@ -58,7 +65,7 @@ export async function resumeSessionInbox(
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
-      if (command.kind === "session-failure") throw error;
+      if (command.kind === "session-failure" || command.kind === "session-prewarm") throw error;
       return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
     }
     let identity: Promise<string> | undefined;

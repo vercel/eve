@@ -7,8 +7,9 @@ import type { ConnectionClient } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 
 /**
- * Per-session container mapping connection names to lazily-initialized
- * client wrappers.
+ * Per-step container mapping connection names to lazily-initialized
+ * client wrappers. `withContextScope` builds one per step, and the connection
+ * provider disposes it when the step ends.
  *
  * The registry is protocol-agnostic: it dispatches to the client
  * implementation matching each connection's `protocol` (MCP or OpenAPI).

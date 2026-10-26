@@ -3,7 +3,9 @@ title: "Dynamic Scheduling"
 description: "Compose one minute-level eve schedule, proactive channel handoff, and CRUD tools into application-managed schedules."
 ---
 
-Authored eve schedules are static files discovered at build time. You can build dynamic scheduling today by putting schedule rows in your application store and using one authored schedule as a dispatcher:
+Use this pattern when your application needs to own schedule storage and dispatch, including on self-hosted infrastructure. For built-in creator-owned schedules, management tools, and Vercel-backed delivery, see [Experimental dynamic schedules](../experimental/dynamic-schedules).
+
+This pattern uses a static `defineSchedule` file discovered at build time. Put schedule rows in your application store and use that authored schedule as a dispatcher:
 
 1. CRUD tools let the agent create and manage rows for the current tenant;
 2. `defineSchedule({ cron: "* * * * *" })` wakes once a minute;

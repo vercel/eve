@@ -4,6 +4,10 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 import type { ToolApproval } from "#approval/definition.js";
 import type { MessageResult, SendTurnOptions } from "#client/types.js";
+import type {
+  AgentModelOptionsDefinition,
+  AgentReasoningDefinition,
+} from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   stampToolDefinition,
@@ -25,10 +29,37 @@ export interface WorkflowAgentMetadata {
   readonly description: string;
 }
 
-/** Context capabilities available inside an authored `"use step"` helper. */
+/** A serializable model selection for a local `ctx.agent` session. */
+export type AgentSessionModelSelection =
+  | string
+  | {
+      readonly model: string;
+      readonly modelContextWindowTokens?: number;
+      readonly modelOptions?: AgentModelOptionsDefinition;
+      readonly reasoning?: AgentReasoningDefinition;
+    };
+
+/** Options that bind to a `ctx.agent` session when it opens. */
+export interface AgentSessionOptions {
+  /** Override the model for every turn in this local agent session. */
+  readonly model?: AgentSessionModelSelection;
+}
+
+/**
+ * Context capabilities available inside an authored `"use step"` helper.
+ *
+ * `getSandbox()` opens the sandbox of the session that made the call, the
+ * same sandbox its turns use. If the session had not recorded its sandbox
+ * when it called the tool, the step opens it with the sandbox definition of
+ * the session that owns it (the parent's, for a session that shares its
+ * parent's sandbox), so make that definition safe to run again. The step does not own the sandbox: eve lets go of the
+ * step's handle when the step ends and never stops or deletes the sandbox for
+ * it, and `stop()` and `delete()` throw. The session deletes it when the
+ * session ends. Steps can retry, so make sandbox writes safe to repeat.
+ */
 export type WorkflowStepToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "abortSignal" | "callId" | "session" | "toolName" | "getSandbox" | "getToken" | "requireAuth"
 >;
 
 /** Options for one message to a `ctx.agent` session. */
@@ -76,16 +107,20 @@ export interface AgentSession {
   ): Promise<AgentResponse<TOutput>>;
 }
 
-/** Members the context of every workflow tool entry point shares. */
+/**
+ * Members the context of every workflow tool entry point shares.
+ * `getSandbox`, `getToken`, and `requireAuth` work only after `ctx` is passed
+ * to a `"use step"` helper; the workflow body throws when it calls them.
+ */
 export type WorkflowSharedContext = Pick<
   ToolContext,
-  "session" | "toolName" | "getToken" | "requireAuth"
+  "session" | "toolName" | "getSandbox" | "getToken" | "requireAuth"
 > & {
   /**
    * Returns a new session with the agent of this invocation name. Nothing
    * starts until the first `send`.
    */
-  agent(name: string): AgentSession;
+  agent(name: string, options?: AgentSessionOptions): AgentSession;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   /**

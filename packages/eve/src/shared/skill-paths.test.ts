@@ -1,8 +1,9 @@
+import { posix } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import {
-  FALLBACK_SKILL_ROOT,
   MODEL_SKILL_ROOT,
   resolveSandboxModelPath,
   resolveSandboxSkillRoot,
@@ -55,22 +56,21 @@ describe("skill path helpers", () => {
     expect(sandbox.commandLog).toEqual([]);
   });
 
-  it("falls back to /workspace/skills when HOME is unusable", async () => {
-    const sandbox = mockSandbox({
+  it("falls back to skills/ under the workspace root when HOME is unusable", async () => {
+    const { session } = mockSandbox({
       commands: {
         [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "\n" },
       },
     });
+    const sandbox = { ...session, resolvePath: (path: string) => posix.resolve("/srv/app", path) };
 
-    await expect(resolveSandboxSkillRoot({ sandbox: sandbox.session })).resolves.toBe(
-      FALLBACK_SKILL_ROOT,
-    );
+    await expect(resolveSandboxSkillRoot({ sandbox })).resolves.toBe("/srv/app/skills");
     await expect(
       resolveSandboxModelPath({
         path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
-        sandbox: sandbox.session,
+        sandbox,
       }),
-    ).resolves.toBe("/workspace/skills/research/references/catalog.md");
+    ).resolves.toBe("/srv/app/skills/research/references/catalog.md");
   });
 
   it("resolves model-facing seed paths before writing to the sandbox", async () => {

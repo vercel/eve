@@ -2,6 +2,7 @@
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
+import type { SandboxState } from "#sandbox/state.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -28,6 +29,7 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
+import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -45,7 +47,6 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
-  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -55,6 +56,8 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** The tasks the dispatch started or sent to, for the step that publishes `task.started`. */
+  readonly started: readonly TaskStartedStreamEvent["data"][];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */
@@ -76,6 +79,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
   readonly sandboxSessionId: string;
+  /** The state of that sandbox: this session's own, or else its owner's when it shares it. */
+  readonly sandboxState?: SandboxState;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
@@ -87,10 +92,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
 
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
- * deserialization, handle-store validation, and batch planning — before
- * the caller acquires the parent stream writer, so a preflight failure
- * never leaks the writer lock. Returns undefined when no actions are
- * pending.
+ * deserialization, handle-store validation, and batch planning — before any
+ * run starts. Returns undefined when no actions are pending.
  */
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
@@ -158,6 +161,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  const sandboxState = session.sandboxState ?? resolveOwnerSandboxState(adapter.state);
 
   return {
     adapter,
@@ -174,6 +178,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     parentSession: ctx.get(ParentSessionKey),
     plan,
     sandboxSessionId,
+    sandboxState,
     serializedContext: input.serializedContext,
     session,
     traceRoot: childTraceRoot(ctx, session.sessionId),
@@ -189,6 +194,12 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot | undefined {
   if (ctx.get(TraceRootKey) === undefined) return undefined;
   return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
+}
+
+/** A child that shares its owner's sandbox uses the owner's state until it records its own. */
+function resolveOwnerSandboxState(adapterState: unknown): SandboxState | undefined {
+  if (typeof adapterState !== "object" || adapterState === null) return undefined;
+  return (adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined;
 }
 
 function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {

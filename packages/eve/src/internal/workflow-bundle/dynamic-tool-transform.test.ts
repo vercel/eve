@@ -60,6 +60,7 @@ async function transformAndEval(
         label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
+        endsTurn: entry.endsTurn,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
       }),
@@ -127,6 +128,7 @@ export default defineDynamic({
       const promptPrefix = "Review";
       const allowedResponder = "user-123";
       const projectionPrefix = "visible";
+      const doneStatus = "posted";
       return {
         guarded: defineTool({
           description: "Guarded",
@@ -161,6 +163,7 @@ export default defineDynamic({
           toModelOutput(output) {
             return { type: "text", value: projectionPrefix + ":" + output };
           },
+          endsTurn: (output) => output.status === doneStatus,
         }),
       };
     },
@@ -174,6 +177,7 @@ export default defineDynamic({
     const callbacks = durableCallbacks(guarded);
 
     expect(Object.keys(callbacks)).toEqual([
+      "endsTurn",
       "execute",
       "label",
       "approvalPrompt",
@@ -189,7 +193,9 @@ export default defineDynamic({
     expect(callbacks.approvalPrompt!.closure).toEqual({ promptPrefix: "Review" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
+    expect(callbacks.endsTurn!.closure).toEqual({ doneStatus: "posted" });
     const callbackValues = [
+      callbacks.endsTurn,
       callbacks.execute,
       callbacks.label?.start,
       callbacks.label?.complete,
@@ -199,8 +205,48 @@ export default defineDynamic({
       callbacks.approvalResponse,
       callbacks.toModelOutput,
     ];
-    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(8);
+    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(9);
     for (const callback of callbackValues) expect(callback!.callback).toBeTypeOf("function");
+  });
+
+  it("stamps an endsTurn identifier only when it names a function", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+const ENDS_TURN = true;
+function isAwaitingConfirmation(output) {
+  return output.status === "awaiting_confirmation";
+}
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => ({
+      react: defineTool({
+        description: "React",
+        inputSchema: { type: "object" },
+        execute: () => ({ ok: true }),
+        endsTurn: ENDS_TURN,
+      }),
+      open_case: defineTool({
+        description: "Open a case",
+        inputSchema: { type: "object" },
+        execute: () => ({ status: "awaiting_confirmation" }),
+        endsTurn: isAwaitingConfirmation,
+      }),
+    }),
+  },
+});
+`;
+
+    const tools = await (await transformAndEval("tools/ends-turn.ts", source)).callHandler();
+    const react = tools.react as { endsTurn: unknown };
+    const openCase = tools.open_case as { endsTurn: (output: unknown) => boolean };
+
+    expect(react.endsTurn).toBe(true);
+    expect(durableCallbacks(react).endsTurn).toBeUndefined();
+    const { callback, closure } = durableCallbacks(openCase).endsTurn!;
+    expect(callback(closure, { status: "awaiting_confirmation" })).toBe(true);
+    expect(callback(closure, { status: "redirected" })).toBe(false);
   });
 
   it("preserves top-level function-form approval properties", async () => {
@@ -569,6 +615,51 @@ export default defineDynamic({
     });
     expect(execute({})).toBe("missing");
     expect(execute({ value: "present" })).toBe("present");
+  });
+
+  // https://github.com/vercel/eve/issues/4860
+  it("captures locals bound by an array rest element", async () => {
+    const { callHandler } = await transformAndEval(
+      "tools/array-rest.ts",
+      `
+      import { defineDynamic, defineTool } from "eve/tools";
+      import { z } from "zod";
+      export default defineDynamic({ events: { "turn.started": () => {
+        const [first, ...rest] = ["a", "b"];
+        return { pick: defineTool({
+          description: "Pick",
+          inputSchema: z.object({ pick: z.enum([first, ...rest]) }),
+          execute: ({ pick }) => pick,
+        }) };
+      } } });
+    `,
+    );
+    const { inputSchema } = durableCallbacks((await callHandler()).pick);
+    expect(inputSchema!.closure).toEqual({ first: "a", rest: ["b"] });
+    const schema = inputSchema!.callback(JSON.parse(JSON.stringify(inputSchema!.closure)));
+    if (!isToolSchema(schema)) throw new Error("Expected schema");
+    expect(await schema["~standard"].validate({ pick: "b" })).toEqual({ value: { pick: "b" } });
+  });
+
+  // https://github.com/vercel/eve/issues/4860
+  it("captures a rest parameter of the resolver", async () => {
+    const { callHandler } = await transformAndEval(
+      "tools/rest-param.ts",
+      `
+      import { defineDynamic, defineTool } from "eve/tools";
+      export default defineDynamic({ events: { "turn.started": (...args) => ({
+        count: defineTool({
+          description: "Count",
+          inputSchema: { type: "object" },
+          execute: () => args.length,
+        }),
+      }) } });
+    `,
+    );
+    const tool = (await callHandler()).count as Record<string, unknown>;
+    const { execute } = durableCallbacks(tool);
+    expect(execute!.closure.args).toHaveLength(2);
+    expect(execute!.callback(JSON.parse(JSON.stringify(execute!.closure)), {})).toBe(2);
   });
 
   it("captures a direct identifier in an arrow expression body", async () => {

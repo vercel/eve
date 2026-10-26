@@ -4,7 +4,6 @@ import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import {
   createCompactionConfig,
   createSession,
-  DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
   hydrateDurableSession,
   mintSubagentContinuationToken,
   projectToDurableSession,
@@ -112,7 +111,9 @@ describe("createSession", () => {
     });
 
     expect(session.agent.system).toContain("`$HOME/.agents/skills/<skill>/`");
-    expect(session.agent.system).toContain("`/workspace/skills/<skill>/` as the fallback");
+    expect(session.agent.system).toContain(
+      "`skills/<skill>/` under the workspace root as the fallback",
+    );
     expect(session.agent.system).toContain(
       "- research: Research topics. (path: $HOME/.agents/skills/research/SKILL.md)",
     );
@@ -233,84 +234,6 @@ describe("createSession", () => {
     });
   });
 
-  it("defaults root sessions to the root input token budget", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits?.maxInputTokensPerSession).toBe(
-      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-    );
-  });
-
-  it("keeps the default cap when remote lineage has no inherited budget", () => {
-    const session = createSession({
-      continuationToken: "subagent-token",
-      rootSessionId: "sess-root",
-      sessionId: "sess-child",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits?.maxInputTokensPerSession).toBe(
-      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-    );
-  });
-
-  it("uncaps a root session when the authored limit is false", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      limits: { maxInputTokensPerSession: false },
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits).toEqual({});
-  });
-
-  it("uncaps a delegated subagent session when the authored limit is false", () => {
-    const session = createSession({
-      continuationToken: "subagent-token",
-      limits: { maxInputTokensPerSession: false },
-      rootSessionId: "sess-root",
-      sessionId: "sess-child",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits).toEqual({});
-  });
-
-  it("treats a durable session without stored limits as uncapped on hydration", () => {
-    const hydrated = hydrateDurableSession({
-      durable: {
-        agent: { system: "You are a helpful assistant." },
-        continuationToken: "root-token",
-        sessionId: "sess-root",
-      },
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(hydrated.limits).toBeUndefined();
-  });
-
-  it("rehydrates persisted limits verbatim without re-applying defaults", () => {
-    const hydrated = hydrateDurableSession({
-      durable: {
-        agent: { system: "You are a helpful assistant." },
-        continuationToken: "subagent-token",
-        limits: {},
-        rootSessionId: "sess-root",
-        sessionId: "sess-child",
-      },
-      turnAgent: createTestTurnAgent(),
-    });
-
-    // An uncapped session (resolved limits `{}`) must stay uncapped across
-    // rehydration instead of picking up the root default again.
-    expect(hydrated.limits).toEqual({});
-  });
-
   it("persists run outputSchema through durable session projection and hydration", () => {
     const runOutputSchema = {
       properties: { title: { type: "string" } },
@@ -350,36 +273,6 @@ describe("createSession", () => {
 
     expect(durable.rootSessionId).toBe("sess-root");
     expect(hydrated.rootSessionId).toBe("sess-root");
-  });
-
-  it("persists session token limits through durable session projection and hydration", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      limits: {
-        maxInputTokensPerSession: 200_000,
-        maxOutputTokensPerSession: 20_000,
-        maxTokenCostUsdPerSession: 1.5,
-      },
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    const durable = projectToDurableSession(session);
-    const hydrated = hydrateDurableSession({
-      durable,
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(durable.limits).toEqual({
-      maxInputTokensPerSession: 200_000,
-      maxOutputTokensPerSession: 20_000,
-      maxTokenCostUsdPerSession: 1.5,
-    });
-    expect(hydrated.limits).toEqual({
-      maxInputTokensPerSession: 200_000,
-      maxOutputTokensPerSession: 20_000,
-      maxTokenCostUsdPerSession: 1.5,
-    });
   });
 
   it("restores current reasoning configuration when hydrating a durable session", () => {

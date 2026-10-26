@@ -27,6 +27,8 @@ import { defineTool, type ToolDefinition } from "#public/tools/index.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
+    const sessionUsage = ({ window }: { window: { inputTokens: number } }) =>
+      window.inputTokens >= 1_000_000;
     const agent = defineAgent({
       description: "type-test",
       experimental: {
@@ -36,10 +38,8 @@ describe("definition helper exact inputs", () => {
         },
       },
       limits: {
-        maxInputTokensPerSession: 200_000,
-        maxOutputTokensPerSession: 20_000,
-        maxTokenCostUsdPerSession: 1.5,
         sessionTimeoutMs: 86_400_000,
+        sessionUsage,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -53,10 +53,8 @@ describe("definition helper exact inputs", () => {
     expect(defineAgent({ model: "openai/gpt-5.5", tool: false }).tool).toBe(false);
     expect(agent.experimental.workflow.modelCallsPerStep).toBe(4);
     expect(agent.experimental.workflow.retention).toBe(0);
-    expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
-    expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
-    expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
+    expect(agent.limits.sessionUsage).toBe(sessionUsage);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
@@ -213,6 +211,22 @@ function typeOnlyFixtures(): void {
     limits: {
       // @ts-expect-error Generated-program fan-out is configured by the workflow factory.
       maxSubagents: 6,
+    },
+    model: "anthropic/claude-sonnet-5",
+  });
+
+  defineAgent({
+    limits: {
+      // @ts-expect-error Numeric per-session token limits were replaced by `sessionUsage`.
+      maxInputTokensPerSession: 200_000,
+    },
+    model: "anthropic/claude-sonnet-5",
+  });
+
+  defineAgent({
+    limits: {
+      // @ts-expect-error `sessionUsage` is a function, not a number.
+      sessionUsage: 40_000_000,
     },
     model: "anthropic/claude-sonnet-5",
   });

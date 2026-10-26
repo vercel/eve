@@ -29,7 +29,7 @@ import type { SessionView } from "#harness/session-machine/view.js";
 export function deliver(
   view: SessionView,
   input: StepInput | undefined,
-  options: { readonly takeQueued: boolean },
+  options: { readonly takeQueued: boolean; readonly typedAnswers?: boolean },
 ): {
   readonly input?: StepInput;
   readonly displayMessage?: string | UserContent;
@@ -39,7 +39,7 @@ export function deliver(
   const limit = openInputs(view.projection).find((entry) => entry.request.kind === "session-limit");
   // Match the new typed answer before queued messages join it.
   const incoming =
-    queued !== undefined && limit !== undefined
+    queued !== undefined && limit !== undefined && options.typedAnswers !== false
       ? resolveTextInput({ requests: [limit.request] }, input)
       : input;
   const merged =
@@ -94,6 +94,7 @@ export function resolveTextInput(
   return compactInput({
     ...stepInput,
     context: undefined,
+    history: undefined,
     inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
     message: undefined,
     messageConsumed: true,
@@ -128,6 +129,7 @@ export function resolveTypedApproval(
   return {
     ...stepInput,
     context: undefined,
+    history: undefined,
     inputResponses: [...(stepInput.inputResponses ?? []), response],
     message: undefined,
     messageConsumed: true,
@@ -155,11 +157,16 @@ export function withoutResponses(input: ResolvedStepInput | undefined): StepInpu
   return rest;
 }
 
-/** The turn's own input: the message a plain-text answer didn't consume, and its context. */
+/** The turn's own input: the message a plain-text answer didn't consume, its history and context. */
 export function turnInputOnly(input: ResolvedStepInput | undefined): StepInput | undefined {
   if (input === undefined) return undefined;
-  const result: { context?: StepInput["context"]; message?: StepInput["message"] } = {};
+  const result: {
+    context?: StepInput["context"];
+    history?: StepInput["history"];
+    message?: StepInput["message"];
+  } = {};
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
+  if ((input.history?.length ?? 0) > 0) result.history = input.history;
   if (input.message !== undefined && input.messageConsumed !== true) result.message = input.message;
   const turnInput = attachClientContext(result, readClientContext(input));
   return isEmptyInput(turnInput) ? undefined : turnInput;
@@ -180,12 +187,14 @@ export function compactInput(input: ResolvedStepInput | undefined): ResolvedStep
   if (input === undefined) return {};
   const result: {
     context?: StepInput["context"];
+    history?: StepInput["history"];
     inputResponses?: StepInput["inputResponses"];
     message?: StepInput["message"];
     messageConsumed?: boolean;
     outputSchema?: StepInput["outputSchema"];
   } = {};
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
+  if ((input.history?.length ?? 0) > 0) result.history = input.history;
   if ((input.inputResponses?.length ?? 0) > 0) result.inputResponses = input.inputResponses;
   if (input.message !== undefined) result.message = input.message;
   if (input.messageConsumed === true) result.messageConsumed = true;

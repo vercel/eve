@@ -100,7 +100,7 @@ controls observability content capture, not access to the channel. See
 
 ### Message hooks
 
-Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
+Message hooks return `{ auth }` to dispatch, `null` to drop, `{ auth, context }` to inject background into history, or `{ auth, history }` to add prior conversation as user and assistant turns (see [Start from prior history](./eve#start-from-prior-history)). Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
 - `onMessage(ctx, message)` handles newly posted Slack messages. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth.
@@ -189,6 +189,8 @@ Keep authorization checks inside sensitive tools too. The inbound allowlist cont
 
 `onInputResponse` runs after eve decodes a built-in HITL answer but before the parked session resumes. Return `{ auth }` to accept the answer. Returning `null` or throwing rejects it, leaves the request pending, and keeps the Slack controls active. `ctx.defaultAuth` identifies the Slack user who submitted the signed interaction; it does not authorize that user by itself.
 
+A message typed in a thread or DM never passes through `onInputResponse`, so while it or `approvalChannel` is set, a typed message doesn't answer a pending request. Answers come only through the Slack controls. The typed message reaches the agent as a new message and follows the [turn policy](#control-overlapping-turns). With the default steering policy, it withdraws an open question.
+
 If you omit `onInputResponse`, Slack accepts HITL answers with the submitting user's auth, regardless of which message or event handlers you define. Define `onInputResponse` when those handlers enforce an invocation policy that must also apply to HITL answers. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
 
 #### Continue conversations without repeated mentions
@@ -247,6 +249,8 @@ export default slackChannel({
 
 `threadContext` requires the matching Slack history scope. Thread helpers reuse messages already loaded within the same inbound handler, and overlapping refreshes share one `conversations.replies` request. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
+When the triggering message starts the thread's session, eve adds those replies as session history instead of a transcript. Replies from this installed app become assistant turns, and replies from people and other bots become user messages with their Slack user ids attached. If the agent posted a report and people replied to it, the new session sees that report as its own earlier turn. Slack shows rendered output rather than the model's original response, so these assistant turns can differ from what the model wrote. Later messages in the same thread keep the transcript behavior above. When a hook returns its own `history`, eve keeps the transcript and does not add thread replies as history.
+
 #### Control overlapping turns
 
 Accepted Slack messages steer by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again.
@@ -302,7 +306,7 @@ Reset returns `{ status: "reset", previousSessionId }` when the thread had a ses
 
 ### Other Events API callbacks
 
-Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, title })` zero, one, or many times to start turns. `title` sets the run title without changing the message sent to the model. Each call returns the resulting session.
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, title, history })` zero, one, or many times to start turns. `title` sets the run title without changing the message sent to the model, and `history` adds prior conversation before the message (see [Start from prior history](./eve#start-from-prior-history)). Each call returns the resulting session.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -645,6 +649,8 @@ The callback receives the `InputRequest` and current `SessionContext`, so it can
 
 When a tool approval resolves, eve retires the messages it posted for it. The card loses its buttons and shows the answer and who gave it, the separate tool-input post is deleted, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This also happens when the approval ends without a click, for example when the person replies in the thread instead, in which case the card reads `No longer needed`.
 
+A click on any request whose session is no longer active, for example because its run was cancelled outside eve, can never be answered. eve removes the card's buttons, marks it `No longer active`, and tells the person who clicked, in an ephemeral message, to send a new message.
+
 A renderer's `input.requested` handler can extend delivery and then hand the requests on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
 
 ```ts title="agent/channels/slack.ts"
@@ -747,6 +753,8 @@ Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [
 The agent receives the files attached to the message that reaches it. When a mention carries no files, eve also collects the files posted in the thread since the previous mention of the app, up to 10 messages back, so a person can share a file and then ask about it in a follow-up. This works for mentions up to 1,000 replies into a thread. The app's own messages are skipped. A DM, or a thread where the app answers without a mention, gets no lookback, because each earlier message brought its own files.
 
 Images, PDFs, audio, video, and other files all reach the agent. See [Inbound attachments](../sandbox#inbound-attachments) for which files the model reads directly and which it opens with tools. Files shared through an integration such as Google Drive or Dropbox are links to the other service, not Slack files, so eve skips them; their link stays in the message text. A download that fails or takes longer than 30 seconds reaches the model as a note.
+
+Slack voice clips reach the model as an audio file label, not as sound. To answer them, give the agent a transcription tool; see [Voice notes](../patterns/voice-notes).
 
 Private file downloads resolve credentials from the session's app installation workspace and require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments.
 

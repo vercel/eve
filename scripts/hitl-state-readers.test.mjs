@@ -20,6 +20,7 @@ test("rule 50 keeps requests storage private with only the save and migration ex
   assert.ok(pattern.test('from "#harness/hitl/requests.js"'));
   assert.ok(pattern.test('from "../hitl/requests.js"'));
   assert.ok(!pattern.test('from "#harness/hitl/index.js"'));
+  assert.ok(!pattern.test('from "#harness/hitl/view.js"'));
   assert.ok(rule.includes('posix === "packages/eve/src/harness/session-machine/commit.ts"'));
   assert.ok(
     rule.includes('posix === "packages/eve/src/execution/session/checkpoint-migrations.ts"'),
@@ -43,6 +44,7 @@ test("rule 50 keeps requests storage private with only the save and migration ex
     assert.equal(violations[0].rule, 50);
     const readers = [];
     check(file, ['import { readHitlState } from "#harness/hitl/index.js";'], readers);
+    check(file, ['import { holdsHitlRequests } from "#harness/hitl/view.js";'], readers);
     assert.equal(readers.length, 0);
   }
   for (const file of [

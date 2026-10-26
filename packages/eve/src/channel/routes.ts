@@ -6,6 +6,7 @@ import type { InvokeToolFn } from "#channel/invoke-tool.js";
 import type { InputResponse } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { AgentDescription, AgentSkillFileDescription } from "#channel/agent-description.js";
 
@@ -69,6 +70,11 @@ export interface SendPayload {
    * message and persists it across the session.
    */
   readonly context?: readonly string[];
+  /**
+   * Prior conversation added as user and assistant turns before this
+   * delivery's `context` and message.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /**
    * Run-scoped JSON schema the turn's result must match.
    */

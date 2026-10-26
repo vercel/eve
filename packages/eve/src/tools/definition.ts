@@ -454,6 +454,7 @@ export function stampToolDefinition<
       label: definition.label,
       approval: definition.approval,
       approvalKey: definition.approvalKey,
+      endsTurn: (definition as { readonly endsTurn?: unknown }).endsTurn,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),

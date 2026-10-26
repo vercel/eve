@@ -4,6 +4,22 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AgentModelOptionsDefinition, AgentToolExposure } from "#shared/agent-definition.js";
 
 /**
+ * Returns the exports of transpiled CommonJS as its module namespace. Bundlers
+ * expose a CommonJS module's whole `exports` object as the ESM default, so a
+ * module marked `__esModule` would otherwise read its namespace as
+ * `{ default: { default, ...named } }`.
+ */
+export function interopAuthoredModuleNamespace(namespace: unknown): unknown {
+  if (typeof namespace !== "object" || namespace === null) return namespace;
+  const exports: unknown = Reflect.get(namespace, "default");
+  return typeof exports === "object" &&
+    exports !== null &&
+    Reflect.get(exports, "__esModule") === true
+    ? exports
+    : namespace;
+}
+
+/**
  * Returns the selected authored module export from one namespace.
  */
 export function getAuthoredModuleExport(

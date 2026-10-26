@@ -133,4 +133,76 @@ describe("adaptMultiplexedCommandToSandboxProcess", () => {
     await process.kill();
     expect(command.kill).toHaveBeenCalledOnce();
   });
+
+  it("does not kill a command that exited before its signal aborts", async () => {
+    const controller = new AbortController();
+    const command = {
+      kill: vi.fn(async () => undefined),
+      logs: logs(),
+      wait: vi.fn(async () => ({ exitCode: 0 })),
+    };
+    const process = adaptMultiplexedCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      command,
+      getOutput: (log) => log.output,
+    });
+
+    await process.wait();
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(command.kill).not.toHaveBeenCalled();
+  });
+
+  it("rejects both streams with the abort reason when the signal aborts", async () => {
+    const controller = new AbortController();
+    const stop = new Error("stop");
+    const command = {
+      kill: vi.fn(async () => undefined),
+      async *logs({ signal }: { readonly signal?: AbortSignal }) {
+        yield* [];
+        await new Promise((_, reject) => {
+          const abort = () => reject(new DOMException("This operation was aborted", "AbortError"));
+          if (signal?.aborted) abort();
+          signal?.addEventListener("abort", abort);
+        });
+      },
+      wait: vi.fn(() => new Promise<{ exitCode: number }>(() => {})),
+    };
+    const process = adaptMultiplexedCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      command,
+      getOutput: (log: TestLog) => log.output,
+    });
+    const stdout = readText(process.stdout);
+    const stderr = readText(process.stderr);
+
+    controller.abort(stop);
+
+    await expect(stdout).rejects.toBe(stop);
+    await expect(stderr).rejects.toBe(stop);
+  });
+
+  it("kills a running command when its signal aborts after the log stream failed", async () => {
+    const controller = new AbortController();
+    const failure = new Error("log transport failed");
+    const command = {
+      kill: vi.fn(async () => undefined),
+      async *logs() {
+        yield* [];
+        throw failure;
+      },
+      wait: vi.fn(() => new Promise<{ exitCode: number }>(() => {})),
+    };
+    const process = adaptMultiplexedCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      command,
+      getOutput: (log: TestLog) => log.output,
+    });
+
+    await expect(readText(process.stdout)).rejects.toBe(failure);
+    controller.abort();
+
+    await vi.waitFor(() => expect(command.kill).toHaveBeenCalledOnce());
+  });
 });

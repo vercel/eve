@@ -210,8 +210,13 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
-`-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
-keeps a channel's `server-only` imports on the same export used during compilation.
+`-C`, or `NODE_OPTIONS`, so compilation and the bundle resolve each package to the same export.
+For example, `NODE_OPTIONS="--conditions=react-server" eve build` selects the `react-server`
+export of packages that publish one.
+
+eve loads `server-only` and `client-only` imports as empty modules in every bundle it builds. Code
+shared with a Next.js app can keep these imports without a resolution condition, and your app does
+not need to depend on either package.
 
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
@@ -224,7 +229,7 @@ Use a profile file to establish a repeatable baseline before changing the build 
 eve build --profile .eve/build-profiles/baseline.json
 ```
 
-The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
+The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. For self-hosted output it includes `deploymentId`, the content-derived build identity eve passes to the Workflow World as `WORKFLOW_DEPLOYMENT_ID` when that variable isn't already set. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
 
 Production builds do not write through the stable compiler, host, Nitro, or Workflow files owned by `eve dev`, so builds can run while a local dev server is active. A failed build leaves the last successful `.output/` and agent summary untouched. Concurrent completed builds serialize only the final publication window.
 
@@ -241,15 +246,20 @@ Useful stable artifacts written by inspection and development flows under `.eve/
 ## `eve start`
 
 ```bash
-eve start [--host <host>] [--port <port>]
+eve start [--host <host>] [--port <port>] [--no-schedules]
 ```
 
-| Flag            | Type   | Default            | Description            |
-| --------------- | ------ | ------------------ | ---------------------- |
-| `--host <host>` | string | all interfaces     | Host interface to bind |
-| `--port <port>` | number | `$PORT`, then 3000 | Port to listen on      |
+| Flag             | Type   | Default            | Description                                   |
+| ---------------- | ------ | ------------------ | --------------------------------------------- |
+| `--host <host>`  | string | all interfaces     | Host interface to bind                        |
+| `--port <port>`  | number | `$PORT`, then 3000 | Port to listen on                             |
+| `--no-schedules` | flag   | schedules on       | Start without running authored cron schedules |
 
-Serves the previously built output. Prints the listening URL.
+Serves the previously built output. Prints the listening URL, and a `schedules disabled` line when `--no-schedules` or `EVE_SCHEDULES_DISABLED` turns schedules off. HTTP requests and workflow jobs continue to run.
+
+Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime, including when you run `node .output/server/index.mjs` directly. Unset, empty, and other values leave schedules enabled. `--no-schedules` sets the variable to `1` only for the spawned server; omitting the flag preserves any value you already set. The same build can run with schedules enabled or disabled.
+
+Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosting#run-schedules). It also disables authored cron dispatch on Vercel if set there, but does not affect explicit schedule dispatch in `eve dev`.
 
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. The deployment directory can differ from the build directory. Preserve the relative layout of any workspace packages used by the app; startup resolves sandbox prewarm modules from the deployed source.
 
@@ -449,19 +459,23 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
-| Flag                     | Type   | Default | Description                                                   |
-| ------------------------ | ------ | ------- | ------------------------------------------------------------- |
-| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                    |
-| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                 |
-| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                     |
-| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                |
-| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
-| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
-| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
-| `--json`                 | flag   | off     | Output results as JSON                                        |
-| `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
-| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
-| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
+Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends unless you pass `--keep-state`. A kept directory, including the server's Workflow data in `.workflow-data/`, stays until a later `eve eval` in the same app cleans it up. The local server runs beside an `eve dev` session for the same agent without attaching to it or changing it.
+
+| Flag                     | Type   | Default | Description                                                    |
+| ------------------------ | ------ | ------- | -------------------------------------------------------------- |
+| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                     |
+| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                  |
+| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                      |
+| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                 |
+| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them  |
+| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                               |
+| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                 |
+| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability                |
+| `--json`                 | flag   | off     | Output results as JSON                                         |
+| `--junit <path>`         | string | none    | Write JUnit XML results to a file                              |
+| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                  |
+| `--keep-state`           | flag   | off     | Keep the local eval server's state after the run (not `--url`) |
+| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout            |
 
 See [Evals](../evals/overview) for authoring evals.
 

@@ -102,6 +102,9 @@ export function createDevelopmentWorkflowWorld(): World {
   const forwarded = buildForwardedOperations();
   const world = {
     specVersion: 8 as SpecVersion,
+    // Every operation runs on the dev parent's local world, which supports
+    // both; session handoffs across reloads depend on them.
+    capabilities: { hookForceClaim: true, hookRetention: { active: true } },
     async getDeploymentId() {
       // Inside a pinned delivery, steps and child runs must record the
       // delivery's generation — not whatever is active — so replay after a

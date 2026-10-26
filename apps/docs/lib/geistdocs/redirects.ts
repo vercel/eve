@@ -85,6 +85,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/multi-agent-projects", "/concepts/project-structure"),
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
   ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
+  ...createDocsRedirects("/sandbox/microsandbox", "/sandbox"),
 ];
 
 export const rootMarkdownRedirects: DocsRedirect[] = [
@@ -117,6 +118,11 @@ export const compatibilityRedirects: DocsRedirect[] = [
   {
     source: "/r/extension/upstash-agentkit.json",
     destination: "/r/memory/upstash-agentkit.json",
+    permanent: true,
+  },
+  {
+    source: "/r/extension/hindsight.json",
+    destination: "/r/memory/hindsight.json",
     permanent: true,
   },
   { source: "/evals", destination: "/benchmarks", permanent: true },

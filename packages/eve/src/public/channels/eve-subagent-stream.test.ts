@@ -8,7 +8,11 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import { createAgentStartedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import {
+  createAgentStartedEvent,
+  createMessageAppendedEvent,
+  type MessageStreamEvent,
+} from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none, type AuthFn } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
@@ -157,6 +161,27 @@ describe("eveChannel remote subagent stream", () => {
     expect(response.headers.get("x-eve-stream-version")).toBe("21");
     await expect(response.text()).resolves.toBe("remote denied");
   });
+
+  it("stops reading the parent stream at the matching agent.started event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+    const laterEvents = Array.from({ length: 1_000 }, (_, index) =>
+      stampTestEvent(
+        createMessageAppendedEvent({
+          messageDelta: "x",
+          sequence: index,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+        index + 1,
+      ),
+    );
+    const harness = createHarness({ events: [remoteStartedEvent(), ...laterEvents] });
+
+    const response = await harness.fetch(proxyRequest());
+
+    expect(response.status).toBe(200);
+    expect(harness.eventsRead()).toBe(1);
+  });
 });
 
 function remoteStartedEvent(overrides: Partial<typeof coordinates> = {}): MessageStreamEvent {
@@ -196,6 +221,7 @@ function createHarness(input: {
   readonly events: readonly MessageStreamEvent[];
   readonly resolveHeaders?: RemoteAgentStreamHeadersResolver;
 }) {
+  let eventsRead = 0;
   const channel = eveChannel({ auth: input.auth ?? none() });
   const route = channel.routes.find(
     (candidate) =>
@@ -210,6 +236,9 @@ function createHarness(input: {
     async cancel() {
       return { status: "no_active_turn" };
     },
+    async prewarm() {
+      return { status: "ready" as const };
+    },
     async compact() {
       return { sessionId: coordinates.parentSessionId, status: "accepted" };
     },
@@ -220,14 +249,22 @@ function createHarness(input: {
       return { previousSessionId: coordinates.parentSessionId, status: "reset" };
     },
     async getEventStream() {
-      return new ReadableStream<MessageStreamEvent>({
-        start(controller) {
-          for (const event of input.events) controller.enqueue(event);
+      let index = 0;
+      return new ReadableStream<MessageStreamEvent>(
+        {
+          pull(controller) {
+            const event = input.events[index];
+            index += 1;
+            if (event === undefined) return controller.close();
+            eventsRead += 1;
+            controller.enqueue(event);
+          },
+          cancel() {
+            input.bindingCancelled?.();
+          },
         },
-        cancel() {
-          input.bindingCancelled?.();
-        },
-      });
+        { highWaterMark: 0 },
+      );
     },
     async getStreamTailIndex() {
       return input.events.length - 1;
@@ -236,6 +273,7 @@ function createHarness(input: {
   const getSession = vi.fn().mockReturnValue(session);
 
   return {
+    eventsRead: () => eventsRead,
     getSession,
     async fetch(request: Request) {
       const args = attachRemoteAgentStreamHeadersResolver(

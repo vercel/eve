@@ -7,6 +7,7 @@ export {
   type ChatSdkChannelEvents,
   type ChatSdkChannelState,
   type ChatSdkEventContext,
+  type ChatSdkInputAnswer,
   type ChatSdkInstrumentationMetadata,
   type ChatSdkReceiveTarget,
   type ChatSdkRespondOptions,

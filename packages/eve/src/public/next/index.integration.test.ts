@@ -128,6 +128,39 @@ describe("withEve Vercel config", () => {
     ]);
   });
 
+  it("stops a managed agent that cannot bind its port instead of waiting for its URL", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    await writeBuiltAgent(process.cwd());
+    const kill = vi.fn();
+    spawnMock.mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), {
+        killed: false,
+        kill,
+        stderr: new EventEmitter(),
+        stdout: new EventEmitter(),
+      });
+      setImmediate(() => {
+        child.stderr.emit(
+          "data",
+          Buffer.from(
+            "[srvx] Failed to start server: Error: listen EADDRINUSE: address already in use 127.0.0.1:4274\n",
+          ),
+        );
+      });
+      return child;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await expect(
+      withEve<TestConfig>({})("phase-production-server", { defaultConfig: {} }),
+    ).rejects.toThrow(
+      "Port 4274 on 127.0.0.1 is already in use. Another process is listening there; stop it or set EVE_NEXT_PRODUCTION_PORT to another port.",
+    );
+    expect(kill).toHaveBeenCalledOnce();
+  });
+
   it("does not start a managed agent on Vercel, for a hosted origin, or while building", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);

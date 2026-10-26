@@ -74,6 +74,7 @@ async function executeAuthorizedStep(
           ctx,
           execute,
           receiver,
+          run,
         });
       } catch (error) {
         if (!ctx.abortSignal.aborted) {
@@ -116,8 +117,9 @@ async function invokeAuthorizedStep(input: {
   readonly ctx: ToolContext;
   readonly execute: (invocation: WorkflowStepInvocation) => Promise<unknown>;
   readonly receiver: unknown;
+  readonly run: WorkflowToolRunContext;
 }): Promise<WorkflowStepResult> {
-  const { args, authorizationResults, callbackToken, ctx, execute, receiver } = input;
+  const { args, authorizationResults, callbackToken, ctx, execute, receiver, run } = input;
   const context: WorkflowStepContext = {
     callId: ctx.callId,
     toolName: ctx.toolName,
@@ -126,6 +128,11 @@ async function invokeAuthorizedStep(input: {
     baseUrl: getWorkflowMetadata().url,
     token: callbackToken,
     authorizationResults,
+    sandbox: {
+      bundle: run.agentContext.bundle,
+      sessionId: run.agentContext.sandbox.sessionId,
+      state: run.agentContext.sandbox.state,
+    },
   };
   const invocation: WorkflowStepInvocation = {
     args: args.map((arg) => (arg === ctx ? null : arg)),

@@ -7,11 +7,7 @@ import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
-import {
-  createFrameworkUserMessage,
-  type HarnessModelMessage,
-  type UserModelMessage,
-} from "#harness/messages.js";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
@@ -22,14 +18,15 @@ export type RequestMessages = ReturnType<typeof createCurrentMessages>;
 /**
  * The messages one model call sends: the durable prompt, then the step's system instructions and
  * announcements. Announcements persist ahead of the new input, or after earlier tool results on a
- * continuation, so later requests keep the full prefix.
+ * continuation, or ahead of the turn's surviving input after a compaction, so later requests keep
+ * the full prefix.
  */
 export function requestMessages(
   step: Step,
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly projectedMessages: readonly HarnessModelMessage[];
-    readonly turnMessages: readonly UserModelMessage[];
+    readonly turnMessages: readonly HarnessModelMessage[];
     readonly catalog: StepCatalog;
     readonly hidesHeldText: boolean;
     readonly pendingApprovalsNote: string | undefined;

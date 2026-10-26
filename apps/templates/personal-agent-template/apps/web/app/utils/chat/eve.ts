@@ -1,4 +1,4 @@
-import { isDynamicToolUIPart, isTextUIPart, isToolUIPart } from "ai";
+import { isDynamicToolUIPart, isToolUIPart } from "ai";
 import type { UIMessage } from "ai";
 import type { EveDynamicToolPart } from "eve/vue";
 

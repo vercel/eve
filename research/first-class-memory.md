@@ -266,7 +266,9 @@ interface MemoryNamespaceContext {
 }
 
 type MemoryNamespaceDefinition =
-  string | null | ((context: MemoryNamespaceContext) => string | null | Promise<string | null>);
+  | string
+  | null
+  | ((context: MemoryNamespaceContext) => string | null | Promise<string | null>);
 
 function defaultNamespace(context: MemoryNamespaceContext): string;
 ```

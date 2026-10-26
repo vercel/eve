@@ -8,7 +8,7 @@ A connection wires an agent into an external server you don't author, either an 
 
 Connections live under `agent/connections/`. A static connection's runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. A dynamic connection file can instead resolve a caller-specific connection set at session or turn boundaries. The model never sees a connection's URL or credentials. It finds tools with the built-in [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), where a query such as `linear__` searches one connection's tools, and calls them with `eve__tool`. Stream events, approval policies, and hooks name each call by its qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
 
-A connection owns its name and every name that starts with `<name>__`, so `linear__list_issues` always means the `linear` connection's `list_issues` tool. The compiler rejects a tool, subagent, or connection whose name is a static connection's name or starts with its `<name>__` prefix. eve applies the same rule to dynamic connections, tools, and subagents when they resolve. Both errors name the two sides of the conflict; rename either one.
+A connection owns its name and every name that starts with `<name>__`, so `linear__list_issues` always means the `linear` connection's `list_issues` tool. The compiler rejects a tool, subagent, or connection whose name is a static connection's name or starts with its `<name>__` prefix. eve applies the same rule to dynamic connections, tools, and subagents when they resolve, except that a dynamic connection with exactly a static connection's name replaces that static connection; see [Naming and conflicts](/docs/guides/dynamic-capabilities#naming-and-conflicts). Both errors name the two sides of the conflict; rename either one.
 
 ## MCP connections
 
@@ -99,7 +99,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
+If the token has a known TTL, set `expiresAt` (milliseconds since epoch). Once it expires, eve calls `getToken` again before the next request, including requests on an existing MCP client.
 
 When `getToken` is the only auth, `credentialOwner` defaults to `"app"`: one shared credential keyed across all sessions. Set `credentialOwner: "user"` when each end-user carries their own token.
 
@@ -332,7 +332,7 @@ channels fall back to title-casing the connection name when neither is set.
 Two error classes drive the consent flow. Throw them from `getToken` or `completeAuthorization`; both are exported from `eve/connections`.
 
 - `ConnectionAuthorizationRequiredError(connectionName)`: the user must authorize. Throw it from `getToken` to emit `authorization.required` and kick off the flow.
-- `ConnectionAuthorizationFailedError(connectionName, { reason?, retryable? })`: authorization failed. `reason` is a stable machine-readable code (e.g. `"access_denied"`) that shows up on the `authorization.completed` event and the failed tool result. `retryable` defaults to `true`; set it to `false` for terminal cases like user denial so the runtime stops re-prompting.
+- `ConnectionAuthorizationFailedError(connectionName, { reason?, retryable? })`: authorization failed. `reason` is a stable machine-readable code (e.g. `"access_denied"`) that shows up on the `authorization.completed` event and the failed tool result. `retryable` defaults to `true`; set it to `false` for terminal cases like user denial. The `authorization.completed` event then carries `retryable: false`, and a later tool call in the same turn that needs the same grant for the same principal fails with that failure instead of asking the user to sign in again. The next turn asks again.
 
 ```ts
 import { ConnectionAuthorizationFailedError } from "eve/connections";

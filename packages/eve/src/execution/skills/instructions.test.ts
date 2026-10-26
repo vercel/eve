@@ -36,7 +36,7 @@ describe("formatAvailableSkillsSection", () => {
     );
     expect(result).toContain("Skill files live under `$HOME/.agents/skills/<skill>/`");
     expect(result).toContain(
-      "`/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable",
+      "`skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable",
     );
     expect(result).toContain(
       "resolve them relative to the directory containing that specific SKILL.md",

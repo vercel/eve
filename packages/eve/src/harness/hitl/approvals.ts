@@ -2,7 +2,8 @@ import type { ModelMessage } from "ai";
 
 import type { getApprovalAuditState } from "#harness/hitl/candidates.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { supersededChallenges, withSignIns } from "./sign-ins.js";
+import type { StoppedCall } from "#harness/inline-tool-authorization.js";
+import { signInAttemptKey, supersededChallenges, withSignIns } from "./sign-ins.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
@@ -47,10 +48,11 @@ import {
   type ResolvedStepInput,
 } from "./delivery.js";
 import type { StepCoordinates, SuspendedStep, TurnState } from "#harness/session-machine/view.js";
-import { withoutCalls } from "#harness/inline-tool-authorization.js";
 import {
+  awaitSignIns,
   hold,
   ownOpenRequestIds,
+  runnableCalls,
   settle,
   stepCallIds,
   withoutApproved,
@@ -159,8 +161,7 @@ export interface ResponsePolicyPass {
     | "continue"
     | "continue-coordination"
     | "authorization-required"
-    | "responses-completed"
-    | "park";
+    | "responses-completed";
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
   /** The delivery minus the answers the policies took, plus the settlements they reached. */
@@ -202,6 +203,8 @@ export function answer(
     readonly policy: ResponsePolicyPass;
     /** The delivery merged the queue in, so the queue empties. */
     readonly takeQueued: boolean;
+    /** False when no message answers by text; see `ToolLoopHarnessConfig.typedAnswers`. */
+    readonly typedAnswers?: boolean;
     readonly approvalKey: (request: InputRequest) => string | undefined;
     /**
      * Whether the request's restored step has `eve__search`, which a call whose
@@ -231,7 +234,6 @@ export function answer(
     turn = withQueued(turn, queued);
   };
 
-  if (policy.kind === "park") return done({ next: "park" });
   if (policy.kind === "continue-coordination") {
     queue(policy.stepInput);
     return done({ next: "repeat" });
@@ -250,7 +252,9 @@ export function answer(
 
   // The approval coordinator already answered a typed approval; see `resolveTypedApproval`.
   const resolved =
-    limit === undefined ? delivery : resolveTextInput({ requests: [limit.request] }, delivery);
+    limit === undefined || input.typedAnswers === false
+      ? delivery
+      : resolveTextInput({ requests: [limit.request] }, delivery);
   const responses = canonicalize(resolved?.inputResponses ?? []);
   const byId = new Map(responses.map((response) => [response.requestId, response]));
   const answered = answerable.filter((step) =>
@@ -482,6 +486,7 @@ export function hasRunnableQueue(view: SessionView): boolean {
   if (
     queued.message !== undefined ||
     (queued.context?.length ?? 0) > 0 ||
+    (queued.history?.length ?? 0) > 0 ||
     readClientContext(queued) !== undefined ||
     queued.outputSchema !== undefined ||
     (queued.runtimeActionResults?.length ?? 0) > 0
@@ -539,18 +544,27 @@ export function stepForRequest(view: SessionView, requestId: string): SuspendedS
 }
 
 /**
- * The held turn moves on, steered or cancelled: the sign-ins it waits on end, declined, including
- * a responder's for one of its approvals.
+ * The held turn moves on, steered: the sign-ins it waits on end, declined, including a
+ * responder's for one of its approvals, and the calls that waited for them fail with `reason`.
  */
 export function withdrawSignIns(view: SessionView, reason: string): Transition {
-  return {
-    events: view.signIns.flatMap((challenge) => {
-      const attempt = view.projection.authorizations[challenge.attemptId ?? challenge.name];
-      return attempt?.status === "required" ? [signInWithdrawn(attempt, reason)] : [];
-    }),
-    signIns: [],
-    turn: view.turn,
-  };
+  const waiting = view.turn.suspended.flatMap((step) =>
+    (step.approved ?? []).filter((call) => !runnableCalls(view, step).includes(call)),
+  );
+  const withdrawn = [...view.signIns, ...waiting.flatMap((call) => call.signIns ?? [])];
+  const events = [
+    ...new Map(withdrawn.map((challenge) => [signInAttemptKey(challenge), challenge])),
+  ]
+    .map(([, challenge]) => view.projection.authorizations[challenge.attemptId ?? challenge.name])
+    .flatMap((attempt) =>
+      attempt?.status === "required" ? [signInWithdrawn(attempt, reason)] : [],
+    );
+  const settled = settle(view, {
+    results: waiting.map(({ action }) =>
+      failedCall({ callId: action.callId, failure: reason, toolName: action.toolName }),
+    ),
+  });
+  return { ...settled, events: [...events, ...settled.events], signIns: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -586,17 +600,16 @@ export function requestLimit(
 // ---------------------------------------------------------------------------
 
 /**
- * Work needs a sign-in. The calls that need it stop, settling `cancelled` until it completes;
- * an attempt it replaces fails; and each sign-in is asked for and recorded. The turn holds until
- * every sign-in calls back. Input that waited on a responder's sign-in stays queued for it. An
- * approved call that needs the sign-in leaves its step, so the model calls it again once the
- * sign-in completes.
+ * Work needs a sign-in. The calls that need it stop and wait in their steps; an attempt it
+ * replaces fails; and each sign-in is asked for and recorded. The turn holds until every sign-in
+ * calls back, and then the stopped calls run. Input that waited on a responder's sign-in stays
+ * queued for it.
  */
 export function requireSignIn(
   view: SessionView,
   input: {
     readonly challenges: readonly AuthorizationChallenge[];
-    readonly callIdsByName?: ReadonlyMap<string, readonly string[]>;
+    readonly calls?: readonly StoppedCall[];
     readonly queued?: StepInput;
   },
 ): Transition {
@@ -633,15 +646,12 @@ export function requireSignIn(
         ? input.queued
         : coalesceTurnInputs(view.turn.queued, input.queued);
   const signIns = withSignIns(view.signIns, input.challenges);
-  const stopped = new Set([...(input.callIdsByName?.values() ?? [])].flat());
-  const suspended = view.turn.suspended.map((step) =>
-    [...stepCallIds(step)].some((callId) => stopped.has(callId))
-      ? { ...step, messages: withoutCalls(step.messages, stopped) }
-      : step,
-  );
-  if (suspended.every((step, index) => step === view.turn.suspended[index])) {
-    return { events, signIns, turn: { ...view.turn, queued } };
-  }
-  const settled = settle({ ...view, turn: { ...view.turn, queued, suspended } }, { results: [] });
-  return { commit: settled.commit, events, signIns, turn: settled.turn };
+  const { calls } = input;
+  const suspended =
+    calls === undefined
+      ? view.turn.suspended
+      : view.turn.suspended.map((step) =>
+          awaitSignIns(step, { challenges: input.challenges, stopped: calls }),
+        );
+  return { events, signIns, turn: { ...view.turn, queued, suspended } };
 }

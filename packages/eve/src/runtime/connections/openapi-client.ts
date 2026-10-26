@@ -1,6 +1,6 @@
 import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
+import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 import {
   omitProvidedArgumentsFromSchema,
   resolveProvidedArguments,
@@ -67,6 +67,8 @@ interface OpenApiToolResult {
   readonly status: number;
   readonly statusText: string;
   readonly body: unknown;
+  /** Target of a redirect to another origin, which eve returns instead of following. */
+  location?: string;
 }
 
 /**
@@ -145,17 +147,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const baseUrl = this.#resolveBaseUrl(document);
     const operations = this.#extractOperations(document);
 
-    const filter = this.#connection.tools;
-    const selected =
-      filter !== undefined
-        ? operations.filter((op) => passesToolFilter(op.toolName, filter))
-        : operations;
-
     const metadata: ConnectionToolMetadata[] = [];
     const operationMap = new Map<string, OpenApiOperation>();
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
 
-    for (const operation of selected) {
+    for (const operation of operations) {
       let inputSchema: JsonObject;
       try {
         inputSchema = parseJsonObject(
@@ -427,7 +423,14 @@ export class OpenApiConnectionClient implements ConnectionClient {
         continue;
       }
       if (param.location === "path") {
-        path = path.replace(`{${param.name}}`, encodeURIComponent(String(value)));
+        const pathValue = String(value);
+        // URL parsing normalizes dot segments even after encodeURIComponent.
+        if (pathValue === "." || pathValue === "..") {
+          throw new Error(
+            `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not be "." or "..".`,
+          );
+        }
+        path = path.replace(`{${param.name}}`, encodeURIComponent(pathValue));
       } else if (param.location === "query") {
         appendQuery(query, param.name, value);
       } else if (param.location === "cookie") {
@@ -454,19 +457,87 @@ export class OpenApiConnectionClient implements ConnectionClient {
       headers["content-type"] = operation.requestBody.contentType;
     }
 
-    const response = await fetch(url, {
-      method: operation.method.toUpperCase(),
-      headers,
-      body,
-      signal: options?.abortSignal,
-    });
+    const { response, location } = await fetchWithinOrigin(
+      url,
+      {
+        method: operation.method.toUpperCase(),
+        headers,
+        body,
+        signal: options?.abortSignal,
+      },
+      this.#connection.connectionName,
+    );
 
-    return {
+    const result: OpenApiToolResult = {
       status: response.status,
       statusText: response.statusText,
       body: await readResponseBody(response),
     };
+    if (location !== undefined) result.location = location;
+    return result;
   }
+}
+
+const MAX_REDIRECTS = 10;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+interface OperationRequestInit {
+  readonly method: string;
+  readonly headers: Record<string, string>;
+  readonly body: string | undefined;
+  readonly signal: AbortSignal | undefined;
+}
+
+/**
+ * Sends an operation request, following redirects only within the request's
+ * origin. Every hop carries the connection's credentials, and fetch forwards
+ * custom headers such as an api-key header to any origin a redirect names. A
+ * cross-origin redirect is therefore returned with its resolved `location`
+ * instead of followed, so the caller can fetch the target without credentials.
+ */
+async function fetchWithinOrigin(
+  url: URL,
+  init: OperationRequestInit,
+  connectionName: string,
+): Promise<{ readonly response: Response; readonly location?: string }> {
+  let current = url;
+  let request = init;
+  for (let redirects = 0; ; redirects++) {
+    const response = await fetch(current, { ...request, redirect: "manual" });
+    const location = response.headers.get("location");
+    if (!REDIRECT_STATUSES.has(response.status) || location === null) {
+      return { response };
+    }
+    const next = URL.parse(location, current.href);
+    if (next === null) {
+      return { response };
+    }
+    if (next.origin !== url.origin) {
+      return { response, location: next.href };
+    }
+    await response.body?.cancel();
+    if (redirects >= MAX_REDIRECTS) {
+      throw new Error(
+        `OpenAPI connection "${connectionName}" stopped after ${MAX_REDIRECTS} redirects from "${url.origin}${url.pathname}", last to "${next.pathname}". The API may be redirecting in a loop.`,
+      );
+    }
+    current = next;
+    request = redirectedRequest(request, response.status);
+  }
+}
+
+/** Applies fetch's method rewrite: 303, and 301/302 after a POST, re-send as a bodiless GET. */
+function redirectedRequest(init: OperationRequestInit, status: number): OperationRequestInit {
+  const becomesGet =
+    (status === 303 && init.method !== "GET" && init.method !== "HEAD") ||
+    ((status === 301 || status === 302) && init.method === "POST");
+  if (!becomesGet) {
+    return init;
+  }
+  const headers = Object.fromEntries(
+    Object.entries(init.headers).filter(([name]) => name.toLowerCase() !== "content-type"),
+  );
+  return { ...init, method: "GET", headers, body: undefined };
 }
 
 function appendQuery(query: URLSearchParams, name: string, value: unknown): void {

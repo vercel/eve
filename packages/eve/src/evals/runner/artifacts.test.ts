@@ -61,6 +61,41 @@ describe("eval artifacts", () => {
     });
   });
 
+  it("writes each repeated attempt to its own detail and event files", async () => {
+    const base = skippedSummary();
+    const [result] = base.results;
+    if (result === undefined) throw new Error("expected a result");
+    await writeArtifacts("/tmp/eve-evals", {
+      ...base,
+      results: [1, 2].map((attempt) => ({ ...result, attempt })),
+    });
+
+    expect(writtenJson("/tmp/eve-evals/summary.json")).toMatchObject({
+      evals: [{ attempt: 1 }, { attempt: 2 }],
+    });
+    for (const attempt of [1, 2]) {
+      expect(
+        writtenJson(`/tmp/eve-evals/evals/runtime/skipped.attempt-${attempt}.json`),
+      ).toMatchObject({ id: "runtime/skipped", attempt });
+      expect(fsMocks.writeFile).toHaveBeenCalledWith(
+        `/tmp/eve-evals/evals/runtime/skipped.attempt-${attempt}.events.ndjson`,
+        "\n",
+      );
+    }
+  });
+
+  it("records each eval's start and completion time in every JSON artifact", async () => {
+    await writeArtifacts("/tmp/eve-evals", skippedSummary());
+
+    const timing = {
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:01.000Z",
+    };
+    expect(writtenJson("/tmp/eve-evals/summary.json")).toMatchObject({ evals: [timing] });
+    expect(writtenJson("/tmp/eve-evals/results.jsonl")).toMatchObject(timing);
+    expect(writtenJson("/tmp/eve-evals/evals/runtime/skipped.json")).toMatchObject(timing);
+  });
+
   it("keeps assertion diagnostics in the run summary", async () => {
     await writeArtifacts("/tmp/eve-evals", judgedSummary());
 

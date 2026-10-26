@@ -9,6 +9,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
+  InvalidRuntimeModelSelectionError,
   loadDynamicRuntimeModelDefinition,
   resolveRuntimeModelReference,
   resolveRuntimeModelSelection,
@@ -43,8 +44,23 @@ describe("dynamic runtime model resolution", () => {
         durability: "live",
         state: new ContextContainer(),
       }),
-    ).rejects.toThrow("invalid reasoning");
+    ).rejects.toBeInstanceOf(InvalidRuntimeModelSelectionError);
     expect(catalog.getByGatewayId).not.toHaveBeenCalled();
+  });
+
+  it("keeps catalog failures retryable", async () => {
+    const catalog = createCatalog();
+    const failure = new Error("AI Gateway catalog is temporarily unavailable.");
+    catalog.getByGatewayId.mockRejectedValue(failure);
+
+    await expect(
+      resolveRuntimeModelSelection({
+        catalog,
+        selection: "openai/gpt-5.5",
+        durability: "durable",
+        state: new ContextContainer(),
+      }),
+    ).rejects.toBe(failure);
   });
 
   it("carries prompt cache options on a direct provider selection", async () => {

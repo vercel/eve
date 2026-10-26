@@ -2,14 +2,20 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Message as ExternalMessage, Thread as ExternalThread } from "chat";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
+import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { fail } from "#harness/session-machine/transitions.js";
-import { SessionKey } from "#context/keys.js";
+import {
+  callChannelEvent as callEvent,
+  channelEvent as makeEvent,
+  compiledChannel as asCompiled,
+  postToChannelRoute,
+  stubSessionAccessor as stubAccessor,
+} from "#internal/testing/mocks/mock-channel-calls.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -55,13 +61,6 @@ const AUTH = {
   principalType: "user",
 } as const;
 
-function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
-  if (!isCompiledChannel(channel)) {
-    throw new Error("Expected a CompiledChannel.");
-  }
-  return channel as CompiledChannel<T>;
-}
-
 function getAdapter(channel: unknown): ChannelAdapter<any> {
   return asCompiled(channel).adapter;
 }
@@ -70,72 +69,37 @@ function withState(adapter: ChannelAdapter<any>, state: ChatSdkChannelState): Ch
   return { ...adapter, state };
 }
 
-function stubAccessor() {
-  const accessor = { get: () => undefined, set: () => {} } as any;
-  // A step enters its projection before it publishes.
-  enterSessionProjection(accessor, undefined);
-  return accessor;
-}
-
-const stubAlsContext = (() => {
-  const ctx = new ContextContainer();
-  ctx.setVirtualContext(SessionKey, {
-    sessionId: "test-session",
-    auth: { current: null, initiator: null },
-    turn: { id: "test-turn", sequence: 0 },
-  });
-  return ctx;
-})();
-
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<UnstampedMessageStreamEvent> {
-  return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
-}
-
 /** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
 async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
   await callEvent(adapter, event, ctx);
   recordPublishedEvent(ctx.ctx, event);
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
-}
-
 async function firePost(
   channel: unknown,
   path: string,
   body: Record<string, unknown>,
+  sendError?: Error,
 ): Promise<{
   cancel: ReturnType<typeof vi.fn>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
 }> {
-  const compiled = asCompiled<ChatSdkChannelState>(channel);
-  const post = compiled.routes.find((route) => route.method === "POST" && route.path === path);
-  if (!post || !isHttpRouteDefinition(post)) {
-    throw new Error(`Expected POST ${path}.`);
-  }
   const send = vi.fn().mockResolvedValue({ id: "session-1" });
+  if (sendError) send.mockRejectedValue(sendError);
   const cancel = vi.fn().mockResolvedValue({ sessionId: "session-1", status: "accepted" });
   const waitUntil = vi.fn();
   const channelContext = mockChannelContext<ChatSdkChannelState>(send);
 
-  const response = await post.handler(
+  const response = await postToChannelRoute(
+    asCompiled<ChatSdkChannelState>(channel),
     new Request(`https://example.com${path}`, {
       body: JSON.stringify(body),
       headers: { "content-type": "application/json" },
       method: "POST",
     }),
     {
-      ...mockAgentRouteArgs(),
       from(continuationToken) {
         return {
           ...channelContext.from(continuationToken),
@@ -143,20 +107,9 @@ async function firePost(
         };
       },
       resolveSession: channelContext.resolveSession,
-      attachSession: vi.fn() as any,
-      params: {},
-      to: vi.fn() as any,
-      requestIp: null,
-      waitUntil,
-    } satisfies RouteHandlerArgs<ChatSdkChannelState>,
+    },
+    waitUntil,
   );
-
-  let drained = 0;
-  while (drained < waitUntil.mock.calls.length) {
-    const pending = waitUntil.mock.calls.slice(drained).map(([task]) => task as Promise<unknown>);
-    drained = waitUntil.mock.calls.length;
-    await Promise.allSettled(pending);
-  }
 
   return { cancel, response, send, waitUntil };
 }
@@ -216,6 +169,87 @@ describe("chatSdkChannel", () => {
       { method: "GET", path: "/eve/v1/test" },
       { method: "POST", path: "/eve/v1/test" },
     ]);
+  });
+
+  it("records each delivery's message as the thread's latest, skipping the bot's own", () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const adapter = getAdapter(bridge.channel);
+    const state: ChatSdkChannelState = { thread: null };
+    const deliver = (id: string, isMe: boolean) =>
+      adapter.deliver?.(
+        {
+          message: "hello",
+          state: {
+            thread: {
+              _type: "chat:Thread",
+              adapterName: "test",
+              channelId: CHANNEL_ID,
+              currentMessage: { author: { isBot: isMe, isMe, userId: id }, id },
+              id: THREAD_ID,
+              isDM: true,
+            },
+          },
+        } as never,
+        { session: { auth: { current: null } }, state } as never,
+      );
+
+    deliver("first", false);
+    deliver("second", false);
+    deliver("bot-post", true);
+
+    expect(state.latestMessageId).toBe("second");
+  });
+
+  it("answers only the waiting request on the card a delivery's inputAnswer names", () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const adapter = getAdapter(bridge.channel);
+    const approval = {
+      kind: "tool-approval",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve Deploy?",
+    };
+    const state: ChatSdkChannelState = {
+      pendingInputCards: {
+        "answered-card": {
+          requests: [{ ...approval, requestId: "answered" }],
+          resolved: { answered: { outcome: "answered", requestId: "answered" } },
+        },
+        "deploy-card": { requests: [{ ...approval, requestId: "deploy" }], resolved: {} },
+      },
+      thread: null,
+    } as never;
+    const deliver = (messageId: string, optionId: string) =>
+      adapter.deliver?.(
+        {
+          context: [],
+          message: "Tapback: Liked a message",
+          state: { inputAnswer: { messageId, optionId } },
+        } as never,
+        { session: { auth: { current: null } }, state } as never,
+      );
+
+    expect(deliver("deploy-card", "approve")).toEqual({
+      context: [],
+      inputResponses: [{ optionId: "approve", requestId: "deploy" }],
+    });
+    expect(deliver("other-message", "approve")).toMatchObject({
+      message: "Tapback: Liked a message",
+    });
+    expect(deliver("answered-card", "approve")).toMatchObject({
+      message: "Tapback: Liked a message",
+    });
+    expect(deliver("deploy-card", "maybe")).toMatchObject({ message: "Tapback: Liked a message" });
   });
 
   it("routes GET verification challenges to the adapter webhook", async () => {
@@ -352,6 +386,87 @@ describe("chatSdkChannel", () => {
       expect.objectContaining({
         inputResponses: [{ optionId: "approve", requestId: "request-1" }],
       }),
+    );
+  });
+
+  describe("pressing a button no session can take", () => {
+    const press = { actionId: "eve_input:request-1:approve", kind: "action", value: "approve" };
+
+    async function pressWith(adapter: TestAdapter & Adapter, error: Error) {
+      const ephemerals: Array<{ message: AdapterPostableMessage; userId: string }> = [];
+      adapter.postEphemeral = async (threadId, userId, posted) => {
+        ephemerals.push({ message: posted, userId });
+        return { id: "e1", raw: {}, threadId, usedFallback: false };
+      };
+      const bridge = chatSdkChannel({
+        adapters: { test: adapter },
+        concurrency: "concurrent",
+        logger: "warn",
+        state: memoryState(),
+        userName: "bot",
+      });
+      const { response } = await firePost(bridge.channel, "/eve/v1/test", press, error);
+      expect(response.status).toBe(200);
+      return ephemerals;
+    }
+
+    it("retires the pressed card and tells only the presser", async () => {
+      const adapter = testAdapter();
+
+      const ephemerals = await pressWith(adapter, new SessionNotActiveError());
+
+      expect(adapter.edited).toMatchObject([
+        {
+          message: {
+            card: { type: "card", children: [{ type: "text", content: "No longer active" }] },
+            fallbackText: "No longer active",
+          },
+          messageId: "message-1",
+          threadId: THREAD_ID,
+        },
+      ]);
+      expect(ephemerals).toEqual([
+        { message: { markdown: INACTIVE_REQUEST_NOTICE }, userId: author().userId },
+      ]);
+    });
+
+    it("still tells the presser when the adapter can't edit", async () => {
+      const adapter = testAdapter();
+      adapter.editError = new NotImplementedError("editMessage");
+
+      const ephemerals = await pressWith(adapter, new SessionNotActiveError());
+
+      expect(adapter.edited).toEqual([]);
+      expect(ephemerals).toHaveLength(1);
+    });
+
+    it.each([
+      ["authorization", { resolveInputAuth: () => Promise.reject(new Error("auth down")) }],
+      ["delivery", {}, new Error("network down")],
+    ] as const)(
+      "lets Chat SDK see a failed %s and leaves the card live",
+      async (_, config, sendError?: Error) => {
+        const adapter = testAdapter();
+        adapter.postEphemeral = vi.fn();
+        const bridge = chatSdkChannel({
+          adapters: { test: adapter },
+          concurrency: "concurrent",
+          logger: "warn",
+          state: memoryState(),
+          userName: "bot",
+          ...config,
+        });
+        const later = vi.fn();
+        bridge.bot.onAction(later);
+
+        await expect(firePost(bridge.channel, "/eve/v1/test", press, sendError)).rejects.toThrow(
+          sendError?.message ?? "auth down",
+        );
+
+        expect(later).not.toHaveBeenCalled();
+        expect(adapter.edited).toEqual([]);
+        expect(adapter.postEphemeral).not.toHaveBeenCalled();
+      },
     );
   });
 
@@ -986,6 +1101,66 @@ describe("chatSdkChannel", () => {
     });
   });
 
+  it("tracks posted input cards without edit support, so an answer can name its card", async () => {
+    const adapter = testAdapter();
+    adapter.editError = new NotImplementedError("editMessage");
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      concurrency: "concurrent",
+      state: memoryState(),
+      logger: "warn",
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+    const request = (requestId: string) => ({
+      action: { callId: `call-${requestId}`, name: "deploy", type: "tool-call" as const },
+      display: "confirmation" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Deploy?",
+      requestId,
+    });
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.requested", {
+        requests: [request("request-1")],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.resolved", {
+        resolutions: [{ optionId: "approve", requestId: "request-1" }],
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(state.editSupported).toBe(false);
+    expect(state.pendingInputCards).toEqual({});
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.requested", {
+        requests: [request("request-2")],
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(Object.keys(state.pendingInputCards ?? {})).toEqual(["posted-2"]);
+  });
+
   it("asks for a typed reply when an input request accepts a freeform answer", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
@@ -1102,36 +1277,35 @@ describe("messageToUserContent", () => {
     expect((parts[1] as { data: URL }).data.href).toBe("https://example.com/a.pdf");
   });
 
-  it("skips attachments without a URL, keeping the text part", () => {
-    const withUrllessAttachment = new Message({
-      attachments: [{ name: "pasted", type: "image" }],
+  it("notes an attachment without a download in place, keeping the other parts", () => {
+    const mixed = new Message({
+      attachments: [
+        { name: "pasted", type: "image" },
+        {
+          mimeType: "application/pdf",
+          name: "a.pdf",
+          type: "file",
+          url: "https://example.com/a.pdf",
+        },
+      ],
       author: author(),
-      formatted: parseMarkdown("no url"),
+      formatted: parseMarkdown("see both"),
       id: "message-3",
       isMention: true,
       metadata: metadata(),
-      raw: { text: "no url" },
-      text: "no url",
+      raw: { text: "see both" },
+      text: "see both",
       threadId: THREAD_ID,
     });
 
-    expect(messageToUserContent(withUrllessAttachment)).toEqual([{ text: "no url", type: "text" }]);
-  });
-
-  it("falls back to text when there are no usable parts", () => {
-    const emptyWithUrllessAttachment = new Message({
-      attachments: [{ name: "pasted", type: "image" }],
-      author: author(),
-      formatted: parseMarkdown(""),
-      id: "message-4",
-      isMention: true,
-      metadata: metadata(),
-      raw: { text: "" },
-      text: "",
-      threadId: THREAD_ID,
-    });
-
-    expect(messageToUserContent(emptyWithUrllessAttachment)).toBe("");
+    expect(messageToUserContent(mixed)).toEqual([
+      { text: "see both", type: "text" },
+      {
+        text: "Attachment pasted was not retrieved: the platform did not provide a download for it.",
+        type: "text",
+      },
+      expect.objectContaining({ filename: "a.pdf", type: "file" }),
+    ]);
   });
 });
 

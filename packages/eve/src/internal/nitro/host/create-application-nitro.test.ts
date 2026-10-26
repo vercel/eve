@@ -13,7 +13,7 @@ describe("shouldPruneLocalSandboxProviders", () => {
   });
 
   it("keeps local providers when a local backend is configured explicitly", () => {
-    for (const providerName of ["docker", "microsandbox", "just-bash"]) {
+    for (const providerName of ["docker", "just-bash"]) {
       expect(
         shouldPruneLocalSandboxProviders({
           configuredBackendNames: new Set([providerName]),

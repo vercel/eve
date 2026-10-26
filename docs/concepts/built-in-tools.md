@@ -81,7 +81,7 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths and paths beginning with `$HOME/`.
+`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`. Results and errors name the resolved absolute path.
 
 ```sh
 eve add tool/read_file
@@ -113,7 +113,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
 
 ```sh
 eve add tool/write_file
@@ -131,10 +131,15 @@ import { writeFile } from "eve/tools/write_file";
 
 export default defineTool({
   ...writeFile,
-  description: "Write approved project files in the sandbox.",
+  description: "Write notes in the sandbox's notes directory.",
   async execute(input, ctx) {
-    if (!input.filePath.startsWith("/workspace/")) {
-      throw new Error("write_file is limited to /workspace");
+    const sandbox = await ctx.getSandbox();
+    const notes = `${sandbox.resolvePath("notes")}/`;
+    if (
+      input.filePath.startsWith("$HOME") ||
+      !sandbox.resolvePath(input.filePath).startsWith(notes)
+    ) {
+      throw new Error("write_file is limited to the notes directory");
     }
     return writeFile.execute(input, ctx);
   },
@@ -291,7 +296,25 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
+To let the model choose an AI Gateway model for each root-copy task, export `agentWithModel` from the same slot:
+
+```ts title="agent/tools/agent.ts"
+export { agentWithModel as default } from "eve/tools/agent";
+```
+
+This is a separate workflow tool that calls `ctx.agent("agent", { model })`. The default `agent` tool remains unchanged and does not gain a `model` parameter. The opt-in definition accepts:
+
+```ts
+{
+  message: string;
+  model: string; // AI Gateway model id for the child session
+  taskId?: string;
+}
+```
+
+It otherwise has the default tool's task behavior: a call returns a receipt, the result arrives later, and `taskId` continues the same root-copy session. The selected model applies to every turn in that session. A continuation must repeat the original model; start a new task to use another one. Because the parent model controls this value, use this tool only when it may choose among every model your AI Gateway credentials and policies allow.
+
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the default definition above to restore direct root-copy delegation, export `agentWithModel` to expose model selection, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -314,7 +337,7 @@ Entries the agent declares count from the session's first step. An entry a dynam
 - A query whose first word contains `__` searches one namespace: everything before its last `__`, without trailing underscores. The namespace only filters. `eve__search` keeps names under `<namespace>__` and anything named exactly the namespace, such as a connection's sign-in entry, then ranks them by the whole query, so `eve__search({ query: "linear__" })` returns only the `linear` connection's tools, or its sign-in result, and an exact name that contains `__` still ranks first. eve lists only the connections that can own names in that namespace, so other connections make no network call and don't appear in `unavailable`. A namespace that matches nothing fails with the closest connection names. Characters that can't appear in a name, such as a leading `^`, are ignored; `query` isn't a regular expression.
 - `eve__search` never asks the user to sign in. A connection whose server won't list its tools until the user signs in appears as one result named after the connection, such as `linear`; a connection whose server lists its tools without a token is searched like any other. A connection whose tools fail to load, or don't load within 10 seconds, appears under `unavailable` with its `error`, such as `"crm" did not list its tools within 10s. Try again later.` Matches from everything else are still returned, so a slow server doesn't hold up the search. An `eve__tool` call on that connection's tools fails with the same error.
 - `eve__tool({ name: "linear" })`, with a connection's own name, asks the user to sign in to that connection when its tools need it, and returns once they can be listed, so the next `eve__search` finds them. On a server that lists its tools without sign-in, it confirms the tools are available without asking.
-- `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes.
+- `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes. A connection tool call the server doesn't answer within 5 minutes is cancelled and fails with an error such as `"linear" did not answer list_issues within 5 minutes. It may still have run, so check before you retry.` The server may finish the call after eve stops waiting, so a tool that changes data may already have made the change.
 - `eve__skill({ name })` loads the named skill, deferred or not, and returns its instructions. An unknown name fails with the closest skill names, a tool's name fails with a reminder to call it with `eve__tool` or directly, and a name that matches a connection says to find its tools with `eve__search({ query: "<connection>__" })`.
 
 After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load reports a `load-skill` action and a `load-skill-result`, both with the skill's `name`, and an `execute_tool eve:load-skill` span. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
@@ -352,11 +375,11 @@ import { askQuestion } from "eve/tools/ask_question";
 export default askQuestion();
 ```
 
-`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` withdraws its question, resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
+`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the first open request and the message matches an option or the question allows free text; see [Several requests at once](/docs/human-in-the-loop#several-requests-at-once). A steering message that doesn't answer it withdraws the question: `ask_question` resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a [markdown schedule](/docs/schedules#markdown-form-fire-and-forget), the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
 
 ### `glob`
 
-`glob` finds sandbox files by glob pattern. Add it:
+`glob` finds sandbox files by glob pattern. It searches the workspace root unless the model passes a directory, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/glob
@@ -382,7 +405,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `glob
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. Add it:
+`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/grep
@@ -421,6 +444,8 @@ export default noReply();
 ```
 
 `no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
+
+A root session also accepts a successful model call that returns no text with `finishReason: "stop"`, without retrying or reporting a model-call failure. A turn that settles with no text completes without a final message. Use `no_reply` when the agent should record an explicit choice to stay quiet, including an optional reason. Delegated sessions still retry an empty reply once and report a failure if it remains empty, so the caller can act on the failure.
 
 ### `sleep`
 

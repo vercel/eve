@@ -10,8 +10,8 @@ import { inspect } from "node:util";
 
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { currentCapture } from "#compiled/@eve/tracing/index.js";
-import { truncateTelemetryText } from "#compiled/@eve/tracing/otel.js";
+import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
+import { truncateTelemetryText } from "#compiled/@vercel/agent-runs/otel.js";
 
 const MAX_INSPECT_STRING_LENGTH = 8 * 1024;
 const MAX_DETAIL_BYTES = 16 * 1024;

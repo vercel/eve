@@ -409,7 +409,8 @@ function attachInheritedSandboxWorkspaceResources(input: {
     const parentNodeId = parentNodeIdByChildNodeId.get(nodeId);
     if (parentNodeId === undefined) {
       throw new ResolveRuntimeAgentGraphError(
-        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" has no parent.`,
+        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" has no parent. ` +
+          "Only a declared subagent can share its parent's sandbox with defineParentSandbox(). Give this agent its own sandbox with defineSandbox() and an exported environment.",
         { nodeId },
       );
     }

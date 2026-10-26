@@ -52,8 +52,14 @@ export async function admitSessionInboxPayload(
   }
 
   switch (command.kind) {
-    case "deliver":
-      return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
+    case "session-prewarm":
+      if (command.expectedOwnerRunId === getWorkflowMetadata().workflowRunId)
+        input.queue.prepareOnDeployment(command.targetDeploymentId);
+      return { kind: "consumed" };
+    case "deliver": {
+      const admission = input.queue.enqueueDelivery(command);
+      return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
+    }
     case "clear":
     case "compact":
       input.queue.enqueueControl(command.kind);

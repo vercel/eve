@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
 import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
 import { assertStaticConnectionOwnership } from "#compiler/connection-ownership.js";
+import {
+  createAuthoredModuleGraph,
+  type AuthoredModuleGraph,
+} from "#internal/authored-module-graph.js";
 import { bindingMountId } from "#compiler/extension-mount-bindings.js";
+import { pruneAuthoredModuleCache } from "#internal/authored-module-cache.js";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
@@ -87,7 +92,11 @@ import {
   withExtensionNamespace,
 } from "#compiler/normalize-manifest-helpers.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
-import { projectAgentSources, projectSelectedSources } from "#compiler/project-sources.js";
+import {
+  listApplicationModulePaths,
+  projectAgentSources,
+  projectSelectedSources,
+} from "#compiler/project-sources.js";
 import {
   composeAgentModuleCandidates,
   createAgentModuleBinding,
@@ -131,7 +140,14 @@ export async function compileAgentManifest(
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     selection: options.developmentExtensions ?? noDevelopmentExtensions(),
   });
-  const compiler = new AgentGraphCompiler(context, registries, diagnostics);
+  const compiler = new AgentGraphCompiler(
+    context,
+    registries,
+    diagnostics,
+    createAuthoredModuleGraph(listApplicationModulePaths(developmentExtensions.manifest), {
+      appRoot: manifest.appRoot,
+    }),
+  );
   const root = await compiler.compileStaticNode({
     developmentExtensionCandidates: developmentExtensions.candidates,
     inheritedExternalDependencies: [],
@@ -145,11 +161,14 @@ export async function compileAgentManifest(
 
   const diagnosticsSummary = summarizeCompilerDiagnostics(diagnostics);
   const subagents = withDiagnosticsSummary(root.descendants, diagnosticsSummary);
-  return createCompiledAgentManifest({
+  const compiled = createCompiledAgentManifest({
     ...root.manifest,
     diagnosticsSummary,
     subagents,
   });
+  // In the background, so pruning never delays a compile.
+  void pruneAuthoredModuleCache();
+  return compiled;
 }
 
 class AgentGraphCompiler {
@@ -158,15 +177,18 @@ class AgentGraphCompiler {
   private readonly diagnostics: CompilerDiagnostic[];
   private readonly mounts = new Map<string, ExtensionCompileMount>();
   private readonly evaluationId = randomUUID();
+  private readonly moduleGraph: AuthoredModuleGraph;
 
   constructor(
     context: ManifestCompileContext,
     registries: readonly AgentSourceRegistry[],
     diagnostics: CompilerDiagnostic[],
+    moduleGraph: AuthoredModuleGraph,
   ) {
     this.context = context;
     this.registries = registries;
     this.diagnostics = diagnostics;
+    this.moduleGraph = moduleGraph;
   }
 
   async compileStaticNode(input: NodeCompileInput): Promise<CompiledLocalNodeResult> {
@@ -433,6 +455,7 @@ class AgentGraphCompiler {
       this.mounts,
       this.evaluationId,
       input.manifest.appRoot,
+      this.moduleGraph,
     );
     evaluation.setBindings(
       Object.fromEntries(
@@ -500,8 +523,15 @@ class AgentGraphCompiler {
             binding: binding!,
             loadNamespace,
           });
-          if (result.kind === "connection") connections.push(result.definition);
-          else {
+          if (result.kind === "connection") {
+            if (
+              result.definition.experimental_events === true &&
+              input.nodeId !== ROOT_COMPILED_AGENT_NODE_ID
+            ) {
+              throw new Error("experimental_events currently requires a root-agent connection.");
+            }
+            connections.push(result.definition);
+          } else {
             dynamicConnections.push(withExtensionNamespace(result.definition, candidate.owner));
           }
           state.evaluation.requireRuntimeEntry(candidate.sourceId);

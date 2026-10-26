@@ -15,6 +15,7 @@ export {
   type AgentWorkflowRetentionDefinition,
   type AgentWorkflowWorldDefinition,
   type DefinedAgent,
+  type SessionUsageLimit,
   type DynamicSubagentDefinition,
   type DynamicLocalSubagentDefinition,
   defineAgent,

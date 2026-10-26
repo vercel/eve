@@ -1,6 +1,9 @@
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 
-/** One user message or completed assistant message in a {@link TranscriptData}. */
+/**
+ * One user message or completed assistant message in a {@link TranscriptData}.
+ * Matches the shape `history` accepts, so a transcript can seed another session.
+ */
 export interface TranscriptMessage {
   readonly role: "assistant" | "user";
   readonly text: string;
@@ -23,8 +26,8 @@ export interface TranscriptReducerOptions {
 
 /**
  * Creates a reducer that projects a session's stream into its text
- * conversation: user message text and completed assistant text, oldest
- * first.
+ * conversation: history added with `history.imported`, user message text,
+ * and completed assistant text, oldest first.
  *
  * Reasoning, tool calls and results, attachments, approvals, and assistant
  * output that never completed are left out. A `context.cleared` event, or a
@@ -70,6 +73,11 @@ export function transcriptReducer(
     initial: () => ({ messages: [] }),
     reduce(data, event) {
       switch (event.type) {
+        case "history.imported":
+          return event.data.messages.reduce(
+            (next, { role, text }) => append(next, { role, text }),
+            data,
+          );
         case "message.received":
           return append(data, { role: "user", text: receivedText(event) });
         case "message.completed":

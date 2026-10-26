@@ -5,6 +5,7 @@ import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
+import { BUILD_DEPLOYMENT_ID_PLACEHOLDER } from "./build-deployment-id.js";
 import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
@@ -49,6 +50,13 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
     )}\n`,
   );
   await writeFile(join(functionDirectory, "_runtime.mjs"), "export default {};\n");
+  if (!process.env.VERCEL) {
+    await mkdir(join(outputDir, "server"), { recursive: true });
+    await writeFile(
+      join(outputDir, "server", "index.mjs"),
+      `const deploymentId = "${BUILD_DEPLOYMENT_ID_PLACEHOLDER}";\n`,
+    );
+  }
   await mkdir(join(outputDir, "functions", "eve", "v1"), { recursive: true });
   await symlink("./__server.func", join(outputDir, "functions", "index.func"), "dir");
   await symlink(
@@ -175,6 +183,7 @@ function createNitroStub(outputDir: string): Nitro {
   return {
     close: vi.fn(async () => undefined),
     options: {
+      preset: process.env.VERCEL ? "vercel" : "node-server",
       output: {
         dir: outputDir,
       },
@@ -295,6 +304,7 @@ describe("buildApplication", () => {
       expect.arrayContaining([
         expect.objectContaining({ name: "host.prepare" }),
         expect.objectContaining({ name: "nitro.bundle" }),
+        expect.objectContaining({ name: "id.compute" }),
         expect.objectContaining({ name: "output.publish" }),
         expect.objectContaining({ name: "workspace.remove" }),
       ]),
@@ -411,6 +421,28 @@ describe("buildApplication", () => {
       "last-good-output\n",
     );
     await expect(readFile(summaryPath, "utf8")).resolves.toBe("last-good-summary\n");
+  });
+
+  it("keeps the last-good output when the workflow-world placeholder is missing", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-missing-id-");
+    const outputDir = join(appRoot, ".output");
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(outputDir, "marker.txt"), "last-good-output\n");
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+    buildNitroMock.mockImplementationOnce(async (nitro: Nitro) => {
+      await mkdir(nitro.options.output.dir, { recursive: true });
+      await writeFile(join(nitro.options.output.dir, "index.mjs"), "no world plugin\n");
+    });
+    const { buildApplication } = await import("./build-application.js");
+    await expect(buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS)).rejects.toThrow(
+      "expected exactly one workflow-world placeholder",
+    );
+    expect(await readFile(join(outputDir, "marker.txt"), "utf8")).toBe("last-good-output\n");
   });
 
   it("builds one Vercel Nitro output and normalizes eve functions", async () => {

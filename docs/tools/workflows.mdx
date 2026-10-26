@@ -90,9 +90,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `agent`, `agents`, `ask`, and `reply`; each call it receives carries its own `callId` and
   `abortSignal`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
+  `session`, `callId`, `toolName`, `abortSignal`, `getSandbox`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
-  `getSandbox` remains unavailable.
+  Call `getSandbox`, `getToken`, and `requireAuth` in a step: the workflow body throws when it calls them.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -146,9 +146,21 @@ continue a child from an earlier call. Agent authorization, questions, approvals
 behave as they do for sessions an authored workflow tool opens with `ctx.agent`.
 
 The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
-fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
-A failed child turn throws at the corresponding `ctx.agent` call, so generated code can catch it.
-The program must return a JSON-serializable value.
+fan-out followed by fan-in. The program must await every `ctx.agent` call before it returns. A call
+that is still pending at that point, such as one that is never awaited or one that loses a
+`Promise.race` or `Promise.any`, fails the workflow.
+
+A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a
+`WorkflowProgramAgentError` at that `ctx.agent` call, which the program can catch; the message
+says which.
+
+The sandbox converts the program's return value and each `ctx.agent` input with `JSON.stringify`,
+so a `Date` becomes a string and functions and `undefined` members drop. A return value that
+converts to nothing, such as `undefined`, becomes `null`. Each converted value may be up to 1 MiB of
+JSON, each child reply up to 4 MiB of JSON, and the program source up to 256 KiB.
+
+Each start or resume may spend up to 30 seconds running JavaScript and up to 5 minutes in total.
+Time spent waiting for child agents does not count toward either limit.
 
 ### Migrate from `experimental_workflow`
 
@@ -438,6 +450,62 @@ itself contains no credentials.
 Cancelling an authorization wait withdraws its callback. Cancellation uses the existing turn
 cancellation path rather than a separate authorization completion event.
 
+## Use the session sandbox in a step
+
+Pass `ctx` directly to a step helper and call `ctx.getSandbox()` there. The step opens the
+[sandbox](/docs/sandbox) of the session that called the tool, the same sandbox that session's
+turns use. When the session shares its parent's sandbox, as a copy started by the built-in `agent`
+tool does, the step opens that shared sandbox. The step sees files the session wrote, and the
+session's later tool calls see files the step writes:
+
+```ts title="agent/tools/analyze.ts"
+import { defineWorkflowTool, type WorkflowStepToolContext } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Prepare the input file for an analysis run.",
+  inputSchema: z.object({ value: z.string() }),
+  async task(input, ctx) {
+    "use workflow";
+    await prepareInput(ctx, input);
+    return { path: "/workspace/input.json" };
+  },
+});
+
+async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string }) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ path: "/workspace/input.json", content: JSON.stringify(input) });
+}
+```
+
+- The workflow body cannot open the sandbox, because it replays. `ctx.getSandbox()` in the body
+  throws and tells you to pass `ctx` to a step helper.
+- The step opens the sandbox directly, with any sandbox provider. If the session recorded its
+  sandbox before it called the tool, the step resumes it. Otherwise, or if that sandbox is gone by
+  the time the step runs, the step opens it the way the session's first turn would: it runs your
+  `defineSandbox()` definition, and the provider finds or creates the sandbox by the session's id. The session's later turns open the same sandbox. Your
+  definition can run once for each caller that opens the sandbox before the session records it,
+  so make its initialization safe to repeat.
+- The step does not own the sandbox. When the step ends, even by throwing, eve lets go of the
+  step's handle and leaves the sandbox running for the session. eve never stops or deletes the
+  sandbox for a step, and `sandbox.stop()` and `sandbox.delete()` in a step fail without a retry,
+  because the session's turns may be using the sandbox.
+- The session removes the sandbox when the session ends, even when only a step opened it. A step
+  that is still running when the session ends can open the sandbox again after that cleanup, and
+  nothing removes the new one.
+- When the eve server shuts down, it stops the sandboxes its sessions opened, but not one that
+  only a step opened. With Docker, that container keeps running until the session ends or you
+  stop it.
+- A step can use the sandbox while the session's turns use it too, as subagents that share a
+  sandbox do. Give each one its own files to write.
+- Steps run at least once and retry after a failure, so make sandbox writes safe to repeat. Write
+  whole files instead of appending to them, or check for earlier output first.
+- When the session shares its parent's sandbox, the step opens it by the parent's session id with
+  the parent's sandbox definition, and the parent removes it when the parent ends.
+- A step runs wherever the workflow runs. A sandbox that lives on one machine, such as just-bash
+  on the local disk, is reachable from a step only on that machine, as in local development.
+
 ## Ask a human: `ctx.ask`
 
 ```ts
@@ -502,9 +570,9 @@ and can only show the model's input. Both compose: `approval` before the run, `c
 
 ## Delegate work: `ctx.agent`
 
-`ctx.agent(name)` returns a session with an agent, shaped like the TypeScript client's session. The
-session opens on its first `send`, and each `response.result()` resolves when that message's turn
-ends:
+`ctx.agent(name, options?)` returns a session with an agent, shaped like the TypeScript client's
+session. The session opens on its first `send`, and each `response.result()` resolves when that
+message's turn ends:
 
 ```ts
 import { z } from "zod";
@@ -516,6 +584,37 @@ const response = await reviewer.send("Review the deployment plan for security ri
 });
 const { data, message, status } = await response.result();
 ```
+
+Set `model` when the workflow should run a local child with a different AI Gateway model. The
+selection belongs to the returned session, so every message sent through that handle uses it:
+
+```ts
+const reviewer = ctx.agent("agent", {
+  model: "anthropic/claude-opus-5.5",
+});
+
+const response = await reviewer.send("Review the migration plan.", {
+  signal: ctx.abortSignal,
+});
+```
+
+The override changes only the model. The child keeps the target agent's instructions, tools, skills,
+connections, sandbox behavior, limits, reasoning, and explicit compaction model. Pass a selection
+object to override model-specific settings too:
+
+```ts
+const reviewer = ctx.agent("agent", {
+  model: {
+    model: "anthropic/claude-opus-5.5",
+    modelContextWindowTokens: 200_000,
+    reasoning: "high",
+  },
+});
+```
+
+The selection must contain an AI Gateway model id. A live AI SDK `LanguageModel` cannot cross the
+durable workflow boundary. A remote agent rejects the option because its deployment owns its model
+configuration.
 
 The name is an available agent target. On the root agent, `"agent"` starts a copy of the root agent.
 A declared subagent uses its path-derived name and remains callable when hidden with `tool: false`
@@ -544,8 +643,8 @@ client's `MessageResult` fields, plus `error` when the turn failed:
 | `status`  | `"waiting"` when the session waits for its next message, `"completed"` when the session ended with the turn, or `"failed"` when the turn failed. A cancelled turn is `"waiting"` with neither `data` nor `message`. |
 | `error`   | `{ message }` with the reason the turn failed, present only when `status` is `"failed"`.                                                                                                                            |
 
-Every `ctx.agent(name)` call returns a new session that only the workflow run can address. The model
-does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
+Every `ctx.agent(name, options?)` call returns a new session that only the workflow run can address.
+The model does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
 caller's capabilities. A remote child does not inherit the caller's session principal by default;
 the receiving deployment determines its identity from the outbound request. To forward the caller's
 identity, set `forwardPrincipal: true` on the remote agent and configure the receiver's

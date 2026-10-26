@@ -12,6 +12,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createContextClearedEvent,
+  createHistoryImportedEvent,
   createInputRequestedEvent,
   createInputResolvedEvent,
   createMessageReceivedEvent,
@@ -45,14 +46,14 @@ import {
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Transition } from "./commit.js";
 import { inputWithdrawn, signInWithdrawn } from "./events.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { toProxyInputRequestEntries, type WorkflowAskRoute } from "#harness/hitl/relays.js";
-import type { StepCoordinates, SuspendedStep, TurnState } from "./state.js";
+import type { ApprovedCall, StepCoordinates, SuspendedStep, TurnState } from "./state.js";
 import {
   activeTurnId,
   answeredCallIds,
@@ -94,11 +95,12 @@ function at(projection: SessionProjection) {
 
 /**
  * Input arrives: the session starts once, a turn opens unless one is open (steering joins it),
- * and a message is received.
+ * any history the delivery added is published, and a message is received.
  */
 export function receive(
   view: SessionView,
   input: {
+    readonly imported?: readonly SessionHistoryMessage[];
     readonly message?: string | UserContent;
     /** The session this one replaced, when eve started it in place of a stranded one. */
     readonly predecessor?: SessionPredecessor;
@@ -123,6 +125,15 @@ export function receive(
       createTurnStartedEvent({
         sequence: position.sequence,
         trace: input.trace,
+        turnId,
+      }),
+    );
+  }
+  if (input.imported !== undefined && input.imported.length > 0) {
+    events.push(
+      createHistoryImportedEvent({
+        messages: input.imported,
+        sequence: position.sequence,
         turnId,
       }),
     );
@@ -355,9 +366,20 @@ export function withoutApproved(step: SuspendedStep, callIds: ReadonlySet<string
   return approved.length === 0 ? rest : { ...rest, approved };
 }
 
-/** Approved calls of suspended steps that haven't run. */
-export function approvedCalls(turn: TurnState): readonly InputRequest[] {
-  return turn.suspended.flatMap((step) => step.approved ?? []);
+/**
+ * The approved calls of `step` that can run. A call a sign-in stopped is approved too, but waits
+ * until every sign-in it stopped on has called back.
+ */
+export function runnableCalls(view: SessionView, step: SuspendedStep): readonly ApprovedCall[] {
+  const waiting = new Set(view.signIns.map(signInAttemptKey));
+  return (step.approved ?? []).filter((call) =>
+    (call.signIns ?? []).every((challenge) => !waiting.has(signInAttemptKey(challenge))),
+  );
+}
+
+/** Approved calls of suspended steps that can run and haven't. */
+export function approvedCalls(view: SessionView): readonly ApprovedCall[] {
+  return view.turn.suspended.flatMap((step) => runnableCalls(view, step));
 }
 
 export function suspend(turn: TurnState, step: SuspendedStep): TurnState {
@@ -404,6 +426,20 @@ export function withResult(
     next.splice(asking.index + 1, 0, { content: [part], role: "tool" });
   }
   return next;
+}
+
+/** The messages without the results of the calls in `callIds`, which stay as unanswered calls. */
+function withoutResults(
+  messages: readonly ModelMessage[],
+  callIds: ReadonlySet<string>,
+): ModelMessage[] {
+  return messages.flatMap((message): ModelMessage[] => {
+    if (message.role !== "tool") return [message];
+    const content = message.content.filter(
+      (part) => part.type !== "tool-result" || !callIds.has(part.toolCallId),
+    );
+    return content.length === 0 ? [] : [{ ...message, content }];
+  });
 }
 
 /** The call with this id, and the index of the message that made it. */
@@ -637,7 +673,8 @@ export function runSignIn(
 
 /**
  * Sign-in callbacks matched the attempts `attemptIds` name: the session stops waiting on them.
- * Their completions report once the turn they resume runs (`completeSignIn`).
+ * A call they stopped runs once every sign-in it waits on has called back (`runnableCalls`); any
+ * other completion reports once the turn it resumes runs (`completeSignIn`).
  */
 export function matchSignIns(
   view: SessionView,
@@ -650,27 +687,79 @@ export function matchSignIns(
   };
 }
 
+/** The sign-ins calls stopped on, which the calls report when they settle. */
+export function callSignIns(turn: TurnState): readonly AuthorizationChallenge[] {
+  return turn.suspended.flatMap((step) =>
+    (step.approved ?? []).flatMap((call) => call.signIns ?? []),
+  );
+}
+
+/**
+ * The `stopped` calls wait for a sign-in: their results leave the step, and they stay approved,
+ * to run once the sign-ins call back, rather than the model asking for them again.
+ */
+export function awaitSignIns(
+  step: SuspendedStep,
+  input: {
+    readonly stopped: readonly {
+      readonly action: ApprovedCall["action"];
+      readonly connections: readonly string[];
+    }[];
+    readonly challenges: readonly AuthorizationChallenge[];
+  },
+): SuspendedStep {
+  const ids = stepCallIds(step);
+  const stopped = input.stopped.filter(({ action }) => ids.has(action.callId));
+  if (stopped.length === 0) return step;
+  const calls = stopped.map(({ action, connections }): ApprovedCall => {
+    // A call approved before keeps its request, and the sign-ins it already waited on report with
+    // it, beside the ones it waits on now.
+    const earlier = step.approved?.find((approved) => approved.action.callId === action.callId);
+    return {
+      action,
+      requestId: earlier?.requestId ?? action.callId,
+      signIns: [
+        ...(earlier?.signIns ?? []),
+        ...input.challenges.filter((challenge) => connections.includes(challenge.name)),
+      ],
+    };
+  });
+  const callIds = new Set(calls.map((call) => call.action.callId));
+  return {
+    ...step,
+    messages: withoutResults(step.messages, callIds),
+    approved: [
+      ...(step.approved ?? []).filter((call) => !callIds.has(call.action.callId)),
+      ...calls,
+    ],
+  };
+}
+
 /** Sign-in callbacks arrived: each completion is reported at the coordinates of the turn that asked. */
 export function completeSignIn(
   view: SessionView,
   input: { readonly completions: readonly AuthorizationChallenge[] },
 ): Transition {
   const position = at(view.projection);
+  // A call a sign-in stopped reports it when the call settles.
+  const reportedByCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   return unchanged(
     view,
-    input.completions.map((challenge) => {
-      const attempt =
-        challenge.attemptId === undefined
-          ? undefined
-          : view.projection.authorizations[challenge.attemptId];
-      return createAuthorizationCompletedEvent({
-        ...authorizationEventFields(challenge),
-        outcome: "authorized",
-        sequence: attempt?.sequence ?? position.sequence,
-        stepIndex: attempt?.stepIndex ?? position.stepIndex,
-        turnId: attempt?.turnId ?? position.turnId,
-      });
-    }),
+    input.completions
+      .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
+      .map((challenge) => {
+        const attempt =
+          challenge.attemptId === undefined
+            ? undefined
+            : view.projection.authorizations[challenge.attemptId];
+        return createAuthorizationCompletedEvent({
+          ...authorizationEventFields(challenge),
+          outcome: "authorized",
+          sequence: attempt?.sequence ?? position.sequence,
+          stepIndex: attempt?.stepIndex ?? position.stepIndex,
+          turnId: attempt?.turnId ?? position.turnId,
+        });
+      }),
   );
 }
 

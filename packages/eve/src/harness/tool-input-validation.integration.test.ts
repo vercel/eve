@@ -43,7 +43,7 @@ function toolCall(toolCallId: string, toolName: string, input: string): StreamPa
   return { input, toolCallId, toolName, type: "tool-call" };
 }
 
-function finish(unified: "length" | "stop" | "tool-calls"): StreamPart {
+function finish(unified: "length" | "other" | "stop" | "tool-calls"): StreamPart {
   return { finishReason: { raw: undefined, unified }, type: "finish", usage };
 }
 
@@ -121,18 +121,21 @@ describe("framework tool input validation (real AI SDK)", () => {
 
   it.each([
     {
-      name: "beside a truncated call",
+      name: "length beside a truncated call",
+      reason: "length" as const,
       truncated: [{ input: '{"path": "notes/bob', toolCallId: "read-truncated" }],
     },
-    { name: "alone", truncated: [] },
-  ])("answers complete tool calls cut short at the output limit $name", async ({ truncated }) => {
+    { name: "length alone", reason: "length" as const, truncated: [] },
+    { name: "other", reason: "other" as const, truncated: [] },
+    { name: "missing finish event", reason: undefined, truncated: [] },
+  ])("answers complete tool calls ended early: $name", async ({ reason, truncated }) => {
     const skippedCallId = "read-skipped";
     const model = new MockLanguageModelV4({
       doStream: scriptedStreams([
         [
           toolCall(skippedCallId, "read_note", JSON.stringify({ path: "notes/alice.md" })),
           ...truncated.map((call) => toolCall(call.toolCallId, "read_note", call.input)),
-          finish("length"),
+          ...(reason === undefined ? [] : [finish(reason)]),
         ],
         [
           { id: "reply", type: "text-start" },
@@ -179,14 +182,21 @@ describe("framework tool input validation (real AI SDK)", () => {
     if (typeof cutShortStep.next !== "function") {
       throw new TypeError("Expected the cut-short step to continue the tool loop.");
     }
+    const expectedResult = {
+      output: {
+        type: "error-text",
+        value: expect.stringContaining(`finish reason: ${reason ?? "other"}`),
+      },
+    };
+    expect(findToolResult(cutShortStep.session.history, skippedCallId)).toMatchObject(
+      expectedResult,
+    );
     const nextStep = await cutShortStep.next(cutShortStep.session);
 
     expect(execute).not.toHaveBeenCalled();
     expect(model.doStreamCalls).toHaveLength(2);
     const retryPrompt = model.doStreamCalls[1]?.prompt ?? [];
-    expect(findToolResult(retryPrompt, skippedCallId)).toMatchObject({
-      output: { type: "error-text", value: expect.stringContaining("finish reason: length") },
-    });
+    expect(findToolResult(retryPrompt, skippedCallId)).toMatchObject(expectedResult);
     for (const call of truncated) {
       expect(findToolResult(retryPrompt, call.toolCallId)).toBeDefined();
     }

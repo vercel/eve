@@ -186,6 +186,10 @@ function httpAddress(runtime: Runtime, continuationToken: string) {
 async function resetSession(runtime: Runtime, sessionId: string | undefined): Promise<void> {
   if (sessionId === undefined) return;
   await runtime.dispatchSession({ command: { kind: "reset" }, sessionId });
+  // Keep the World through shutdown without reading result data, which may already have expired.
+  await vi.waitFor(async () => {
+    expect(["completed", "cancelled", "failed"]).toContain(await getRun(sessionId).status);
+  });
 }
 
 describe("stranded sessions", () => {
@@ -400,6 +404,34 @@ describe("stranded sessions", () => {
         await expect(stranded.status).resolves.toBe("cancelled");
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
       } finally {
+        await cancelIfActive(stranded);
+      }
+    });
+  });
+
+  it("refuses create() at a stranded address until it is reset", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-create" } });
+    await test.run(async () => {
+      const continuationToken = "stranded-session-create";
+      const stranded = await parkStrandedOwner(`http:${continuationToken}`);
+      const runtime = channelRuntime();
+      const address = httpAddress(runtime, continuationToken);
+      const history = [{ role: "user" as const, text: "Alice asks for the venue list." }];
+      let createdSessionId: string | undefined;
+      try {
+        // A stranded owner cannot run, so `created: false` would hand back a dead session.
+        await expect(address.create({ auth: null, history })).rejects.toThrow(
+          "Call reset() on the address, then create() again",
+        );
+        expect(runtime.createSession).not.toHaveBeenCalled();
+        await expect(stranded.status).resolves.toBe("running");
+
+        await address.reset();
+        const result = await address.create({ auth: null, history });
+        createdSessionId = result.session.id;
+        expect(result.created).toBe(true);
+      } finally {
+        await resetSession(runtime, createdSessionId);
         await cancelIfActive(stranded);
       }
     });

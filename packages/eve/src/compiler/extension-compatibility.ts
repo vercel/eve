@@ -22,10 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 91,
+    current: 102,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
-      85, 86, 87, 88, 89, 90, 91,
+      85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 97, 98, 99, 100, 101, 102,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -86,14 +86,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       75: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
       79: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
       83: 'webSearch provider "openai" was replaced by "native" before it shipped in a release',
+      95: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
+      96: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
     },
   },
   dynamicTool: {
-    current: 85,
+    current: 92,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
       60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
-      85,
+      85, 86, 87, 89, 90, 91, 92,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -131,13 +133,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       59: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       71: "AI SDK evaluation models became decision models; auto() accepts decision models only",
       74: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      88: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
     },
   },
   channel: {
-    current: 61,
+    current: 69,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 36, 37, 38, 39, 40, 41, 42,
-      43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61,
+      43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67,
+      68, 69,
     ],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -157,13 +161,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       34: 'Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       35: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
       53: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      64: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
     },
   },
   schedule: {
-    current: 33,
+    current: 37,
     supported: [
       1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-      29, 30, 31, 32, 33,
+      29, 30, 31, 32, 33, 34, 35, 36, 37,
     ],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -172,10 +177,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 38,
+    current: 41,
     supported: [
       3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
-      34, 35, 36, 37, 38,
+      34, 35, 36, 37, 38, 39, 41,
     ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -186,13 +191,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       20: "Run mode was removed and agent definitions no longer declare outputSchema; sessions always park, ConversationContext no longer carries mode, and structured output is requested per turn.",
       21: 'Background task execution was removed: subagent results no longer carry backgroundTask, message.completed always carries text, and experimental.tasks is gone. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       22: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
+      40: "limits.sessionUsage replaces the numeric per-session token and cost limits",
     },
   },
   connection: {
-    current: 49,
+    current: 57,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32, 33, 34,
-      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49,
+      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57,
     ],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
@@ -205,11 +211,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       30: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       31: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       42: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      53: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
     },
   },
   hook: {
-    current: 46,
-    supported: [20, 21, 22, 23, 25, 27, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46],
+    current: 51,
+    supported: [
+      20, 21, 22, 23, 25, 27, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46, 47, 49,
+      50, 51,
+    ],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -236,14 +246,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       29: 'Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       30: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event hook events were removed; subscribe to task.started, task.settled, and agent.started.",
       40: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      48: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
     },
   },
   skill: { current: 3, supported: [1, 2, 3], dropped: {} },
   dynamicSkill: {
-    current: 38,
+    current: 40,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25, 26, 27, 28, 29, 30,
-      31, 32, 33, 34, 35, 36, 37, 38,
+      31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
     ],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -254,10 +265,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 39,
+    current: 41,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28, 29, 30,
-      31, 32, 33, 34, 35, 36, 37, 38, 39,
+      31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
     ],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -268,12 +279,13 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   config: { current: 1, supported: [1], dropped: {} },
   state: {
-    current: 13,
-    supported: [1, 2, 3, 4, 5, 7, 9, 10, 12, 13],
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 7, 9, 10, 12, 14, 15, 16],
     dropped: {
       6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       8: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       11: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      13: "Custom sandbox providers must implement onSessionEnd(context, state, options) and make start an upsert keyed by the session id.",
     },
   },
 } as const satisfies Record<string, ExtensionCapabilityContract>;

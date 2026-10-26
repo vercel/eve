@@ -53,6 +53,11 @@ export default channel;
 
 `adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string or an AI SDK `UserContent` array, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
 
+Pass `idempotencyKey: message.id` to `send` to prevent duplicate agent input
+within the session's [recent-key window](./custom#retried-deliveries). Chat SDK's
+separate duplicate check can mark a message as seen before eve accepts it, so
+a shared state adapter alone does not guarantee delivery.
+
 Deploy once the channel file is in place:
 
 ```bash
@@ -104,7 +109,7 @@ bot.onNewMention(async (thread, message) => {
 });
 ```
 
-`options` accepts `thread` and `adapterName`, plus the channel send options `auth`, `context`, `outputSchema`, `title`, `callback`, and `turnPolicy`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn. `auth` defaults to `null`.
+`options` accepts `thread` and `adapterName`, plus the channel send options `auth`, `context`, `outputSchema`, `title`, `callback`, `turnPolicy`, and `idempotencyKey`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn. `auth` defaults to `null`.
 
 To answer pending input requests from a handler you render yourself, call `respond(inputResponses, { thread, auth?, context? })`. Like a channel's `respond()`, it never creates a session. This example answers a custom button whose `value` carries the eve request id:
 
@@ -140,7 +145,7 @@ This policy controls overlapping eve turns. Chat SDK's separate `concurrency` op
 
 The default handlers post the agent's reply back to the thread — no `events` override required. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
 
-Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn — email, for example — so the reply posts once on completion instead of editing:
+Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn or can't edit sent messages — email and WhatsApp, for example — so the reply posts once on completion instead of editing:
 
 ```ts
 chatSdkChannel({
@@ -245,7 +250,9 @@ bot.onNewMention(async (thread, message) => {
 });
 ```
 
-When the adapter can download an attachment (it sets `fetchData`, as the Slack, Google Chat, WhatsApp, and Twilio adapters do), eve downloads it with the adapter's credentials when the turn runs, not in the webhook, and passes the bytes. Platform file URLs usually need those credentials, so the model provider couldn't open them. eve rebuilds the download with the adapter's `rehydrateAttachment`; an adapter without one can't download after the webhook returns, so its files reach the agent as a short note. A failed download, or a file over 25 MB, also becomes a note. An attachment with only a URL is downloaded by eve when the URL is public `https:`; otherwise it becomes a note.
+When the adapter can download an attachment (it sets `fetchData`, as the Slack, Google Chat, WhatsApp, and Twilio adapters do), eve downloads it with the adapter's credentials when the turn runs, not in the webhook, and passes the bytes. Platform file URLs usually need those credentials, so the model provider couldn't open them. eve rebuilds the download with the adapter's `rehydrateAttachment`; an adapter without one can't download after the webhook returns, so its files reach the agent as a short note. A failed download, or a file over 25 MB, also becomes a note. An attachment with only a URL is downloaded by eve when the URL is public `https:`; otherwise it becomes a note. An attachment with neither a download nor a URL also becomes a note, so the agent still knows a file was sent.
+
+Audio attachments, such as voice notes, reach the model as a file label, not as sound. To answer them, give the agent a transcription tool; see [Voice notes](../patterns/voice-notes).
 
 See [File uploads](./custom#file-uploads) for how eve stages remote file URLs before the model call.
 

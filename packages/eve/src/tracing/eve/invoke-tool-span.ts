@@ -14,12 +14,23 @@ import { resolveInstrumentationEnvironment } from "#internal/application/dev-env
 import { createLogger, formatError } from "#internal/logging.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
-import { otelTelemetry, type Attributes, type SpanWriter } from "#compiled/@eve/tracing/index.js";
-import { contentAttribute, mcpLifecycle, withErrorContent } from "#compiled/@eve/tracing/otel.js";
+import {
+  otelTelemetry,
+  type Attributes,
+  type SpanWriter,
+} from "#compiled/@vercel/agent-runs/index.js";
+import {
+  contentAttribute,
+  mcpLifecycle,
+  withErrorContent,
+} from "#compiled/@vercel/agent-runs/otel.js";
 import { DIRECT_TOOL_CALL_ATTRIBUTE, DIRECT_TOOL_CALL_VALUE } from "#tracing/local/inspection.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
-import { operationConversationId } from "#tracing/eve/conversation-context.js";
+import {
+  operationConversationId,
+  withOperationTraceContext,
+} from "#tracing/eve/conversation-context.js";
 import { MCP_SERIALIZER } from "#tracing/eve/mcp.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 
@@ -155,7 +166,7 @@ async function traced(
   const recordOutputs = content.action === "record" && content.recordOutputs;
 
   const spanName = `execute_tool ${input.toolName}`;
-  const parent = withChannelAudience(base, conversation.audience);
+  const parent = withOperationTraceContext(withChannelAudience(base, conversation.audience), scope);
   const attributes: Record<string, Attributes[string]> = {
     "agent.tool.is_framework": false,
     "gen_ai.agent.name": input.agentName,

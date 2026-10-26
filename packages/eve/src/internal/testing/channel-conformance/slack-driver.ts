@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { slackChannel } from "#public/channels/slack/index.js";
+import { type SlackChannelConfig, slackChannel } from "#public/channels/slack/index.js";
 import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
@@ -61,9 +61,13 @@ interface SlackMessageBody {
 
 /**
  * Drives the Slack channel through its Events API and interactivity webhooks,
- * in a public channel thread by default or in a DM.
+ * in a public channel thread by default or in a DM. `config` adds authored
+ * channel hooks on top of the fake platform.
  */
-export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+export function slackDriver(
+  surface: Exclude<Surface, "public"> = "shared",
+  config: Pick<SlackChannelConfig, "onInputResponse"> = {},
+): ChannelDriver {
   const dm = surface === "private";
   // A fresh channel per driver keeps each test's session apart in the shared workflow world.
   nextChannel += 1;
@@ -144,6 +148,7 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     surface,
     createChannel: (record) =>
       slackChannel({
+        ...config,
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
       }),
