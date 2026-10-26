@@ -27,6 +27,16 @@ export const NEXT_RELEASE_TRAIN = {
   train: "mobile-2026.42",
 };
 
+/** The deferred tool `late_additions` adds from the second turn on. */
+export const LATE_TOOL = "fleet_charger_uptime";
+
+/** What `fleet_charger_uptime` returns. */
+export const CHARGER_UPTIME = {
+  depot: "Oakland",
+  offline: "CHG-0417",
+  uptime: "96.8%",
+};
+
 const NAMESPACED: readonly CatalogTool[] = [
   // sre: incident response, status page, and observability.
   {

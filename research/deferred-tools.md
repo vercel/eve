@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-10-08"
+last_updated: "2026-10-13"
 ---
 
 # Deferred tools and skills
@@ -781,8 +781,9 @@ One announcement under the key `catalog` replaces the connection listing.
   capped.
 - **No deferred names.** A deferred entry is meant to stay out of context
   until a search finds it, so the listing never names one. It doesn't count
-  entries either: counts would change, and append a message, whenever a
-  dynamic resolver adds or drops one.
+  entries either, since counts would change, and append a message, whenever a
+  dynamic resolver adds or drops one. Dynamic additions are announced
+  separately (below).
 - **Namespaces.** The first `__` segment of deferred tool, agent, and skill
   names, such as `sre` for `sre__list_alerts`, whether the entries come from
   an extension mount or are vendored under that prefix. A namespace query
@@ -803,8 +804,21 @@ One announcement under the key `catalog` replaces the connection listing.
   the session upgrades to a new deployment. eve then appends the full
   listing again, prefixed with "The catalog changed.", and names any
   namespace or connection that is gone. A deferred entry added to a listed
-  namespace, or without one, appends nothing; `eve__search` finds it.
-- **After compaction,** the next step appends a fresh baseline.
+  namespace, or without one, appends nothing to the listing.
+- **Dynamic additions.** A second announcement, under the key
+  `dynamic-tools`, names the deferred tools and agents a dynamic resolver
+  adds mid-session, by name only, in one line that points to an exact-name
+  `eve__search` for the description and signature. Descriptions are left
+  out because their length is up to the author (a subagent's can run to
+  hundreds of tokens), and the model can't call an entry without searching
+  for its signature anyway. The session's first step records a
+  silent baseline (an announcement's `render` may return `undefined` to
+  record its value without a message), so entries present from the start
+  stay unnamed like static deferred entries; compaction makes the next step
+  a silent baseline again. The recorded value is the sorted set of every
+  name seen so far, so removing an entry appends nothing and a returning
+  entry isn't repeated. It names at most 20 per message, then a count.
+- **After compaction,** the next step appends a fresh listing baseline.
 - **Empty catalog,** no message.
 
 ```text
@@ -868,7 +882,7 @@ start.
 | Find a capability by name | Authored tool map, dynamic tool list, dynamic subagent merge, presentation map (`prepareModelTools`), and `connection_execute`'s own lookup | One table of the step's entries, built once per step and used both to advertise direct tools and to resolve `eve__tool` and `eve__skill` |
 | Run a call                | AI SDK `execute`, workflow dispatch, subagent dispatch, the `load_skill` `frameworkAction`, and the `connection_execute` closure            | Resolve the entry, then dispatch on its handling, the same for direct and catalog calls                                                  |
 | Approve a call            | Per-tool approval functions on AI SDK tool objects, plus connection approval delegated through `connection_execute`                         | The resolved entry's approval, for every call                                                                                            |
-| Announce state            | A dedicated `availableSkills` field and the keyed announcements (`harness/current-messages.ts`)                                             | Keyed announcements only: `catalog`, plus skills that aren't deferred                                                                    |
+| Announce state            | A dedicated `availableSkills` field and the keyed announcements (`harness/current-messages.ts`)                                             | Keyed announcements only: `catalog`, `dynamic-tools`, plus skills that aren't deferred                                                   |
 | Load a skill              | `load_skill`, the `frameworkAction` marker, and reserved-name handling in the subagent registry                                             | `eve__skill({ name })` to the `load-skill` action                                                                                        |
 | Report a call             | An action, plus nested actions for connection calls                                                                                         | One action per call, named for the entry                                                                                                 |
 | Label a call              | Entry labels, plus `connection_execute` special cases in `toolCallDisplayName`, the dev TUI, and the channel task card                      | Entry labels                                                                                                                             |
