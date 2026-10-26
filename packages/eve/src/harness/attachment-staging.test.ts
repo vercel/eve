@@ -31,7 +31,6 @@ const STUB_ADAPTER_CTX: ChannelAdapterContext = {
   session: {
     id: "",
     auth: { current: null, initiator: null },
-    continuation: { token: "", alias: () => {} },
   },
 };
 
@@ -387,6 +386,38 @@ describe("stageAttachmentsToSandbox", () => {
 });
 
 describe("stageToolResultMedia", () => {
+  it("preserves a remote tool-result file without resuming a sandbox", async () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "report",
+            output: {
+              type: "content",
+              value: [
+                {
+                  type: "file",
+                  data: { type: "url", url: new URL("https://files.example/report.pdf") },
+                  mediaType: "application/pdf",
+                  filename: "report.pdf",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+
+    const staged = await contextStorage.run(unresumableSandboxContext(), () =>
+      stageToolResultMedia(messages),
+    );
+
+    expect(staged).toEqual(messages);
+  });
+
   // #4839: a throw here escapes the step after its model call and tools ran,
   // so the step retries and replays them.
   it("replaces a returned file with a note when the sandbox cannot be resumed", async () => {

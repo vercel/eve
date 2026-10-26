@@ -20,7 +20,7 @@ export default defineChannel({
         idempotencyKey: body.idempotencyKey,
         turnPolicy: "queue",
       });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
   ],
   async receive(input, { from }) {

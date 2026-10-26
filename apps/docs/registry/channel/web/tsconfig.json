@@ -10,6 +10,7 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "Bundler",
+    "types": ["node", "eve/workflow-modules"],
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

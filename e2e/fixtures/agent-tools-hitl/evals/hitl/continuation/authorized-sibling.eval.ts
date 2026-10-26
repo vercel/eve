@@ -23,19 +23,19 @@ export default defineEval({
 
     // When the authorized responder approves the separate change.
     const live = await session.startRespond([
-      { requestId: current.requestId, optionId: "approve" },
+      { interactionId: current.interactionId, optionId: "approve" },
     ]);
 
     // Then authorization settles, the change executes once, and the read gets a reply; the message cancelled A, which never runs.
     await expectToolResult(t, live, "read-draft");
-    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.requestId);
+    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.interactionId);
     reply.calledTool("authorized-change", {
       status: "completed",
       output: { executions: 1 },
       count: 1,
     });
-    reply.event("approval.settled", {
-      data: { requestId: current.requestId, outcome: "approved" },
+    reply.event("interaction.settled", {
+      data: { interactionId: current.interactionId, outcome: "accepted" },
       count: 1,
     });
     expectChangeStillUnexecuted(session);

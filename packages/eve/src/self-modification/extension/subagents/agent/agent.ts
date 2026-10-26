@@ -1,11 +1,8 @@
-import type { DynamicResolveContext } from "#dynamic/definition.js";
 import {
   defineAgent,
   defineDynamic,
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
-  type DynamicSentinel,
-  type DynamicSubagentDefinition,
 } from "eve";
 
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
@@ -51,10 +48,8 @@ const localEffectiveEdits =
  * Defines the local development self-modification dynamic subagent, offered
  * only to the developer running `eve dev` (see {@link isLocalDeveloper}).
  */
-export function defineSelfModificationAgent(
-  options: SelfModificationAgentOptions = {},
-): DynamicSentinel<DynamicSubagentDefinition | null> {
-  const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
+export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
+  return defineDynamic((ctx) => {
     const bound = selfModification.config;
     const config = resolveSelfModificationConfig(options.config ?? bound);
     if (
@@ -64,7 +59,7 @@ export function defineSelfModificationAgent(
     ) {
       return null;
     }
-    const configuredModel = options.model ?? bound.model ?? ctx.model?.id;
+    const configuredModel = options.model ?? bound.model ?? ctx.model.id ?? undefined;
     const reasoning =
       options.reasoning ??
       bound.reasoning ??
@@ -82,13 +77,6 @@ export function defineSelfModificationAgent(
       localEffectiveEdits,
     ]);
     return defineAgent({ description, model, reasoning });
-  };
-
-  return defineDynamic({
-    events: {
-      "session.started": resolve,
-      "turn.started": resolve,
-    },
   });
 }
 

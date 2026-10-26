@@ -57,7 +57,7 @@ describe("prepareWebRegistryProject", () => {
     expect(parseJsonc(source)).toEqual({
       compilerOptions: {
         strict: false,
-        types: ["node", "vite/client"],
+        types: ["node", "vite/client", "eve/workflow-modules"],
         target: "ES2022",
         lib: ["dom", "dom.iterable", "esnext"],
         skipLibCheck: true,

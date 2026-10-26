@@ -1,3 +1,4 @@
+import type { MessageContent } from "#shared/message-content.js";
 import {
   FatalError,
   getStepMetadata,
@@ -13,7 +14,11 @@ import {
   resolveAgentStartTarget,
   type SubagentStartTarget,
 } from "#execution/agent-sessions/target.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -46,6 +51,9 @@ import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
+import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
+import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
@@ -72,11 +80,20 @@ export type AgentSessionAddress =
       readonly forwardPrincipal?: boolean;
       readonly name: string;
       readonly nodeId: string;
-      /** Keys the authored credential functions, as on `agent.started`. */
+      /** Keys the authored credential functions, as on `child.opened`. */
       readonly resolverId?: string;
+      /**
+       * A dynamic remote agent's binding, which its credentials are built from again: the child
+       * keeps the session it was opened with, whatever the parent's session becomes. Private.
+       */
+      readonly dynamicBinding?: DynamicRemoteBinding;
       readonly sessionId: string;
       readonly url: string;
+      /** The child's remote agent protocol, when it speaks an earlier one than this deployment. */
+      readonly earlierProtocol?: number;
     };
+
+type RemoteAgentSessionAddress = Extract<AgentSessionAddress, { readonly kind: "remote" }>;
 
 /** A session a run opened, with the context of the call that opened it: its lineage. */
 export interface OpenedAgentSession {
@@ -87,13 +104,22 @@ export interface OpenedAgentSession {
 }
 
 /**
+ * A message a session accepted. An earlier-protocol remote agent names no delivery, so
+ * nothing records it.
+ */
+export interface AgentSessionReceipt {
+  readonly sessionId: string;
+  readonly deliveryId?: string;
+}
+
+/**
  * One message to a session, as the call that sends it: the session runs the
  * message with that call's auth. Its turn's result and questions arrive on
  * `replyTo`.
  */
 export interface AgentSessionMessage {
   readonly auth: SessionAuth;
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly replyTo: string;
 }
@@ -110,7 +136,7 @@ export async function openAgentSessionStep(
     readonly model?: AgentSessionModelSelection;
     readonly name: string;
   },
-): Promise<AgentSessionAddress> {
+): Promise<{ readonly address: AgentSessionAddress; readonly deliveryId?: string }> {
   "use step";
 
   const { context } = input;
@@ -178,13 +204,13 @@ async function normalizeRuntimeOverrides(
  */
 export async function sendAgentSessionMessageStep(
   input: AgentSessionMessage & OpenedAgentSession,
-): Promise<void> {
+): Promise<AgentSessionReceipt> {
   "use step";
 
   const { address, context } = input;
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
-    await continueRemoteAgentSession({
+    return await continueRemoteAgentSession({
       auth: input.auth.current,
       callback: {
         callId: context.parent.callId,
@@ -195,13 +221,16 @@ export async function sendAgentSessionMessageStep(
           createEveCallbackRoutePath(input.replyTo),
         ),
       },
+      earlierProtocol: address.earlierProtocol,
+      // The step's own identity, so its retry repeats the same delivery, as a local child's does.
+      idempotencyKey: agentDeliveryId("send", address.sessionId),
       message: input.message,
       outputSchema: input.outputSchema,
       remote,
       sessionId: address.sessionId,
     });
-    return;
   }
+  const deliveryId = agentDeliveryId("send", address.sessionId);
   const result = await commandLocalSession(
     { ...input, address },
     {
@@ -213,6 +242,7 @@ export async function sendAgentSessionMessageStep(
         subagentName: address.name,
       },
       kind: "send",
+      delivery: { channelKind: "subagent", channelName: "subagent", deliveryId },
       payload: { message: input.message, outputSchema: input.outputSchema },
     },
   ).catch((error: unknown) => {
@@ -224,6 +254,7 @@ export async function sendAgentSessionMessageStep(
   if (result.status !== "accepted") {
     throw new Error(`Agent "${address.name}" can no longer receive messages; its session ended.`);
   }
+  return { deliveryId, sessionId: result.sessionId };
 }
 
 /** Cancels a session's running turn; the turn still reports, as cancelled. */
@@ -237,7 +268,10 @@ export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Pro
       await cancelRemoteAgentTurn({ remote, sessionId: address.sessionId });
       return;
     }
-    await commandLocalSession({ ...input, address }, { kind: "cancel" });
+    await commandLocalSession(
+      { ...input, address },
+      { kind: "cancel", deliveryId: agentDeliveryId("cancel", address.sessionId) },
+    );
   } catch (error) {
     logError(log, "failed to cancel an agent session turn", error, {
       name: address.name,
@@ -255,6 +289,26 @@ export async function endAgentSessionsStep(input: {
   await Promise.all(input.sessions.map(endAgentSession));
 }
 
+/** Best-effort cleanup for a late address whose cancelled run cannot own it. */
+export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Promise<void> {
+  "use step";
+  if (opened.address.kind === "remote") {
+    await endAgentSession(opened);
+    return;
+  }
+  const { sessionId } = opened.address;
+  try {
+    // Waiting for a booting inbox would hold the parent's next turn.
+    await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), {
+      kind: "reset",
+      reason: RUN_FINISHED_REASON,
+      deliveryId: agentDeliveryId("reset", sessionId),
+    });
+  } catch (error) {
+    logError(log, "could not stop late child; cleanup is best effort", error, { sessionId });
+  }
+}
+
 async function endAgentSession(opened: OpenedAgentSession): Promise<void> {
   const { address, context } = opened;
   try {
@@ -269,7 +323,11 @@ async function endAgentSession(opened: OpenedAgentSession): Promise<void> {
     }
     await commandLocalSession(
       { ...opened, address },
-      { kind: "reset", reason: RUN_FINISHED_REASON },
+      {
+        kind: "reset",
+        reason: RUN_FINISHED_REASON,
+        deliveryId: agentDeliveryId("reset", address.sessionId),
+      },
     );
   } catch (error) {
     logError(log, "failed to end an agent session", error, {
@@ -315,7 +373,7 @@ interface SessionStart<Target extends SubagentStartTarget> {
 
 async function startLocalSession(
   input: SessionStart<Extract<SubagentStartTarget, { readonly kind: "local" }>>,
-): Promise<AgentSessionAddress> {
+): Promise<{ readonly address: AgentSessionAddress; readonly deliveryId: string }> {
   const { auth, bundle, context, target } = input;
   const { action } = target;
   const { childContinuationToken, runInput } = buildSubagentRunInput({
@@ -351,11 +409,13 @@ async function startLocalSession(
       agentPath: stubToolPath(childToolStubs, action.name),
     };
   }
+  const deliveryId = `agent-session:${input.key}:initial`;
   const started = await contextStorage.run(
     new ContextContainer({ localDevRequest: context.localDevRequest }),
     () =>
       childRuntime.createSession({
         ...runInput,
+        delivery: { channelKind: "subagent", channelName: "subagent", deliveryId },
         toolStubs: childToolStubs,
       }),
   );
@@ -369,20 +429,31 @@ async function startLocalSession(
     ));
   }
   return {
-    continuationToken: childContinuationToken,
-    kind: "local",
-    name: action.name,
-    nodeId: action.nodeId,
-    sessionId,
+    address: {
+      continuationToken: childContinuationToken,
+      kind: "local",
+      name: action.name,
+      nodeId: action.nodeId,
+      sessionId,
+    },
+    deliveryId,
   };
 }
 
 async function startRemoteSession(
   input: SessionStart<Extract<SubagentStartTarget, { readonly kind: "remote" }>>,
-): Promise<AgentSessionAddress> {
+): Promise<{ readonly address: AgentSessionAddress; readonly deliveryId?: string }> {
   const { auth, bundle, context, target } = input;
   const { action } = target;
+  const dynamicBinding = bindingFor(context, action.nodeId);
   const remote = resolveRemoteAgentForAction({
+    credentials:
+      target.dynamicRemoteAgent === undefined
+        ? undefined
+        : await credentialsOf(bundle, action.nodeId, dynamicBinding, {
+            name: action.remoteAgentName,
+            url: target.dynamicRemoteAgent.url,
+          }),
     dynamicRemoteAgent: target.dynamicRemoteAgent,
     nodeId: action.nodeId,
     registry: bundle.subagentRegistry.subagentsByNodeId,
@@ -401,16 +472,21 @@ async function startRemoteSession(
     remote,
     session: { continuationToken: input.replyTo },
   });
-  return {
+  const address: {
+    -readonly [K in keyof RemoteAgentSessionAddress]: RemoteAgentSessionAddress[K];
+  } = {
     callbackBaseUrl,
     kind: "remote",
     forwardPrincipal: remote.forwardPrincipal,
     name: action.remoteAgentName,
     nodeId: action.nodeId,
-    resolverId: target.dynamicRemoteAgent?.credentialsStepId ?? action.nodeId,
+    resolverId: action.nodeId,
     sessionId: child.sessionId,
     url: remote.url,
   };
+  if (dynamicBinding !== undefined) address.dynamicBinding = dynamicBinding;
+  if (child.earlierProtocol !== undefined) address.earlierProtocol = child.earlierProtocol;
+  return child.deliveryId === undefined ? { address } : { address, deliveryId: child.deliveryId };
 }
 
 function createParentContext(context: AgentSessionContext, replyTo: string): SubagentParentContext {
@@ -433,6 +509,8 @@ async function resolveSessionRemote(
   const bundle = await loadAgentSessionBundle(context);
   const selection = context.dynamicSelections[address.nodeId];
   const resolved = resolveRemoteAgentForAction({
+    // Credentials come from the binding the child was opened with, and go only to its destination.
+    credentials: await credentialsOf(bundle, address.nodeId, address.dynamicBinding, address),
     dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
     nodeId: address.nodeId,
     registry: bundle.subagentRegistry.subagentsByNodeId,
@@ -441,9 +519,43 @@ async function resolveSessionRemote(
   return { ...resolved, url: address.url };
 }
 
+/** The binding a dynamic remote agent with credentials keeps for a child opened now. */
+function bindingFor(
+  context: AgentSessionContext,
+  nodeId: string,
+): DynamicRemoteBinding | undefined {
+  const selection = context.dynamicSelections[nodeId];
+  return selection?.kind === "remote" && selection.remoteAgent.credentials === true
+    ? selection.binding
+    : undefined;
+}
+
+/**
+ * A dynamic remote agent's credentials, built from `binding` for `destination`. `undefined` for
+ * one without credentials, which keeps no binding.
+ */
+async function credentialsOf(
+  bundle: CompiledBundle,
+  nodeId: string,
+  binding: DynamicRemoteBinding | undefined,
+  destination: { readonly name: string; readonly url: string },
+): Promise<RemoteAgentCredentials | undefined> {
+  if (binding === undefined) return undefined;
+  return await remoteAgentCredentials({
+    binding,
+    destination,
+    nodeId,
+    resolvers: bundle.subagentRegistry.dynamicResolvers,
+  });
+}
+
 async function loadAgentSessionBundle(context: AgentSessionContext): Promise<CompiledBundle> {
   return await getCompiledRuntimeAgentBundle({
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(context.bundle.source),
     nodeId: context.bundle.nodeId,
   });
+}
+
+function agentDeliveryId(kind: string, sessionId: string): string {
+  return `agent-session:${getWorkflowMetadata().workflowRunId}:${getStepMetadata().stepId}:${sessionId}:${kind}`;
 }

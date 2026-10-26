@@ -22,7 +22,7 @@ const AGENT_SOURCE = `export default { model: "openai/gpt-5.4" };\n`;
 
 const AUDIT_HOOK_SOURCE = `export default {
   events: {
-    async "turn.completed"() {},
+    async "turn.settled"() {},
     async "session.started"() {},
   },
 };
@@ -55,15 +55,11 @@ describe("authored hooks end-to-end", () => {
     expect(manifest.hooks.map((entry) => entry.slug).sort()).toEqual(["audit", "metrics"]);
 
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
-    const registry = graph.root.hookRegistry;
+    const hooks = Object.fromEntries(
+      graph.root.agent.hooks.map((hook) => [hook.slug, Object.keys(hook.events).sort()]),
+    );
 
-    expect(registry.streamEventsByType.get("turn.completed")?.map((e) => e.slug)).toEqual([
-      "audit",
-    ]);
-    expect(registry.streamEventsByType.get("session.started")?.map((e) => e.slug)).toEqual([
-      "audit",
-    ]);
-    expect(registry.streamEventsWildcard.map((e) => e.slug)).toEqual(["metrics"]);
+    expect(hooks).toEqual({ audit: ["session.started", "turn.settled"], metrics: ["*"] });
   });
 
   it("rejects authored hook filenames that violate the hook charset at compile time", async () => {
@@ -124,12 +120,9 @@ describe("authored hooks end-to-end", () => {
     const subagentNode = graph.nodesByNodeId.get("subagents/researcher");
     if (subagentNode === undefined) throw new Error("expected the researcher node");
 
-    expect(
-      graph.root.hookRegistry.streamEventsByType.get("turn.completed")?.map((e) => e.slug),
-    ).toEqual(["audit"]);
-    expect(subagentNode.hookRegistry.streamEventsByType.size).toBe(0);
-    expect(subagentNode.hookRegistry.streamEventsWildcard.map((e) => e.slug)).toEqual([
-      "subagent-only",
+    expect(graph.root.agent.hooks.map((hook) => hook.slug)).toEqual(["audit"]);
+    expect(subagentNode.agent.hooks.map((hook) => [hook.slug, Object.keys(hook.events)])).toEqual([
+      ["subagent-only", ["*"]],
     ]);
   });
 });

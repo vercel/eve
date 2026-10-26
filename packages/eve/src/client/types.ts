@@ -1,16 +1,16 @@
-import type { UserContent } from "ai";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { MessageContent } from "#shared/message-content.js";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
-export type { HealthResult } from "#client/health-schema.js";
+export type { HealthResult } from "#client/health-types.js";
 
 export type {
   AgentInfoChannelEntry,
@@ -31,7 +31,7 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
-} from "./agent-info-schema.js";
+} from "./agent-info-types.js";
 
 /**
  * Static credential value or per-request credential resolver.
@@ -78,7 +78,7 @@ export interface ClientOptions {
    * Base URL of the eve agent server. Query parameters are included on every
    * request; request-specific parameters override parameters with the same name.
    */
-  readonly host: string;
+  readonly baseUrl: string;
 
   /**
    * Authentication configuration. The client resolves credentials before each
@@ -106,7 +106,7 @@ export interface ClientOptions {
  * Input object for creating a client session. The first message is required.
  */
 export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutput> {
-  readonly message: string | UserContent;
+  readonly message: MessageContent;
 }
 
 /** Request options for creating a conversation session before its first turn. */
@@ -143,7 +143,7 @@ export interface SendTurnOptions<TOutput = unknown> {
    *
    * The client lowers Standard Schema implementations (Zod, Valibot,
    * ArkType, etc.) to JSON Schema before sending the request. The server is
-   * authoritative for validation; {@link MessageResult.data} is typed to this
+   * authoritative for validation; {@link DeliveryResult.data} is typed to this
    * schema's output type and is not revalidated client-side.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, TOutput> | JsonObject;
@@ -167,16 +167,17 @@ export interface SendTurnOptions<TOutput = unknown> {
 }
 
 /** Options for answering pending HITL input requests on a client session. */
-export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
+export type RespondTurnOptions<TOutput = unknown> = Omit<SendTurnOptions<TOutput>, "turnPolicy">;
 
 /** @internal Transport envelope used by stores and command adapters. */
 export type SendTurnPayload<TOutput = unknown> =
   | (SendTurnOptions<TOutput> & {
-      readonly inputResponses?: never;
-      readonly message: string | UserContent;
+      readonly answers?: never;
+      readonly message: MessageContent;
     })
   | (RespondTurnOptions<TOutput> & {
-      readonly inputResponses: readonly InputResponse[];
+      readonly answers: readonly Answer[];
+      readonly turnPolicy?: never;
       readonly message?: never;
     });
 
@@ -194,11 +195,12 @@ export interface StreamReconnectRetryPolicy {
 
 /** Configurable policy used when automatic stream reconnection is enabled. */
 export interface ResolvedStreamReconnectPolicy {
-  /** Retry policy for opening an HTTP stream connection. */
+  /**
+   * Retry policy for opening an HTTP stream connection. Its `maxAttempts` also bounds how many
+   * consecutive transport failures a bounded read (`follow: false`) retries. A read that follows
+   * retries failures for as long as it runs, and stops on what it reads.
+   */
   readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
-
-  /** Retry policy for reconnecting streams that make no progress. */
-  readonly streamIdleReconnectPolicy?: StreamReconnectRetryPolicy;
 
   /** HTTP response statuses that may be retried while opening a stream. */
   readonly retryableErrorStatuses?: readonly number[];
@@ -207,36 +209,7 @@ export interface ResolvedStreamReconnectPolicy {
 /** Automatic stream reconnection configuration. */
 export type StreamReconnectPolicy = ResolvedStreamReconnectPolicy | { readonly reconnect: false };
 
-/**
- * Options for {@link ClientSession.stream}.
- */
-export interface StreamOptions {
-  /**
-   * Reconnection policy for the event stream. Omit to use the default policy,
-   * or pass `{ reconnect: false }` when the caller owns cursor recovery.
-   */
-  readonly streamReconnectPolicy?: StreamReconnectPolicy;
-
-  /**
-   * Absolute event index to start from. Negative values read relative to the
-   * current tail (`-1` starts at the latest event). Relative-tail streams do
-   * not reconnect automatically because their absolute cursor is unknown.
-   */
-  readonly startIndex?: number;
-
-  /**
-   * Follow the live stream after the durable tail (default). Pass `false`
-   * for a bounded catch-up read: yields events until the cursor passes the
-   * tail observed when the stream opened, then returns instead of
-   * following. Requires a nonnegative start cursor.
-   */
-  readonly follow?: boolean;
-
-  /**
-   * Abort signal for cancelling the stream.
-   */
-  readonly signal?: AbortSignal;
-}
+export type { SessionStreamOptions } from "#shared/session.js";
 
 /** Result of requesting cancellation for a client session's active turn. */
 export type CancelSessionResult = CancelTurnResult;
@@ -277,50 +250,7 @@ export type ResetResult =
       readonly status: Extract<ResetStatus, "no_active_session">;
     };
 
-/**
- * Aggregated result of one message turn, returned by
- * {@link MessageResponse.result}.
- */
-export interface MessageResult<TOutput = unknown> {
-  /**
-   * Final structured result emitted by the harness, when this turn requested
-   * an output schema and the server fulfilled it.
-   */
-  readonly data: TOutput | undefined;
-
-  /**
-   * The final completed assistant message text, or `undefined` if no terminal
-   * `message.completed` event was observed.
-   */
-  readonly message: string | undefined;
-
-  /**
-   * All events received during this turn.
-   */
-  readonly events: MessageStreamEvent[];
-
-  /**
-   * HITL input requests emitted in this response and still open at its boundary.
-   * Earlier requests may remain open in the same session.
-   */
-  readonly inputRequests: readonly InputRequest[];
-
-  /**
-   * The session ID for this turn. Always populated; the post-turn handler
-   * rejects responses that do not assign a session id.
-   */
-  readonly sessionId: string;
-
-  /**
-   * How the turn ended.
-   *
-   * - `"completed"`: the session finished (`session.completed`).
-   * - `"waiting"`: the session is parked for the next user message
-   *   (`session.waiting`).
-   * - `"failed"`: the session ended in a terminal failure (`session.failed`).
-   */
-  readonly status: "completed" | "failed" | "waiting";
-}
+export type { Delivery, DeliveryResult } from "#shared/delivery.js";
 
 /**
  * Response from the health endpoint.
@@ -338,7 +268,7 @@ export interface ClientSessionState {
  */
 export interface SessionSnapshot {
   /** Events from the start of the session through the durable tail observed when the read opened. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
 
   /** Session cursor advanced exactly past {@link events}. */
   readonly session: ClientSessionState;

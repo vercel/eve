@@ -1,4 +1,5 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
+import type { Delivery } from "#shared/delivery.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
@@ -7,20 +8,12 @@ import { type ChannelCreateResult, createChannelAddressFn } from "#channel/chann
 export type { ChannelCreateResult } from "#channel/channel-address.js";
 import type { Session } from "#channel/session.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  ResetSessionResult,
   Runtime,
   SessionAuthContext,
-  SessionCallback,
   TurnPolicy,
+  SessionControlOptions,
 } from "#channel/types.js";
-import {
-  type InputResponse,
-  parseInputResponses,
-  type StrictInputResponses,
-} from "#shared/input.js";
+import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
@@ -28,16 +21,14 @@ import { attachInputText, readInputText } from "#internal/input-text.js";
 interface BaseChannelSendOptions {
   /** Stable delivery identity, deduplicated within this session's recent-key window. */
   readonly idempotencyKey?: string;
-  readonly auth: SessionAuthContext | null;
-  readonly callback?: SessionCallback;
-  readonly context?: readonly string[];
   /**
    * Prior conversation added as user and assistant turns before this
    * message and its `context`. Seeds a session this send creates, or
    * extends the history of the session that owns the address.
    */
   readonly history?: readonly SessionHistoryMessage[];
-  readonly initiatorAuth?: SessionAuthContext | null;
+  readonly auth: SessionAuthContext | null;
+  readonly context?: readonly string[];
   /** JSON Schema for a structured final answer, as on `Session.send()`. */
   readonly outputSchema?: JsonObject;
   readonly title?: string;
@@ -45,14 +36,15 @@ interface BaseChannelSendOptions {
 }
 
 /** Options for sending a message from a channel-local continuation address. */
-export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseChannelSendOptions
-  : BaseChannelSendOptions & { readonly state: TState };
+export type ChannelSendOptions<TState = undefined> = BaseChannelSendOptions & {
+  readonly state?: Partial<TState>;
+};
 
 interface BaseChannelRespondOptions<TState = undefined> {
   /** Stable delivery identity, with the same scope and retention as `send()`. */
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
+  readonly outputSchema?: JsonObject;
   readonly context?: readonly string[];
   readonly state?: Partial<TState>;
 }
@@ -60,23 +52,17 @@ interface BaseChannelRespondOptions<TState = undefined> {
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
-interface BaseChannelCreateOptions {
+/** Options for creating a session at a channel-local address without running a turn. */
+export type ChannelCreateOptions<TState = undefined> = {
   readonly auth: SessionAuthContext | null;
   /** Prior conversation the session starts with; it joins history with the first message. */
   readonly history?: readonly SessionHistoryMessage[];
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly title?: string;
-}
-
-/** Options for creating a session at a channel-local address without running a turn. */
-export type ChannelCreateOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseChannelCreateOptions
-  : BaseChannelCreateOptions & { readonly state: TState };
+} & ([TState] extends [undefined] ? unknown : { readonly state: TState });
 
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
-  /** Starts or resumes a turn with a user message. May create a session. */
-  send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /**
    * Creates a session that waits for its first message, without running a
    * turn. When another session owns the address, or claims it concurrently,
@@ -85,19 +71,21 @@ export interface ChannelSource<TState = undefined> {
    * address, then create again.
    */
   create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
+  /** Starts or resumes a turn with a user message. May create a session. */
+  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Delivery>;
   /** Answers pending input requests. Never creates a session. */
-  respond<const TResponses extends readonly InputResponse[]>(
-    inputResponses: StrictInputResponses<TResponses>,
+  respond<const TResponses extends readonly Answer[]>(
+    answers: StrictAnswers<TResponses>,
     options: ChannelRespondOptions<TState>,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
   /** Cooperatively cancels the active turn without creating a session. */
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
+  cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   /** Queues context compaction without creating a session. */
-  compact(): Promise<CompactSessionResult>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
   /** Clears model-message history without creating a session. */
-  clear(): Promise<ClearSessionResult>;
+  clear(options?: SessionControlOptions): Promise<Delivery>;
   /** Retires the current owner without creating a replacement. */
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
 }
 
 /** Binds a raw channel-local continuation address to its current-owner operations. */
@@ -146,15 +134,16 @@ export function createChannelOperations<TState = undefined>(input: {
         async create(options) {
           return await bound.create(options);
         },
-        async respond(inputResponses, options) {
-          if (inputResponses.length === 0) {
-            throw new Error("respond() requires at least one input response.");
+        async respond(answers, options) {
+          if (answers.length === 0) {
+            throw new Error("respond() requires at least one answer.");
           }
-          const validatedInputResponses = parseInputResponses(inputResponses);
+          const validatedAnswers = parseAnswers(answers);
           return await bound.deliver(
             {
               context: options.context,
-              inputResponses: validatedInputResponses,
+              outputSchema: options.outputSchema,
+              answers: validatedAnswers,
               state: options.state,
             },
             options,
@@ -163,11 +152,11 @@ export function createChannelOperations<TState = undefined>(input: {
         async cancel(options) {
           return await bound.cancel(options);
         },
-        async compact() {
-          return await bound.compact();
+        async compact(options) {
+          return await bound.compact(options);
         },
-        async clear() {
-          return await bound.clear();
+        async clear(options) {
+          return await bound.clear(options);
         },
         async reset(options) {
           return await bound.reset(options);

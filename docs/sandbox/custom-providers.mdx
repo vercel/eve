@@ -60,9 +60,9 @@ export const AcmeSandbox = defineSandboxProvider({
           throw new SandboxSessionGoneError(`Acme machine "${state.name}" is gone.`);
         return connect(machine);
       },
-      async onSessionEnd(ctx, state, { abortSignal }) {
+      async onSessionEnd(ctx, state, { signal }) {
         await acme.machines.destroyIfExists(state?.name ?? nameFor(ctx.session.id), {
-          signal: abortSignal,
+          signal,
         });
       },
     };
@@ -71,19 +71,18 @@ export const AcmeSandbox = defineSandboxProvider({
 
 function connect(machine: AcmeMachine): SandboxConnection {
   return {
-    spawn: ({ abortSignal, command, env, workingDirectory }) =>
+    spawn: ({ signal, command, env, workingDirectory }) =>
       machine.exec({
         argv: ["bash", "-lc", command],
         cwd: workingDirectory,
         env,
-        signal: abortSignal,
+        signal,
       }),
     // Acme returns `null` for a missing path and rejects for a directory.
-    readFile: ({ abortSignal, path }) => machine.files.read(path, { signal: abortSignal }),
-    writeFiles: ({ abortSignal, files }) =>
-      machine.files.write(files, { mkdirs: true, signal: abortSignal }),
-    removePath: ({ abortSignal, force, path, recursive }) =>
-      machine.files.remove(path, { force, recursive, signal: abortSignal }),
+    readFile: ({ signal, path }) => machine.files.read(path, { signal }),
+    writeFiles: ({ signal, files }) => machine.files.write(files, { mkdirs: true, signal }),
+    removePath: ({ signal, force, path, recursive }) =>
+      machine.files.remove(path, { force, recursive, signal }),
     stop: () => machine.suspend(),
   };
 }
@@ -111,10 +110,10 @@ export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 
 A `SandboxConnection` is the byte-level link to one sandbox. Each method has a fixed contract:
 
-- `spawn({ command, workingDirectory, env, abortSignal })` runs `command` as a Bash login-shell script (`bash -lc`) in `workingDirectory`, with the sandbox's environment plus `env`. `env` holds only the per-call variables. Aborting kills the process tree. It resolves to a process with `stdout` and `stderr` byte streams, `wait()`, and `kill()`.
-- `readFile({ path, abortSignal })` resolves to the file's bytes or a byte stream, or to `null` only when the path does not exist. A directory or an unreadable path rejects.
-- `writeFiles({ files, abortSignal })` writes every file, creating missing parent directories and overwriting existing files. It is the only write primitive.
-- `removePath({ path, force, recursive, abortSignal })` removes a file or directory. `force` ignores a missing path, and `recursive` removes a non-empty directory.
+- `spawn({ command, workingDirectory, env, signal })` runs `command` as a Bash login-shell script (`bash -lc`) in `workingDirectory`, with the sandbox's environment plus `env`. `env` holds only the per-call variables. Aborting kills the process tree. It resolves to a process with `stdout` and `stderr` byte streams, `wait()`, and `kill()`.
+- `readFile({ path, signal })` resolves to the file's bytes or a byte stream, or to `null` only when the path does not exist. A directory or an unreadable path rejects.
+- `writeFiles({ files, signal })` writes every file, creating missing parent directories and overwriting existing files. It is the only write primitive.
+- `removePath({ path, force, recursive, signal })` removes a file or directory. `force` ignores a missing path, and `recursive` removes a non-empty directory.
 - `stop()` releases compute and keeps the sandbox's files.
 - `close()` is optional. It releases what this process holds for the connection, such as a local interpreter or child processes, without touching the sandbox. eve calls it whenever it lets go of a connection: when the step that opened it ends, after `stop()`, and before deletion. A connection lasts at most one step, so the next step resumes the sandbox through a new connection.
 - `extensions` is optional. It is a plain object whose own properties eve merges onto the session, such as `setNetworkPolicy()`. Use closures rather than class methods, because eve does not copy inherited members.
@@ -175,7 +174,7 @@ Validate the shape of your own state in `resume()`. When you change it incompati
 
 `onSessionEnd()` deletes whatever exists for `ctx.session.id`. `state` is `null` when the session never recorded it, for example when only a subagent that shares the sandbox opened it, or when a step failed before its checkpoint, so find the sandbox from the session id. The method must succeed when nothing exists and must be idempotent, because eve retries the cleanup step. eve logs an exhausted failure without replacing the session's outcome.
 
-`sandbox.delete()` uses the same method with `reason: "deleted"` and the caller's `abortSignal`, so a provider has one deletion path. A subagent that shares its parent's sandbox never calls it, because cleanup belongs to the parent. An `invokeTool` call without a key calls it when the call ends if the tool requested the sandbox.
+`sandbox.delete()` uses the same method with `reason: "deleted"` and the caller's `signal`, so a provider has one deletion path. A subagent that shares its parent's sandbox never calls it, because cleanup belongs to the parent. An `invokeTool` call without a key calls it when the call ends if the tool requested the sandbox.
 
 ## Bake files into templates
 

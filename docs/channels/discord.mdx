@@ -149,7 +149,7 @@ https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applic
 
 - **Credentials.** Vercel Connect authenticates callers with your project's Vercel OIDC token, which other hosts don't have, so give the relay the bot token directly. The agent can keep using Connect.
 - **URL.** The relay can't read `VERCEL_PROJECT_PRODUCTION_URL`, so pass the agent's URL as `url`.
-- **Auth.** The route's default auth accepts only your Vercel project's own runtime. Use a shared secret instead: `basic()` from `eve/agents/auth` signs the relay's requests, and `httpBasic()` on `gateway.auth` checks them.
+- **Auth.** The route's default auth accepts only your Vercel project's own runtime. Use a shared secret instead: `httpBasic()` from `eve/agents/auth` signs the relay's requests, and `httpBasic()` from `eve/channels/auth` on `gateway.auth` checks them.
 
 Generate a long random secret, for example with `openssl rand -hex 32`, and set it as `DISCORD_RELAY_SECRET` on both the agent's Vercel project and the relay's host. On the agent:
 
@@ -172,13 +172,13 @@ export default discordChannel({
 On the relay, set `DISCORD_BOT_TOKEN` to the token from **Bot** → **Reset Token** in the Discord Developer Portal, and `EVE_URL` to the agent's production URL:
 
 ```ts title="relay/main.ts"
-import { basic } from "eve/agents/auth";
+import { httpBasic } from "eve/agents/auth";
 import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";
 
 await experimental_runDiscordGatewayRelay({
   // Reads DISCORD_BOT_TOKEN when `credentials` is omitted.
   url: process.env.EVE_URL,
-  auth: basic({ username: "discord-relay", password: process.env.DISCORD_RELAY_SECRET! }),
+  auth: httpBasic({ username: "discord-relay", password: process.env.DISCORD_RELAY_SECRET! }),
 });
 ```
 
@@ -327,7 +327,7 @@ Scale the production daemon to zero while you do this. Every connection receives
 
 The model-visible `<discord_context>` includes `user_id` and the receiving application's `application_id`.
 
-Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
+Event handlers receive `(event, ctx)`, with Discord platform handles on `ctx.channel.discord`:
 
 ```ts
 import { discordChannel } from "eve/channels/discord";
@@ -342,9 +342,9 @@ export default discordChannel({
     },
   }),
   events: {
-    "message.completed"(eventData, channel, ctx) {
-      if (eventData.finishReason === "tool-calls") return;
-      if (eventData.message) channel.discord.post(eventData.message);
+    "content.completed"(event, ctx) {
+      if (event.data.phase !== "reply" || typeof event.data.value !== "string") return;
+      return ctx.channel.discord.post(event.data.value);
     },
   },
 });
@@ -352,17 +352,17 @@ export default discordChannel({
 
 ### Delivery
 
-The default `message.completed` handler edits the deferred response for the first reply and sends followups after that. If the interaction token is rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
+The default `content.completed` handler edits the deferred response for the first reply part and sends followups after that. If the interaction token is rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
 
-Typing fires on `turn.started` and `actions.requested`, but only when a bot token is present. In custom hooks, call `channel.discord.startTyping()` yourself.
+Typing fires on `turn.started` and `call.requested`, but only when a bot token is present. In custom handlers, call `ctx.channel.discord.startTyping()` yourself.
 
 ### Human-in-the-loop (HITL)
 
 HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes.
 
-A press, select, or modal submission answers as the Discord user who made it, with the same `defaultDiscordAuth` principal a command from them gets by default. Approval response policies compare against that principal. Approvals are requester-only by default, so only the person whose command asked can approve. `onInputResponse(ctx, interaction)` decides the answer's `auth`: return `{ auth }` to accept it, or `null` (or throw) to drop it and keep the request pending. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`; it identifies them but doesn't authorize them by itself.
+A press, select, or modal submission answers as the Discord user who made it, with the same `defaultDiscordAuth` principal a command from them gets by default. Approval response policies compare against that principal. Approvals are requester-only by default, so only the person whose command asked can approve. `onAnswers(ctx, interaction)` decides the answer's `auth`: return `{ auth }` to accept it, or `null` (or throw) to drop it and keep the request pending. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`; it identifies them but doesn't authorize them by itself.
 
-If you customize `onCommand`, eve drops every press and submission until you also set `onInputResponse`, and logs a warning saying so. The default Discord principal wouldn't match the principals your `onCommand` returns, so a requester-only approval would refuse the requester. It would also let someone your `onCommand` turns away answer open approvals. Give both hooks the same mapping and gating:
+If you customize `onCommand`, eve drops every press and submission until you also set `onAnswers`, and logs a warning saying so. The default Discord principal wouldn't match the principals your `onCommand` returns, so a requester-only approval would refuse the requester. It would also let someone your `onCommand` turns away answer open approvals. Give both hooks the same mapping and gating:
 
 ```ts
 import { discordChannel } from "eve/channels/discord";
@@ -378,7 +378,7 @@ const auth = (interaction: { user: { id: string } }) => ({
 
 export default discordChannel({
   onCommand: (_ctx, interaction) => auth(interaction),
-  onInputResponse: (_ctx, interaction) => auth(interaction),
+  onAnswers: (_ctx, interaction) => auth(interaction),
 });
 ```
 

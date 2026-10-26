@@ -10,12 +10,10 @@ import {
   type DiscordComponentInteraction,
   type DiscordModalSubmitInteraction,
 } from "#public/channels/discord/inbound.js";
-import {
-  type InputOption,
-  type InputRequest,
-  parseInputResponse,
-  type ValidatedInputResponse,
-} from "#shared/input.js";
+import { parseAnswer, type ValidatedAnswer } from "#shared/input.js";
+import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
+import { chunk, truncate } from "#public/channels/text.js";
 
 /** Maps Discord component kinds (ACTION_ROW, BUTTON, STRING_SELECT, TEXT_INPUT) to their wire `type` integers used in component payloads. */
 export const DISCORD_COMPONENT_TYPE = {
@@ -52,19 +50,20 @@ interface HitlCustomIdPayload {
  * else a freeform-answer button when freeform is accepted. Empty array when no
  * control applies.
  */
-export function renderInputRequestComponents(
-  request: InputRequest,
+export function renderInteractionComponents(
+  request: Interaction,
 ): readonly Readonly<Record<string, unknown>>[] {
-  const options = request.options;
-  const acceptsFreeform = request.allowFreeform === true || !options || options.length === 0;
+  const options = request.request.options;
+  const acceptsFreeform =
+    request.request.allowFreeform === true || !options || options.length === 0;
 
-  if (options && options.length > 0 && request.display === "select") {
+  if (options && options.length > 0 && request.request.display === "select") {
     return [
       {
         components: [
           {
             custom_id: encodeHitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
-              requestId: request.requestId,
+              requestId: request.interactionId,
             }),
             options: options.slice(0, DISCORD_SELECT_OPTION_LIMIT).map((option) => {
               const result: Record<string, unknown> = {
@@ -94,7 +93,7 @@ export function renderInputRequestComponents(
         components: row.map((option) => ({
           custom_id: encodeHitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
             optionId: option.id,
-            requestId: request.requestId,
+            requestId: request.interactionId,
           }),
           label: truncate(option.label, DISCORD_LABEL_MAX_LENGTH),
           style: toDiscordButtonStyle(option.style),
@@ -111,7 +110,7 @@ export function renderInputRequestComponents(
         components: [
           {
             custom_id: encodeHitlCustomId(DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX, {
-              requestId: request.requestId,
+              requestId: request.interactionId,
             }),
             label: "Type your answer",
             style: 1,
@@ -174,19 +173,19 @@ export function isDiscordFreeformComponent(customId: string): boolean {
  * if the custom id is not an eve HITL id; otherwise one response from the
  * encoded option id (buttons) or the first selected value (selects).
  */
-export function deriveComponentInputResponses(
+export function deriveComponentAnswers(
   interaction: DiscordComponentInteraction,
-): readonly ValidatedInputResponse[] {
+): readonly ValidatedAnswer[] {
   const payload = decodeHitlCustomId(interaction.customId, DISCORD_HITL_CUSTOM_ID_PREFIX);
   if (!payload) return [];
 
   if (payload.optionId !== undefined) {
-    return [parseInputResponse({ optionId: payload.optionId, requestId: payload.requestId })];
+    return [parseAnswer({ interactionId: payload.requestId, optionId: payload.optionId })];
   }
 
   const selected = interaction.values[0];
   if (selected !== undefined) {
-    return [parseInputResponse({ optionId: selected, requestId: payload.requestId })];
+    return [parseAnswer({ interactionId: payload.requestId, optionId: selected })];
   }
 
   return [];
@@ -197,13 +196,13 @@ export function deriveComponentInputResponses(
  * Empty array unless the custom id matches the freeform prefix and the freeform
  * text field is present.
  */
-export function deriveModalInputResponses(
+export function deriveModalAnswers(
   interaction: DiscordModalSubmitInteraction,
-): readonly ValidatedInputResponse[] {
+): readonly ValidatedAnswer[] {
   const payload = decodeHitlCustomId(interaction.customId, DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX);
   const text = interaction.textInputs[DISCORD_HITL_FREEFORM_TEXT_INPUT_ID];
   if (!payload || text === undefined) return [];
-  return [parseInputResponse({ requestId: payload.requestId, text })];
+  return [parseAnswer({ interactionId: payload.requestId, text })];
 }
 
 /**
@@ -235,22 +234,8 @@ function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPaylo
   return typeof optionId === "string" ? { optionId, requestId } : null;
 }
 
-function toDiscordButtonStyle(style: InputOption["style"]): number {
+function toDiscordButtonStyle(style: InteractionOption["style"]): number {
   if (style === "primary") return 1;
   if (style === "danger") return 4;
   return 2;
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
-}
-
-function chunk<T>(values: readonly T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    result.push(values.slice(index, index + size));
-  }
-  return result;
 }

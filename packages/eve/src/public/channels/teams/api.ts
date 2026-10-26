@@ -1,3 +1,5 @@
+import type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
+export type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
 /**
  * Minimal Microsoft Teams Bot Framework Connector REST wrapper.
  *
@@ -33,16 +35,10 @@ export type TeamsAccessTokenResult =
 export type TeamsTokenProvider = () => TeamsAccessTokenResult | Promise<TeamsAccessTokenResult>;
 
 /** Credentials used by the native Teams channel. */
-export interface TeamsCredentials {
-  readonly appId?: TeamsAppId;
-  readonly appPassword?: TeamsAppPassword;
-  readonly tenantId?: TeamsTenantId;
-  readonly tokenProvider?: TeamsTokenProvider;
-}
 
 /** Shared Teams API options. */
 export interface TeamsApiOptions {
-  readonly credentials?: TeamsCredentials;
+  readonly credentials?: TeamsChannelCredentials;
   /** Fetch override for tests or non-standard runtimes. */
   readonly fetch?: TeamsFetch;
   /**

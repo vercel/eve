@@ -24,6 +24,22 @@ export function normalizeSerializableError(error: unknown): unknown {
 }
 
 /**
+ * What a step that failed every attempt threw. The workflow reports exhaustion as a
+ * `FatalError` naming the step and its retries, with the last attempt's error as its cause.
+ */
+export function exhaustedStepError(error: unknown): unknown {
+  return isRecord(error) &&
+    error.name === "FatalError" &&
+    typeof error.message === "string" &&
+    /^Step ".+" (?:failed after \d+ retr(?:y|ies):|exceeded max retries \(\d+ retr(?:y|ies)\))/.test(
+      error.message,
+    ) &&
+    error.cause !== undefined
+    ? error.cause
+    : error;
+}
+
+/**
  * Rebuilds an {@link Error} from the normalized hook payload sent by a
  * child workflow.
  */

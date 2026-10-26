@@ -1,3 +1,4 @@
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
 
@@ -5,11 +6,7 @@ import { assertGitRef, assertRepositoryPart } from "../identifiers.js";
 
 /** Principal and channel that requested a deployed source modification. */
 export interface SelfModificationAuthorizationContext {
-  readonly channel: {
-    /** Channel adapter family, such as `"slack"` or `"http"`. */
-    readonly kind?: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: InstrumentationChannel;
   readonly principal: SessionAuthContext | null;
 }
 
@@ -35,7 +32,7 @@ export interface GitHubCredentialProvider {
   resolve(request: GitHubCredentialRequest): Promise<string>;
 }
 
-/** Values accepted by the `eve/self-modification/remote` extension mount. */
+/** Values accepted by the `eve/extensions/self-modification/remote` extension mount. */
 export interface DeployedSelfModificationConfig {
   readonly source: {
     readonly git: {

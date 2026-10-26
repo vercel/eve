@@ -1,48 +1,25 @@
 import type { Session } from "#channel/session.js";
-import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
+import { signInOf, type SignIn } from "#channel/sign-in.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { openSignIns } from "#protocol/session-projection/reader.js";
 
-type AuthorizationRequired = AuthorizationRequiredStreamEvent["data"];
-
-/**
- * How many recent events a lookup reads. A pending sign-in holds its turn, so
- * it sits near the tail; reading a bounded window keeps a press in a
- * long-lived thread from replaying the whole session.
- */
+// A pending sign-in holds its turn near the tail. Bound button lookups in long-lived threads,
+// as on main; the lookup needs only sign-in rows, not a complete conversation projection.
 const PENDING_AUTHORIZATION_WINDOW = 500;
 
-/**
- * The newest sign-in that `matches` and hasn't completed yet, from the
- * session's recent events. Attempts are keyed by connection name and
- * `attemptId`, so one attempt completing never hides another still pending.
- */
+/** The latest matching sign-in still open in the recent durable stream. */
 export async function findPendingAuthorization(
-  session: Pick<Session, "getEventStream">,
-  matches: (event: AuthorizationRequired) => boolean,
-): Promise<AuthorizationRequired | undefined> {
-  const pending = new Map<string, AuthorizationRequired>();
-  const reader = (
-    await session.getEventStream({ follow: false, startIndex: -PENDING_AUTHORIZATION_WINDOW })
-  ).getReader();
-  try {
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      const event = next.value;
-      if (event.type === "authorization.required" && matches(event.data)) {
-        const key = attemptKey(event.data);
-        pending.delete(key);
-        pending.set(key, event.data);
-      } else if (event.type === "authorization.completed") {
-        pending.delete(attemptKey(event.data));
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
+  session: Pick<Session, "stream">,
+  matches: (signIn: SignIn) => boolean,
+): Promise<SignIn | undefined> {
+  const view = emptySessionView();
+  for await (const event of session.stream({
+    follow: false,
+    startIndex: -PENDING_AUTHORIZATION_WINDOW,
+  })) {
+    foldReceivedEvent(view, event);
   }
-  return [...pending.values()].at(-1);
-}
-
-/** Identifies one sign-in attempt: a connection name and its `attemptId`. */
-export function attemptKey(event: { readonly attemptId?: string; readonly name: string }): string {
-  return JSON.stringify([event.name, event.attemptId ?? null]);
+  return openSignIns(view)
+    .map((row) => signInOf(view, row.interactionId)!)
+    .findLast(matches);
 }

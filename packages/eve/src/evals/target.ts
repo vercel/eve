@@ -114,41 +114,12 @@ function createHandle(input: {
     kind: input.kind,
     url: input.url,
 
-    async attachSession(
-      sessionId: string,
-      opts?: { readonly startIndex?: number },
-    ): Promise<EveEvalSession> {
-      if (input.sessions !== undefined) {
-        return await input.sessions.attachSession(sessionId, opts);
-      }
-
-      if (base !== undefined) {
-        return await base.attachSession(sessionId, opts);
-      }
-
-      if (client === undefined) {
+    attach(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalSession {
+      if (input.sessions !== undefined) return input.sessions.attach(sessionId, opts);
+      if (base !== undefined) return base.attach(sessionId, opts);
+      if (client === undefined)
         throw new Error("Eval target cannot attach sessions without a client.");
-      }
-
-      const sessions = new EvalSessionManager({ client });
-      return await sessions.attachSession(sessionId, opts);
-    },
-
-    watchTurn(sessionId: string, opts?: { readonly startIndex?: number }) {
-      if (input.sessions !== undefined) {
-        return input.sessions.watchTurn(sessionId, opts);
-      }
-
-      if (base !== undefined) {
-        return base.watchTurn(sessionId, opts);
-      }
-
-      if (client === undefined) {
-        throw new Error("Eval target cannot watch sessions without a client.");
-      }
-
-      const sessions = new EvalSessionManager({ client });
-      return sessions.watchTurn(sessionId, opts);
+      return new EvalSessionManager({ client }).attach(sessionId, opts);
     },
 
     async dispatchSchedule(scheduleId: string): Promise<EveEvalScheduleDispatchResult> {

@@ -168,20 +168,26 @@ describe("createWorkflowRuntime command dispatch", () => {
       subagentName: "research",
     };
 
-    await expect(
-      buildRuntime().dispatchContinuation({
-        command: {
-          auth: null,
-          caller,
-          kind: "send",
-          payload: { message: "hello" },
-          requestId: "req_deliver",
-        },
-        continuationToken: "test:token",
-      }),
-    ).resolves.toEqual({ sessionId: "owner-run", status: "accepted" });
+    const result = await buildRuntime().dispatchContinuation({
+      command: {
+        auth: null,
+        caller,
+        kind: "send",
+        payload: { message: "hello" },
+        requestId: "req_deliver",
+      },
+      continuationToken: "test:token",
+    });
+    expect(result).toEqual({
+      sessionId: "owner-run",
+      status: "accepted",
+      deliveryId: expect.any(String),
+    });
 
     expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken("test:token"), {
+      delivery: expect.objectContaining({
+        deliveryId: result.status === "accepted" ? result.deliveryId : undefined,
+      }),
       auth: null,
       caller,
       kind: "send",
@@ -214,16 +220,14 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       buildRuntime().dispatchSession({
-        command: { kind: "clear" },
+        command: { deliveryId: "clear-delivery", kind: "clear" },
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
       sessionInboxHookToken(sessionCommandHookToken("session-1")),
-      {
-        kind: "clear",
-      },
+      { deliveryId: "clear-delivery", kind: "clear" },
     );
   });
 
@@ -253,16 +257,22 @@ describe("createWorkflowRuntime command dispatch", () => {
   it("preserves the delivery payload through the stable session inbox", async () => {
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
 
-    await expect(
-      buildRuntime().dispatchSession({
-        command: { kind: "send", payload: { message: "hello" } },
-        sessionId: "session-1",
-      }),
-    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+    const result = await buildRuntime().dispatchSession({
+      command: { kind: "send", payload: { message: "hello" } },
+      sessionId: "session-1",
+    });
+    expect(result).toEqual({
+      sessionId: "session-1",
+      status: "accepted",
+      deliveryId: expect.any(String),
+    });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
       sessionInboxHookToken(sessionCommandHookToken("session-1")),
       {
+        delivery: expect.objectContaining({
+          deliveryId: result.status === "accepted" ? result.deliveryId : undefined,
+        }),
         kind: "send",
         payload: { message: "hello" },
       },
@@ -289,9 +299,18 @@ describe("createWorkflowRuntime command dispatch", () => {
 
   it.each([
     { command: { kind: "send" as const, payload: {} }, status: "session_not_active" },
-    { command: { kind: "compact" as const }, status: "no_active_session" },
-    { command: { kind: "clear" as const }, status: "no_active_session" },
-    { command: { kind: "reset" as const }, status: "no_active_session" },
+    {
+      command: { kind: "compact" as const, deliveryId: "compact-delivery" },
+      status: "no_active_session",
+    },
+    {
+      command: { kind: "clear" as const, deliveryId: "clear-delivery" },
+      status: "no_active_session",
+    },
+    {
+      command: { kind: "reset" as const, deliveryId: "reset-delivery" },
+      status: "no_active_session",
+    },
   ])("maps a missing $command.kind target to $status", async ({ command, status }) => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
@@ -313,7 +332,7 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       runtime.dispatchContinuation({
-        command: { kind: "compact" },
+        command: { deliveryId: "compact-delivery", kind: "compact" },
         continuationToken: NOT_FOUND_TOKEN,
       }),
     ).rejects.toBe(failure);
@@ -327,16 +346,13 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       buildRuntime().dispatchSession({
-        command: { kind: "cancel", turnId: "turn-2" },
+        command: { deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-2" },
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
     expect(resumeHookMock).toHaveBeenCalledWith(
       sessionInboxHookToken(sessionCommandHookToken("session-1")),
-      {
-        kind: "cancel",
-        turnId: "turn-2",
-      },
+      { deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-2" },
     );
   });
 
@@ -354,7 +370,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       resumeHookMock.mockRejectedValue(error);
       await expect(
         buildRuntime().dispatchSession({
-          command: { kind: "cancel" },
+          command: { deliveryId: "cancel-delivery", kind: "cancel" },
           sessionId: "session-1",
         }),
       ).resolves.toEqual({ status: "no_active_turn" });
@@ -368,7 +384,7 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       buildRuntime().dispatchSession({
-        command: { kind: "cancel" },
+        command: { deliveryId: "cancel-delivery", kind: "cancel" },
         sessionId: "session-1",
       }),
     ).rejects.toBe(failure);
@@ -388,11 +404,12 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       buildRuntime().dispatchContinuation({
-        command: { kind: "reset", reason: "User requested /new" },
+        command: { deliveryId: "reset-delivery", kind: "reset", reason: "User requested /new" },
         continuationToken: "eve:token",
       }),
     ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
     expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken("eve:token"), {
+      deliveryId: "reset-delivery",
       kind: "reset",
       reason: "User requested /new",
     });
@@ -886,7 +903,9 @@ describe("createWorkflowRuntime#createSession", () => {
       resolvedAgent: { config: {} },
       turnAgent: createTestTurnAgent(),
     } as never);
-    const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
+    const bytes = new TextEncoder().encode(
+      `${JSON.stringify({ at: "2026-09-02T00:00:00.000Z", facts: [{ data: {}, type: "session.started" }] })}\n`,
+    );
     const getReadable = vi.fn(
       () =>
         new ReadableStream<Uint8Array>({
@@ -913,51 +932,12 @@ describe("createWorkflowRuntime#createSession", () => {
     const event = await reader.read();
     reader.releaseLock();
 
-    expect(event.value).toEqual({ type: "test.event" });
+    expect(event.value).toMatchObject({
+      meta: { position: { index: 0, line: 0 } },
+      type: "session.started",
+    });
     expect(getRunMock).toHaveBeenCalledWith("owner-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
-  });
-
-  it("normalizes persisted v24 appends before exposing a current event stream", async () => {
-    const legacy = {
-      data: {
-        messageDelta: "lo",
-        messageSoFar: "Hello",
-        sequence: 2,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt-v24" },
-      type: "message.appended",
-    };
-    const bytes = new TextEncoder().encode(`${JSON.stringify(legacy)}\n`);
-    getRunMock.mockReturnValue({
-      getReadable: () =>
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(bytes);
-            controller.close();
-          },
-        }),
-    });
-
-    const stream = await buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream(
-      "owner-run",
-    );
-
-    await expect(stream.getReader().read()).resolves.toEqual({
-      done: false,
-      value: {
-        data: {
-          messageDelta: "lo",
-          sequence: 2,
-          stepIndex: 0,
-          turnId: "turn-1",
-        },
-        meta: legacy.meta,
-        type: "message.appended",
-      },
-    });
   });
 
   it("rejects a following read of an unknown session before opening its stream", async () => {

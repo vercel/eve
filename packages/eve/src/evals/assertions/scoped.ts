@@ -32,16 +32,16 @@ export function createScopedAssertions(
 
   return {
     succeeded: () => record(RunAssertions.succeeded()),
-    parked: () => record(RunAssertions.parked()),
+    awaitingInput: () => record(RunAssertions.awaitingInput()),
     messageIncludes: (token) => record(RunAssertions.messageIncludes(token)),
     calledTool: (name, options) => record(RunAssertions.calledTool(toolName(name), options)),
-    loadedSkill: (skill, options) => record(RunAssertions.loadedSkill(skill, options)),
+    calledSkill: (skill, options) => record(RunAssertions.calledSkill(skill, options)),
     notCalledTool: (name) => record(RunAssertions.notCalledTool(toolName(name))),
     toolOrder: (names) => record(RunAssertions.toolOrder(names.map(toolName))),
     usedNoTools: () => record(RunAssertions.usedNoTools()),
     maxToolCalls: (max) => record(RunAssertions.maxToolCalls(max)),
-    calledSubagent: (name, options) => record(RunAssertions.calledSubagent(name, options)),
-    noFailedActions: () => record(RunAssertions.noFailedActions()),
+    calledAgent: (name, options) => record(RunAssertions.calledAgent(name, options)),
+    noFailedCalls: () => record(RunAssertions.noFailedCalls()),
     event: (type, options) =>
       record(RunAssertions.typedEvent({ ...options, type } as EveEvalEventMatch)),
     notEvent: (type, options) =>

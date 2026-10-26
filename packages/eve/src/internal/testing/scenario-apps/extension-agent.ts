@@ -33,12 +33,12 @@ exports.default = defineSandbox(async () => {
 `,
     "agent/schedules/nightly.cts": `export default {
   cron: "0 0 * * *",
-  markdown: "Run the nightly extension fixture schedule.",
+  content: "Run the nightly extension fixture schedule.",
 };
 `,
     "agent/skills/handoff.mts": `export default {
   description: "Hand off the task to the next specialist.",
-  markdown: "Use this skill when routing tasks across specialized agents.",
+  content: "Use this skill when routing tasks across specialized agents.",
 };
 `,
     "agent/instructions.md": `You are an extension fixture agent.

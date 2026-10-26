@@ -1,12 +1,12 @@
-# eve/computer-use
+# eve/extensions/computer-use
 
-`eve/computer-use` is an eve extension for computer use. It contributes the `computer_use` tool, which drives a Linux desktop inside the sandbox, plus the helpers that install and start that desktop.
+`eve/extensions/computer-use` is an eve extension for computer use. It contributes the `computer_use` tool, which drives a Linux desktop inside the sandbox, plus the helpers that install and start that desktop.
 
 It ships inside the `eve` package. This private `@eve/computer-use` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/computer-use/extension` and publishes it with these entry points:
 
-- `eve/computer-use`: the extension
-- `eve/computer-use/sandbox`: `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY`
-- `eve/computer-use/tools`: `computer_use`
+- `eve/extensions/computer-use`: the extension
+- `eve/extensions/computer-use/sandbox`: `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY`
+- `eve/extensions/computer-use/tools`: `computer_use`
 
 ## Mount
 
@@ -14,7 +14,7 @@ The extension has no config:
 
 ```ts
 // agent/extensions/computer-use.ts
-export { default } from "eve/computer-use";
+export { default } from "eve/extensions/computer-use";
 ```
 
 Mount it only for agents whose sandbox runs the desktop. The tool schema is large, so agents that never use a desktop should leave it out.
@@ -27,7 +27,7 @@ Install the desktop and driver in the environment's `prepare` callback, then sta
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import { installComputerUse, startComputerUse } from "eve/computer-use/sandbox";
+import { installComputerUse, startComputerUse } from "eve/extensions/computer-use/sandbox";
 
 export const environment = VercelSandbox.environment({
   prepare: async (sandbox) => {

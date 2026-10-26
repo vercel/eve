@@ -26,7 +26,7 @@ import {
   type SlackFileUpload,
   type SlackMessageOptions,
 } from "#compiled/@chat-adapter/slack/api.js";
-import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat/index.js";
+import { isCardElement, type CardElement, type FileUpload } from "#public/channels/slack/cards.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
@@ -59,7 +59,13 @@ export type SlackBotToken = string | ((context: SlackBotTokenContext) => string 
  * may be empty for threadless sessions; the channel auto-anchors on its
  * first post.
  */
-export function slackContinuationToken(channelId: string, threadTs: string): string {
+export function slackContinuationToken({
+  channelId,
+  threadTs,
+}: {
+  readonly channelId: string;
+  readonly threadTs: string;
+}): string {
   return `${channelId}:${threadTs}`;
 }
 

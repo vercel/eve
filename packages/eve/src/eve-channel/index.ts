@@ -1,11 +1,12 @@
 import { InvalidToolStubTargetError } from "#tool-stubs/validate-targets.js";
 import { readStubFailure, readMatchedStubRules } from "#execution/tool-stubs/steps.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
+import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
+import { descendantStreamResponse } from "#eve-channel/descendant-stream.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
-import type { Session } from "#channel/session.js";
+import type { SessionAuthContext, SessionParent, SessionTraceSeed } from "#channel/types.js";
+import { internalSession, type Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
@@ -19,8 +20,7 @@ import {
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
-import { EVE_SESSION_ID_HEADER, EVE_STREAM_CONTROL_VERSION_QUERY } from "#protocol/message.js";
-import { legacyTaskInputRoute } from "#execution/legacy-remote-agent/protocol.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
@@ -33,15 +33,12 @@ import {
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
+  EVE_DESCENDANT_STREAM_ROUTE_PATTERN,
   EVE_SESSION_STUBS_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
-import type { ClearResponse } from "#protocol/clear-session.js";
-import type { CompactResponse } from "#protocol/compact-session.js";
-import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent, readAgentDispatchTraceContext } from "#protocol/traceparent.js";
 import {
   readForwardedAudienceBaggage,
@@ -69,22 +66,27 @@ import {
   parseSessionControlBody,
   parseSessionMessageBody,
   parseStartIndex,
-  rejectSessionContinuationToken,
   requireSessionId,
 } from "#eve-channel/request.js";
-import { attachClientContext } from "#internal/client-context.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
+import { attachClientContext } from "#internal/client-context.js";
+import { deliveryIdForIdempotencyKey } from "#channel/delivery-idempotency.js";
+import {
+  REMOTE_AGENT_PROTOCOL_MISMATCH,
+  REMOTE_AGENT_PROTOCOL_VERSION,
+  formatEarlierRemoteChildStreamError,
+} from "#protocol/remote-agent-protocol.js";
 import type { ParsedCreateBody } from "#eve-channel/create-request.js";
 import {
   findRemoteAgentBinding,
   healthResponse,
   type RemoteAgentBinding,
-  normalizeEveCors,
   resolveOnMessage,
+  sessionCommandErrorResponse,
+  deliveryResponse,
   resolveTurnClientContext,
-  strandedSessionResponse,
 } from "#eve-channel/support.js";
-import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
+import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
 
 export * from "#eve-channel/types.js";
 
@@ -95,27 +97,31 @@ const log = createLogger("eve.channel");
  * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session,
  * ID-addressed POST routes deliver follow-ups and controls, and GET streams a
  * session's NDJSON event feed). Every route
- * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
+ * runs {@link EveChannelConfig.auth} via {@link routeAuth} before dispatching.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
 /** A delegating caller checks that this deployment serves its remote agent protocol. */
-function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
+function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryId?: string) {
   const created: {
     ok: true;
     protocolVersion?: number;
+    status?: "accepted";
     sessionId: string;
-    status: "accepted";
-  } = { ok: true, sessionId, status: "accepted" };
+    deliveryId?: string;
+  } = { ok: true, sessionId };
+  if (deliveryId !== undefined) created.deliveryId = deliveryId;
+  // Supported delegated protocols still require this wire acknowledgement.
+  if (body.callback !== undefined) created.status = "accepted";
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
 }
 
-export function eveChannel(input: EveChannelInput): EveChannel {
+export function eveChannel(input: EveChannelConfig): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
   return defineChannel<undefined, EveEventContext>({
-    cors: normalizeEveCors(input.cors),
+    cors: input.cors,
     turnPolicy: input.turnPolicy,
     audience: (classifierInput) => {
       const audience = input.audience ?? defaultEveAudience;
@@ -151,7 +157,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
-      POST(legacyTaskInputRoute.path, legacyTaskInputRoute.handler),
       GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
@@ -171,9 +176,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { status: 403 },
           );
         }
-        const tokenRejection = rejectSessionContinuationToken(payload);
-        if (tokenRejection !== null) return tokenRejection;
-
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
           forwarder: auth,
@@ -183,12 +185,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        if (body.callback !== undefined && body.legacyRemoteAgentCaller !== undefined) {
-          log.info("serving a remote agent protocol 1 caller", {
-            callerOrigin: new URL(body.callback.url).origin,
-            forwarder: authResult.principalId,
-          });
-        }
         const forwardedParentSession =
           body.callback === undefined
             ? "absent"
@@ -255,10 +251,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 auth: forwarded.auth,
                 operationId: body.operationId,
               });
+        const initialDeliveryId =
+          operationToken === undefined ? undefined : `delivery:${operationToken}`;
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            return Response.json(createdSessionBody(owner.id, body), {
+            return Response.json(createdSessionBody(owner.id, body, initialDeliveryId), {
               headers: {
                 "cache-control": "no-store",
                 [EVE_SESSION_ID_HEADER]: owner.id,
@@ -283,7 +281,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : forwardedTraceAssertion === "malformed"
               ? FAIL_CLOSED_FORWARDED_TRACE_ASSERTION
               : undefined;
-        let parentTraceContext: SessionTraceContext | undefined = parsedParentTraceContext;
+        let parentTraceContext: SessionTraceSeed | undefined = parsedParentTraceContext;
         if (acceptedForwardedTracePolicy !== undefined && parsedParentTraceContext !== undefined) {
           parentTraceContext = {
             ...parsedParentTraceContext,
@@ -334,6 +332,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
+        // A caller on an earlier remote agent protocol gets its result but can't answer for the
+        // session, which can't relay its requests in a shape that caller reads.
+        const earlierCallerProtocol =
+          body.protocolVersion === undefined ||
+          body.protocolVersion === REMOTE_AGENT_PROTOCOL_VERSION
+            ? undefined
+            : body.protocolVersion;
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await agentDelegation.receive(
@@ -347,6 +352,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             },
             ({ conversationId, parentTraceContext: inheritedTrace }) => {
               return createSession({
+                deliveryId: initialDeliveryId,
                 audienceAuth: auth,
                 toolStubs:
                   body.stubs === undefined
@@ -356,9 +362,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                         token: crypto.randomUUID(),
                       },
                 auth: messageResult.auth,
-                capabilities: body.capabilities ?? { requestInput: true },
+                capabilities:
+                  earlierCallerProtocol === undefined
+                    ? (body.capabilities ?? { requestInput: true })
+                    : { requestInput: false },
                 callback: body.callback,
-                legacyRemoteAgentCaller: body.legacyRemoteAgentCaller,
+                earlierCallerProtocol,
                 continuationToken: operationToken,
                 initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
                 input: attachClientContext(
@@ -393,13 +402,16 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(createdSessionBody(handle.sessionId, body), {
-          headers: {
-            "cache-control": "no-store",
-            [EVE_SESSION_ID_HEADER]: handle.sessionId,
+        return Response.json(
+          createdSessionBody(handle.sessionId, body, initialDeliveryId ?? handle.deliveryId),
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: handle.sessionId,
+            },
+            status: 202,
           },
-          status: 202,
-        });
+        );
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -474,15 +486,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
               title,
+              // A repeat of the same request is the same delivery, with the same receipt.
+              ...(body.idempotencyKey !== undefined && {
+                deliveryId: await deliveryIdForIdempotencyKey(body.idempotencyKey),
+                idempotencyKey: body.idempotencyKey,
+              }),
             },
             clientContext,
           );
           result =
-            body.inputResponses === undefined
+            body.answers === undefined
               ? await session.send(body.message!, options)
-              : await session.respond(body.inputResponses, options);
+              : await session.respond(body.answers, options);
         } catch (error) {
-          const stranded = strandedSessionResponse(error);
+          const stranded = sessionCommandErrorResponse(error);
           if (stranded !== undefined) return stranded;
           const errorId = logError(log, "session-message request failed", error, { sessionId });
           return Response.json(
@@ -490,35 +507,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { status: 500 },
           );
         }
-        if (result.status !== "accepted") {
-          return Response.json(
-            {
-              code: result.retryable ? "session_not_ready" : "session_not_active",
-              error:
-                result.retryable === true
-                  ? "The session is not ready to accept messages yet."
-                  : "The session is no longer active.",
-              ok: false,
-            },
-            { headers: { "cache-control": "no-store" }, status: 409 },
-          );
-        }
-
-        return Response.json(
-          {
-            ok: true,
-            sessionId: result.sessionId,
-            status: "accepted",
-            deliveryId: result.deliveryId,
-          },
-          {
-            headers: {
-              "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: result.sessionId,
-            },
-            status: 202,
-          },
-        );
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_CANCEL_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -530,27 +519,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({ turnId: body.turnId });
+          result = await attachSession(sessionId).cancel({
+            auth: sessionAuthFromResult(authResult),
+            turnId: body.turnId,
+          });
         } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to cancel the turn.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies CancelTurnResponse)
-            : ({ ok: true, status: "no_active_turn" } satisfies CancelTurnResponse),
-          {
-            headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
-          },
-        );
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -562,27 +544,19 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["compact"]>>;
         try {
-          result = await attachSession(sessionId).compact();
+          result = await attachSession(sessionId).compact({
+            auth: sessionAuthFromResult(authResult),
+          });
         } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
           const errorId = logError(log, "session-compaction request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to compact the session.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies CompactResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies CompactResponse),
-          {
-            headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
-          },
-        );
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -594,9 +568,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["clear"]>>;
         try {
-          result = await attachSession(sessionId).clear();
+          result = await attachSession(sessionId).clear({
+            auth: sessionAuthFromResult(authResult),
+          });
         } catch (error) {
-          const stranded = strandedSessionResponse(error);
+          const stranded = sessionCommandErrorResponse(error);
           if (stranded !== undefined) return stranded;
           const errorId = logError(log, "session-clear request failed", error, { sessionId });
           return Response.json(
@@ -604,10 +580,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { status: 500 },
           );
         }
-        return Response.json({ ok: true, ...result } satisfies ClearResponse, {
-          headers: { "cache-control": "no-store" },
-          status: result.status === "accepted" ? 202 : 200,
-        });
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -619,24 +592,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["reset"]>>;
         try {
-          result = await attachSession(sessionId).reset({ reason: body.reason });
+          result = await attachSession(sessionId).reset({
+            auth: sessionAuthFromResult(authResult),
+            reason: body.reason,
+          });
         } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
           const errorId = logError(log, "session-reset request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to reset the session.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "reset"
-            ? ({
-                ok: true,
-                previousSessionId: result.previousSessionId,
-                status: "reset",
-              } satisfies ResetResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies ResetResponse),
-          { headers: { "cache-control": "no-store" } },
-        );
+        return deliveryResponse(result);
       }),
 
       GET(EVE_SESSION_STUBS_ROUTE_PATTERN, async (req, { params }) => {
@@ -680,6 +649,19 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         return await createSessionStreamResponse(req, attachSession(sessionId));
       }),
 
+      GET(EVE_DESCENDANT_STREAM_ROUTE_PATTERN, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(args.params);
+        if (sessionId instanceof Response) return sessionId;
+        return descendantStreamResponse({
+          request: req,
+          root: args.attachSession(sessionId),
+          attachSession: args.attachSession,
+          resolveHeaders: readRemoteAgentStreamHeadersResolver(args),
+        });
+      }),
+
       GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
@@ -710,7 +692,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             callId,
             childSessionId,
             childStreamPath,
-            parent,
+            parent: internalSession(parent),
           });
           if (found === undefined) {
             throw new Error("Remote subagent binding not found.");
@@ -718,6 +700,19 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           binding = found;
         } catch {
           return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
+        }
+        if (binding.earlierProtocol !== undefined) {
+          return Response.json(
+            {
+              code: REMOTE_AGENT_PROTOCOL_MISMATCH,
+              error: formatEarlierRemoteChildStreamError({
+                childVersion: binding.earlierProtocol,
+                name: binding.name,
+              }),
+              ok: false,
+            },
+            { status: 409 },
+          );
         }
 
         const resolveHeaders = readRemoteAgentStreamHeadersResolver(args);
@@ -745,10 +740,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (startIndex !== undefined) {
           upstreamUrl.searchParams.set("startIndex", String(startIndex));
         }
-        const controlVersion = new URL(req.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY);
-        if (controlVersion !== null) {
-          upstreamUrl.searchParams.set(EVE_STREAM_CONTROL_VERSION_QUERY, controlVersion);
-        }
         if (includeTailIndex) {
           upstreamUrl.searchParams.set("includeTailIndex", "1");
         }
@@ -759,12 +750,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           redirect: "manual",
           signal: req.signal,
         });
-        const responseHeaders = proxyStreamHeaders(upstream.headers);
-        return new Response(upstream.body, {
-          headers: responseHeaders,
-          status: upstream.status,
-          statusText: upstream.statusText,
-        });
+        return proxyStreamResponse(upstream);
       }),
     ],
     events: input.events,

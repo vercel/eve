@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -11,17 +12,13 @@ import {
   sessionIdempotencyKey,
   toolCallIdempotencyKey,
   turnIdempotencyKey,
-  type InstrumentationAttemptScope,
+  type InstrumentationScope,
   type InstrumentationEvent,
   type InstrumentationModelCallStartedEvent,
   type InstrumentationProviderDefinition,
-  type InstrumentationToolCallCompletedEvent,
+  type InstrumentationCallSettledEvent,
 } from "#instrumentation/lifecycle.js";
-import {
-  findInstrumentationActionScopeForCall,
-  instrumentationStateSlot,
-  rememberInstrumentationActionScope,
-} from "#instrumentation/state.js";
+import { instrumentationStateSlot } from "#instrumentation/state.js";
 
 const { logDebug, logWarn } = vi.hoisted(() => ({ logDebug: vi.fn(), logWarn: vi.fn() }));
 
@@ -47,13 +44,15 @@ function createInstrumentationHooks(
   return createUnboundInstrumentationHooks(...args).forTrace!(traceContext());
 }
 
-const scope: InstrumentationAttemptScope = {
-  attemptId: "session-1:turn-1:0:0",
-  attemptIndex: 0,
-  sessionId: "session-1",
-  stepIndex: 0,
-  turnId: "turn-1",
-};
+const scope: InstrumentationScope = instrumentationScope(
+  {
+    runId: "run_0",
+    attempt: 0,
+    sessionId: "session-1",
+    turnId: "turn-1",
+  },
+  0,
+);
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   let resolve!: () => void;
@@ -84,12 +83,12 @@ describe("instrumentation idempotency keys", () => {
   });
 
   it("derives model identity without an AI SDK call ID", () => {
-    expect(modelCallIdempotencyKey(scope, 2, 0)).toBe("model:session-1:turn-1:0:0:2:0");
+    expect(modelCallIdempotencyKey(scope, 2, 0)).toBe("model:session-1:run_0:0:2:0");
     expect(modelCallIdempotencyKey(scope, 2, 0)).not.toBe(modelCallIdempotencyKey(scope, 2, 1));
   });
 
   it("separates model attempts and SDK tool calls", () => {
-    const retry = { ...scope, attemptId: "session-1:turn-1:0:1", attemptIndex: 1 };
+    const retry = { ...scope, attempt: 1 };
     expect(attemptIdempotencyKey(scope)).not.toBe(attemptIdempotencyKey(retry));
     expect(modelCallIdempotencyKey(scope, 0, 0)).not.toBe(
       toolCallIdempotencyKey(scope, "call-1", 0),
@@ -110,7 +109,8 @@ describe("provider state lifecycle", () => {
     idempotencyKey: started.idempotencyKey,
     sessionId: "session-1",
     turnId: "turn-1",
-    type: "turn.completed" as const,
+    outcome: "completed" as const,
+    type: "turn.settled" as const,
   };
 
   it("carries a value from a start to its terminal and releases it", async () => {
@@ -118,7 +118,7 @@ describe("provider state lifecycle", () => {
     const hooks = createInstrumentationHooks([
       {
         events: {
-          "turn.completed": (_event, ctx) => {
+          "turn.settled": (_event, ctx) => {
             observed = ctx.state.get();
           },
           "turn.started": (_event, ctx) => ctx.state.set({ rowId: "row-1" }),
@@ -163,24 +163,25 @@ describe("provider state lifecycle", () => {
     const context = new ContextContainer();
     const starts = createInstrumentationHooks([
       {
-        events: { "input.requested": (_event, ctx) => ctx.state.set({ rowId: "input-1" }) },
+        events: { "interaction.opened": (_event, ctx) => ctx.state.set({ rowId: "input-1" }) },
         name: "sink",
       },
     ]);
     await contextStorage.run(context, async () => {
       await starts.publish({
-        action: { callId: "call-1", name: "weather" },
+        call: { callId: "call-1", name: "weather" },
         idempotencyKey: key,
-        kind: "tool-approval",
+        kind: "approval",
         request: { prompt: "Approve weather?" },
-        requestId: "request-1",
+        interactionId: "request-1",
         scope,
-        type: "input.requested",
+        type: "interaction.opened",
       });
       await starts.publish({
+        outcome: "completed",
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
-        type: "step.attempt.completed",
+        type: "model.settled",
       });
     });
 
@@ -188,19 +189,19 @@ describe("provider state lifecycle", () => {
     const restored = await deserializeContext(await serializeContext(context));
     const terminals = createInstrumentationHooks([
       {
-        events: { "input.resolved": (_event, ctx) => void observed.push(ctx.state.get()) },
+        events: { "interaction.settled": (_event, ctx) => void observed.push(ctx.state.get()) },
         name: "sink",
       },
     ]);
     await contextStorage.run(restored, async () => {
       await terminals.publish({
         idempotencyKey: key,
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
-        response: { optionId: "approve" },
+        kind: "approval",
+        outcome: "accepted",
+        interactionId: "request-1",
+        answer: { optionId: "approve" },
         scope,
-        type: "input.resolved",
+        type: "interaction.settled",
       });
       expect(instrumentationStateSlot("sink", key).get()).toBeUndefined();
     });
@@ -224,9 +225,10 @@ describe("provider state lifecycle", () => {
         type: "model.call.started",
       });
       await hooks.publish({
+        outcome: "completed",
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
-        type: "step.attempt.completed",
+        type: "model.settled",
       });
       expect(instrumentationStateSlot("sink", modelKey).get()).toBeUndefined();
     });
@@ -250,9 +252,10 @@ describe("provider state lifecycle", () => {
         type: "model.call.started",
       });
       await terminals.publish({
+        outcome: "completed",
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
-        type: "step.attempt.completed",
+        type: "model.settled",
       });
       expect(instrumentationStateSlot("removed", modelKey).get()).toBeUndefined();
     });
@@ -262,7 +265,7 @@ describe("provider state lifecycle", () => {
     const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
     const hooks = createInstrumentationHooks([
       {
-        events: { "tool.call.started": (_event, ctx) => ctx.state.set("open") },
+        events: { "call.requested": (_event, ctx) => ctx.state.set("open") },
         name: "sink",
       },
     ]);
@@ -271,57 +274,19 @@ describe("provider state lifecycle", () => {
         callId: "call-1",
         idempotencyKey: actionKey,
         input: {},
-        kind: "tool-call",
+        capability: { kind: "tool", name: "weather" },
+        frameworkTool: false,
         toolName: "tool",
         scope,
-        type: "tool.call.started",
+        type: "call.requested",
       });
       await hooks.publish({
+        outcome: "completed",
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
-        type: "step.attempt.completed",
+        type: "model.settled",
       });
       expect(instrumentationStateSlot("sink", actionKey).get()).toBe("open");
-    });
-  });
-
-  it("terminalizes and releases pending actions when a turn is cancelled", async () => {
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
-    const failed = vi.fn();
-    const hooks = createInstrumentationHooks([
-      {
-        events: {
-          "tool.call.failed": failed,
-          "tool.call.started": (_event, ctx) => ctx.state.set("open"),
-        },
-        name: "sink",
-      },
-    ]);
-    await contextStorage.run(new ContextContainer(), async () => {
-      rememberInstrumentationActionScope(actionKey, scope);
-      await hooks.publish({
-        callId: "call-1",
-        idempotencyKey: actionKey,
-        input: {},
-        kind: "tool-call",
-        toolName: "tool",
-        scope,
-        type: "tool.call.started",
-      });
-      await hooks.publish({
-        idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
-        sessionId: scope.sessionId,
-        turnId: scope.turnId,
-        type: "turn.cancelled",
-      });
-      expect(instrumentationStateSlot("sink", actionKey).get()).toBeUndefined();
-      expect(findInstrumentationActionScopeForCall(scope.sessionId, "call-1")).toBeUndefined();
-    });
-    expect(failed).toHaveBeenCalledOnce();
-    expect(failed.mock.calls[0]?.[0]).toMatchObject({
-      errorCode: "ACTION_CANCELLED",
-      outcome: "cancelled",
-      type: "tool.call.failed",
     });
   });
 });
@@ -340,7 +305,8 @@ describe("provider handler deadlines", () => {
     idempotencyKey: key,
     sessionId: "session-1",
     turnId: "turn-1",
-    type: "turn.completed" as const,
+    outcome: "completed" as const,
+    type: "turn.settled" as const,
   };
   const hang = () => new Promise<void>(() => {});
 
@@ -368,7 +334,7 @@ describe("provider handler deadlines", () => {
 
     const restored = await deserializeContext(await serializeContext(context));
     const terminals = createInstrumentationHooks(
-      [{ events: { "turn.completed": terminal }, name: "sink" }],
+      [{ events: { "turn.settled": terminal }, name: "sink" }],
       { handlerTimeoutMs: 1 },
     );
     await contextStorage.run(restored, () => terminals.publish(completed));
@@ -379,34 +345,34 @@ describe("provider handler deadlines", () => {
     const key = inputIdempotencyKey(scope.sessionId, scope.turnId, "request-1");
     const context = new ContextContainer();
     const starts = createInstrumentationHooks(
-      [{ events: { "input.requested": hang }, name: "sink" }],
+      [{ events: { "interaction.opened": hang }, name: "sink" }],
       { handlerTimeoutMs: 1 },
     );
     await contextStorage.run(context, () =>
       starts.publish({
-        action: { callId: "call-1", name: "weather" },
+        call: { callId: "call-1", name: "weather" },
         idempotencyKey: key,
-        kind: "tool-approval",
+        kind: "approval",
         request: { prompt: "Approve weather?" },
-        requestId: "request-1",
+        interactionId: "request-1",
         scope,
-        type: "input.requested",
+        type: "interaction.opened",
       }),
     );
 
     const terminal = vi.fn();
     const restored = await deserializeContext(await serializeContext(context));
     const terminals = createInstrumentationHooks([
-      { events: { "input.resolved": terminal }, name: "sink" },
+      { events: { "interaction.settled": terminal }, name: "sink" },
     ]);
     await contextStorage.run(restored, () =>
       terminals.publish({
         idempotencyKey: key,
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
+        kind: "approval",
+        outcome: "accepted",
+        interactionId: "request-1",
         scope,
-        type: "input.resolved",
+        type: "interaction.settled",
       }),
     );
     expect(terminal).not.toHaveBeenCalled();
@@ -440,40 +406,6 @@ describe("provider handler deadlines", () => {
       expect(instrumentationStateSlot("slow", key).get()).toBeUndefined();
     });
   });
-
-  it("does not abandon an operation for a point-event timeout", async () => {
-    const terminal = vi.fn();
-    const hooks = createInstrumentationHooks(
-      [
-        {
-          events: {
-            "step.attempt.completed": terminal,
-            "step.attempt.metadata": hang,
-          },
-          name: "slow-metadata",
-        },
-      ],
-      { handlerTimeoutMs: 1 },
-    );
-    await contextStorage.run(new ContextContainer(), async () => {
-      await hooks.publish({
-        idempotencyKey: attemptIdempotencyKey(scope),
-        providerMetadata: {},
-        scope,
-        type: "step.attempt.metadata",
-      });
-      await hooks.publish({
-        idempotencyKey: attemptIdempotencyKey(scope),
-        scope,
-        type: "step.attempt.completed",
-      });
-    });
-    expect(terminal).toHaveBeenCalledOnce();
-    expect(logWarn).toHaveBeenCalledWith(
-      "instrumentation provider timed out",
-      expect.objectContaining({ boundary: "step.attempt.metadata", provider: "slow-metadata" }),
-    );
-  });
 });
 
 describe("provider dispatch groups", () => {
@@ -489,7 +421,8 @@ describe("provider dispatch groups", () => {
     idempotencyKey: started.idempotencyKey,
     sessionId: "session-1",
     turnId: "turn-1",
-    type: "turn.completed" as const,
+    outcome: "completed" as const,
+    type: "turn.settled" as const,
   };
 
   it("starts every parallel handler before either is released", async () => {
@@ -577,11 +510,11 @@ describe("provider dispatch groups", () => {
   });
 
   it("reuses the frozen scope snapshot across publications", async () => {
-    const observedScopes: InstrumentationAttemptScope[] = [];
+    const observedScopes: InstrumentationScope[] = [];
     const hooks = createInstrumentationHooks([
       {
         events: {
-          "model.call.completed": (event) => void observedScopes.push(event.scope),
+          "model.call.settled": (event) => void observedScopes.push(event.scope),
           "model.call.started": (event) => void observedScopes.push(event.scope),
         },
         name: "observer",
@@ -598,11 +531,12 @@ describe("provider dispatch groups", () => {
         type: "model.call.started",
       });
       await hooks.publish({
+        outcome: "completed",
         content: [],
         finishReason: "stop",
         idempotencyKey: modelCallIdempotencyKey(sharedScope, 0, 0),
         scope: sharedScope,
-        type: "model.call.completed",
+        type: "model.call.settled",
         usage: {},
       });
     });
@@ -743,7 +677,7 @@ describe("provider dispatch groups", () => {
       parallel: [
         {
           events: {
-            "turn.completed": (_event, ctx) => {
+            "turn.settled": (_event, ctx) => {
               observed.set("first", ctx.state.get());
             },
             "turn.started": (_event, ctx) => ctx.state.set("one"),
@@ -752,7 +686,7 @@ describe("provider dispatch groups", () => {
         },
         {
           events: {
-            "turn.completed": (_event, ctx) => {
+            "turn.settled": (_event, ctx) => {
               observed.set("second", ctx.state.get());
             },
             "turn.started": (_event, ctx) => ctx.state.set("two"),
@@ -784,7 +718,7 @@ describe("provider dispatch groups", () => {
         parallel: [
           {
             events: {
-              "turn.completed": timedOutTerminal,
+              "turn.settled": timedOutTerminal,
               "turn.started": async (_event, ctx) => {
                 await continuation.promise;
                 ctx.state.set("late");
@@ -792,7 +726,7 @@ describe("provider dispatch groups", () => {
             },
             name: "times-out",
           },
-          { events: { "turn.completed": unaffectedTerminal }, name: "unaffected" },
+          { events: { "turn.settled": unaffectedTerminal }, name: "unaffected" },
         ],
       },
       { handlerTimeoutMs: 10 },
@@ -890,32 +824,40 @@ describe("trace policies", () => {
 
   it("lets an explicit provider policy authorize private content", async () => {
     const observed = vi.fn();
+    const metadata = vi.fn();
     const hooks = createInstrumentationHooks([
       {
-        events: { "tool.call.started": observed },
+        events: { "call.requested": observed },
         name: "private-audit",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
       },
+      { name: "metadata-only", events: { "call.requested": metadata } },
     ]).forTrace!(traceContext("weather", "private"));
 
     await hooks.publish({
       callId: "call-1",
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       input: { secret: "private" },
-      kind: "tool-call",
+      capability: { kind: "tool", name: "weather", label: "Read Alice's private report" },
+      frameworkTool: false,
       toolName: "weather",
       scope,
-      type: "tool.call.started",
+      type: "call.requested",
     });
 
     expect(observed.mock.calls[0]?.[0].input).toEqual({ secret: "private" });
+    expect(observed.mock.calls[0]?.[0].capability.label).toBe("Read Alice's private report");
+    expect(metadata.mock.calls[0]?.[0]).toMatchObject({
+      input: undefined,
+      capability: { kind: "tool", name: "weather", label: undefined },
+    });
   });
 
   it("projects input and output content independently per provider", async () => {
     const inputEvents: InstrumentationEvent[] = [];
     const outputEvents: InstrumentationEvent[] = [];
     const events = (target: InstrumentationEvent[]) => ({
-      "model.call.completed": (event: InstrumentationEvent) => void target.push(event),
+      "model.call.settled": (event: InstrumentationEvent) => void target.push(event),
       "model.call.started": (event: InstrumentationEvent) => void target.push(event),
     });
     const hooks = createInstrumentationHooks([
@@ -939,11 +881,12 @@ describe("trace policies", () => {
       type: "model.call.started",
     });
     await hooks.publish({
+      outcome: "completed",
       content: [{ text: "private answer", type: "text" }],
       finishReason: "stop",
       idempotencyKey: "model-1",
       scope,
-      type: "model.call.completed",
+      type: "model.call.settled",
       usage: {},
     });
 
@@ -967,7 +910,7 @@ describe("trace policies", () => {
     });
     const hooks = createInstrumentationHooks([
       {
-        events: { "turn.failed": observed },
+        events: { "turn.settled": observed },
         name: "inputs-only",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
       },
@@ -978,7 +921,8 @@ describe("trace policies", () => {
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       sessionId: "session-1",
       turnId: "turn-1",
-      type: "turn.failed",
+      outcome: "failed",
+      type: "turn.settled",
     });
 
     expect(observed.mock.calls[0]?.[0].error).toBeUndefined();
@@ -1098,10 +1042,10 @@ describe("trace policies", () => {
     const metadataOnly = vi.fn();
     const wantsContent = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "step.attempt.metadata": metadataOnly }, name: "metadata" },
+      { events: { "model.call.settled": metadataOnly }, name: "metadata" },
       {
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
-        events: { "step.attempt.metadata": wantsContent },
+        events: { "model.call.settled": wantsContent },
         name: "content",
       },
     ]).forTrace!(traceContext("weather", "private"));
@@ -1117,8 +1061,11 @@ describe("trace policies", () => {
     await hooks.publish({
       idempotencyKey: attemptIdempotencyKey(scope),
       providerMetadata,
+      outcome: "completed",
+      finishReason: "stop",
+      usage: {},
       scope,
-      type: "step.attempt.metadata",
+      type: "model.call.settled",
     });
 
     const visible = metadataOnly.mock.calls[0]?.[0];
@@ -1137,9 +1084,9 @@ describe("trace policies", () => {
     const metadataOnly = vi.fn();
     const wantsContent = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "tool.call.failed": metadataOnly }, name: "metadata" },
+      { events: { "call.settled": metadataOnly }, name: "metadata" },
       {
-        events: { "tool.call.failed": wantsContent },
+        events: { "call.settled": wantsContent },
         name: "content",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
       },
@@ -1153,14 +1100,14 @@ describe("trace policies", () => {
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       outcome: "failed",
       scope: actionScope,
-      type: "tool.call.failed",
+      type: "call.settled",
     });
 
     expect(metadataOnly.mock.calls[0]?.[0]).toMatchObject({
       error: undefined,
       errorCode: "SUBAGENT_EXECUTION_FAILED",
       outcome: "failed",
-      type: "tool.call.failed",
+      type: "call.settled",
     });
     expect(Object.isFrozen(metadataOnly.mock.calls[0]?.[0])).toBe(true);
     expect(wantsContent.mock.calls[0]?.[0].error).toEqual(error);
@@ -1171,22 +1118,21 @@ describe("trace policies", () => {
   it("keeps action outcome and usage when output content is withheld", async () => {
     const metadataOnly = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "tool.call.completed": metadataOnly }, name: "metadata" },
+      { events: { "call.settled": metadataOnly }, name: "metadata" },
     ]);
     await hooks.publish({
       acceptedAtMs: 1_234,
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       outcome: "completed",
-      output: { output: "private result", type: "result" },
+      output: "private result",
       scope,
-      type: "tool.call.completed",
+      type: "call.settled",
       usage: { inputTokens: 10, outputTokens: 5 },
     });
 
     expect(metadataOnly.mock.calls[0]?.[0]).toMatchObject({
       acceptedAtMs: 1_234,
       outcome: "completed",
-      output: { type: "result" },
       usage: { inputTokens: 10, outputTokens: 5 },
     });
   });
@@ -1197,16 +1143,16 @@ describe("trace policies", () => {
     const hooks = createInstrumentationHooks([
       {
         events: {
-          "input.requested": (event) => void metadataEvents.push(event),
-          "input.resolved": (event) => void metadataEvents.push(event),
+          "interaction.opened": (event) => void metadataEvents.push(event),
+          "interaction.settled": (event) => void metadataEvents.push(event),
         },
         name: "metadata",
       },
       {
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
         events: {
-          "input.requested": (event) => void contentEvents.push(event),
-          "input.resolved": (event) => void contentEvents.push(event),
+          "interaction.opened": (event) => void contentEvents.push(event),
+          "interaction.settled": (event) => void contentEvents.push(event),
         },
         name: "content",
       },
@@ -1214,33 +1160,33 @@ describe("trace policies", () => {
     const idempotencyKey = inputIdempotencyKey(scope.sessionId, scope.turnId, "request-1");
 
     await hooks.publish({
-      action: { callId: "call-1", name: "weather" },
+      call: { callId: "call-1", name: "weather" },
       idempotencyKey,
-      kind: "tool-approval",
+      kind: "approval",
       request: { prompt: "Approve private input?" },
-      requestId: "request-1",
+      interactionId: "request-1",
       scope,
-      type: "input.requested",
+      type: "interaction.opened",
     });
     await hooks.publish({
       idempotencyKey,
-      kind: "tool-approval",
-      outcome: "denied",
-      requestId: "request-1",
-      response: { optionId: "deny", text: "private reason" },
+      kind: "approval",
+      outcome: "declined",
+      interactionId: "request-1",
+      answer: { optionId: "deny", text: "private reason" },
       scope,
-      type: "input.resolved",
+      type: "interaction.settled",
     });
 
     expect(metadataEvents).toMatchObject([
-      { request: undefined, type: "input.requested" },
-      { response: undefined, type: "input.resolved" },
+      { request: undefined, type: "interaction.opened" },
+      { answer: undefined, type: "interaction.settled" },
     ]);
     expect(contentEvents).toMatchObject([
-      { request: { prompt: "Approve private input?" }, type: "input.requested" },
+      { request: { prompt: "Approve private input?" }, type: "interaction.opened" },
       {
-        response: { optionId: "deny", text: "private reason" },
-        type: "input.resolved",
+        answer: { optionId: "deny", text: "private reason" },
+        type: "interaction.settled",
       },
     ]);
   });
@@ -1248,17 +1194,17 @@ describe("trace policies", () => {
   it("freezes one stripped projection shared by metadata providers", async () => {
     const observed = vi.fn();
     const content = vi.fn();
-    const mutator = vi.fn((event: InstrumentationToolCallCompletedEvent) => {
+    const mutator = vi.fn((event: InstrumentationCallSettledEvent) => {
       expect(Reflect.set(event, "finishReason", "corrupted")).toBe(false);
-      expect(Reflect.set(event.output, "type", "error")).toBe(false);
+      expect(Reflect.set(event.scope, "turnId", "corrupted")).toBe(false);
     });
     const hooks = createInstrumentationHooks({
       parallel: [
-        { events: { "tool.call.completed": mutator }, name: "first" },
-        { events: { "tool.call.completed": observed }, name: "second" },
+        { events: { "call.settled": mutator }, name: "first" },
+        { events: { "call.settled": observed }, name: "second" },
         {
           tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
-          events: { "tool.call.completed": content },
+          events: { "call.settled": content },
           name: "content",
         },
       ],
@@ -1266,20 +1212,21 @@ describe("trace policies", () => {
 
     const event = {
       idempotencyKey: toolCallIdempotencyKey(scope, "call-1", 0),
-      output: { output: "private", type: "result" },
+      outcome: "completed",
+      output: { answer: "private" },
       scope,
-      type: "tool.call.completed",
+      type: "call.settled",
     } as const;
     await hooks.publish(event);
 
-    expect(observed.mock.calls[0]?.[0].output).toEqual({ type: "result" });
+    expect(observed.mock.calls[0]?.[0].output).toBeUndefined();
+    expect(observed.mock.calls[0]?.[0].outcome).toBe("completed");
     expect(observed.mock.calls[0]?.[0]).toBe(mutator.mock.calls[0]?.[0]);
     expect(Object.isFrozen(observed.mock.calls[0]?.[0])).toBe(true);
-    expect(Object.isFrozen(observed.mock.calls[0]?.[0].output)).toBe(true);
     const contentEvent = content.mock.calls[0]?.[0];
     expect(contentEvent).not.toBe(event);
     expect(contentEvent).toEqual(event);
-    expect(contentEvent.output).toEqual({ output: "private", type: "result" });
+    expect(contentEvent.output).toEqual({ answer: "private" });
     expect(Object.isFrozen(contentEvent)).toBe(true);
     expect(Object.isFrozen(contentEvent.output)).toBe(true);
     expect(Object.isFrozen(contentEvent.scope)).toBe(true);

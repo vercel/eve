@@ -1,7 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
-import { TurnSegment } from "#client/session-utils.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { deliveryEvents } from "#client/delivery-events.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,
@@ -9,32 +9,25 @@ import {
 } from "#protocol/routes.js";
 import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError, createClientError } from "#client/client-error.js";
-import { MessageResponse, type ClientSendReceipt } from "#client/message-response.js";
-import { followStreamIterable, sleep } from "#client/open-stream.js";
-import {
-  cancelClientSession,
-  prewarmClientSession,
-  clearClientSession,
-  compactClientSession,
-  resetClientSession,
-} from "#client/session-controls.js";
+import { messageForRequest } from "#client/file-parts.js";
+import { StreamDelivery, type ClientSendReceipt, type Delivery } from "#client/delivery.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
+import { followStreamIterable, sleep, type FollowedEvent } from "#client/open-stream.js";
+import { prewarmClientSession, sendClientControl } from "#client/session-controls.js";
+import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type {
-  CancelSessionResult,
-  ClearResult,
   ClientSessionState,
-  CompactResult,
   ClientRedirectPolicy,
   CreateSessionOptions,
   RespondTurnOptions,
-  ResetResult,
   SendTurnInput,
   SendTurnOptions,
   SendTurnPayload,
   SessionSnapshot,
-  StreamOptions,
+  SessionStreamOptions,
 } from "#client/types.js";
 
 const SESSION_SEND_RETRY_BASE_DELAY_MS = 250;
@@ -42,10 +35,10 @@ const SESSION_SEND_RETRY_MAX_DELAY_MS = 2_000;
 const SESSION_SEND_READY_TIMEOUT_MS = 20_000;
 const followSession = Symbol("followClientSession");
 
-interface FollowSessionOptions extends StreamOptions {
+interface FollowSessionOptions extends SessionStreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
   readonly onCaughtUp?: () => void;
-  readonly resolveReconnectPolicy?: () => StreamOptions["streamReconnectPolicy"];
+  readonly resolveReconnectPolicy?: () => SessionStreamOptions["streamReconnectPolicy"];
   readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
 }
 
@@ -54,7 +47,7 @@ interface FollowSessionOptions extends StreamOptions {
  * configuration without depending on the full {@link Client} class.
  */
 export interface ClientSessionContext {
-  readonly host: string;
+  readonly baseUrl: string;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
@@ -74,7 +67,7 @@ export class ClientSession {
   static async create<TOutput = unknown>(
     context: ClientSessionContext,
     input: SendTurnInput<TOutput> & CreateSessionOptions,
-  ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
+  ): Promise<{ readonly delivery: Delivery<TOutput>; readonly session: ClientSession }> {
     const startedAt = Date.now();
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input.stubs);
     const acceptedAt = Date.now();
@@ -83,7 +76,7 @@ export class ClientSession {
     const receipt = { deliveryId, startedAt, notReadyMs: 0, acceptedAt };
 
     return {
-      response: session.#messageResponse<TOutput>(response, input, 0, undefined, receipt),
+      delivery: session.#messageResponse<TOutput>(response, input, 0, deliveryId, receipt),
       session,
     };
   }
@@ -98,6 +91,11 @@ export class ClientSession {
     return new ClientSession(context, { sessionId, streamIndex: 0 });
   }
 
+  /** The fixed session ID; reading it performs no I/O. */
+  get id(): string {
+    return this.#state.sessionId;
+  }
+
   /** Current fixed session identity and durable stream cursor. */
   get state(): ClientSessionState {
     return this.#state;
@@ -106,46 +104,45 @@ export class ClientSession {
   /** Reads a finite prefix through the durable tail without advancing this handle. */
   async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
     throwIfAborted(options?.signal);
-    const events: MessageStreamEvent[] = [];
+    const events: SessionStreamEvent[] = [];
+    let streamIndex = 0;
 
-    for await (const event of this.#readStream({
+    for await (const { cursor, event } of this.#readStream({
       follow: false,
       signal: options?.signal,
       startIndex: 0,
     })) {
       events.push(event);
+      streamIndex = cursor;
     }
 
     throwIfAborted(options?.signal);
-    return {
-      events,
-      session: { sessionId: this.#state.sessionId, streamIndex: events.length },
-    };
+    return { events, session: { sessionId: this.#state.sessionId, streamIndex } };
   }
 
   /** Sends a message to this exact session ID. */
   async send<TOutput = unknown>(
     message: SendTurnInput<TOutput>["message"],
     options: SendTurnOptions<TOutput> = {},
-  ): Promise<MessageResponse<TOutput>> {
+  ): Promise<Delivery<TOutput>> {
     return await this.#send({ ...options, message }, true);
   }
 
   /** Answers pending input requests on this exact session ID. */
   async respond<TOutput = unknown>(
-    inputResponses: readonly InputResponse[],
+    answers: readonly Answer[],
     options: RespondTurnOptions<TOutput> = {},
-  ): Promise<MessageResponse<TOutput>> {
-    if (inputResponses.length === 0) {
-      throw new Error("ClientSession.respond() requires at least one input response.");
+  ): Promise<Delivery<TOutput>> {
+    if (answers.length === 0) {
+      throw new Error("ClientSession.respond() requires at least one answer.");
     }
-    return await this.#send({ ...options, inputResponses }, false);
+    return await this.#send({ ...options, answers }, false);
   }
 
   async #send<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
     retrySessionNotReady: boolean,
-  ): Promise<MessageResponse<TOutput>> {
+  ): Promise<Delivery<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
     const path = createEveSessionRoutePath(this.#state.sessionId);
     const { response, timing } = await postSessionSend(
@@ -161,26 +158,19 @@ export class ClientSession {
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
-    if (input.message !== undefined && deliveryId === undefined) {
+    if (deliveryId === undefined) {
       throw new Error(
         "Message route did not return a delivery id. Update the server before sending with this client.",
       );
     }
-    // A message's response ends at the boundary that lists its delivery. An answer's ends at its
-    // first turn boundary: not every path that publishes an answer's events attributes them.
-    return this.#messageResponse<TOutput>(
-      response,
-      input,
-      initialStreamIndex,
-      input.message === undefined ? undefined : deliveryId,
-      { ...timing, deliveryId },
-    );
+    return this.#messageResponse<TOutput>(response, input, initialStreamIndex, deliveryId, {
+      ...timing,
+      deliveryId,
+    });
   }
 
   /** Requests preparation of an existing idle session; never starts a model turn. */
-  async prewarm(options?: {
-    readonly signal?: AbortSignal;
-  }): Promise<import("#protocol/prewarm-session.js").PrewarmSessionResult> {
+  async prewarm(options?: { readonly signal?: AbortSignal }): Promise<PrewarmSessionResult> {
     return await prewarmClientSession({
       context: this.#context,
       sessionId: this.#state.sessionId,
@@ -191,59 +181,73 @@ export class ClientSession {
   /** Requests cooperative cancellation of this session's active turn. */
   async cancel(options?: {
     readonly signal?: AbortSignal;
-    readonly turnId?: string;
-  }): Promise<CancelSessionResult> {
-    return await cancelClientSession({
-      context: this.#context,
-      options,
-      sessionId: this.#state.sessionId,
-    });
+    readonly turnId?: string | null;
+  }): Promise<Delivery> {
+    return this.#control("cancel", options);
   }
 
   /** Queues removal of this session's durable model-message history. */
-  async clear(): Promise<ClearResult> {
-    return await clearClientSession({ context: this.#context, sessionId: this.#state.sessionId });
+  async clear(options?: { readonly signal?: AbortSignal }): Promise<Delivery> {
+    return this.#control("clear", options);
   }
 
   /** Queues context compaction without sending model input. */
-  async compact(): Promise<CompactResult> {
-    return await compactClientSession({ context: this.#context, sessionId: this.#state.sessionId });
+  async compact(options?: { readonly signal?: AbortSignal }): Promise<Delivery> {
+    return this.#control("compact", options);
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */
   async reset(options?: {
     readonly reason?: string;
     readonly signal?: AbortSignal;
-  }): Promise<ResetResult> {
-    return await resetClientSession({
+  }): Promise<Delivery> {
+    return this.#control("reset", options);
+  }
+
+  async #control(
+    kind: "cancel" | "clear" | "compact" | "reset",
+    options?: {
+      readonly signal?: AbortSignal;
+      readonly turnId?: string | null;
+      readonly reason?: string;
+    },
+  ): Promise<Delivery> {
+    const startIndex = this.#state.streamIndex;
+    const receipt = await sendClientControl({
       context: this.#context,
+      kind,
       options,
       sessionId: this.#state.sessionId,
+    });
+    return new StreamDelivery({
+      ...receipt,
+      createStream: (read) =>
+        this.#createEventStream(
+          startIndex,
+          { signal: read?.signal },
+          receipt.deliveryId,
+          kind !== "reset",
+        ),
     });
   }
 
   /** Opens this session's durable event stream from its stored cursor. */
-  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
-    if (options?.follow === false && (options.startIndex ?? this.#state.streamIndex) < 0) {
-      throw new Error(
-        "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
-    }
+  stream(options?: SessionStreamOptions): AsyncIterable<SessionStreamEvent> {
     return this.#streamAndAdvance(options);
   }
 
   /**
-   * The session an agent run opened, as this session's stream announced it.
-   * Pass an `agent.started` event from this session, then follow the child
-   * with `stream()`; reads use this session's host and credentials, for local
+   * The session an agent run opened, as this session's stream linked it.
+   * Pass a `child.opened` event from this session, then follow the child
+   * with `stream()`; reads use this session's base URL and credentials, for local
    * and remote agents alike.
    */
-  agent(started: AgentStartedStreamEvent): ClientAgentSession {
-    return new ClientAgentSession(this.#context, started);
+  agent(opened: Extract<SessionStreamEvent, { type: "child.opened" }>): ClientAgentSession {
+    return new ClientAgentSession(this.#context, this.id, opened);
   }
 
-  [followSession](options: FollowSessionOptions): AsyncIterable<MessageStreamEvent> {
-    return this.#streamAndAdvance({ ...options, keepAlive: true });
+  [followSession](options: FollowSessionOptions): AsyncIterable<SessionStreamEvent> {
+    return this.#streamAndAdvance(options);
   }
 
   #messageResponse<TOutput>(
@@ -252,77 +256,42 @@ export class ClientSession {
     initialStreamIndex: number,
     deliveryId: string | undefined,
     receipt: ClientSendReceipt,
-  ): MessageResponse<TOutput> {
+  ): Delivery<TOutput> {
     response.body?.cancel().catch(() => {});
-    return new MessageResponse<TOutput>({
-      cancelTurn: async (turnId) => await this.cancel({ turnId }),
-      createStream: (source) =>
-        this.#createEventStream(initialStreamIndex, input, deliveryId, source),
+    if (deliveryId === undefined) throw new Error("Message route did not return a delivery id.");
+    return new StreamDelivery<TOutput>({
+      createStream: (read) =>
+        this.#createEventStream(initialStreamIndex, { ...input, signal: read?.signal }, deliveryId),
       deliveryId,
       receipt,
-      resumesTurn: input.inputResponses !== undefined,
       sessionId: this.#state.sessionId,
     });
   }
 
-  async *#createEventStream(
+  #createEventStream(
     initialStreamIndex: number,
-    input: SendTurnPayload,
-    deliveryId?: string,
-    source?: AsyncIterable<MessageStreamEvent>,
-  ): AsyncGenerator<MessageStreamEvent> {
-    let eventCount = 0;
-    let started = deliveryId === undefined;
-    let reachedBoundary = false;
-    const segment = new TurnSegment({ followCallbacks: true });
-    try {
-      for await (const event of source ??
-        this.#readStream({
-          headers: input.headers,
-          keepAlive: true,
-          signal: input.signal,
-          startIndex: initialStreamIndex,
-          streamReconnectPolicy: input.streamReconnectPolicy,
-        })) {
-        eventCount += 1;
-        if (deliveryId !== undefined) {
-          const matches = event.meta?.deliveryIds?.includes(deliveryId) === true;
-          const terminal = event.type === "session.failed" || event.type === "session.completed";
-          if (!matches && terminal && (!started || event.type === "session.completed")) {
-            throw new Error(
-              "The session ended before the accepted message reached its turn boundary.",
-            );
-          }
-          if (!started && !matches) continue;
-          const attributed = event.meta?.deliveryIds !== undefined;
-          if (!terminal && attributed && !matches) continue;
-          started = true;
-        }
-        reachedBoundary = segment.observe(event);
-        yield event;
-        if (reachedBoundary) {
-          break;
-        }
-      }
-      if (deliveryId !== undefined && !reachedBoundary && !input.signal?.aborted) {
-        throw new Error(
-          "The response stream ended before the accepted message reached its turn boundary.",
-        );
-      }
-    } finally {
-      this.#advanceStreamIndex(initialStreamIndex + eventCount);
-    }
+    input: SendTurnOptions,
+    deliveryId: string,
+    follow = true,
+  ): AsyncGenerator<SessionStreamEvent> {
+    return deliveryEvents(
+      this.#streamAndAdvance({
+        follow,
+        headers: input.headers,
+        signal: input.signal,
+        startIndex: initialStreamIndex,
+        streamReconnectPolicy: input.streamReconnectPolicy,
+      }),
+      deliveryId,
+      input.signal,
+    );
   }
 
-  async *#streamAndAdvance(
-    options?: FollowSessionOptions & { readonly keepAlive?: boolean },
-  ): AsyncGenerator<MessageStreamEvent> {
+  async *#streamAndAdvance(options?: FollowSessionOptions): AsyncGenerator<SessionStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
-    let eventCount = 0;
-    for await (const event of this.#readStream({
+    for await (const { cursor, event } of this.#readStream({
       follow: options?.follow,
       headers: options?.headers,
-      keepAlive: options?.keepAlive,
       onCaughtUp: options?.onCaughtUp,
       resolveHeaders: options?.resolveHeaders,
       resolveReconnectPolicy: options?.resolveReconnectPolicy,
@@ -330,8 +299,7 @@ export class ClientSession {
       startIndex,
       streamReconnectPolicy: options?.streamReconnectPolicy,
     })) {
-      eventCount += 1;
-      if (startIndex >= 0) this.#advanceStreamIndex(startIndex + eventCount);
+      this.#advanceStreamIndex(cursor);
       yield event;
     }
   }
@@ -345,20 +313,18 @@ export class ClientSession {
 
   #readStream(input: {
     readonly onCaughtUp?: () => void;
-    readonly resolveReconnectPolicy?: () => StreamOptions["streamReconnectPolicy"];
+    readonly resolveReconnectPolicy?: () => SessionStreamOptions["streamReconnectPolicy"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
-    readonly keepAlive?: boolean;
     readonly signal?: AbortSignal;
     readonly startIndex: number;
-    readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
+    readonly streamReconnectPolicy?: SessionStreamOptions["streamReconnectPolicy"];
     readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
-  }): AsyncIterable<MessageStreamEvent> {
+  }): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
       onCaughtUp: input.onCaughtUp,
       follow: input.follow,
-      host: this.#context.host,
-      keepAlive: input.keepAlive,
+      baseUrl: this.#context.baseUrl,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
       path: createEveSessionStreamRoutePath(this.#state.sessionId),
       redirect: this.#context.redirect,
@@ -374,7 +340,7 @@ export class ClientSession {
 export function followClientSession(
   session: ClientSession,
   options: FollowSessionOptions,
-): AsyncIterable<MessageStreamEvent> {
+): AsyncIterable<SessionStreamEvent> {
   return session[followSession](options);
 }
 
@@ -415,7 +381,7 @@ async function postCreateSession(
   const headers = await context.resolveHeaders(options.headers);
   const body = options.stubs === undefined ? undefined : JSON.stringify({ stubs: options.stubs });
   if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.host, EVE_SESSION_ROUTE_PATH), {
+  const response = await fetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
     body,
     headers,
     method: "POST",
@@ -429,8 +395,8 @@ async function postCreateSession(
   return response;
 }
 
-function isSessionNotReady(error: unknown): error is ClientError {
-  return error instanceof ClientError && error.status === 409 && error.code === "session_not_ready";
+function isSessionNotReady(error: unknown): boolean {
+  return SessionNotActiveError.is(error) && error.retryable;
 }
 
 async function postTurn(
@@ -445,14 +411,14 @@ async function postTurn(
     throw new Error(
       requireMessage
         ? "Creating a session requires a non-empty message."
-        : "A session turn requires a non-empty message or inputResponses.",
+        : "A session turn requires a non-empty message or answers.",
     );
   }
   if (stubs !== undefined) body.stubs = stubs;
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.host, path), {
+  const response = await fetch(createClientUrl(context.baseUrl, path), {
     body: JSON.stringify(body),
     headers,
     method: "POST",
@@ -493,9 +459,9 @@ function createMessageBody(
   requireMessage: boolean,
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
-  if (input.message !== undefined) body.message = input.message;
-  if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
-    body.inputResponses = input.inputResponses;
+  if (input.message !== undefined) body.message = messageForRequest(input.message);
+  if (input.answers !== undefined && input.answers.length > 0) {
+    body.answers = input.answers;
   }
   if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
     body.turnPolicy = input.turnPolicy;
@@ -505,6 +471,6 @@ function createMessageBody(
   if (outputSchema !== undefined) body.outputSchema = outputSchema;
 
   if (requireMessage && body.message === undefined) return null;
-  if (body.message === undefined && body.inputResponses === undefined) return null;
+  if (body.message === undefined && body.answers === undefined) return null;
   return body;
 }

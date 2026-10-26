@@ -53,7 +53,7 @@ export async function withSelfModification(
   let checkoutLock: Awaited<ReturnType<typeof acquireCheckoutLock>> | undefined;
   let retainCheckoutLock = false;
   try {
-    t.signal.throwIfAborted();
+    t.abortSignal.throwIfAborted();
     if (isolation.failure !== undefined) {
       throw new Error("A previous self-modification eval could not clean up safely.", {
         cause: isolation.failure,
@@ -177,18 +177,18 @@ export class SelfModificationHarness {
     );
     const started = sessionEvents.find(
       (event) =>
-        event.type === "agent.started" &&
+        event.type === "child.opened" &&
         task?.type === "task.started" &&
-        event.data.taskId === task.data.taskId,
+        event.scope?.taskId === task.data.taskId,
     );
-    if (started?.type !== "agent.started") {
+    if (started?.type !== "child.opened") {
       throw new Error("Self-modification parent turn did not start its child agent.");
     }
     const child = await this.#readChild(
       started.data.sessionId,
       typeof message === "string" ? message : undefined,
     );
-    this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
+    this.#t.calledAgent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
   }
 
@@ -202,7 +202,7 @@ export class SelfModificationHarness {
   }
 
   async apply(): Promise<void> {
-    const response = await this.#post("rebuild?force=1", this.#t.signal);
+    const response = await this.#post("rebuild?force=1", this.#t.abortSignal);
     const body = (await response.json()) as { revision?: unknown };
     if (typeof body.revision !== "string" || body.revision.length === 0) {
       throw new Error("Self-modification rebuild did not return a runtime revision.");
@@ -220,13 +220,13 @@ export class SelfModificationHarness {
   async waitForRebuild(previousRevision: string): Promise<string> {
     const deadline = Date.now() + REBUILD_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      this.#t.signal.throwIfAborted();
+      this.#t.abortSignal.throwIfAborted();
       const revision = await this.#readRuntimeRevision();
       if (revision !== undefined && revision !== previousRevision) {
         this.#t.log(`Self-modification runtime revision: ${revision}`);
         return revision;
       }
-      await delay(REBUILD_POLL_INTERVAL_MS, undefined, { signal: this.#t.signal });
+      await delay(REBUILD_POLL_INTERVAL_MS, undefined, { signal: this.#t.abortSignal });
     }
     throw new Error(`Authored runtime did not rebuild within ${REBUILD_TIMEOUT_MS}ms.`);
   }
@@ -234,7 +234,7 @@ export class SelfModificationHarness {
   async #readRuntimeRevision(): Promise<string | undefined> {
     try {
       const response = await this.#t.target.fetch("/eve/v1/dev/runtime-artifacts", {
-        signal: this.#t.signal,
+        signal: this.#t.abortSignal,
       });
       if (!response.ok) return undefined;
       const body = (await response.json()) as { revision?: unknown };
@@ -242,7 +242,7 @@ export class SelfModificationHarness {
         ? body.revision
         : undefined;
     } catch {
-      this.#t.signal.throwIfAborted();
+      this.#t.abortSignal.throwIfAborted();
       return undefined;
     }
   }
@@ -277,7 +277,7 @@ export class SelfModificationHarness {
     for (const turn of this.#turns) {
       sessionIds.add(turn.sessionId);
       for (const event of turn.events) {
-        if (event.type === "agent.started") sessionIds.add(event.data.sessionId);
+        if (event.type === "child.opened") sessionIds.add(event.data.sessionId);
       }
     }
     const signal = AbortSignal.timeout(CLEANUP_TIMEOUT_MS);
@@ -330,8 +330,8 @@ export class SelfModificationHarness {
       [...this.#turns].reverse().find((turn) => turn.sessionId === sessionId)?.session.state
         .streamIndex ?? 0;
     for (let turns = 0; turns < 16; turns++) {
-      this.#t.signal.throwIfAborted();
-      const live = this.#t.target.watchTurn(sessionId, { startIndex });
+      this.#t.abortSignal.throwIfAborted();
+      const live = this.#t.target.attach(sessionId, { startIndex }).watch();
       this.#turns.add(live);
       const turn = await live.result();
       turn.expectOk();
@@ -340,11 +340,13 @@ export class SelfModificationHarness {
       if (
         message === undefined ||
         turn.events.some(
-          (event) => event.type === "message.received" && event.data.message?.includes(message),
+          (event) =>
+            event.type === "delivery.consumed" &&
+            event.data.parts.some((part) => part.kind === "text" && part.text.includes(message)),
         )
       )
         return turn;
-      if (turn.status !== "waiting") break;
+      if (turn.sessionEnded) break;
       startIndex = live.session.state.streamIndex;
     }
     throw new Error("Self-modification child did not receive the delegated message.");

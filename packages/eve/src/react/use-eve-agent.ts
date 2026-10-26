@@ -1,23 +1,21 @@
+import type { Delivery } from "#shared/delivery.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
-  attachEveAgentStore,
-  detachEveAgentStore,
-  EveAgentStore,
-  type EveAgentStoreCallbacks,
-  type EveAgentStoreSnapshot,
-  type EveAgentStoreStatus,
+  attachSessionStore,
+  detachSessionStore,
+  SessionStore,
+  type SessionStoreCallbacks,
+  type SessionStoreInit,
+  type SessionStoreSnapshot,
+  type SessionStoreStatus,
   type PrepareSend,
-} from "#client/eve-agent-store.js";
-import { resolveEveAgentHost } from "#client/agent-host.js";
-import type { EveAgentReducer } from "#client/reducer.js";
+} from "#client/session-store.js";
+import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
-import { conversationReducer } from "#client/conversation-reducer.js";
-import type { ConversationState } from "#client/conversation-state.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type {
-  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -28,63 +26,75 @@ import type {
 export type { PrepareSend };
 
 /**
- * Lifecycle status of an eve agent session.
+ * Outstanding work this binding has observed or still owes. Failures are reported separately in
+ * `error`.
  *
- * - `"ready"`: idle, accepting a new turn.
- * - `"resuming"`: checking an attached session for events; submission is disabled.
- * - `"submitted"`: a turn was sent, no stream events received yet.
- * - `"streaming"`: stream events are arriving for the active turn.
- * - `"error"`: the last turn ended in a terminal failure (see `snapshot.error`).
+ * - `"idle"`: no command, answer, or followed receipt is pending, and the last observed view is
+ *   idle. A turn waiting only on a person can still be open; read `activeTurn(view)`.
+ * - `"resuming"`: catching up on an attached session; submission is disabled.
+ * - `"busy"`: a send, answer, or control command is pending, a followed receipt has not settled,
+ *   or the session has running or queued work.
+ *
+ * After `followWhile` closes the stream, `status` reflects the last observed view, not the
+ * current server state.
  */
-export type UseEveAgentStatus = EveAgentStoreStatus;
+export type UseEveAgentStatus = SessionStoreStatus;
 
 /**
- * Snapshot of an eve agent session: `conversation` (canonical state), `data`
- * (the selected view), `events` (the authoritative server stream), `session`
- * (resumable cursor), `status`, and `error`.
+ * Snapshot of an eve agent session: the conversation (`messages`, `agents`, `view`),
+ * `events` (the authoritative server stream), `session` (resumable cursor),
+ * `status`, and `error`.
  */
-export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
+export type UseEveAgentSnapshot = SessionStoreSnapshot;
 
 /**
  * Snapshot plus commands returned by `useEveAgent`.
  */
-export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
-  /** Requests durable cancellation of the active turn while continuing to receive its events. */
-  readonly cancel: () => Promise<CancelSessionResult>;
-  /** Replays the attached durable session and follows its in-flight turn, if any. */
+export interface UseEveAgentReturn extends UseEveAgentSnapshot {
+  /**
+   * Requests durable cancellation of the active turn while continuing to receive its events.
+   * Offer it while `activeTurn(view)` returns a turn, including one waiting on a person.
+   */
+  readonly cancel: () => Promise<Delivery>;
+  /** Follow a same-session delivery receipt from this or another store until settlement. */
+  readonly follow: (receipt: Pick<Delivery, "sessionId" | "deliveryId">) => void;
+  /** Resolves at the durable tail; subsequent following obeys `followWhile`. */
   readonly resume: () => Promise<void>;
   /** Creates the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Resets the session: detaches any local stream and clears events and projected data. */
-  readonly reset: () => void;
-  /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
+  readonly newSession: () => void;
+  readonly reset: () => Promise<Delivery>;
+  readonly clear: () => Promise<Delivery>;
+  readonly compact: () => Promise<Delivery>;
+  /** Resolves on acceptance. Use `turnPolicy` to steer or queue during a running turn. */
   readonly send: <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<void>;
-  /** Answers pending HITL input requests. Rejects if a turn is already in flight. */
+  ) => Promise<Delivery<TOutput>>;
+  /** Submits answers to open interactions and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
-    inputResponses: Parameters<ClientSession["respond"]>[0],
+    answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<void>;
+  ) => Promise<Delivery<TOutput>>;
 }
 
 /**
  * Configuration for creating or binding a React eve agent session.
  *
  * Session configuration is read when the hook creates its internal store;
- * remount the component to point at a different host, reducer, or session.
+ * remount the component to point at a different base URL or session.
  * Lifecycle callbacks update on every render.
  *
  * For credentials or headers that must change without remounting, pass function
  * values to `auth` or `headers`; the client resolves those before each request.
  */
-export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+export interface UseEveAgentOptions extends SessionStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
    * `agent: "support"` targets same-origin routes under
-   * `/eve/support/v1/...`. Do not combine with `host`.
+   * `/eve/support/v1/...`. Do not combine with `baseUrl`.
    */
   readonly agent?: string;
   readonly auth?: ClientAuth;
@@ -98,32 +108,29 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    *
    * @default ""
    */
-  readonly host?: string;
+  readonly baseUrl?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
-   * `message.received` stream event.
+   * `delivery.consumed` fact.
    *
-   * Optimistic events are reducer-facing projection events only. They are not
-   * exposed through `events`, which remains the authoritative eve stream.
+   * Such a message shows in `messages` only; `events` remains the
+   * authoritative eve stream.
    *
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
-  readonly followSubagents?: boolean;
+  /** Recursively observe recorded children, or select relationships with a predicate, within store safety limits. @default false */
+  readonly followAgents?: SessionStoreInit["followAgents"];
+  /** Keep following while the committed view matches; local obligations always keep the stream open. @default () => true */
+  readonly followWhile?: (view: SessionStoreSnapshot["view"]) => boolean;
   /**
-   * Keep the session stream open between turns to show events that arrive from schedules,
-   * channels, or other clients. Set to false to close it once the session is idle and reopen it
-   * on the next send, answer, or resume. @default true
-   */
-  readonly followIdle?: boolean;
-  /**
-   * Create a session or prepare its existing idle owner when true. React observes this value across renders;
-   * changing it from false to true prepares the current session, and reset checks
-   * the latest rendered value before preparing the next session.
+   * Create a session or prepare its existing idle owner when true. React observes
+   * this value across renders; changing it from false to true prepares the current
+   * session, and `newSession()` checks the latest rendered value before preparing
+   * the next session.
    *
    * Changing the value to false does not discard an existing session or abort
    * session creation already in flight.
@@ -131,7 +138,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default false
    */
   readonly prewarm?: boolean;
-  readonly reducer?: EveAgentReducer<TData>;
   /**
    * Replay the attached durable session after mount and follow its in-flight
    * turn, if any. Requires `initialSession` or `session`.
@@ -142,33 +148,24 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly session?: ClientSession;
 }
 
-export function useEveAgent(
-  options?: UseEveAgentOptions<ConversationState>,
-): UseEveAgentHelpers<ConversationState>;
-
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
-): UseEveAgentHelpers<TData>;
-
 /**
  * React hook that drives an eve session and projects its event stream into UI data.
  *
- * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
- * plus the commands `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. With no reducer, `data` is the
- * built-in conversation projection (including UIMessage-compatible `messages`);
- * pass a reducer to project into your own shape and
- * infer `TData`.
+ * Returns the current snapshot (the conversation's `messages`, `agents`, and `view`, plus
+ * `events`, `session`, `status`, and `error`) and the commands `prewarm`, `send`, `respond`,
+ * `resume`, `cancel`, `newSession`, and `reset`. Read lifecycle from `view` with selectors
+ * from `eve/events`.
  *
- * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
+ * Session-shaping options (`baseUrl`, `session`, `initialEvents`,
  * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are read once
  * when the store is created; remount to change them. `prewarm` and lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
- * refresh on every render.
+ * and `followWhile` refresh on every render.
  */
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> = {},
-): UseEveAgentHelpers<TData> {
-  const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
+export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
+  const storeRef = useRef<SessionStore | undefined>(undefined);
+  const followWhileRef = useRef(options.followWhile);
+  followWhileRef.current = options.followWhile;
   const mountedRef = useRef(false);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
@@ -183,17 +180,15 @@ export function useEveAgent<TData>(
     ) {
       throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
     }
-    const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
-    storeRef.current = new EveAgentStore({
+    storeRef.current = new SessionStore({
       auth: options.auth,
       headers: options.headers,
-      host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
+      baseUrl: resolveEveAgentBaseUrl({ agent: options.agent, baseUrl: options.baseUrl }),
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
       optimistic: options.optimistic,
-      followSubagents: options.followSubagents,
-      followIdle: options.followIdle,
-      reducer,
+      followAgents: options.followAgents,
+      followWhile: (view) => followWhileRef.current?.(view) ?? true,
       session: options.session,
     });
   }
@@ -219,13 +214,13 @@ export function useEveAgent<TData>(
 
   useEffect(() => {
     mountedRef.current = true;
-    const timeout = setTimeout(() => attachEveAgentStore(store), 0);
+    const timeout = setTimeout(() => attachSessionStore(store), 0);
     return () => {
       mountedRef.current = false;
       clearTimeout(timeout);
       // Strict Mode and Fast Refresh replay this cleanup and setup in one synchronous commit.
       queueMicrotask(() => {
-        if (!mountedRef.current) detachEveAgentStore(store);
+        if (!mountedRef.current) detachSessionStore(store);
       });
     };
   }, [store]);
@@ -248,27 +243,34 @@ export function useEveAgent<TData>(
   }, [store]);
 
   const cancel = useCallback(() => store.cancel(), [store]);
-  const reset = useCallback(() => {
-    store.reset();
+  const reset = useCallback(() => store.reset(), [store]);
+  const clear = useCallback(() => store.clear(), [store]);
+  const compact = useCallback(() => store.compact(), [store]);
+  const newSession = useCallback(() => {
+    store.newSession();
     setPrewarmResetGeneration((generation) => generation + 1);
   }, [store]);
   const prewarm = useCallback(() => store.prewarm(), [store]);
   const resume = useCallback(() => store.resume(), [store]);
+  const follow = useCallback(
+    (receipt: Pick<Delivery, "sessionId" | "deliveryId">) => store.follow(receipt),
+    [store],
+  );
   const send = useCallback(
-    <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) => {
+    <TOutput = unknown>(message: MessageContent, options?: SendTurnOptions<TOutput>) => {
       return store.send({ ...options, message });
     },
     [store],
   );
   const respond = useCallback(
     <TOutput = unknown>(
-      inputResponses: Parameters<ClientSession["respond"]>[0],
+      answers: Parameters<ClientSession["respond"]>[0],
       options?: RespondTurnOptions<TOutput>,
-    ) => store.send({ ...options, inputResponses }),
+    ) => store.send({ ...options, answers }),
     [store],
   );
   const visibleSnapshot =
-    autoResumePending && snapshot.status === "ready"
+    autoResumePending && snapshot.status === "idle"
       ? { ...snapshot, status: "resuming" as const }
       : snapshot;
 
@@ -276,12 +278,28 @@ export function useEveAgent<TData>(
     () => ({
       ...visibleSnapshot,
       cancel,
+      clear,
+      compact,
+      newSession,
+      prewarm,
+      reset,
+      respond,
+      resume,
+      follow,
+      send,
+    }),
+    [
+      cancel,
+      clear,
+      compact,
+      follow,
+      newSession,
       prewarm,
       reset,
       respond,
       resume,
       send,
-    }),
-    [cancel, prewarm, reset, respond, resume, send, visibleSnapshot],
+      visibleSnapshot,
+    ],
   );
 }

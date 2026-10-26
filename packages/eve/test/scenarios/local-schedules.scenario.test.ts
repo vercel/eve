@@ -22,8 +22,10 @@ const appDescriptor = {
   installDependencies: true,
   files: {
     "agent/instructions.md": "Help Alice review her daily reports.\n",
-    "agent/agent.ts": 'export default { model: "openai/gpt-5.4-mini" };\n',
-    "agent/schedules/heartbeat.ts": 'export default { cron: "* * * * *", run() {} };\n',
+    "agent/agent.ts": `export default { model: "openai/gpt-5.4-mini" };
+`,
+    "agent/schedules/heartbeat.ts": `export default { cron: "* * * * *", run() {} };
+`,
   },
 };
 const localEnv = {

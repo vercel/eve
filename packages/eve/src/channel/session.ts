@@ -1,27 +1,29 @@
+import type { RemoteChildBinding } from "#execution/child-binding.js";
+import type { SessionReader } from "#shared/session.js";
+import type { Delivery } from "#shared/delivery.js";
+import { commandDelivery } from "#channel/delivery.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import type { ContextAccessor } from "#context/key.js";
 import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  GetEventStreamOptions,
-  ResetSessionResult,
+  SessionStreamOptions,
+  SessionControlOptions,
   Runtime,
   SessionAuthContext,
   SessionCallback,
-  SessionSendCommandResult,
   TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
-import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
   AuthKey,
   ContinuationHookTokensKey,
@@ -29,58 +31,50 @@ import {
   InitiatorAuthKey,
   SessionIdKey,
 } from "#context/keys.js";
-import {
-  type InputResponse,
-  parseInputResponses,
-  type StrictInputResponses,
-} from "#shared/input.js";
+import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /** Immutable-ID handle for one exact durable session. */
-export interface Session {
-  readonly id: string;
-  /**
-   * Sends a message to this exact session ID without creating or following a
-   * replacement. Throws `SessionStrandedError` when the session's owner cannot
-   * execute here; nothing is delivered. Call {@link reset} to end it.
-   */
-  send(
-    message: string | UserContent,
-    options: SessionSendOptions,
-  ): Promise<SessionSendCommandResult>;
-  /** Answers pending input requests on this exact session ID. Throws `SessionStrandedError` like {@link send}. */
-  respond<const TResponses extends readonly InputResponse[]>(
-    inputResponses: StrictInputResponses<TResponses>,
+export interface Session extends SessionReader {
+  send(message: MessageContent, options: SessionSendOptions): Promise<Delivery>;
+  respond<const TAnswers extends readonly Answer[]>(
+    answers: StrictAnswers<TAnswers>,
     options: SessionRespondOptions,
-  ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  ): Promise<Delivery>;
+  cancel(options?: SessionControlOptions & { readonly turnId?: string | null }): Promise<Delivery>;
   /** Prepares an idle session on the deployment accepting this request, without a model turn. */
-  prewarm(): Promise<import("#protocol/prewarm-session.js").PrewarmSessionResult>;
-  /** Queues compaction on this exact session ID. */
-  compact(): Promise<CompactSessionResult>;
-  /** Queues a context clear on this exact session ID. */
-  clear(): Promise<ClearSessionResult>;
-  /** Terminally retires this exact session ID. */
-  reset(options?: { reason?: string }): Promise<ResetSessionResult>;
+  prewarm(): Promise<PrewarmSessionResult>;
+  clear(options?: SessionControlOptions): Promise<Delivery>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
+  reset(options?: SessionControlOptions & { readonly reason?: string }): Promise<Delivery>;
   /**
    * Opens the recorded stream. Following it throws `SessionStrandedError`
    * while its owner is stranded; `follow: false` reads recorded history up to
    * the current tail without inspecting or changing the session.
    */
-  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<MessageStreamEvent>>;
+  stream(options?: SessionStreamOptions): AsyncIterable<SessionStreamEvent>;
+}
+
+export interface InternalSession extends Session {
+  getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
+  getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
+  /** Whether a run that can still execute owns the session; `true` when the runtime can't tell. */
+  hasRunnableOwner(): Promise<boolean>;
+}
+
+/** HTTP framing and conformance readers operate on framework-created handles. */
+export function internalSession(session: Session): InternalSession {
+  return session as InternalSession;
 }
 
 interface SessionDeliveryOptions {
   /** Stable delivery identity, deduplicated within this session's recent-key window. */
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
-  /** Public callback destination for a delegated continuation turn. */
-  readonly callback?: SessionCallback;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
 }
@@ -97,39 +91,33 @@ export type SessionSendOptions = SessionDeliveryOptions & {
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
 
-/**
- * Live handle to the current session, exposed on `ctx.session` to
- * `deliver` and event handlers. The framework hydrates the read-only
- * fields from the active context at step start. A write through
- * `continuation.alias()` selects a new current address and records it so the
- * runtime can add its hook to the session inbox at the next step boundary.
- * Previously claimed addresses remain active.
- */
-export interface SessionHandle {
-  readonly id: string;
-  readonly auth: SessionAuth;
-  readonly continuation?: {
-    readonly token: string;
-    alias(rawToken: string): void;
-  };
+interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
+  readonly callback?: SessionCallback;
+  /** The delivery's id, when the request names it (`deliveryIdForIdempotencyKey`). */
+  readonly deliveryId?: string;
 }
 
 export function createSession(
   id: string,
   runtime: Runtime,
   metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
-): Session {
+): InternalSession {
   return {
     id,
     async send(message, options) {
       validateDeliveryIdempotencyKey(options.idempotencyKey);
-      const delivery = createDelivery(metadata);
-      const caller = sessionCallbackToTurnCaller(options.callback);
+      const delivery = createDelivery(
+        metadata,
+        (options as InternalSessionDeliveryOptions).deliveryId,
+      );
+      const caller = sessionCallbackToTurnCaller(
+        (options as InternalSessionDeliveryOptions).callback,
+      );
       const history = validateSessionHistory(options.history);
       const payload = attachClientContext<{
         context?: readonly string[];
         history?: readonly SessionHistoryMessage[];
-        message: string | UserContent | undefined;
+        message: MessageContent | undefined;
         outputSchema?: JsonObject;
       }>({ message: serializeFilePartsInMessage(message) }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
@@ -145,24 +133,30 @@ export function createSession(
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
         title: options.title,
       };
-      return await runtime.dispatchSession({
+      const result = await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
       });
+      return commandDelivery(runtime, result, delivery.deliveryId);
     },
-    async respond(inputResponses, options) {
+    async respond(answers, options) {
       validateDeliveryIdempotencyKey(options.idempotencyKey);
-      if (inputResponses.length === 0) {
-        throw new Error("respond() requires at least one input response.");
+      if (answers.length === 0) {
+        throw new Error("respond() requires at least one answer.");
       }
-      const validatedInputResponses = parseInputResponses(inputResponses);
-      const caller = sessionCallbackToTurnCaller(options.callback);
-      const delivery = createDelivery(metadata);
+      const validatedAnswers = parseAnswers(answers);
+      const caller = sessionCallbackToTurnCaller(
+        (options as InternalSessionDeliveryOptions).callback,
+      );
+      const delivery = createDelivery(
+        metadata,
+        (options as InternalSessionDeliveryOptions).deliveryId,
+      );
       const payload = attachClientContext<{
         context?: readonly string[];
-        inputResponses: readonly InputResponse[];
+        answers: readonly Answer[];
         outputSchema?: JsonObject;
-      }>({ inputResponses: validatedInputResponses }, readClientContext(options));
+      }>({ answers: validatedAnswers }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
@@ -173,15 +167,16 @@ export function createSession(
         payload,
         requestId: metadata.requestId,
       };
-      return await runtime.dispatchSession({
+      const result = await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
       });
+      return commandDelivery(runtime, result, delivery.deliveryId);
     },
-    async cancel(options?: { turnId?: string }) {
-      const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
-      if (options?.turnId !== undefined) command.turnId = options.turnId;
-      return await runtime.dispatchSession({ command, sessionId: id });
+    async cancel(options) {
+      const command = controlCommand({ kind: "cancel" as const, turnId: options?.turnId }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
     },
     async prewarm() {
       return await runtime.dispatchSession({
@@ -189,23 +184,35 @@ export function createSession(
         sessionId: id,
       });
     },
-    async compact() {
-      return await runtime.dispatchSession({ command: { kind: "compact" }, sessionId: id });
+    async compact(options) {
+      const command = controlCommand({ kind: "compact" as const }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
     },
-    async clear() {
-      return await runtime.dispatchSession({ command: { kind: "clear" }, sessionId: id });
+    async clear(options) {
+      const command = controlCommand({ kind: "clear" as const }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
     },
     async reset(options) {
-      return await runtime.dispatchSession({
-        command: { kind: "reset", reason: options?.reason },
-        sessionId: id,
-      });
+      const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId, { follow: false });
     },
-    async getEventStream(options?: GetEventStreamOptions) {
-      return runtime.getEventStream(id, options);
+    async *stream(options?: SessionStreamOptions) {
+      yield* await runtime.getEventStream(id, options);
+    },
+    async getLineStream(options?: SessionStreamOptions) {
+      return runtime.getLineStream(id, options);
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);
+    },
+    async hasRunnableOwner() {
+      return (await runtime.hasRunnableOwner?.(id)) ?? true;
+    },
+    async getChildBinding(childSessionId: string) {
+      return await runtime.readChildBinding?.(id, childSessionId);
     },
   };
 }
@@ -218,34 +225,28 @@ export function createAttachSessionFn(
   return (sessionId) => createSession(sessionId, runtime, metadata);
 }
 
-function createDelivery(
-  metadata: Partial<ChannelDeliverySource>,
-): ReturnType<typeof createChannelDeliveryMetadata> | undefined {
-  return metadata.channelKind !== undefined && metadata.channelName !== undefined
-    ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
-    : undefined;
+function createDelivery(metadata: Partial<ChannelDeliverySource>, deliveryId?: string) {
+  const delivery = createChannelDeliveryMetadata({
+    channelKind: "http",
+    channelName: "http",
+    ...metadata,
+  });
+  return deliveryId === undefined ? delivery : { ...delivery, deliveryId };
 }
 
-/**
- * Builds a live {@link SessionHandle} backed by the active context
- * accessor. Read-only fields resolve through getters so they reflect
- * any updates made by other handlers within the same step (e.g. the
- * `deliver` hook seeding `AuthKey` before an event handler reads
- * `session.auth`).
- *
- * Used by {@link buildAdapterContext} to populate `ctx.session` on
- * every adapter handler invocation.
- */
-export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
+/** Live metadata and routing authority stay separate, including when auth changes mid-step. */
+export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
   return {
-    get id() {
-      return accessor.get(SessionIdKey) ?? "";
-    },
-    get auth(): SessionAuth {
-      return {
-        current: accessor.get(AuthKey) ?? null,
-        initiator: accessor.get(InitiatorAuthKey) ?? null,
-      };
+    session: {
+      get id() {
+        return accessor.get(SessionIdKey) ?? "";
+      },
+      get auth(): SessionAuth {
+        return {
+          current: accessor.get(AuthKey) ?? null,
+          initiator: accessor.get(InitiatorAuthKey) ?? null,
+        };
+      },
     },
     get continuation() {
       const currentToken = accessor.get(ContinuationTokenKey);

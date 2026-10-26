@@ -18,10 +18,20 @@ export {
   type SessionUsageLimit,
   type DynamicSubagentDefinition,
   type DynamicLocalSubagentDefinition,
+  type DynamicSubagentResult,
   defineAgent,
   defineDynamic,
 } from "#public/definitions/agent.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicContext,
+  DynamicKey,
+  DynamicModelContext,
+  DynamicSentinel,
+  DynamicTurn,
+  Memo,
+  Occurrence,
+  SessionFrame,
+} from "#dynamic/definition.js";
 export {
   defineWorkspaceAgent,
   type WorkspaceAgentDefinition,
@@ -33,3 +43,9 @@ export {
   type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";
+
+export type {
+  AgentBuildDefinition,
+  AgentPromptCacheDefinition,
+  AgentToolExposure,
+} from "#shared/agent-definition.js";

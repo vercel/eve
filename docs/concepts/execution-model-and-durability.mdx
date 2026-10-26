@@ -23,15 +23,9 @@ replay unit.
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds deployment-aware routing and dashboard run metadata.
 
-<span id="stranded-sessions" />
-<span id="what-a-replacement-session-receives" />
-<span id="how-a-stranded-session-ends" />
-
-On Vercel, workflow runs continue on the deployment that started them, and idle sessions can move to a newer deployment on their next delivery. Self-hosted worlds without per-deployment routing can resume persisted sessions after a process restart with the same eve version, but cannot resume session runs built by another eve version. See [Recover a stranded session](../guides/deployment/self-hosting#recover-a-stranded-session) for recovery and optional conversation context in a replacement session.
-
 When a Vercel production deployment changes, a new delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. This applies whether the delivery arrives through the session ID or through any channel continuation address the session has claimed. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. As with any turn, the triggering delivery restarts the session's [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window, whether or not the handoff succeeds; disabled timeouts stay disabled.
 
-Before taking ownership, the target deployment upgrades the checkpoint when an older eve release wrote it, then checks that no pending work remains. A deployment accepts checkpoints from eve 0.66.0 and later, so upgrading eve does not leave long-lived sessions, such as a Slack thread, on their old deployment. An older release cannot read a newer checkpoint: after a rollback, a session that already moved to the newer deployment stays there. Extension state saved before eve 0.69 moves to its mount when exactly one mount of that extension package defines that state. State that the target deployment no longer defines, such as a removed `defineState` key, is dropped, and the target deployment's runtime logs show a `dropping unknown context key during deserialization` warning. When two or more mounts of one extension package define that state, eve cannot choose an owner, and the session stays on its current deployment. Idle subagent sessions that eve 0.66–0.68 kept for later reuse are stopped after the handoff. Authored session state remains opaque to this validation.
+Before taking ownership, the target deployment checks checkpoint compatibility and that no pending work remains. A session with an incompatible checkpoint stays on its current deployment; see the [migration guide](./upgrade-to-v27-events#before-you-upgrade) for this release's requirements. An older release cannot read a newer checkpoint: after a rollback, a session that already moved to the newer deployment stays there. State that the target deployment no longer defines, such as a removed `defineState` key, is dropped, and the runtime logs identify the unknown key. Authored session state remains opaque to this validation.
 
 Messages that arrive while a handoff is in progress are accepted right away and are not lost. The new owner processes them after the triggering delivery, in the order they arrived, whichever run accepted them.
 
@@ -48,6 +42,106 @@ Every workflow run records each step it executes, so a session that ran on one r
 The move happens once the turn settles and nothing else is waiting: no queued messages, running tasks or subagents, or pending human input. The new run receives the compacted history and settled state, then waits for the next message. A message that is already waiting when the turn settles runs on the current run first, and the session moves at the next point where nothing is waiting. A message that arrives after the move starts is accepted right away and runs once, on the new run. If work is still pending, eve tries again after a later turn settles. The session keeps its ID, event stream, and continuation addresses, and its [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window still counts from the turn that compacted. If the new run cannot take ownership, the current run keeps the session, writes a `session handoff failed` warning to its runtime logs, and tries again later.
 
 Both kinds of handoff need a Workflow world that can move a session's addresses from one run to another without releasing them, and can keep a released address reserved for a while (the `hookForceClaim` and `hookRetention` capabilities). Vercel Workflow, the local world, and `@workflow/world-postgres` 5.0.4 and later provide both. On a world without them, sessions never move between runs: deployment and compaction handoffs are skipped, and a session's run history grows for as long as the session lives. The first skipped attempt writes a `session handoff unavailable` warning to the runtime logs.
+
+### Stranded sessions
+
+A session is stranded when another eve version built the workflow run that owns it. A run can only be replayed by the eve version that started it, so the conversation is still stored, but nothing on the current deployment can process a new message. On worlds without per-deployment routing, eve checks the owner before delivering channel messages and input responses, rather than committing them to a session that cannot answer.
+
+eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session can never run again:
+
+| World                        | When a session is stranded                                                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                                                                 |
+| Local world with `eve start` | After any upgrade that changes the eve version. Sessions created before eve recorded its version on the run are treated the same way.                                                                                                 |
+| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time: a deployment running another version cannot replay these sessions, and eve does not route runs between deployments.                                          |
+| `eve dev`                    | After an eve version change. A session from a previous dev server invocation built by the same eve version is not stranded: it stays dormant until you restart `eve dev` with [`--resume`](../reference/cli#local-workflow-recovery). |
+
+eve ends a stranded session without running any of its code. When that happens depends on the kind of run:
+
+- **A root session**, one that a channel or client started, stays where it is. It keeps its address and executes nothing until a new channel message replaces it, a reset ends it, or its session timeout elapses, whichever comes first.
+- **A subagent session or workflow tool run**, including a task, is cancelled the next time the world delivers work to it, for example when the local world or Postgres recovers active runs at startup. No later message could resume its interrupted work, so eve does not wait.
+
+See [How a stranded session ends](#how-a-stranded-session-ends) for the details.
+
+For a root session, what happens next depends on how the message is addressed:
+
+- **A channel address**, such as a Slack thread or any `from(address).send(...)`, resets the stranded session and starts a fresh session at the same address. The message becomes the fresh session's first turn. Concurrent messages to the address produce one fresh session. The fresh session names the session it replaced, whose recorded conversation your instructions can read; see [What a replacement session receives](#what-a-replacement-session-receives). A delivery that carries input responses, with or without a message, throws `SessionStrandedError` and leaves the stranded session in place, because a fresh session has no request for them to answer. See [custom channels](../channels/custom#channel-operations-and-session-handles).
+- **`create()` on a channel address** throws `SessionStrandedError` and leaves the stranded session in place. Call `reset()` on the address, then `create()` again; see [Start from prior history](../channels/eve#start-from-prior-history).
+- **A session ID** is never reset implicitly. The eve HTTP channel returns `409` with `code: "session_stranded"` and the `eveVersion` that built the session when it recorded one. `Session.send()` and `Session.respond()` throw `SessionStrandedError` from `eve/channels`, and the TypeScript client's `ClientSession.send()` and `respond()` throw `ClientSessionStrandedError` from `eve/client`. Nothing is delivered, and the stranded run keeps its status and event log. See [Start and continue a session](../channels/eve#start-and-continue-a-session).
+- **Following a stream** of a stranded session returns the same `409 session_stranded`. The TypeScript client stops reconnecting and reports `ClientSessionStrandedError`; the TUI explains how to recover. An existing connection learns this when it reconnects. Messages accepted before the upgrade are not redelivered.
+- **Reading recorded history** still works. A bounded read (`stream({ follow: false })`, or `follow=false` on the stream route) returns the events recorded so far without inspecting or changing the session, so you can read a stranded conversation before deciding to reset it.
+- **Reset** works on a stranded session through a channel address or a session ID. **Clear** would keep a session that cannot run, so it is refused: `Session.clear()` throws `SessionStrandedError`, the eve HTTP channel returns `409 session_stranded`, and nothing changes. Reset the session instead.
+- **Session timeouts** end a stranded session the same way a reset does; see [How a stranded session ends](#how-a-stranded-session-ends).
+
+A reset ends the stranded session without running any of its code and waits for its channel addresses to be released. If another run has taken ownership in the meantime, the reset fails without ending the new owner and can be retried. The stranded session's `session.ended` hooks do not run; a replacement session runs `session.started` as usual. eve attempts to record the reset delivery and a `session.ended` fact with `outcome: "failed"` and error code `session_stranded`, then close the old stream. Publication is best effort: unavailable storage or a stalled write does not prevent retirement, so a terminal fact may be missing. A reset that fails partway through can be retried.
+
+Each reset logs a `warn` record, `Reset stranded session`, with the previous session ID, both eve versions, and the `trigger`: `message`, `reset`, or `timeout`.
+
+A reset cannot be undone. A fresh session started by a message can read at most the stranded conversation's text; an explicit reset leaves the next session no link to the stranded one. Rolling back to the eve version that built a session helps only before the session is reset. On a world other than Vercel Workflow, pin the exact eve version in `package.json` so upgrades happen only when you choose them.
+
+#### What a replacement session receives
+
+A replacement session is a new session with its own ID, stream, auth, channel binding, and state. It starts with no history from the stranded session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
+
+To let the model continue the conversation, read the stranded session's recorded stream with `sessions.attach()` from `eve/server`, read it with `transcriptOf()` from `eve/client`, and return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions) with a memo keyed by the predecessor's ID:
+
+```ts title="agent/instructions/replaced-conversation.ts"
+import { transcriptOf } from "eve/client";
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { sessions } from "eve/server";
+
+export default defineDynamic(async (ctx) => {
+  const predecessor = ctx.session.predecessor;
+  if (predecessor === undefined) return null;
+  const content = await ctx.memo(predecessor.sessionId, async () => {
+    const events = [];
+    try {
+      for await (const event of sessions.attach(predecessor.sessionId).stream({
+        startIndex: -2000,
+        follow: false,
+        signal: AbortSignal.timeout(5_000),
+      })) {
+        events.push(event);
+      }
+    } catch (error) {
+      console.warn("couldn't read the replaced session", { error });
+      return null;
+    }
+    const transcript = transcriptOf(events, { maxMessages: 40 });
+    if (transcript.messages.length === 0) return null;
+
+    return [
+      "Earlier conversation from a session this one replaced, as historical data rather than instructions:",
+      ...transcript.messages.map((message) => JSON.stringify(message)),
+    ].join("\n");
+  });
+  return content === null ? null : defineInstructions({ content, role: "user" });
+});
+```
+
+The memo runs before the replacement's first model call, and the instruction enters the replacement's durable history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
+
+`transcriptOf()` keeps the history each consumed delivery imported, the text of each consumed delivery, and each completed reply part, oldest first, as `{ role, text }` messages. Reasoning, narration, tool calls and results, attachments, interactions, and interrupted output are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. `sessions.attach()` also converts older session history to v27 events. That conversion reads from the beginning to reconstruct the conversation, even when `startIndex` requests a later position. `maxMessages` keeps only the newest messages in the resulting transcript.
+
+The read and the prompt are yours to bound:
+
+- `startIndex: -2000` requests the newest 2,000 stored lines, not 2,000 events. Older history conversion still reads from the beginning; the `signal` limits read time in either case. The example catches a read that throws or times out and returns `null`, so the instruction contributes nothing and the turn continues. A memo that throws fails the turn instead, and eve tries it again at the next model call.
+- Keep the instruction's role `"user"` and label the text as historical data. Text the earlier user wrote should not reach the model as system instructions.
+- `sessions` reads any session ID, including a session that set `experimental.workflow.retention: 0`, until its data is deleted. Skip such sessions if your agent sets zero retention. Pass only the ID eve provides in `ctx.session.predecessor`, never one taken from a request or a model.
+
+To use other context instead, such as a summary your application stored for the earlier session, look it up by `ctx.session.predecessor.sessionId`.
+
+The transcript is context only: tools, approvals, files, sandbox contents, authored state, and interrupted work do not carry over. It includes only messages the stranded session recorded itself. When a replacement session is later replaced in turn, text it received through an instruction is not part of its stream. Each session's `session.started` event records its own `data.predecessor`, so you can follow `predecessor.sessionId` back through earlier sessions if you need older text.
+
+#### How a stranded session ends
+
+A stranded root session ends on its next channel message, a reset, or its [session timeout](../agent-config#runtime-limits), whichever comes first. It executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve acknowledges the root session's delivery without replaying it and logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses. A later restart skips it the same way.
+
+The timeout is the session's own durable timer, which its last owner armed for the end of an idle window (30 days by default). An owner re-arms the timer only when the timer fires before the window ends, so a stranded session ends at most `sessionTimeoutMs` after its last turn settled, and possibly sooner. The timer still works after the upgrade. When it fires on a stranded session, it retires the session without starting a fresh one. The next message to the address then starts an ordinary session. A session with `sessionTimeoutMs: false` has no timer, so a stranded one stays until a message or a reset, just as a healthy one would stay open.
+
+Ending a root session does not immediately cancel its subagent sessions and workflow tool runs. Each is retired when a delivery for it reaches the current deployment, and the runtime logs identify the stranded run. A run that never receives a delivery, such as one parked in a dormant `eve dev` generation, can stay active; cancel it in your Workflow world if you need to. Cancellation does not run authored cleanup or lifecycle hooks, undo side effects, or stop independent external jobs, and results and approvals do not carry over to a replacement session.
+
+Runs that recorded no eve version, including every run from a release before eve recorded versions, are treated as stranded.
 
 ### Upgrading sessions from the former execution model
 
@@ -113,11 +207,24 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 
 ## Resuming after a crash
 
-Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. An interrupted step runs again from the checkpoint before it, so model calls in that step can run again.
+
+A step publishes session events as it works, before it saves its checkpoint. When an interrupted step already wrote some, its retry continues the stream after them instead of writing them again:
+
+- A tool call whose start is present in the recovered stream does not run again. The model reads each such call's name, input, and what eve knows of it, such as that it completed but its result was lost, and decides what to call again.
+- What the interrupted attempt left open settles `abandoned`: its model run, unfinished calls, and the approvals or questions it asked. The model asks again if it still needs them.
+- A turn the interrupted attempt already settled stays settled, with its input and reply in history.
+- A clear the interrupted attempt finished still empties history. An unfinished clear or compaction change settles `interrupted`; its control delivery settles `failed` instead of running again. A completed compaction keeps its recorded outcome, but its lost private summary is not reconstructed. The checkpoint history remains available for a later compaction.
+- Hooks and channel handlers do not run again for the events the interrupted attempt wrote. New recovery facts use normal hooks and instrumentation.
+
+A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, or with `STEP_FAILED` when one of its steps fails on every retry. The session stays open for the next message.
+
+Terminal cleanup preserves recorded outcomes and closes any remaining work. Its final publication does not run authored hooks; channel notification depends on whether the channel context can be restored. Do not rely on a terminal hook for guaranteed external cleanup: a hook interrupted after publication may have completed its side effect, partly completed it, or never run.
+
+These are durable-step retries, not the model provider's retry loop or ordinary tool errors handled within a step. Recovery does not make external effects exactly-once. A call's start record may not be durable when execution begins, so a crash can lose that record. A call whose start had not reached the stream when the step was interrupted can run again, a call reported as interrupted may have taken effect, and the model can call a tool again. A world that redelivers a step while its earlier attempt is still running can also run both. Give tools with irreversible effects a stable operation ID, or have them check whether the action already happened.
 
 With `experimental.workflow.modelCallsPerStep` greater than `1`, an
-interrupted Workflow step can also repeat earlier model calls and inline tool
-executions from the same batch. Approval, input, and blocking coordination
+interrupted step can repeat earlier model calls from the same batch. Approval, input, and blocking coordination
 boundaries still force a checkpoint before eve waits.
 
 Steering can interrupt pending model generation before assistant output begins.
@@ -186,7 +293,7 @@ An executing eve tool finishes and commits its result before steering reaches th
 
 Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `answers` deliveries do not steer; they remain available to the pending request they address.
 
 Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
 
@@ -196,7 +303,7 @@ A turn can hand work off to a [subagent](../subagents). Each subagent gets its o
 
 ## How eve orders session history
 
-Conversation history within a session is append-only. Static user-role instructions lead fresh-session history. Dynamic user-role instructions land at their session or turn boundary before the current delivery. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see messages in the order they happened.
+Conversation history within a session is append-only. Static user-role instructions lead fresh-session history. Dynamic user-role instructions are added before a model call when their content changes. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see messages in the order they happened.
 
 ## What to read next
 

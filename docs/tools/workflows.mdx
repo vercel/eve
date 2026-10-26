@@ -94,7 +94,7 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
   Call `getSandbox`, `getToken`, and `requireAuth` in a step: the workflow body throws when it calls them.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
-  not tools returned from `defineDynamic` resolvers.
+  not tools a `defineDynamic` function returns.
 
 `ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext` and
 `WorkflowServeContext` in the workflow body.
@@ -191,7 +191,7 @@ Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workfl
 and replace `agent(ctx, input)` and `ask(ctx, request)` with an agent session from
 [`ctx.agent(name)`](#delegate-work-ctxagent) and `ctx.ask(request)`. The `eve/workflow` entry point
 has been removed. Import `WorkflowToolContext`, `AgentSession`,
-`ToolInputRequest`, `ToolInputRequestOptions`, and `ToolInputResponse` from `eve/tools` when you
+`ToolQuestion`, `ToolAskOptions`, and `ToolAnswer` from `eve/tools` when you
 need explicit types.
 
 `ctx.ask` no longer accepts `dismissible`, and its `dismissed` status is now `cancelled`. A
@@ -343,9 +343,9 @@ described in [Tasks](/docs/tools/tasks). What differs:
 - **Unknown tasks:** the id must name an unfinished task this tool started; otherwise the call
   fails with `UNKNOWN_TASK`. The call can come from any caller in the session.
 - **`ctx.session` and `ctx.agents` describe the call being served:** a later call can come in a
-  later turn than the one that started the task. Its `task.started` and `task.settled` carry that
-  call's `callId` and `turnId`, and so do the questions, sign-ins, and `agent.started` events the
-  body causes while serving it. From the moment `receive()` resolves with a call, `ctx.session` is that call's view of
+  later turn than the one that started the task. Its `call.started` and `call.settled` carry that
+  call's `callId` and turn, and so do the questions and sign-ins the body opens while serving
+  it. From the moment `receive()` resolves with a call, `ctx.session` is that call's view of
   the session, including in a step that receives `ctx`: `ctx.session.turn` is the call's turn, and
   `ctx.session.auth` is the auth the session admitted the call with, which may belong to a
   different caller than the one that started the task. `getToken`, `requireAuth`, and connections
@@ -368,7 +368,7 @@ described in [Tasks](/docs/tools/tasks). What differs:
   uses the auth of the call being served; remote identity follows the
   [forwarding rules](../guides/remote-agents#forwarding-the-caller-identity).
 - **Results:** `ctx.reply(output)` settles every call received so far with `output`, all at once.
-  Each settled call reports its own `task.settled`, and the model receives the reply once. The task
+  Each settled call reports its own `call.settled`, and the model receives the reply once. The task
   then goes idle until its next call. A reply with
   no call left to settle is dropped, and `ctx.ask` throws while no call is waiting for a result.
   A reply also withdraws the questions still pending for the calls it settles, but doesn't abort
@@ -395,7 +395,8 @@ described in [Tasks](/docs/tools/tasks). What differs:
 Every [agent tool](/docs/subagents), including the built-in `agent` tool and remote agents, is a
 `serve` tool that eve builds this way on public API: each task opens one session with
 [`ctx.agent`](#delegate-work-ctxagent), sends each call's `message` with that call's `abortSignal`,
-and replies with the final response of each agent turn.
+and replies with the final response of each agent turn. Unlike other `serve` tasks, cancelling an
+agent task ends it; start a new task to delegate again.
 
 ## Authorize inside a step
 
@@ -512,6 +513,7 @@ async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string
 const answer = await ctx.ask(
   {
     prompt: string,
+    title?: string,
     display?: "confirmation" | "select" | "text",
     options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
     allowFreeform?: boolean,
@@ -523,8 +525,8 @@ const answer = await ctx.ask(
 // | { status: "unavailable" }
 ```
 
-`ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
-tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+`ctx.ask` opens an interaction on the session (`interaction.opened`) — rendered the way channels
+render tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
 The `ask_question` tool is a workflow tool built on `ctx.ask`.
 
 The answer's `status` tells the body what happened:
@@ -532,8 +534,7 @@ The answer's `status` tells the body what happened:
 - `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
 - `cancelled`: the request was withdrawn before anyone answered it, because the `signal` passed to
   `ctx.ask` or the call's `abortSignal` aborted, or because a `serve` body replied to the call. The
-  session emits `input.resolved` with
-  `outcome: "cancelled"`, so clients stop offering the question.
+  session settles the interaction `withdrawn`, so clients stop offering the question.
 - `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
   immediately instead of waiting for an answer no one can give.
 
@@ -582,7 +583,7 @@ const response = await reviewer.send("Review the deployment plan for security ri
   outputSchema: z.object({ findings: z.array(z.string()) }),
   signal: ctx.abortSignal,
 });
-const { data, message, status } = await response.result();
+const { data, reply, status } = await response.result();
 ```
 
 Set `model` when the workflow should run a local child with a different AI Gateway model. The
@@ -622,7 +623,19 @@ or `disableTool()`. Delegated root copies and declared subagent contexts do not 
 root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it.
 An unavailable name rejects the first `send`.
 
-`send(message, options?)` accepts:
+`send(message, options?)` accepts text or `MessageContent<string | URL>`: up to 64 text and
+file parts. File `data` must be an HTTP(S) URL, as a string or `URL` object. Inline bytes, base64,
+and `data:` URLs are rejected before dispatch so attachment bytes do not enter durable workflow
+inputs. Upload a local file first, then send its URL:
+
+```ts
+await reviewer.send([
+  { type: "text", text: "Review Alice's report." },
+  { type: "file", data: "https://files.example/report.pdf", mediaType: "application/pdf" },
+]);
+```
+
+The options are:
 
 | Option         | Description                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
@@ -633,15 +646,15 @@ A message sent while the session's turn is running joins that turn, and its resp
 that turn's result. If the turn ends before the agent reads the message, the message starts the next
 turn instead, and its response resolves with that turn's result. The responses of earlier messages
 that are still waiting resolve with the same result. A message sent while the session is idle starts
-the next turn, and the session keeps its conversation between turns. `result()` returns the
-client's `MessageResult` fields, plus `error` when the turn failed:
+the next turn, and the session keeps its conversation between turns. `result()` returns:
 
-| Field     | Description                                                                                                                                                                                                         |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`    | The structured value, when the turn requested `outputSchema`.                                                                                                                                                       |
-| `message` | The agent's final reply text, when the turn did not request `outputSchema`.                                                                                                                                         |
-| `status`  | `"waiting"` when the session waits for its next message, `"completed"` when the session ended with the turn, or `"failed"` when the turn failed. A cancelled turn is `"waiting"` with neither `data` nor `message`. |
-| `error`   | `{ message }` with the reason the turn failed, present only when `status` is `"failed"`.                                                                                                                            |
+| Field          | Description                                                                                               |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `data`         | The structured value, when the turn requested `outputSchema`.                                             |
+| `reply`        | The agent's final reply text, when available.                                                             |
+| `status`       | `"completed"`, `"failed"`, or `"cancelled"`. Completion does not by itself mean the session ended.        |
+| `sessionEnded` | Whether the session ended in the response's final commit.                                                 |
+| `error`        | `{ message }` with the reason the turn failed. Required when `status` is `"failed"` and absent otherwise. |
 
 Every `ctx.agent(name, options?)` call returns a new session that only the workflow run can address.
 The model does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
@@ -652,12 +665,10 @@ identity, set `forwardPrincipal: true` on the remote agent and configure the rec
 A person answers the child's questions and sign-ins at the root session, as for any subagent.
 The session ends when the run finishes, which cancels any turn still running.
 
-The parent stream announces each session with `agent.started`, which carries the `callId` and
-`turnId` of the tool call the run is serving when it opens the session (for a `serve` task, the
-latest call it received), the
-`taskId` when the call runs as a task, the agent `name`, the child's `sessionId`, and a
-`streamPath`. Pass the event to
-[`session.agent(started).stream()`](/docs/guides/client/streaming#follow-a-subagent) to follow the child.
+The parent stream announces each session with `child.opened`, which carries its `owner` (the
+task whose run opened the session, or the tool call when the call doesn't run as a task), the
+agent `name`, the child's `sessionId`, and its `stream` path. Pass the event to
+[`session.agent(opened).stream()`](/docs/guides/client/streaming#follow-a-subagent) to follow the child.
 
 ### Route to a hidden subagent with Jev
 
@@ -709,7 +720,7 @@ async function chooseTarget(
   "use step";
 
   const result = await decide({
-    abortSignal,
+    signal: abortSignal,
     state: { task },
     questions: {
       route: {
@@ -739,9 +750,9 @@ export default defineWorkflowTool({
     );
 
     const response = await ctx.agent(target).send(task, { signal: ctx.abortSignal });
-    const { error, message, status } = await response.result();
-    if (status === "failed") throw new Error(`${target} failed: ${error?.message}`);
-    return message ?? null;
+    const { error, reply, status } = await response.result();
+    if (status === "failed") throw new Error(`${target} failed: ${error.message}`);
+    return reply ?? null;
   },
 });
 ```
@@ -755,7 +766,7 @@ The decision runs in a step so workflow replay records its result instead of mak
 To replace the model-facing `agent` tool with a router across every target in `ctx.agents`, export `agentRouter()` from the `agent` slot:
 
 ```ts title="agent/tools/agent.ts"
-import { agentRouter } from "eve/tools/agent-router";
+import { agentRouter } from "eve/tools/agent_router";
 
 export default agentRouter();
 ```
@@ -774,7 +785,7 @@ eve advances the generator; use an awaited workflow operation when the body need
 
 | Operation       | Behavior                                                          |
 | --------------- | ----------------------------------------------------------------- |
-| `yield value`   | Emits an `action.partial` snapshot for the pending tool call.     |
+| `yield value`   | Emits a `call.progress` snapshot for the pending tool call.       |
 | `return value`  | Settles the tool call with its output.                            |
 | No return value | Uses the last yield as output, or `null` if there were no yields. |
 

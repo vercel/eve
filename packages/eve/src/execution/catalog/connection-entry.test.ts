@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
+import { once } from "#tools/approval/policies.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
@@ -20,11 +21,14 @@ const tools: readonly ConnectionToolMetadata[] = [
 ];
 
 /** Bob's tracker connection, whose approval policy records each context it receives. */
-function setup(getToolMetadata: ConnectionClient["getToolMetadata"] = async () => tools) {
+function setup(
+  getToolMetadata: ConnectionClient["getToolMetadata"] = async () => tools,
+  decide: ApprovalPolicy = () => "user-approval",
+) {
   const seen: ApprovalContext[] = [];
   const policy = vi.fn<ApprovalPolicy>((context) => {
     seen.push(context);
-    return "user-approval";
+    return decide(context);
   });
   const connection = {
     approval: policy,
@@ -55,7 +59,6 @@ function setup(getToolMetadata: ConnectionClient["getToolMetadata"] = async () =
     const approval = connectionEntry(registry, connection, toolName).approval!;
     const context: ApprovalContext = {
       abortSignal: new AbortController().signal,
-      approvedTools: new Set<string>(),
       callId: `call-${toolName}`,
       getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
       session: {} as ApprovalContext["session"],
@@ -92,5 +95,11 @@ describe("connection approval context", () => {
     });
     await expect(request("delete_issue")).resolves.toBe("user-approval");
     expect(seen[0]).not.toHaveProperty("toolAnnotations");
+  });
+
+  it("returns a once() decision itself, so the harness can tell it came from once()", async () => {
+    const perTool = once();
+    const { request } = setup(undefined, perTool);
+    expect(await request("delete_issue")).toBe(await perTool({} as ApprovalContext));
   });
 });

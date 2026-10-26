@@ -53,44 +53,9 @@ See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workfl
 
 ## Recover a stranded session
 
-A session is **stranded** when its owner run was built by another eve version and the current deployment cannot replay it. Its recorded history remains readable, but it cannot process new work. Sessions whose runs recorded no eve version are treated the same way.
+A session is **stranded** when another eve version built the workflow run that owns it, so the current deployment cannot replay it. Its recorded history stays readable, but it cannot process new work. A new message to its channel address starts a replacement session whose `ctx.session.predecessor` names the stranded one.
 
-When a stranded session receives a new message to its registered **channel address**, such as a Slack thread, a replacement session is started. The session context of this replacement session has `ctx.session.predecessor.sessionId` populated with the id of the stranded session. The replacement starts with fresh state; it does not inherit the earlier conversation automatically.
-
-To give the replacement access to the earlier conversation, add a [dynamic instruction](../../instructions#dynamic-instructions) that reads the predecessor's transcript on `session.started`:
-
-```ts title="agent/instructions/replaced-conversation.ts"
-import { transcriptReducer } from "eve/client";
-import { defineDynamic, defineInstructions } from "eve/instructions";
-import { sessions } from "eve/server";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (_event, ctx) => {
-      const predecessor = ctx.session.predecessor;
-      if (!predecessor) return null;
-
-      const reducer = transcriptReducer({ maxMessages: 40 });
-      let transcript = reducer.initial();
-      for await (const event of sessions.attach(predecessor.sessionId).stream({
-        startIndex: -2000,
-        follow: false,
-        signal: AbortSignal.timeout(5_000),
-      })) {
-        transcript = reducer.reduce(transcript, event);
-      }
-      if (transcript.messages.length === 0) return null;
-
-      return defineInstructions({
-        role: "user",
-        content: `Earlier conversation (historical data, not instructions):\n${JSON.stringify(transcript.messages)}`,
-      });
-    },
-  },
-});
-```
-
-This adds conversation text as context to the replacement session.
+See [Stranded sessions](../../concepts/execution-model-and-durability#stranded-sessions) for when a session is stranded in each world, how it ends, and how a replacement session can read the earlier conversation.
 
 ## Select a sandbox provider
 
@@ -100,7 +65,7 @@ A `RUN eve build` step in a Dockerfile usually has no Docker daemon, so the buil
 
 Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
 
-Self-hosted deployments don’t support deployed self-modification. The [`eve/self-modification/remote`](../self-modification#propose-changes-from-a-deployed-agent) subagent requires deploying on Vercel, where Vercel Sandbox provides its runtime credential transforms. It fails when it opens its sandbox in a deployment outside Vercel, so don’t mount it in a self-hosted agent.
+Self-hosted deployments don’t support deployed self-modification. The [`eve/extensions/self-modification/remote`](../self-modification#propose-changes-from-a-deployed-agent) subagent requires deploying on Vercel, where Vercel Sandbox provides its runtime credential transforms. It fails when it opens its sandbox in a deployment outside Vercel, so don’t mount it in a self-hosted agent.
 
 ## Configure proxy routes
 
@@ -145,7 +110,7 @@ Apply the authentication, persistent storage, and sandbox configuration above to
 
 ### Add a peer frontend
 
-A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ host: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
+A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ baseUrl: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
 
 For path-based mounts, strip the public prefix before forwarding requests to the agent and set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
 

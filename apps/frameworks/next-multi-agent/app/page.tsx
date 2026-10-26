@@ -54,7 +54,7 @@ function AgentPanel({
     agent: agent.name,
     prewarm: hasEditedMessage && message.trim().length > 0,
   });
-  const isBusy = eve.status === "submitted" || eve.status === "streaming";
+  const isBusy = eve.status === "busy";
 
   const submit: ComponentProps<"form">["onSubmit"] = async (event) => {
     event.preventDefault();
@@ -75,10 +75,10 @@ function AgentPanel({
       </div>
 
       <div className="messages">
-        {eve.data.messages.length === 0 ? (
+        {eve.messages.length === 0 ? (
           <p className="empty">Send a short prompt to the {agent.name} agent.</p>
         ) : (
-          eve.data.messages.map((item) => (
+          eve.messages.map((item) => (
             <div className="message" data-role={item.role} key={item.id}>
               <strong>{item.role}</strong>
               {item.parts.map((part, index) =>

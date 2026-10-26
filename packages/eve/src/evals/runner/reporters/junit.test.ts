@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { JUnit } from "#evals/reporters/index.js";
+import { junitReporter } from "#evals/reporters/index.js";
 import type { EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 
 const fsMocks = vi.hoisted(() => ({
@@ -15,9 +15,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("JUnit", () => {
+describe("junitReporter", () => {
   it("writes one testsuite with passed and failed evals as JUnit XML", async () => {
-    const reporter = JUnit({ filePath: "/tmp/eve/junit.xml", suiteName: "suite & one" });
+    const reporter = junitReporter({ filePath: "/tmp/eve/junit.xml", suiteName: "suite & one" });
 
     await reporter.onRunComplete(makeSummary());
 
@@ -31,7 +31,7 @@ describe("JUnit", () => {
   });
 
   it("defaults the suite name", async () => {
-    const reporter = JUnit({ filePath: "/tmp/eve/junit.xml" });
+    const reporter = junitReporter({ filePath: "/tmp/eve/junit.xml" });
 
     await reporter.onRunComplete(makeSummary());
 
@@ -40,7 +40,7 @@ describe("JUnit", () => {
   });
 
   it("renders skipped evals as skipped test cases", async () => {
-    const reporter = JUnit({ filePath: "/tmp/eve/junit.xml" });
+    const reporter = junitReporter({ filePath: "/tmp/eve/junit.xml" });
     const summary = makeSummary();
     await reporter.onRunComplete({
       ...summary,
@@ -108,10 +108,11 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       },
     ],
     result: {
+      sessionEnded: false,
       derived: createEmptyDerivedFacts(),
       events: [],
-      finalMessage: "done",
-      output: "done",
+      reply: "done",
+      data: "done",
       status: "completed",
       traceContexts: [],
     },

@@ -36,7 +36,6 @@ export default defineMemory({
 
     return [tenantId, principal];
   },
-  visibility: "scope",
 });
 ```
 
@@ -66,13 +65,13 @@ query itself, not as a filter after a global search. For custom capture, use
 the provider's stable `operationId` as an idempotency key. See
 [Build a memory provider](../memory/custom-provider) for the full contract.
 
-## Choose recall visibility
+## When the caller changes
 
-The default `visibility: "scope"` hides recalled records from an earlier scope
-when the authenticated caller changes within one session. Keep that default for
-tenant-and-caller memory, as the definition above does. Set
-`visibility: "session"` only when all callers who can share the session form
-one trusted audience. Namespace remains an isolation boundary in either mode.
+eve recalls again when the authenticated caller changes within one session.
+With the scope above, a new caller is a new scope, and the slot starts over:
+what eve recalled for the earlier caller leaves model context. It can't remove
+what an earlier assistant response already said; give participants who must not
+see each other's memory separate sessions.
 
 ## Set the trust policy
 

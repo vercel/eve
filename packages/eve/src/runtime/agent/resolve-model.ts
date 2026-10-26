@@ -168,7 +168,7 @@ export async function resolveRuntimeModelSelection(input: {
 }): Promise<ResolvedRuntimeModelSelection> {
   if (input.selection === null || input.selection === undefined) {
     throw new InvalidRuntimeModelSelectionError(
-      "Dynamic model resolver returned no model. Every matching dynamic model handler must return a concrete model selection.",
+      "The dynamic model returned no model. Return a model ID, a provider model, or { model, reasoning?, modelContextWindowTokens?, modelOptions? }.",
     );
   }
 
@@ -220,7 +220,7 @@ export async function resolveRuntimeModelSelection(input: {
   validateRuntimeLanguageModel(selectedModel);
   if (input.durability === "durable") {
     throw new InvalidRuntimeModelSelectionError(
-      'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "step.started" model resolver.',
+      'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "beforeModel" model resolver.',
     );
   }
 
@@ -338,7 +338,7 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
   );
   if (unknownKeys.length > 0) {
     throw new Error(
-      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, reasoning?, modelContextWindowTokens?, modelOptions? }.`,
+      `A dynamic model returns only runtime settings: model, reasoning, modelContextWindowTokens, and modelOptions. It returned ${unknownKeys.map((key) => `"${key}"`).join(", ")}, which can't vary per session; declare ${unknownKeys.length === 1 ? "it" : "them"} on defineAgent() instead.`,
     );
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { MarkdownClient } from "@comark/react";
-import { Client, type MessageStreamEvent } from "eve/client";
+import { Client, type SessionStreamEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { councilResultSchema, type CouncilResult, type MemberId } from "../../../agent/lib/schemas";
@@ -42,7 +42,7 @@ const initialMembers = (): Record<MemberId, MemberState> => ({
 });
 
 export function CouncilApp() {
-  const [client] = useState(() => new Client({ host: "" }));
+  const [client] = useState(() => new Client({ baseUrl: "" }));
   const completedMembersRef = useRef(new Set<MemberId>());
   const memberCallsRef = useRef(new Map<string, MemberId>());
   const runIdRef = useRef(0);
@@ -58,31 +58,39 @@ export function CouncilApp() {
       const session = client.sessions.attach(sessionId, { streamIndex: 0 });
 
       try {
+        // The kind of each content part, which only its first delta announces.
+        const partKinds = new Map<string, string>();
         for await (const event of session.stream()) {
           if (runIdRef.current !== runId) return;
 
-          if (event.type === "message.appended") {
+          if (event.type === "content.delta") {
+            if (event.data.kind !== undefined) partKinds.set(event.data.partId, event.data.kind);
+            if (partKinds.get(event.data.partId) !== "text") continue;
+            const delta = event.data.delta;
             setMemberState((current) => ({
               ...current,
               [memberId]: {
                 ...current[memberId],
-                response: `${current[memberId].response}${event.data.messageDelta}`,
+                response: `${current[memberId].response}${delta}`,
                 status: "running",
               },
             }));
           }
 
-          if (event.type === "message.completed" && event.data.message) {
+          if (
+            event.type === "content.completed" &&
+            event.data.kind === "text" &&
+            event.data.phase === "reply" &&
+            typeof event.data.value === "string"
+          ) {
+            const response = event.data.value;
             setMemberState((current) => ({
               ...current,
-              [memberId]: {
-                ...current[memberId],
-                response: event.data.message,
-              },
+              [memberId]: { ...current[memberId], response },
             }));
           }
 
-          if (event.type === "step.completed" && event.data.usage) {
+          if (event.type === "usage.recorded" && event.data.kind === "model") {
             const usage = event.data.usage;
             setMemberState((current) => ({
               ...current,
@@ -93,17 +101,11 @@ export function CouncilApp() {
             }));
           }
 
-          if (event.type === "turn.completed" || event.type === "session.completed") {
+          if (event.type === "turn.settled" || event.type === "session.ended") {
+            const failed = event.data.outcome === "failed";
             setMemberState((current) => ({
               ...current,
-              [memberId]: { ...current[memberId], status: "complete" },
-            }));
-          }
-
-          if (event.type === "step.failed" || event.type === "turn.failed") {
-            setMemberState((current) => ({
-              ...current,
-              [memberId]: { ...current[memberId], status: "error" },
+              [memberId]: { ...current[memberId], status: failed ? "error" : "complete" },
             }));
           }
         }
@@ -119,12 +121,13 @@ export function CouncilApp() {
   );
 
   const handleEvent = useCallback(
-    (event: MessageStreamEvent) => {
-      if (event.type === "task.started" && isMemberId(event.data.name)) {
-        memberCallsRef.current.set(event.data.callId, event.data.name);
+    (event: SessionStreamEvent) => {
+      // A member's call names it; the child session it opens streams its answer.
+      if (event.type === "call.requested" && isMemberId(event.data.capability.name)) {
+        memberCallsRef.current.set(event.data.callId, event.data.capability.name);
       }
 
-      if (event.type === "agent.started" && isMemberId(event.data.name)) {
+      if (event.type === "child.opened" && isMemberId(event.data.name)) {
         const memberId = event.data.name;
         setMemberState((current) => ({
           ...current,
@@ -133,9 +136,8 @@ export function CouncilApp() {
         void streamMember(memberId, event.data.sessionId, runIdRef.current);
       }
 
-      // A member's task.settled carries the call id its task.started named.
       const settledMember =
-        event.type === "task.settled" && event.data.status === "completed"
+        event.type === "call.settled" && event.data.outcome === "completed"
           ? { id: memberCallsRef.current.get(event.data.callId), output: event.data.output }
           : undefined;
       if (settledMember?.id !== undefined) {
@@ -153,13 +155,18 @@ export function CouncilApp() {
         }));
       }
 
-      if (event.type === "step.completed" && event.data.usage && synthesisStartedRef.current) {
+      // The judge's own model spend; the members' spend reaches it as delegated usage.
+      if (
+        event.type === "usage.recorded" &&
+        event.data.kind === "model" &&
+        synthesisStartedRef.current
+      ) {
         const usage = event.data.usage;
         setSummaryUsage((current) => mergeUsage(current, usage));
       }
 
-      if (event.type === "result.completed") {
-        const parsed = councilResultSchema.safeParse(event.data.result);
+      if (event.type === "content.completed" && event.data.kind === "result") {
+        const parsed = councilResultSchema.safeParse(event.data.value);
         if (!parsed.success) {
           setResultError("The judge returned an invalid result. Ask the council again.");
           return;
@@ -172,7 +179,7 @@ export function CouncilApp() {
   );
 
   const agent = useEveAgent({ onEvent: handleEvent });
-  const busy = agent.status === "submitted" || agent.status === "streaming";
+  const busy = agent.status === "busy";
   const error = resultError ?? agent.error?.message;
   const allMembersComplete = members.every(
     (member) => memberState[member.id].status === "complete",
@@ -195,7 +202,7 @@ export function CouncilApp() {
     setResult(undefined);
     setResultError(undefined);
     setSummaryUsage({});
-    agent.reset();
+    agent.newSession();
     void agent.send(message, { outputSchema: councilResultSchema });
   };
 

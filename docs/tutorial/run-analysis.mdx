@@ -162,14 +162,14 @@ import { z } from "zod";
 const host = process.argv[2];
 if (!host) throw new Error("Usage: node save-chart.ts <dev-server-url>");
 
-const client = new Client({ host });
-const { response } = await client.sessions.create({
+const client = new Client({ baseUrl: host });
+const { delivery } = await client.sessions.create({
   message: "Use run_sql and chart_series to plot daily order revenue in May 2026.",
 });
-const turn = await response.result();
+const turn = await delivery.result();
 if (turn.status === "failed") throw new Error("The agent turn failed. Check the dev server logs.");
-if (turn.inputRequests.length > 0) {
-  const prompts = turn.inputRequests.map((request) => request.prompt).join("\n");
+if (turn.interactions.length > 0) {
+  const prompts = turn.interactions.map((interaction) => interaction.request.prompt).join("\n");
   throw new Error(
     `Session ${turn.sessionId} needs your input before it can create the chart:\n${prompts}`,
   );
@@ -177,13 +177,16 @@ if (turn.inputRequests.length > 0) {
 
 const chartOutput = z.object({ pngBase64: z.string().min(1).max(1_398_104) });
 let saved = false;
-for (const event of turn.events) {
-  if (event.type !== "action.result") continue;
-  const result = event.data.result;
-  if (result.kind !== "tool-result" || result.toolName !== "chart_series" || result.isError)
+const charts = new Set<string>();
+for await (const event of delivery.stream()) {
+  if (event.type === "call.requested" && event.data.capability.name === "chart_series") {
+    charts.add(event.data.callId);
     continue;
+  }
+  if (event.type !== "call.settled" || !charts.has(event.data.callId)) continue;
+  if (event.data.outcome !== "completed") continue;
 
-  const { pngBase64 } = chartOutput.parse(result.output);
+  const { pngBase64 } = chartOutput.parse(event.data.output);
   const png = Buffer.from(pngBase64, "base64");
   if (
     png.byteLength > 1024 * 1024 ||
@@ -195,7 +198,7 @@ for (const event of turn.events) {
   saved = true;
 }
 if (!saved) {
-  console.error(turn.message ?? "The agent returned no explanation.");
+  console.error(turn.reply ?? "The agent returned no explanation.");
   throw new Error("No chart was returned. Check the agent's response above and sandbox setup.");
 }
 console.log(`Saved ${resolve("chart.png")}`);
@@ -211,7 +214,7 @@ Open the saved `chart.png` in your image viewer. This creates a separate session
 
 This step does not require approvals. If you return after adding the approval gate in [Guard the spend](./guard-the-spend), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages#answer-human-input-requests) before collecting that session's chart result.
 
-The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
+The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `call.settled` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
 
 This example caps charts at 1 MiB because tool outputs are persisted with session events. For larger files, copy the bytes to your application's file storage and return an authorized download URL instead. Sandbox files themselves are not permanent artifact storage.
 

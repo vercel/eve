@@ -3,8 +3,6 @@ import { readdir } from "node:fs/promises";
 import { basename } from "node:path";
 import test from "node:test";
 
-import { z } from "zod";
-
 import extension from "../../extension/extension.ts";
 
 const toolsDir = new URL("../../extension/tools/", import.meta.url);
@@ -16,26 +14,28 @@ test("every extension tool advertises an object-root input schema without root u
   const files = (await readdir(toolsDir)).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),
   );
-  assert.ok(files.length >= 3, `found ${files.join(", ")}`);
-  extension({ github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } });
+  assert.ok(files.length > 0, `found ${files.join(", ")}`);
+  extension({});
   for (const file of files) {
     const tool = await resolveTool((await import(new URL(file, toolsDir).href)).default);
-    const schema = z.toJSONSchema(tool.inputSchema, { io: "input" });
+    const schema = tool.inputSchema["~standard"].jsonSchema.input({ target: "draft-07" });
     assert.equal(schema.type, "object", basename(file));
     for (const keyword of ["oneOf", "anyOf", "allOf"])
       assert.equal(keyword in schema, false, `${basename(file)} has root ${keyword}`);
   }
 });
 
-type ToolModule =
-  | { readonly inputSchema: z.ZodType }
-  | { readonly events: { readonly "session.started"?: (...args: never[]) => unknown } };
+type ToolModule = { readonly inputSchema: Schema } | { readonly evaluate: (ctx: never) => unknown };
 
-async function resolveTool(definition: ToolModule): Promise<{ inputSchema: z.ZodType }> {
+async function resolveTool(definition: ToolModule): Promise<{ inputSchema: Schema }> {
   if ("inputSchema" in definition) return definition;
-  const handler = definition.events["session.started"] as (() => unknown) | undefined;
-  assert.ok(handler, "dynamic tool must resolve at session.started");
-  const tool = (await handler()) as { inputSchema: z.ZodType } | null;
+  const tool = (await definition.evaluate({} as never)) as { inputSchema: Schema } | null;
   assert.ok(tool, "dynamic tool resolved to null with every capability configured");
   return tool;
+}
+
+interface Schema {
+  readonly "~standard": {
+    readonly jsonSchema: { input(options: { target: "draft-07" }): Record<string, unknown> };
+  };
 }

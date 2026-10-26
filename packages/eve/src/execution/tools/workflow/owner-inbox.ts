@@ -1,15 +1,12 @@
-import type { SubagentInputRequestHookPayload } from "#channel/types.js";
+import { rebuildSerializableError } from "#execution/workflow-errors.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type {
+  WorkflowToolAskRequest,
   WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunRef,
-  WorkflowToolInputRequestBatch,
-  WorkflowToolRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
-import { rebuildSerializableError } from "#execution/workflow-errors.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
-import type { ToolInputRequest } from "#tools/definition.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
 export function workflowToolRunOutcomeToToolResult(
@@ -24,22 +21,15 @@ export function workflowToolRunOutcomeToToolResult(
       toolName: from.toolName,
     };
   }
-  if (result.status === "failed") {
-    return {
-      callId: from.callId,
-      // The output keeps what the model reads; the serialized error still carries the thrown name.
-      errorName: rebuildSerializableError(result.error).name,
-      isError: true,
-      kind: "tool-result",
-      output: workflowToolRunFailureOutput(message),
-      toolName: from.toolName,
-    };
-  }
   return {
     callId: from.callId,
+    ...(result.status === "failed" && { errorName: rebuildSerializableError(result.error).name }),
     isError: true,
     kind: "tool-result",
-    output: result.reason ?? "The workflow tool run was cancelled.",
+    output:
+      result.status === "failed"
+        ? workflowToolRunFailureOutput(message)
+        : (result.reason ?? "The workflow tool run was cancelled."),
     toolName: from.toolName,
   };
 }
@@ -73,68 +63,46 @@ function parseJsonValueOrUndefined(value: unknown): JsonValue | undefined {
   }
 }
 
-export function workflowToolRunRequestToInputRequestPayload(
-  message: WorkflowToolRunRequestMessage,
-): SubagentInputRequestHookPayload {
-  const { from, replyTo, requestCoordinates } = message;
-  return {
-    callId: from.callId,
-    childContinuationToken: replyTo,
-    childSessionId: from.runId,
-    childSessionInbox: message.childSessionInbox,
-    remote: message.remote,
-    inputSource: message.inputSource,
-    event: {
-      requests: workflowToolRunInputRequests(message),
-      sequence: requestCoordinates?.sequence ?? from.sequence,
-      stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
-      taskId: from.taskId,
-      turnId: requestCoordinates?.turnId ?? from.turnId,
-    },
-    kind: "subagent-input-request",
-    subagentName: from.toolName,
-  };
-}
-
-export function workflowToolRunInputRequests(
-  message: WorkflowToolRunRequestMessage,
-): readonly InputRequest[] {
-  return message.request.kind === "input-batch"
-    ? message.request.requests
-    : [normalizeInputRequest(message.request, message.from, message.replyTo)];
-}
-
-function normalizeInputRequest(
-  request: Exclude<WorkflowToolRequest, WorkflowToolInputRequestBatch>,
-  from: WorkflowToolRunRef,
-  requestId: string,
-): InputRequest {
-  switch (request.kind) {
-    case "authorization-request":
-      throw new TypeError("A workflow authorization event cannot be normalized as human input.");
-    case "ask":
-      return normalizeAskRequest(request.request, from, requestId);
-    default:
-      return request;
-  }
-}
-
-function normalizeAskRequest(
-  authored: ToolInputRequest,
-  from: WorkflowToolRunRef,
-  requestId: string,
-): InputRequest {
+/**
+ * A run's `ctx.ask()` question, relayed like any request: an interaction the run opens, about
+ * the call it serves. The run is the asker, so its question names the run as its origin.
+ */
+export function workflowAskPayload(
+  message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAskRequest },
+): SubagentInteractionHookPayload {
+  const { from, replyTo } = message;
+  const authored = message.request.request;
   if (typeof authored.prompt !== "string" || authored.prompt.length === 0) {
     throw new TypeError("A workflow tool run request needs a non-empty `prompt`.");
   }
-  const normalized: InputRequest = {
-    action: { callId: from.callId, input: from.input, kind: "tool-call", toolName: from.toolName },
+  const request: { -readonly [K in keyof InteractionRequest]: InteractionRequest[K] } = {
     kind: "question",
     prompt: authored.prompt,
-    requestId,
   };
-  if (authored.allowFreeform !== undefined) normalized.allowFreeform = authored.allowFreeform;
-  if (authored.display !== undefined) normalized.display = authored.display;
-  if (authored.options !== undefined) normalized.options = [...authored.options];
-  return normalized;
+  if (authored.allowFreeform !== undefined) request.allowFreeform = authored.allowFreeform;
+  if (authored.display !== undefined) request.display = authored.display;
+  if (authored.title !== undefined) request.title = authored.title;
+  if (authored.options !== undefined) request.options = [...authored.options];
+  return {
+    callId: from.callId,
+    childSessionId: from.runId,
+    events: [
+      {
+        data: {
+          interactionId: replyTo,
+          origin: {
+            call: { callId: from.callId, input: from.input, name: from.toolName },
+            interactionId: replyTo,
+            sessionId: from.runId,
+          },
+          request,
+          subject: { callId: from.callId },
+        },
+        type: "interaction.opened",
+      },
+    ],
+    kind: "subagent-interaction",
+    route: { childContinuationToken: replyTo },
+    subagentName: from.toolName,
+  };
 }

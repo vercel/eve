@@ -1,11 +1,3 @@
-/**
- * AI SDK conversation-message shape that the harness uses as the unit of
- * session history and turn input. Re-exported from the `ai` package so
- * authors wiring up the Slack channel can type their own message arrays
- * without taking a direct `ai` dependency.
- */
-export type { ModelMessage } from "ai";
-
 export {
   slackChannel,
   type SlackApiResponse,
@@ -13,6 +5,7 @@ export {
   type SlackBotToken,
   type SlackChannel,
   type SlackChannelConfig,
+  type SlackChannelContext,
   type SlackChannelCredentials,
   type SlackChannelState,
   type SlackContext,
@@ -25,11 +18,10 @@ export {
   type SlackInboundEventContext,
   type SlackInboundMessageContext,
   type SlackInboundResult,
-  type SlackInboundResultOrPromise,
   type SlackInitialMessage,
-  type SlackInputResponseContext,
-  type SlackInputResponseResult,
-  type SlackInputResponseSubmission,
+  type SlackAnswerContext,
+  type SlackAnswerResult,
+  type SlackAnswerSubmission,
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
   type SlackInteractionContext,
@@ -39,7 +31,6 @@ export {
   type SlackShortcutContext,
   type SlackShortcutMessage,
   type SlackMentionResult,
-  type SlackMentionResultOrPromise,
   type SlackReceiveTarget,
   type SlackSessionTarget,
   type SlackRespondOptions,
@@ -74,14 +65,11 @@ export {
 export { type SlackFetch, type SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
-export { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 
 export {
   postCompletedSlackReply,
   type SlackCompletedReply,
 } from "#public/channels/slack/reply-delivery.js";
-
-export { SLACK_MARKDOWN_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
 
 export {
   defineSlackRenderer,
@@ -92,13 +80,7 @@ export {
   type SlackTaskCard,
 } from "#public/channels/slack/renderers.js";
 
-export type {
-  TaskCardAction,
-  TaskCardBlocker,
-  TaskCardStatus,
-  TaskCardTask,
-  TaskCardView,
-} from "#channel/task-card.js";
+export type { TaskCard } from "#channel/task-card.js";
 
 export {
   loadThreadContextMessages,
@@ -113,17 +95,17 @@ export {
 } from "#public/channels/slack/blocks.js";
 
 export {
-  deriveHitlResponse,
-  HITL_ACTION_PREFIX,
-  renderInputRequestBlocks,
+  answerFromSlackAction,
+  ANSWER_ACTION_PREFIX,
+  renderInteractionBlocks,
   type DerivedHitlResponse,
   type SlackHitlAction,
   type SlackHitlRoute,
 } from "#public/channels/slack/hitl.js";
 
 /**
- * Card builders and element types re-exported from the vendored chat
- * SDK module. These are pure data factories. They return plain typed
+ * Card builders and eve-owned element types. The vendored factories remain an
+ * implementation detail. These are pure data factories. They return plain typed
  * objects that the channel passes to {@link cardToBlocks} at post time.
  * The chat SDK runtime (`Chat`, `Thread`, `Adapter`, etc.) is not
  * imported and not reachable through this entry point.
@@ -149,12 +131,10 @@ export {
   TextInput,
   cardChildToFallbackText,
   isCardElement,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";
 
 export type {
   ActionsElement,
-  AdapterPostableMessage,
-  Attachment,
   ButtonElement,
   ButtonOptions,
   ButtonProps,
@@ -205,4 +185,4 @@ export type {
   TextInputProps,
   TextProps,
   TextStyle,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";

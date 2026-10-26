@@ -1,7 +1,7 @@
 import type {
   InstrumentationHandlerContext,
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
+  InstrumentationInteractionOpenedEvent,
+  InstrumentationInteractionSettledEvent,
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import { resumeTool } from "#tracing/eve/agent-tool-instrumentation.js";
@@ -18,7 +18,7 @@ export function createAgentApprovalInstrumentation(input: {
   ) => Promise<AgentActionTraceState | undefined>;
 }): Pick<
   NonNullable<InstrumentationProviderDefinition["events"]>,
-  "input.requested" | "input.resolved"
+  "interaction.opened" | "interaction.settled"
 > {
   async function toolFor(sessionId: string, turnId: string, callId: string) {
     const state = await input.actionStateFor(sessionId, turnId, callId);
@@ -26,22 +26,27 @@ export function createAgentApprovalInstrumentation(input: {
   }
 
   async function onRequested(
-    event: InstrumentationInputRequestedEvent,
+    event: InstrumentationInteractionOpenedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
-    if (event.kind !== "tool-approval" || ctx.state.get() !== undefined) return;
-    const tool = await toolFor(event.scope.sessionId, event.scope.turnId, event.action.callId);
-    const approval = await tool?.approval({ requestId: event.requestId, request: event.request });
+    const { call } = event;
+    if (event.scope.turnId === undefined) return;
+    if (event.kind !== "approval" || call === undefined || ctx.state.get() !== undefined) return;
+    const tool = await toolFor(event.scope.sessionId, event.scope.turnId, call.callId);
+    const approval = await tool?.approval({
+      requestId: event.interactionId,
+      request: event.request,
+    });
     if (approval === undefined) return;
     ctx.state.set({
-      callId: event.action.callId,
+      callId: call.callId,
       sessionId: event.scope.sessionId,
       turnId: event.scope.turnId,
     });
   }
 
   async function onResolved(
-    event: InstrumentationInputResolvedEvent,
+    event: InstrumentationInteractionSettledEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
     const stored = ctx.state.get();
@@ -49,15 +54,33 @@ export function createAgentApprovalInstrumentation(input: {
     const { callId, sessionId, turnId } = stored as Record<string, unknown>;
     if (typeof callId !== "string" || typeof sessionId !== "string" || typeof turnId !== "string")
       return;
-    const approval = (await toolFor(sessionId, turnId, callId))?.findApproval(event.requestId);
+    const approval = (await toolFor(sessionId, turnId, callId))?.findApproval(event.interactionId);
     if (approval === undefined) return;
     if (event.outcome === "failed") await approval.fail(event.error);
     else
       await approval.complete({
-        outcome: event.outcome as "approved" | "denied" | "cancelled" | "ignored" | "invalid",
-        response: event.response,
+        outcome: APPROVAL_OUTCOMES[event.outcome] ?? "invalid",
+        response: event.answer,
       });
   }
 
-  return { "input.requested": onRequested, "input.resolved": onResolved };
+  return { "interaction.opened": onRequested, "interaction.settled": onResolved };
 }
+
+/**
+ * Trace schema 4's approval outcomes. The instrumentation event carries the interaction's
+ * outcome; the span keeps the values dashboards already query.
+ */
+const APPROVAL_OUTCOMES: Partial<
+  Record<
+    InstrumentationInteractionSettledEvent["outcome"],
+    "approved" | "denied" | "cancelled" | "ignored" | "invalid"
+  >
+> = {
+  abandoned: "cancelled",
+  accepted: "approved",
+  declined: "denied",
+  expired: "cancelled",
+  interrupted: "cancelled",
+  withdrawn: "ignored",
+};

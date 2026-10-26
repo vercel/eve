@@ -10,13 +10,19 @@ export default defineEval({
         `Seed ${index}: ${"Preserve this repository evidence. ".repeat(40)}`,
       );
       seed.expectOk();
-      seed.event("compaction.completed", { count: 0 });
+      seed.event("context.settled", {
+        count: 0,
+        data: { kind: "compaction", outcome: "completed" },
+      });
     }
     const expanded = await session.send(
       "[expand-envelope] Verify that the expanded request was compacted.",
     );
     expanded.expectOk();
-    expanded.event("compaction.completed", { count: 1 });
+    expanded.event("context.settled", {
+      count: 1,
+      data: { kind: "compaction", outcome: "completed" },
+    });
     expanded.messageIncludes("DYNAMIC_ENVELOPE_COMPACTED");
   },
 });

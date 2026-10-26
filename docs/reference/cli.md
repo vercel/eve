@@ -11,8 +11,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | ---------------------------------------------- | ------------------------------------------------------ |
 | `eve init [target]`                            | Create a new agent, or add one to an existing project  |
 | `eve dev`                                      | Start the local development server and terminal UI     |
-| `eve remote connect --url <url>`               | Open the terminal UI for an existing agent             |
-| `eve remote invoke --url <url> [prompt]`       | Invoke an existing agent without a terminal UI         |
+| `eve remote connect --url <url>`               | Open the terminal UI or print one remote response      |
 | `eve remote info --url <url>`                  | Inspect an existing agent                              |
 | `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
 | `eve info`                                     | Inspect the local application                          |
@@ -199,7 +198,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 }
 ```
 
-`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here. To compute the same form for an input schema in your own code, such as in a test, call `serializeModelInputSchema(schema)` from `eve/tools`; it returns JSON Schema data and does not add `taskId`.
+`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here.
 
 ## `eve build`
 
@@ -328,7 +327,7 @@ Use `eve remote` only with an explicit existing agent URL:
 
 ```bash
 eve remote connect --url https://agent.example.com
-eve remote invoke --url https://agent.example.com "Summarize station telemetry"
+eve remote connect --url https://agent.example.com --print "Summarize station telemetry"
 eve remote info --url https://agent.example.com
 ```
 
@@ -337,28 +336,13 @@ eve remote info --url https://agent.example.com
 ### `eve remote connect`
 
 ```bash
-eve remote connect --url <url> [-H "Name: value"]
+eve remote connect --url <url> [--input <text>] [-H "Name: value"]
+eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
+
+Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. `--print` starts a new conversation each time and does not answer pending requests; to answer that session's pending request or script multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
-
-### `eve remote invoke`
-
-```bash
-eve remote invoke --url <url> [prompt] [--resume] [-H "Name: value"] [--scope <team>]
-```
-
-Invokes an existing agent without opening the terminal UI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
-
-| Option                  | Type   | Default  | Description                                     |
-| ----------------------- | ------ | -------- | ----------------------------------------------- |
-| `<url>`                 | string | required | Existing eve agent URL                          |
-| `[prompt]`              | string | none     | Prompt, follow-up, or answer to a pending input |
-| `-H, --header <header>` | string | none     | Request header for the URL target; repeatable   |
-| `--resume`              | flag   | off      | Read a previous resumable result from stdin     |
-| `--scope <team>`        | string | current  | Vercel team that owns the URL target            |
-
-`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input. An `authorization-required` result lists every unresolved challenge; complete them, then resume without text. Pass headers and scope again when resuming. Paused invocations exit `3`; failures exit `1`. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
 
 ### `eve remote info`
 
@@ -384,7 +368,7 @@ A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.0
 
 `eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs list`; `eve logs list --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
 
-`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
+`eve logs --events` resolves session events (`session.started`, `turn.settled`, content deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 

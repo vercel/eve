@@ -79,7 +79,9 @@ async function cancelHeldSignIn(
 ): Promise<void> {
   const { channelId, threadTs, turnId } = cancel.target;
   try {
-    await ctx.from(slackContinuationToken(channelId, threadTs)).cancel({ turnId });
+    await ctx
+      .from(slackContinuationToken({ channelId: channelId, threadTs: threadTs }))
+      .cancel({ turnId });
   } catch (error) {
     log.error("sign-in cancel delivery failed", { error });
     return;

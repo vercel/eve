@@ -10,8 +10,8 @@ export default defineEval({
     turn.messageIncludes("TOOL-FALSE-SUBAGENT-OK");
     turn.messageIncludes("Internal specialist hidden by its agent definition.");
     turn.calledTool("invoke-hidden", { count: 1 });
-    turn.event("agent.started", { count: 1, data: { name: "tool-hidden" } });
+    turn.event("child.opened", { count: 1, data: { name: "tool-hidden" } });
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

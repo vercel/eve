@@ -5,6 +5,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
+import { assertHookForm } from "#public/definitions/hook.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 
 /** Compiles and validates one selected hook while preserving its exact subscriptions. */
@@ -20,6 +21,10 @@ export async function compileHookEntry(
       source,
     }),
     `Expected the hook export "${source.exportName ?? "default"}" from "${source.logicalPath}" to return an object.`,
+  );
+  assertHookForm(
+    loaded,
+    `The hook export "${source.exportName ?? "default"}" from "${source.logicalPath}"`,
   );
   const events =
     loaded.events === undefined

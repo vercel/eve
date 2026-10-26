@@ -1,11 +1,12 @@
+import { call } from "eve/events";
 import { defineHook, type HookDefinition } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
 import structuredEcho from "../tools/structured-echo";
 
 const hook: HookDefinition = defineHook({
   events: {
-    "action.result"(event) {
-      const match = toolResultFrom(event.data.result, structuredEcho);
+    "call.settled"(event, ctx) {
+      const match = toolResultFrom(call(ctx.view, event.data.callId), structuredEcho);
       if (match === undefined) return;
 
       if (typeof match.output !== "object" || match.output === null) {

@@ -6,13 +6,6 @@ import { deepEquals } from "#evals/match.js";
 import { testRegExp } from "#evals/match.js";
 import type { Assertion, AssertionEvaluation, AssertionSeverity } from "#evals/types.js";
 
-export type {
-  Assertion,
-  AssertionEvaluation,
-  AssertionHandle,
-  AssertionSeverity,
-} from "#evals/types.js";
-
 interface AssertionSpec {
   readonly name: string;
   readonly severity: AssertionSeverity;

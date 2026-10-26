@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AnyEventRequest } from "@workflow/world";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  readTurnStepStates,
+  waitForParkedTurnStep,
+} from "#internal/testing/session-test-helpers.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
@@ -86,13 +89,13 @@ describe("session prewarmers", () => {
       try {
         await waitForPrewarmStep(run.runId);
         expect(runtime.sandboxEvents).toEqual(prewarmed);
-        await resumeHook(token, {
-          kind: "send",
-          payload: { message: "Alice opens the project notes." },
-        });
+        await resumeHook(
+          token,
+          handoffFollowUp("dpl_inline", "Alice opens the project notes.", "prewarm-first"),
+        );
         await stream.nextTurn();
         expect(runtime.sandboxEvents).toEqual([...prewarmed, `resume:${run.runId}`]);
-        await resumeHook(token, { kind: "reset" });
+        await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
         await expect(run.returnValue).resolves.toEqual({ output: "" });
         expect(runtime.sandboxCleanups).toEqual([run.runId]);
       } finally {
@@ -124,15 +127,15 @@ describe("session prewarmers", () => {
         await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]), {
           timeout: 10_000,
         });
-        await resumeHook(token, {
-          kind: "send",
-          payload: { message: "Alice asks for a short greeting." },
-        });
+        await resumeHook(
+          token,
+          handoffFollowUp("dpl_inline", "Alice asks for a short greeting.", "prewarm-race"),
+        );
         const turn = await stream.nextTurn();
-        expect(turn.some((event) => event.type === "message.completed")).toBe(true);
+        expect(turn.some((event) => event.type === "content.completed")).toBe(true);
         expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]);
 
-        await resumeHook(token, { kind: "reset" });
+        await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
         // Cleanup that did not wait for the prewarm step would run while start is held.
         await vi
           .waitFor(() => expect(runtime.sandboxEvents).toContain(`end:${run.runId}`), {
@@ -195,7 +198,7 @@ describe("prewarm handoff while the prewarm step runs", () => {
         }
 
         started.resolve();
-        await resumeHook(token, { kind: "reset" });
+        await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
         await expect(run.returnValue).resolves.toEqual({ output: "" });
         expect(runtime.sandboxEvents).toEqual([
           `definition:${run.runId}`,
@@ -272,21 +275,19 @@ describe("idle session prewarm handoff", () => {
         expect(
           events.filter(
             (event) =>
-              event.type === "message.received" &&
-              event.data.message === "Alice writes during preparation.",
+              event.type === "delivery.admitted" && event.data.deliveryId === "typing-race",
           ),
         ).toHaveLength(1);
-        expect(
-          events.some(
-            (event) =>
-              event.type === "message.completed" &&
-              event.data.message?.includes("Alice writes") === true,
-          ),
-        ).toBe(true);
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "content.completed",
+            data: expect.objectContaining({ value: expect.stringContaining("Alice writes") }),
+          }),
+        );
         expect((await waitForCommandHookOwner(token)).runId).not.toBe(anchor.runId);
         await workflowRuntime.dispatchSession({
           sessionId: anchor.runId,
-          command: { kind: "reset" },
+          command: { deliveryId: "reset-delivery", kind: "reset" },
         });
         await anchor.returnValue;
       } finally {
@@ -364,6 +365,12 @@ describe("idle session prewarm handoff", () => {
                 step.stepName.includes("invokeAgent") || step.stepName.endsWith("//runTurnStep"),
             ),
           ).toBe(false);
+          if (!conversation) {
+            await workflowRuntime.dispatchSession({
+              sessionId: anchor.runId,
+              command: { kind: "clear", deliveryId: "before-first-message" },
+            });
+          }
           // A retry inspected before handoff must not move the successor backwards.
           await resumeHook(token, {
             kind: "session-prewarm",
@@ -379,18 +386,33 @@ describe("idle session prewarm handoff", () => {
             ),
           });
           const events = await stream.nextTurn();
-          expect(
-            events.some(
-              (event) =>
-                event.type === "message.completed" &&
-                event.data.message?.includes("Alice confirms") === true,
-            ),
-          ).toBe(true);
+          if (!conversation) {
+            expect(events.some((event) => event.type === "context.started")).toBe(false);
+          }
+          expect(events).toContainEqual(
+            expect.objectContaining({
+              type: "content.completed",
+              data: expect.objectContaining({ value: expect.stringContaining("Alice confirms") }),
+            }),
+          );
+          // Publication and hook takeover precede the successor's durable turn commit.
+          await waitForParkedTurnStep(successorId!);
+          const states = await readTurnStepStates(successorId!);
+          const userHistory = states
+            .at(-1)!
+            .history.filter((message) => message.role === "user")
+            .map((message) => JSON.stringify(message.content));
+          expect(userHistory).toEqual([
+            ...(conversation
+              ? [expect.stringContaining("Alice records the research milestone.")]
+              : []),
+            expect.stringContaining("Alice confirms the research milestone."),
+          ]);
           expect((await waitForCommandHookOwner(token)).runId).toBe(successorId);
           expect(await deadline(successorId!)).toEqual(preparedDeadline);
           await workflowRuntime.dispatchSession({
             sessionId: anchor.runId,
-            command: { kind: "reset" },
+            command: { deliveryId: "reset-delivery", kind: "reset" },
           });
           await expect(anchor.returnValue).resolves.toEqual({ output: "" });
         } finally {
@@ -401,4 +423,126 @@ describe("idle session prewarm handoff", () => {
       expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
     },
   );
+});
+
+describe("first turn abort hooks", () => {
+  it.each([
+    { firstMessage: undefined, start: "a prewarmed session" },
+    { firstMessage: "Say hello.", start: "a session started with a message" },
+  ])(
+    "registers each turn's abort hooks before its message for $start",
+    async ({ firstMessage }) => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
+
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: firstMessage === undefined ? {} : { message: firstMessage },
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+            sessionTimeoutMs: false,
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        const world = await getWorld();
+        const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+        try {
+          await waitForHook({ runId: run.runId }, { token: inboxToken });
+          let turns = 0;
+          if (firstMessage !== undefined) {
+            await stream.nextTurn();
+            turns++;
+          }
+          for (const message of ["Say hello.", "Say hello again."].slice(turns)) {
+            await vi.waitFor(async () => {
+              const hooks = (await world.hooks.list({ runId: run.runId })).data;
+              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
+                2 * (turns + 1),
+              );
+            });
+            await resumeHook(
+              inboxToken,
+              handoffFollowUp("dpl_inline", message, `inline-turn-${turns}`),
+            );
+            await stream.nextTurn();
+            turns++;
+          }
+
+          const events = (
+            await world.events.list({
+              pagination: { limit: 1000 },
+              resolveData: "all",
+              runId: run.runId,
+            })
+          ).data;
+          let abortHooks = 0;
+          const abortHooksBeforeEachTurn: number[] = [];
+          for (const event of events) {
+            if (event.eventType === "hook_created" && event.eventData.token.startsWith("abrt_")) {
+              abortHooks++;
+            }
+            if (
+              event.eventType === "step_created" &&
+              event.eventData.stepName.endsWith("turnStep")
+            ) {
+              abortHooksBeforeEachTurn.push(abortHooks);
+            }
+          }
+          // Each turn uses the pair registered before its message; none starts its own.
+          expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+  );
+});
+
+describe("controls before a prewarmed session's first message", () => {
+  it("settles each one ignored once the session has started", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "prewarmed-controls" } });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+          sessionTimeoutMs: false,
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      try {
+        await waitForHook({ runId: run.runId }, { token: inboxToken });
+        // Alice cancels, clears, and compacts before she has said anything.
+        const controls = ["cancel", "clear", "compact"] as const;
+        for (const kind of controls) await resumeHook(inboxToken, { deliveryId: kind, kind });
+        await resumeHook(inboxToken, handoffFollowUp("dpl_inline", "Say hello.", "first-message"));
+        const settled = new Set<string>();
+        const events = await stream.nextUntil((event) => {
+          if (event.type === "delivery.settled") settled.add(event.data.deliveryId);
+          return [...controls, "first-message"].every((id) => settled.has(id));
+        });
+
+        expect(events[0]?.type).toBe("session.started");
+        for (const deliveryId of controls) {
+          expect(events).toContainEqual(
+            expect.objectContaining({
+              type: "delivery.settled",
+              data: expect.objectContaining({ deliveryId, outcome: "ignored" }),
+            }),
+          );
+        }
+        // The early clear and compaction leave Alice's first turn alone.
+        expect(events.some((event) => event.type === "context.started")).toBe(false);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
 });

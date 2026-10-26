@@ -101,7 +101,7 @@ describe("compiler artifacts", () => {
       "console.log(JSON.stringify({",
       '  memory: typeof memoryDefinition.provider?.recall?.["turn.started"] === "function",',
       "  memoryFactoryCalls: globalThis.__memoryFactoryCalls,",
-      '  wrapper: typeof wrapper.default?.events?.["turn.started"] === "function",',
+      '  wrapper: typeof wrapper.default?.evaluate === "function",',
       "}));",
     ].join("\n");
     const loaded = await runFile(
@@ -174,7 +174,7 @@ describe("compiler artifacts", () => {
     await writeFile(join(agentRoot, "instructions.md"), "Wait when requested.");
     await writeFile(
       join(agentRoot, "tools", "sleep.mjs"),
-      'import { sleep } from "eve/tools/sleep";\nexport default sleep();\n',
+      'import { sleep } from "eve/tools/sleep";\nexport default sleep;\n',
     );
 
     const result = await compileAgent({ startPath: appRoot });
@@ -243,7 +243,7 @@ describe("compiler artifacts", () => {
       instructions: [
         {
           definition: defineInstructions({
-            markdown: "You are a precise assistant.",
+            content: "You are a precise assistant.",
           }),
           sourceKind: "markdown",
           logicalPath: "instructions.md",
@@ -301,7 +301,7 @@ describe("compiler artifacts", () => {
       instructions: [
         {
           definition: {
-            markdown: "You are a precise assistant.",
+            content: "You are a precise assistant.",
           },
           sourceKind: "markdown",
           logicalPath: "instructions.md",
@@ -452,15 +452,15 @@ describe("compiler artifacts", () => {
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(
       join(agentRoot, "instructions.mjs"),
-      'export default { markdown: "Root instructions prompt." };\n',
+      'export default { content: "Root instructions prompt." };\n',
     );
     await writeFile(
       join(agentRoot, "schedules", "daily-digest.mjs"),
-      'export default { cron: "0 8 * * *", markdown: "Send a digest." };\n',
+      'export default { cron: "0 8 * * *", content: "Send a digest." };\n',
     );
     await writeFile(
       join(agentRoot, "skills", "route.mjs"),
-      'export default { description: "Route requests.", markdown: "Route requests." };\n',
+      'export default { description: "Route requests.", content: "Route requests." };\n',
     );
     await writeFile(
       join(agentRoot, "tools", "get_weather.mjs"),
@@ -472,7 +472,7 @@ describe("compiler artifacts", () => {
     );
     await writeFile(
       join(reviewerRoot, "instructions.mjs"),
-      'export default { markdown: "Reviewer instructions prompt." };\n',
+      'export default { content: "Reviewer instructions prompt." };\n',
     );
     await writeFile(
       join(reviewerRoot, "tools", "review.mjs"),
@@ -630,7 +630,7 @@ describe("compileAgent", () => {
         ].join("\n"),
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/instrumentation/support.ts": [
-          'import { isChannel } from "eve/instrumentation";',
+          'import { isChannel } from "eve/channels";',
           'import { otelIntegration } from "eve/instrumentation/otel";',
           'import supportChannel from "../channels/support.js";',
           "",
@@ -712,7 +712,7 @@ describe("compileAgent", () => {
       {
         description: "Hand off the task to the next specialist.",
         logicalPath: "skills/handoff.mts",
-        markdown: "Use this skill when routing tasks across specialized agents.",
+        content: "Use this skill when routing tasks across specialized agents.",
         name: "handoff",
         sourceId: "skills/handoff.mts",
         sourceKind: "module",
@@ -829,7 +829,7 @@ describe("compileAgent", () => {
     );
     await writeFile(
       join(agentRoot, "schedules", "cleanup.cts"),
-      'export default { cron: "0 0 * * *", markdown: "Clean stale workflow state." };\n',
+      'export default { cron: "0 0 * * *", content: "Clean stale workflow state." };\n',
     );
 
     const result = await compileAgent({
@@ -876,7 +876,7 @@ describe("compileAgent", () => {
       [
         "export default {",
         '  description: "Research unfamiliar topics.",',
-        '  markdown: "Gather evidence first.",',
+        '  content: "Gather evidence first.",',
         "  files: {",
         '    "references/checklist.md": "# Checklist\\n\\n- Find primary sources.\\n",',
         '    "assets/query-template.bin": new Uint8Array([0, 1, 255]),',
@@ -912,7 +912,7 @@ describe("compileAgent", () => {
       {
         description: "Research unfamiliar topics.",
         logicalPath: "skills/research.mjs",
-        markdown: "Gather evidence first.",
+        content: "Gather evidence first.",
         name: "research",
         sourceId: "skills/research.mjs",
         sourceKind: "module",
@@ -989,7 +989,7 @@ describe("compileAgent", () => {
     );
     await writeFile(
       join(agentRoot, "schedules", "heartbeat.mjs"),
-      'export default { cron: "*/1 * * * *", markdown: "Heartbeat — no channel." };\n',
+      'export default { cron: "*/1 * * * *", content: "Heartbeat — no channel." };\n',
     );
 
     const result = await compileAgent({

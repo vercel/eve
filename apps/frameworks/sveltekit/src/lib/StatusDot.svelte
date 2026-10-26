@@ -1,13 +1,13 @@
 <script lang="ts">
   import type { UseEveAgentStatus } from "eve/svelte";
 
-  let { status }: { status?: UseEveAgentStatus } = $props();
+  let { status, error = false }: { status?: UseEveAgentStatus; error?: boolean } = $props();
 
-  let isLive = $derived(status === "submitted" || status === "streaming");
+  let isLive = $derived(status === "busy");
   let tone = $derived.by(() => {
-    if (status === "error") return "bg-destructive";
+    if (error) return "bg-destructive";
     if (isLive) return "bg-sky-500";
-    if (status === "ready") return "bg-emerald-500";
+    if (status === "idle") return "bg-emerald-500";
     return "bg-muted-foreground/50";
   });
 </script>
@@ -19,5 +19,5 @@
     {/if}
     <span class="{tone} relative inline-flex size-1.5 rounded-full"></span>
   </span>
-  <span>{status}</span>
+  <span>{error ? "error" : status}</span>
 </div>

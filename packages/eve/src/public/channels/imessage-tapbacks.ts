@@ -51,7 +51,7 @@ export interface IMessageTapback {
 export type IMessageTapbackResult = {
   /**
    * Option id that answers the input request eve posted in the message the
-   * tapback is on, such as `"approve"` or `"cancel"` for a tool approval.
+   * tapback is on, such as `"approve"` or `"deny"` for a tool approval.
    * When that message isn't waiting on an answer with this option, the agent
    * receives the tapback as a message instead.
    */

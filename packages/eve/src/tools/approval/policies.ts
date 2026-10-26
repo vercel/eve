@@ -1,9 +1,8 @@
-import type { Experimental_DecisionModel as DecisionModel } from "ai";
-
+import type { DecisionModel } from "#ai/decision-types.js";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
-import { parseJsonValue, type JsonObject } from "#shared/json.js";
-import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import { approvalEvaluation } from "#approval/evaluation.js";
+import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
 
@@ -53,7 +52,7 @@ async function autoApproval(
           },
         },
       },
-      abortSignal,
+      signal: abortSignal,
       maxRetries: 0,
     });
     return result.answers.permission.choice === "clear" ? "approved" : "user-approval";
@@ -63,21 +62,6 @@ async function autoApproval(
   }
 }
 
-function alwaysApproval(_closure: JsonObject): "user-approval" {
-  return "user-approval";
-}
-
-function neverApproval(_closure: JsonObject): "not-applicable" {
-  return "not-applicable";
-}
-
-function onceApproval(
-  _closure: JsonObject,
-  context: ApprovalContext,
-): "not-applicable" | "user-approval" {
-  return context.approvedTools.has(context.toolName) ? "not-applicable" : "user-approval";
-}
-
 /**
  * Returns an `approval` callback that asks an AI SDK decision model whether
  * the exact tool call presents concrete security danger. Defaults to TypeSafe Jev.
@@ -85,47 +69,31 @@ function onceApproval(
  */
 export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): ApprovalPolicy<TInput> {
   const decisionModel = options.model ?? "typesafe-ai/jev";
-  const callback = (_closure: JsonObject, context: ApprovalContext) =>
-    autoApproval(decisionModel, options, context);
-  return stampDurableDynamicCallback(
-    (context) => autoApproval(decisionModel, options, context as ApprovalContext),
-    { callback, closure: {} },
-  ) as ApprovalPolicy<TInput>;
+  return (context) => autoApproval(decisionModel, options, context as ApprovalContext);
 }
 
-/**
- * Returns an `approval` callback that always requires user approval before
- * the tool executes.
- */
+/** Returns an `approval` callback that always requires user approval. */
 export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "user-approval", {
-    callback: alwaysApproval,
-    closure: {},
-  });
+  return () => "user-approval";
 }
 
-/**
- * Returns an `approval` callback that never requires user approval before
- * the tool executes.
- */
+/** Returns an `approval` callback that never requires user approval. */
 export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "not-applicable", {
-    callback: neverApproval,
-    closure: {},
-  });
+  return () => "not-applicable";
 }
 
-/**
- * Returns an `approval` callback that requires approval until the user
- * approves this tool once in the current session. A tool is recorded as
- * approved only on an explicit approval; a denial (or continuing without
- * responding) leaves it unrecorded, so the next call prompts again. Keys off
- * the bare tool name, so it ignores compound approval keys.
- */
+/** Remembers a person's approval for this tool for the rest of the session. */
 export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(
-    ({ approvedTools, toolName }) =>
-      approvedTools.has(toolName) ? "not-applicable" : "user-approval",
-    { callback: onceApproval, closure: {} },
-  );
+  if (arguments.length !== 0) {
+    throw new TypeError(
+      "once() does not accept options. Use a custom approval policy for input-dependent decisions.",
+    );
+  }
+  return (context) => {
+    const evaluation = approvalEvaluation(context as ApprovalContext);
+    if (evaluation === undefined) return "user-approval";
+    const { entry, pending } = evaluation.read("once");
+    // An approval still waiting on its own answer stays a separate question.
+    return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key: "once" });
+  };
 }

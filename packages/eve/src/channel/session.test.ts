@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  buildSessionHandle,
+  buildChannelContext,
   createAttachSessionFn,
   createSession,
   type Session,
@@ -16,23 +16,21 @@ import {
   SessionIdKey,
 } from "#context/keys.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
-import { type InputResponse, parseInputResponses } from "#shared/input.js";
+import { type Answer, parseAnswers } from "#shared/input.js";
 
 function fixedSessionRespondTypeChecks(session: Session): void {
   const responsesWithMetadata = [
-    { kind: "tool-approval", optionId: "approve", requestId: "approval-1" },
+    { kind: "tool-approval", optionId: "approve", interactionId: "approval-1" },
   ] as const;
 
   // @ts-expect-error fixed sessions enforce the same exact input-response contract.
   void session.respond(responsesWithMetadata, { auth: null });
 
-  const widenedResponses: readonly InputResponse[] = responsesWithMetadata;
+  const widenedResponses: readonly Answer[] = responsesWithMetadata;
   // @ts-expect-error widened responses must be schema-validated before delivery.
   void session.respond(widenedResponses, { auth: null });
 
-  const validatedResponses = parseInputResponses([
-    { optionId: "approve", requestId: "approval-1" },
-  ]);
+  const validatedResponses = parseAnswers([{ optionId: "approve", interactionId: "approval-1" }]);
   void session.respond(validatedResponses, { auth: null });
 }
 
@@ -49,6 +47,7 @@ function createRuntime(): Runtime {
         status: "accepted",
       })),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
@@ -59,9 +58,10 @@ describe("createSession#cancel", () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
 
-    await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
+    const receipt = await session.cancel();
+    expect(receipt).toMatchObject({ sessionId: "sess_1", deliveryId: expect.any(String) });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel" },
+      command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_1",
     });
   });
@@ -73,7 +73,7 @@ describe("createSession#cancel", () => {
     await session.cancel({ turnId: "turn_2" });
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", turnId: "turn_2" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_2" },
       sessionId: "sess_1",
     });
   });
@@ -82,9 +82,10 @@ describe("createSession#cancel", () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime)("sess_2");
 
-    await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
+    const receipt = await session.cancel();
+    expect(receipt).toMatchObject({ sessionId: "sess_2", deliveryId: expect.any(String) });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel" },
+      command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_2",
     });
   });
@@ -103,6 +104,7 @@ describe("fixed session operations", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         kind: "send",
         payload: expect.objectContaining({
           context: ["durable"],
@@ -110,6 +112,7 @@ describe("fixed session operations", () => {
         }),
         requestId: undefined,
         turnPolicy: "steer",
+        title: undefined,
       },
       sessionId: "sess_1",
     });
@@ -146,7 +149,7 @@ describe("fixed session operations", () => {
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
 
     await session.send("hello", { auth: null });
-    await session.respond([{ optionId: "approve", requestId: "request_1" }], { auth: null });
+    await session.respond([{ optionId: "approve", interactionId: "request_1" }], { auth: null });
     await session.compact();
     await session.clear();
     await session.reset({ reason: "fresh start" });
@@ -154,37 +157,40 @@ describe("fixed session operations", () => {
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(1, {
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         kind: "send",
         payload: { message: "hello" },
         requestId: "req_1",
         turnPolicy: "steer",
+        title: undefined,
       },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(2, {
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         kind: "send",
-        payload: { inputResponses: [{ optionId: "approve", requestId: "request_1" }] },
+        payload: { answers: [{ optionId: "approve", interactionId: "request_1" }] },
         requestId: "req_1",
       },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(3, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(4, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(5, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       sessionId: "sess_1",
     });
   });
 
-  it("maps the public callback abstraction onto internal turn routing", async () => {
+  it("maps internal callback metadata onto turn routing", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
     const callback = {
@@ -194,7 +200,8 @@ describe("fixed session operations", () => {
       url: "https://caller.example.com/eve/v1/callback/callback-token",
     };
 
-    await session.send("continue", { auth: null, callback });
+    const options = { auth: null, callback };
+    await session.send("continue", options);
     const invalidSend = async () => {
       // @ts-expect-error runtime TurnCaller routing is not public session input.
       await session.send("continue", { auth: null, caller: {} });
@@ -204,6 +211,7 @@ describe("fixed session operations", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         caller: {
           callId: "call_1",
           replyTo: { kind: "callback", token: callback.token, url: callback.url },
@@ -214,13 +222,14 @@ describe("fixed session operations", () => {
         payload: { message: "continue" },
         requestId: undefined,
         turnPolicy: "steer",
+        title: undefined,
       },
       sessionId: "sess_1",
     });
   });
 });
 
-describe("buildSessionHandle", () => {
+describe("buildChannelContext", () => {
   it("exposes sessionId / continuationToken / auth from the live accessor", () => {
     const ctx = new ContextContainer();
     ctx.set(SessionIdKey, "sess-123");
@@ -238,29 +247,30 @@ describe("buildSessionHandle", () => {
       principalType: "runtime",
     });
 
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    expect(session.id).toBe("sess-123");
-    expect(session.continuation?.token).toBe("C1:T1");
-    expect(session.auth.current?.principalId).toBe("U1");
-    expect(session.auth.initiator?.principalId).toBe("eve:app");
+    expect(channel.session.id).toBe("sess-123");
+    expect(channel.session).not.toHaveProperty("continuation");
+    expect(channel.continuation?.token).toBe("C1:T1");
+    expect(channel.session.auth.current?.principalId).toBe("U1");
+    expect(channel.session.auth.initiator?.principalId).toBe("eve:app");
   });
 
   it("reflects later writes via getter access", () => {
     const ctx = new ContextContainer();
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    expect(session.continuation).toBeUndefined();
+    expect(channel.continuation).toBeUndefined();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
-    expect(session.continuation?.token).toBe("C1:T1");
+    expect(channel.continuation?.token).toBe("C1:T1");
   });
 
   it("namespaces the channel-local token on continuation.alias", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:");
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    session.continuation?.alias("C1:T1");
+    channel.continuation?.alias("C1:T1");
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
@@ -268,9 +278,9 @@ describe("buildSessionHandle", () => {
   it("round-trips the exposed channel-local token through continuation.alias", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    session.continuation?.alias(session.continuation.token);
+    channel.continuation?.alias(channel.continuation.token);
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
@@ -278,7 +288,7 @@ describe("buildSessionHandle", () => {
   it("records every distinct continuation address without duplicating redundant aliases", () => {
     // Authors call continuation.alias from hot-path event handlers
     // (e.g. Slack's `message.completed`). The handler can't always
-    // know whether the token has actually changed, so the SessionHandle
+    // know whether the token has actually changed, so the channel context
     // itself short-circuits redundant writes — the workflow body
     // shouldn't tear down and recreate its park hook for a no-op.
     let writeCount = 0;
@@ -298,15 +308,15 @@ describe("buildSessionHandle", () => {
       },
     };
 
-    const session = buildSessionHandle(observed);
+    const channel = buildChannelContext(observed);
 
-    session.continuation?.alias("C1:T1");
+    channel.continuation?.alias("C1:T1");
     expect(writeCount).toBe(0);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
 
-    session.continuation?.alias("C1:T2");
-    session.continuation?.alias("C1:T3");
-    session.continuation?.alias("C1:T2");
+    channel.continuation?.alias("C1:T2");
+    channel.continuation?.alias("C1:T3");
+    channel.continuation?.alias("C1:T2");
 
     expect(writeCount).toBe(6);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T2");
@@ -319,8 +329,8 @@ describe("buildSessionHandle", () => {
 
   it("throws clearly when no namespaced placeholder token exists", () => {
     const ctx = new ContextContainer();
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    expect(session.continuation).toBeUndefined();
+    expect(channel.continuation).toBeUndefined();
   });
 });

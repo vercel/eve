@@ -1,3 +1,4 @@
+import { replyTextOf } from "#public/channels/reply.js";
 import { createLogger } from "#internal/logging.js";
 import {
   SLACK_MARKDOWN_TEXT_MAX_LENGTH,
@@ -29,7 +30,7 @@ const REFUSED_PAYLOAD_ERRORS = new Set([
   "msg_too_long",
 ]);
 
-type MessageCompletedHandler = NonNullable<SlackChannelInternalEvents["message.completed"]>;
+type ContentCompletedHandler = NonNullable<SlackChannelInternalEvents["content.completed"]>;
 
 /**
  * A completed reply for {@link postCompletedSlackReply}: Markdown alone, or
@@ -199,7 +200,7 @@ function refusedPayloadError(error: unknown): string | undefined {
 }
 
 /**
- * Wraps a channel's composed `message.completed` chain, authored renderers
+ * Wraps a channel's composed `content.completed` chain, authored renderers
  * included, so a final reply that fails is never lost without a trace.
  *
  * When the chain throws on a final reply, eve logs the error at error level,
@@ -207,22 +208,23 @@ function refusedPayloadError(error: unknown): string | undefined {
  * next delivery that its reply was not seen. eve never sends the reply from
  * here: the chain owns the content, including any change a renderer made
  * before `next`, and {@link postCompletedSlackReply} owns the fallbacks.
- * Steps that end in tool calls and empty replies pass through.
+ * Narration, other content, and empty replies pass through.
  */
 export function withFinalReplyDelivery(
-  render: MessageCompletedHandler | undefined,
-): MessageCompletedHandler {
-  return async (event, channel, ctx) => {
-    if (event.finishReason === "tool-calls" || !event.message) {
-      await render?.(event, channel, ctx);
+  render: ContentCompletedHandler | undefined,
+): ContentCompletedHandler {
+  return async (event, ctx) => {
+    if (replyTextOf(event.data) === undefined) {
+      await render?.(event, ctx);
       return;
     }
     try {
-      await render?.(event, channel, ctx);
+      await render?.(event, ctx);
     } catch (error) {
+      const { channel } = ctx;
       await reportUndeliveredReply(
         { log, name: "Slack", post: (notice) => channel.thread.post(notice), state: channel.state },
-        event.turnId,
+        ctx.session.turn.id,
         error,
       );
     }

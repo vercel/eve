@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { withSessionStateDelta } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 
 const stableToken = "eve:session:session-1:inbox";
 

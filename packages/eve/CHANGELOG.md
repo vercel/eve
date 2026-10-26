@@ -1,5 +1,25 @@
 # eve
 
+## 0.83.3
+
+### Patch Changes
+
+- 3e96a14: An optimistic message no longer stays in the `submitted` state when its turn is cancelled or fails before the agent reads it. `EveAgentStore` now marks that message `failed`, so it keeps its own text, and later messages reconcile against their own submissions. A steered message the cancelled turn never read now also lets its `send()` settle. Thanks @brettcrane for reporting this in #3102.
+- 8077f2d: With `otel({ traceChannelRequests: true })`, the `agent.channel.request` span now ends when the response body finishes, fails, or is cancelled, not when the route handler returns. Session stream requests no longer log `You can only call end() on a span once.` for `workflow.stream.read.connect`, and request spans now cover the full streaming time. Thanks @ahcarpenter for reporting this and proposing the fix in #4256.
+- 54adf15: `chatSdkChannel` now reports failed final reply delivery with an error-id notice and a note to the model, avoids reposting streamed replies, and skips unchanged final edits after state restoration. Thanks @diegojohnsonl for reporting this in #4801.
+- 4280d51: A hook that cancels the turn at `compaction.completed` no longer drops the compaction's summary call from the session's usage. `session.waiting` and session limits now count it.
+- 181caed: Compaction no longer re-runs on every step when the current user message is most of the context window. After a compaction, eve keeps at most 20,000 tokens of the latest conversation word for word next to the summary, with tool results shortened to 2,000 characters; a current message larger than that keeps its start and end, and the cut-out middle is summarized. A compaction that cannot bring the history under the threshold now fails the session, without retrying the step, with an error that says to start a new session or send a smaller message.
+- cea4eb0: Declare `next` as an optional peer dependency, so `eve/next` types resolve the app's own `next` in pnpm workspaces that install more than one `next` version. Thanks @laugharn for reporting this in #5341.
+- 80db4b3: A session started before eve 0.57 now imports on its next message instead of failing with `IncompatibleStateLayoutError` for `eve.mode`. The import drops the framework context keys that those builds saved and the current build no longer defines. Thanks @sunlanchang for reporting this in #5213.
+- 200d2d8: `localDev()` now refuses requests that a browser sends for another website: a non-loopback request host or `Origin`. A web page open in the developer's browser can no longer start sessions or run the agent's tools on an `eve dev` server, including through DNS rebinding. Frontends served from any loopback host and port still authenticate.
+- 243a4a4: `localDev()` now refuses callers on other machines. Before, an `eve dev` server started with `--host 0.0.0.0` gave every LAN caller the `local-dev` principal, so they could run the agent and its local editing tools, which write to the project's `agent/` source. Callers on the same machine are unchanged, including the developer's own clients when `--host` names a LAN address.
+- da515dc: OpenAPI `operations.allow` and `operations.block` now match an operation's `operationId` as written in the spec, as well as its generated tool name. Before, an `operationId` with characters such as `.` or `/` never matched, because eve compared the filter only against the sanitized tool name, so a blocked operation stayed callable.
+- 9a55d23: OpenAPI connection tools no longer reject valid deeply nested input, such as a Notion page title. eve now keeps the spec's referenced schemas under `$defs` instead of copying them inline up to a depth limit, so validation applies at every depth and shared schemas no longer grow exponentially. Thanks @lildesert for reporting this with a minimal reproduction in #3267.
+- b8b36a8: Preserve the original session output stream’s public encryption metadata during deployment handoffs, avoiding repeated run metadata and encryption-key lookups before later turns.
+- 7cf27bb: Text a root session's model writes before `eve__task_wait` in the same step now posts as a reply. Before, Slack showed it only as the thread status, and Telegram, Teams, and other channels dropped it.
+- f3e3140: Fixed a denial-of-service issue in `webFetch` with `format: "text"`: HTML text extraction now runs in linear time, so malformed pages, such as ones with unclosed `<script>` tags or stray `<` characters, can no longer block the event loop. Content after an unclosed `<script>`, `<style>`, `<noscript>`, or `<!--` is now dropped, as browsers do. Thanks @not2face for the report.
+- de1b9aa: Workspace packages bundled from TypeScript source can now import their own files with `?raw` and other relative asset imports. Before, `eve build` failed with "resolves outside package root" when an agent imported such a package. `?raw` now also works for `.json` files and files without an extension, such as a `Dockerfile`.
+
 ## 0.83.2
 
 ### Patch Changes

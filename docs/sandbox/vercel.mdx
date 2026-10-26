@@ -136,7 +136,7 @@ const sandboxName = sandbox.name;
 
 ## Mount a Drive
 
-A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` in your app, create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` in your app, create or retrieve the Drive before calling `open()`, then pass its name and mount mode in `mounts` under an absolute path:
 
 ```bash
 pnpm add @vercel/sandbox
@@ -159,7 +159,7 @@ export default defineSandbox(async () => {
 
   return environment.open({
     mounts: {
-      "/data": drive,
+      "/data": { drive: drive.name, mode: "read-write" },
     },
   });
 });
@@ -178,12 +178,12 @@ To share a point-in-time view across concurrent sandboxes, mount a read-only sna
 ```ts
 return environment.open({
   mounts: {
-    "/data": drive.snapshot(),
+    "/data": { drive: drive.name, mode: "snapshot" },
   },
 });
 ```
 
-Before mounting `drive.snapshot()`, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
+Before mounting a Drive snapshot, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
 
 Each `mounts` entry is a `Drive`, which mounts read-write, or a `{ drive, mode }` reference to an existing Drive by name, where `mode` is `"read-write"` or `"snapshot"`. `drive.snapshot()` returns such a reference.
 
