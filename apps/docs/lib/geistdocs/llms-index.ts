@@ -41,6 +41,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Build a Memory Provider](${EVE_ORIGIN}/docs/memory/custom-provider.md): Implement the recall, capture, and tools contract for any store or memory service.
 - [Subagents](${EVE_ORIGIN}/docs/subagents.md): Delegate work to copies of the root agent or declared specialists.
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
+- [Dynamic Schedules](${EVE_ORIGIN}/docs/dynamic-schedules.md): Create and manage creator-owned runtime schedules; includes updates, approvals, and local delivery.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
 - [Evals](${EVE_ORIGIN}/docs/evals.md): Define repeatable scored checks and run them with \`eve eval\`.
@@ -78,10 +79,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Scope any memory provider to an authenticated tenant and caller.
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
-
-## Experimental
-
-- [Dynamic Schedules](${EVE_ORIGIN}/docs/experimental/dynamic-schedules.md): Create and manage creator-owned runtime schedules with the experimental API; includes updates, approvals, and local delivery.
 
 ## API Reference and Discovery
 

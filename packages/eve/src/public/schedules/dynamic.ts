@@ -1,4 +1,4 @@
-export { schedules } from "#public/experimental/schedules/client.js";
+export { schedules } from "#public/schedules/client.js";
 export {
   defineDynamicSchedules,
   type DefinedDynamicSchedules,
