@@ -1,9 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
-FROM ubuntu:26.04
+# eve pins the image by a hash of this file (scripts/sandbox-image-tag.mjs),
+# and a published tag is never rebuilt, so any change here becomes a new image.
+# Base and Node are pinned so a change is reviewable; apt packages resolve when
+# the tag is first built. After editing, run `pnpm sandbox-image:tag --write`.
+FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG NODE_MAJOR=24
+ARG NODE_VERSION=24.22.1
+ARG NODE_SHA256_X64=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
+ARG NODE_SHA256_ARM64=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
 ARG PNPM_VERSION=11.5.2
 
 LABEL org.opencontainers.image.description="Sandbox base image for eve agents."
@@ -35,19 +41,15 @@ RUN set -eux; \
     zstd; \
   arch="$(dpkg --print-architecture)"; \
   case "${arch}" in \
-    amd64) node_arch="x64" ;; \
-    arm64) node_arch="arm64" ;; \
+    amd64) node_arch="x64"; node_sha256="${NODE_SHA256_X64}" ;; \
+    arm64) node_arch="arm64"; node_sha256="${NODE_SHA256_ARM64}" ;; \
     *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
   esac; \
-  base_url="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"; \
-  shasums="$(mktemp)"; \
-  curl -fsSL "${base_url}/SHASUMS256.txt" -o "${shasums}"; \
-  node_file="$(awk -v node_arch="${node_arch}" '$2 ~ "^node-v.*-linux-" node_arch "\\.tar\\.xz$" { print $2; exit }' "${shasums}")"; \
-  test -n "${node_file}"; \
-  curl -fsSLO "${base_url}/${node_file}"; \
-  grep " ${node_file}$" "${shasums}" | sha256sum -c -; \
+  node_file="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+  curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${node_file}"; \
+  echo "${node_sha256}  ${node_file}" | sha256sum -c -; \
   tar -xJf "${node_file}" -C /usr/local --strip-components=1 --no-same-owner; \
-  rm "${node_file}" "${shasums}"; \
+  rm "${node_file}"; \
   rm -rf /usr/local/include/node /usr/local/share/doc /usr/local/share/man; \
   npm install -g "pnpm@${PNPM_VERSION}"; \
   apt-get purge -y --auto-remove xz-utils; \

@@ -1,0 +1,24 @@
+name: "Resolve eve sandbox image"
+description: >-
+  Run against eve's pinned sandbox image. When this change edits the Dockerfile,
+  its image is not published until it reaches main, so fall back to :latest.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve eve sandbox image
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        node scripts/sandbox-image-tag.mjs --check
+        image="ghcr.io/vercel/eve:$(node scripts/sandbox-image-tag.mjs)"
+        if inspect_output="$(docker buildx imagetools inspect --raw "$image" 2>&1)"; then
+          echo "Using pinned sandbox image $image"
+        elif grep -Eq ': not found|manifest unknown' <<<"$inspect_output"; then
+          echo "::warning title=Unpublished sandbox image::$image is published when this packages/eve/Dockerfile change reaches main. This run uses ghcr.io/vercel/eve:latest, so it does not exercise the Dockerfile change."
+          echo "EVE_SANDBOX_IMAGE_TAG=latest" >>"$GITHUB_ENV"
+        else
+          echo "$inspect_output" >&2
+          exit 1
+        fi

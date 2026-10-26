@@ -121,7 +121,6 @@ jobs:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
-      EVE_SANDBOX_IMAGE_TAG: latest
     steps:
       - name: Checkout planned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -137,6 +136,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
+
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -224,7 +226,6 @@ jobs:
       AI_GATEWAY_API_KEY: invalid-e2e-world-suite-key
       EVE_E2E_MODEL: mock
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
-      EVE_SANDBOX_IMAGE_TAG: latest
       WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
       WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
       WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"
@@ -243,6 +244,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
+
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -362,7 +366,6 @@ jobs:
     env:
       EVE_E2E_MODEL: mock
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
-      EVE_SANDBOX_IMAGE_TAG: latest
     steps:
       - name: Checkout planned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -381,6 +384,9 @@ jobs:
 
       - name: Install Vercel CLI
         run: pnpm add --global vercel@latest && vercel --version
+
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -412,7 +418,7 @@ jobs:
             pnpm exec eve build
           DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
-            --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
+            --env "EVE_SANDBOX_IMAGE_TAG=${EVE_SANDBOX_IMAGE_TAG:-}" \
             "${token_args[@]}" | tail -n 1)"
           echo "Deployed $DEPLOYMENT_URL"
 
