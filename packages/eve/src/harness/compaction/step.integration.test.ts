@@ -1,3 +1,4 @@
+import { APICallError } from "@ai-sdk/provider";
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineMemory } from "#public/memory/index.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import { projectMemoryHistoryFromSessionState } from "#shared/memory-state.js";
@@ -400,5 +402,63 @@ describe("announcements after a compaction during a turn", () => {
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
     ]);
+  });
+});
+
+// #5350: the summary call's error escaped the step, so the workflow retried the whole step and
+// then ended the session.
+describe("a compaction that fails during a turn", () => {
+  it.fails("fails the turn and keeps the history when the summary call is rate limited", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const turnCalls = vi.fn(async () => answer());
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("You help Alice.")) return await turnCalls();
+        throw new APICallError({
+          isRetryable: true,
+          message: "Too Many Requests",
+          requestBodyValues: {},
+          statusCode: 429,
+          url: "https://provider.example/v1/messages",
+        });
+      },
+    });
+    const history: HarnessModelMessage[] = [
+      { content: `Read this brief. ${"lorem ipsum ".repeat(1_500)}`, kind: "user", role: "user" },
+      { content: "I read the brief.", role: "assistant" },
+    ];
+    const session: HarnessSession = {
+      agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+      // Small enough that the long brief compacts before the turn's first model call.
+      compaction: { recentWindowSize: 1, threshold: 2_000 },
+      continuationToken: "http:failed-compaction-session",
+      history,
+      sessionId: "failed-compaction-session",
+    };
+    const events: UnstampedMessageStreamEvent[] = [];
+
+    const result = await contextStorage.run(new ContextContainer(), async () => {
+      let stepped = await createToolLoopHarness({
+        handleEvent: foldingHandler(async (event) => {
+          events.push(event);
+        }),
+        resolveModel: async () => model,
+        tools: new Map(),
+      })(session, { message: "Which sources back the second claim?" });
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+      return stepped;
+    });
+
+    expect(turnCalls).not.toHaveBeenCalled();
+    expect(events.find((event) => event.type === "turn.failed")?.data).toMatchObject({
+      code: "MODEL_CALL_FAILED",
+      terminal: false,
+    });
+    expect(events.map((event) => event.type)).not.toContain("session.failed");
+    expect(result.next).toBeNull();
+    expect(result.session.history.slice(0, 2)).toEqual(history);
   });
 });
