@@ -1,4 +1,5 @@
 import { createLogger } from "#internal/logging.js";
+import { getMessageResponseReceipt } from "#client/message-response.js";
 import type { ClientSession } from "#client/session.js";
 import type { CreateSessionOptions, SendTurnInput, SendTurnOptions } from "#client/types.js";
 import type { Client } from "#client/client.js";
@@ -36,17 +37,21 @@ export class EvalSessionManager {
   }
 
   async session(options: CreateSessionOptions = {}): Promise<EvalSessionDriver> {
+    const startedAt = Date.now();
     const { session } = await this.#client.sessions.create({
       ...options,
       signal: options.signal ?? this.#signal,
     });
+    const created = { startedAt, notReadyMs: 0, acceptedAt: Date.now() };
     if (options.stubs !== undefined)
       this.#stubbedSessions.push({
         sessionId: session.state.sessionId,
         headers: options.headers,
         ruleIds: options.stubs.map((rule) => rule.id),
       });
-    return this.#register(session);
+    const driver = this.#register(session);
+    driver.recordSend("prewarm", created);
+    return driver;
   }
 
   /** A recorded stub failure always fails the eval, even if the agent recovers. */
@@ -88,6 +93,7 @@ export class EvalSessionManager {
       signal: options.signal ?? this.#signal,
     });
     const driver = this.#register(session);
+    driver.recordSend("create", getMessageResponseReceipt(response));
     return await driver.consume(response, message).result();
   }
 

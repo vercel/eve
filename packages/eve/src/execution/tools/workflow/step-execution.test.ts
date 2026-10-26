@@ -15,7 +15,7 @@ import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import {
@@ -23,10 +23,7 @@ import {
   createDiskRuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import {
-  defineSandboxProvider,
-  type SandboxProviderSessionContext,
-} from "#shared/sandbox-provider.js";
+import { defineSandboxProvider } from "#sandbox/provider.js";
 
 const durable = vi.hoisted(() => ({
   attempt: 1,
@@ -72,42 +69,42 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 /**
  * A provider whose `start` upserts a sandbox by session id and whose
  * `onSessionEnd` deletes by it, as the provider contract requires. Each open
- * hands out its own handle over the shared sandbox; `shutDown` records which
- * ones the runtime's shutdown stopped.
+ * hands out its own connection over the shared sandbox; `stopped` and
+ * `closed` record which connections eve stopped and closed.
  */
 function upsertSandboxes() {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
   const starts: string[] = [];
-  const handles: object[] = [];
-  const shutDown: object[] = [];
-  const stopped: Mock<() => Promise<void>> = vi.fn(async () => {});
+  const connections: object[] = [];
+  const stopped: object[] = [];
+  const closed: object[] = [];
   const deleted: Mock<() => Promise<void>> = vi.fn(async () => {});
-  const handleFor = (key: string) => {
+  const connect = (key: string) => {
     let sandbox = live.get(key);
     if (sandbox === undefined) {
       sandbox = mockSandbox();
       live.set(key, sandbox);
     }
-    const handle = {
-      sandbox: sandbox.session,
-      onRuntimeShutdown: async () => void shutDown.push(handle),
-      onSandboxDelete: deleted,
-      onSandboxStop: stopped,
+    const connection = {
+      ...sandbox.connection,
+      close: async () => void closed.push(connection),
+      stop: async () => void stopped.push(connection),
     };
-    handles.push(handle);
-    return handle;
+    connections.push(connection);
+    return connection;
   };
   const provider = defineSandboxProvider({
     name: "upsert",
     environment: () => ({
-      onSessionEnd: async (context: SandboxProviderSessionContext) =>
-        void live.delete(context.session.id),
       prepare: async () => null,
-      resume: async (_context: unknown, _artifact: unknown, state: { readonly key: string }) =>
-        handleFor(state.key),
-      start: async (context: SandboxProviderSessionContext) => {
+      start: async (context) => {
         starts.push(context.session.id);
-        return { handle: handleFor(context.session.id), state: { key: context.session.id } };
+        return { connection: connect(context.session.id), state: { key: context.session.id } };
+      },
+      resume: async (_context, _artifact, state) => connect(state.key),
+      async onSessionEnd(context, _state, { reason }) {
+        if (reason === "deleted") await deleted();
+        live.delete(context.session.id);
       },
     }),
   });
@@ -126,7 +123,7 @@ function upsertSandboxes() {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { deleted, handles, provider, registry, shutDown, starts, stopped };
+  return { closed, connections, deleted, provider, registry, starts, stopped };
 }
 
 function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext {
@@ -170,7 +167,7 @@ describe("workflow step authorization", () => {
     durable.stepId = "step-1";
     durable.entries.clear();
     bundle.loadedFrom = [];
-    await shutdownActiveSandboxHandles();
+    await shutdownActiveSandboxConnections();
   });
   afterEach(() => vi.unstubAllEnvs());
   it.each([
@@ -228,8 +225,8 @@ describe("workflow step authorization", () => {
     expect(starts).toEqual(["owner-session"]);
   });
 
-  it("leaves the session's handle tracked for runtime shutdown after a step uses the sandbox", async () => {
-    const { handles, registry, shutDown } = upsertSandboxes();
+  it("closes the step's connection and leaves the session's tracked for runtime shutdown", async () => {
+    const { closed, connections, registry, stopped } = upsertSandboxes();
     bundle.registry = registry;
     // The session's turn opened its sandbox in this process.
     const session = await ensureSandboxAccess({
@@ -240,14 +237,15 @@ describe("workflow step authorization", () => {
       state: null,
     });
     await session.get();
-    const sessionHandle = handles[0];
     await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
       kind: "result",
     });
-    await shutdownActiveSandboxHandles();
-    // The step's handle neither replaced nor dropped the session's.
-    expect(handles).toHaveLength(2);
-    expect(shutDown).toEqual([sessionHandle]);
+    const [sessionConnection, stepConnection] = connections;
+    expect(closed).toEqual([stepConnection]);
+    await shutdownActiveSandboxConnections();
+    // The step's connection neither replaced nor dropped the session's.
+    expect(connections).toHaveLength(2);
+    expect(stopped).toEqual([sessionConnection]);
   });
 
   it("fails ctx.getSandbox() without retrying once its step has returned", async () => {
@@ -294,7 +292,7 @@ describe("workflow step authorization", () => {
         message: expect.stringContaining(message),
       });
     }
-    expect(stopped).not.toHaveBeenCalled();
+    expect(stopped).toEqual([]);
     expect(deleted).not.toHaveBeenCalled();
   });
 

@@ -22,7 +22,7 @@ export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 
-/** Stable route pattern for sending a message to one exact session ID. */
+/** Stable route pattern for preparing or delivering input to one exact session ID. */
 export const EVE_SESSION_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId`;
 
 /** Stable route pattern for cancelling one exact session ID. */
@@ -118,7 +118,7 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
-/** Builds the ID-addressed message route for one session. */
+/** Builds the ID-addressed preparation and input route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
 }

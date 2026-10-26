@@ -1,16 +1,19 @@
 import { createProcessor } from "@mdx-js/mdx";
 import { toMarkdown, type Options } from "mdast-util-to-markdown";
 import { describe, expect, it } from "vitest";
-import { remarkComponentMarkdown } from "./remark-component-markdown";
 import config from "../../source.config";
+
+async function configuredProcessor() {
+  const options =
+    typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
+  const plugins = options?.remarkPlugins;
+  if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
+  return createProcessor({ remarkPlugins: plugins });
+}
 
 describe("component Markdown export", () => {
   it("expands the runtime diagram without changing HTML or component examples", async () => {
-    const options =
-      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
-    const plugins = options?.remarkPlugins;
-    if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
-    const processor = createProcessor({ remarkPlugins: plugins });
+    const processor = await configuredProcessor();
     const source = [
       "## Agent loop and sandbox",
       "",
@@ -66,5 +69,43 @@ describe("component Markdown export", () => {
     expect(tree.children).toContainEqual(
       expect.objectContaining({ type: "mdxJsxFlowElement", name: "AgentRuntimeDiagram" }),
     );
+  });
+
+  it("renders use case cards as Markdown lists with their titles and links", async () => {
+    const processor = await configuredProcessor();
+    const source = [
+      "<UseCaseSummaries>",
+      '  <UseCaseSummary audience="For your team" title="Business agents" href="#business-agents" channels={["slack"]}>',
+      "    Automate a company function.",
+      "  </UseCaseSummary>",
+      "</UseCaseSummaries>",
+      "",
+      "<TemplateCards>",
+      '  <TemplateCard title="iMessage agent" template="openinstinct-eve-template" label="iMessage">',
+      "    A multi-tenant iMessage service.",
+      "  </TemplateCard>",
+      "</TemplateCards>",
+      "",
+      "<Capabilities>",
+      '  <Capability icon="channels" title="Meet employees where they work" href="/docs/channels/overview" link="Channels">',
+      "    One agent serves Slack and",
+      "    your own web apps.",
+      "  </Capability>",
+      "</Capabilities>",
+    ].join("\n");
+    const markdown = toMarkdown(processor.parse(source), {
+      extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+    });
+
+    expect(markdown).toContain(
+      "- **[Business agents](#business-agents)** (For your team): Automate a company function.",
+    );
+    expect(markdown).toContain(
+      "- **iMessage agent**: A multi-tenant iMessage service. See the [iMessage template](/templates/openinstinct-eve-template).",
+    );
+    expect(markdown).toContain(
+      "- **Meet employees where they work**: One agent serves Slack and your own web apps. See [Channels](/docs/channels/overview).",
+    );
+    expect(markdown).not.toMatch(/<(UseCase|Template|Capabilit)/);
   });
 });

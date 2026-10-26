@@ -133,6 +133,9 @@ describe("docsRedirects", () => {
     ["/docs/evals", "/docs/evals/overview"],
     ["/docs/guides/evaluate", "/docs/guides/decide"],
     ["/docs/guides/evaluate.md", "/docs/guides/decide.md"],
+    ["/docs/sandbox/microsandbox", "/docs/sandbox"],
+    ["/docs/sandbox/microsandbox.md", "/docs/sandbox.md"],
+    ["/en/docs/sandbox/microsandbox.mdx", "/docs/sandbox.mdx"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
   });

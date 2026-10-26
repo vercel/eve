@@ -116,6 +116,29 @@ function dispatchWork(
 const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedDeliverResult>;
 
 describe("SessionExecution checkpoints", () => {
+  it("carries an applied handover to only the next existing turn step", async () => {
+    const handover = { attemptKey: "source-run:0", payloadCount: 2, appliedAtMs: 123456 };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async (input) => ({
+          action: "park",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+    const execution = createExecution({
+      inbox: { ...idleInbox(), handoverObservation: handover },
+      sessionState: state(""),
+    });
+    await execution.runTurn(undefined);
+    await execution.runTurn(undefined);
+    expect(vi.mocked(turnStep).mock.calls.map(([input]) => input.handover)).toEqual([
+      handover,
+      undefined,
+    ]);
+  });
+
   it("uses prepared cancellation and steering controls for the first step", async () => {
     const control = createTurnControl();
     vi.mocked(turnStep)

@@ -9,10 +9,10 @@ Deploy eve to Vercel or run it as a Node service on your own infrastructure. You
 
 Choose where the eve runtime will run:
 
-| Strategy                       | Build output           | Workflows                      | Sandbox                         | Choose it when                                        |
-| ------------------------------ | ---------------------- | ------------------------------ | ------------------------------- | ----------------------------------------------------- |
-| [Vercel](./vercel)             | `.vercel/output`       | Vercel Workflow                | Vercel Sandbox                  | You want Vercel to operate the runtime services       |
-| [Self-hosting](./self-hosting) | `.output/` Node server | Local or custom Workflow world | Docker, microsandbox, or custom | You operate your own Node or container infrastructure |
+| Strategy                       | Build output           | Workflows                      | Sandbox          | Choose it when                                        |
+| ------------------------------ | ---------------------- | ------------------------------ | ---------------- | ----------------------------------------------------- |
+| [Vercel](./vercel)             | `.vercel/output`       | Vercel Workflow                | Vercel Sandbox   | You want Vercel to operate the runtime services       |
+| [Self-hosting](./self-hosting) | `.output/` Node server | Local or custom Workflow world | Docker or custom | You operate your own Node or container infrastructure |
 
 eve is frontend agnostic and can be deployed within Next.js, Nuxt, SvelteKit, or TanStack Start applications. See [Frontend integrations](../frontend/overview) for more details.
 

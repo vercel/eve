@@ -1,3 +1,4 @@
+import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
@@ -23,6 +24,7 @@ import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
   EVE_VERSION_ATTRIBUTE,
+  EVE_PREWARM_ATTRIBUTE,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -46,6 +48,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import {
+  assertSessionHistoryReadable,
   readSessionEventHistory,
   readSessionEventStream,
   readSessionStreamTailIndex,
@@ -208,6 +211,7 @@ export function createWorkflowRuntime(config: {
           });
     const attributes = {
       ...sessionAttributes,
+      [EVE_PREWARM_ATTRIBUTE]: "1",
       ...(input.externalInvocation === undefined
         ? {}
         : buildInvocationAttributes(input.externalInvocation)),
@@ -306,9 +310,13 @@ export function createWorkflowRuntime(config: {
       // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false) return readSessionEventHistory(sessionId, options.startIndex);
       // An ended session has no inbox, and a dormant `eve dev` run may resume;
-      // either recorded stream stays readable. Only a stranded owner refuses.
+      // either recorded stream stays readable. Only a stranded owner, an
+      // unknown session, or expired history refuses.
       try {
-        await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
+        await Promise.all([
+          assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId))),
+          assertSessionHistoryReadable(sessionId),
+        ]);
       } catch (error) {
         if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
         throw error;
@@ -328,6 +336,13 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   token: string | SessionInboxAddress,
   command: TCommand,
 ): Promise<SessionCommandResult<TCommand>> {
+  if (command.kind === "prewarm") {
+    return (
+      typeof token === "string"
+        ? { status: "unsupported" }
+        : await prewarmWorkflowSession(token.sessionId, command.targetDeploymentId)
+    ) as SessionCommandResult<TCommand>;
+  }
   let hook: SessionInboxOwnerRecord;
   try {
     const resumed = await resumeSessionInbox(token, command);

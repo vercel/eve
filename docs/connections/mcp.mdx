@@ -26,7 +26,7 @@ The `url` must speak Streamable HTTP or SSE. Write the `description` for the mod
 
 ## Configure protocol discovery
 
-eve discovers the server's MCP protocol by default. If a server requires the older `initialize` handshake, disable discovery for that connection:
+eve discovers the server's MCP protocol by default. If a server rejects discovery with an unsupported protocol version error (`-32022`) and lists a handshake-based version eve supports, eve falls back to `initialize` with the newest version both sides support. If a server requires the older `initialize` handshake and does not report a supported version, disable discovery for that connection:
 
 ```ts
 export default defineMcpClientConnection({

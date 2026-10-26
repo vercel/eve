@@ -7,6 +7,29 @@ url: "/observability/otel"
 `eve dev` records local traces by default. Use `otel()` for process-wide
 settings and `otelIntegration()` for third-party destinations.
 
+## Session handover events
+
+Existing Workflow step spans include these events when tracing is active:
+
+- `eve.session.handover.forwarding_started`: the previous owner starts submitting its buffered messages, including an empty buffer.
+- `eve.session.handover.part_submitted`: a buffered part was durably submitted.
+- `eve.session.handover.final_submitted`: the final marker was durably submitted. This does not confirm that the successor has processed it.
+- `eve.session.handover.inbox_unblocked`: an existing turn step observes that the inbox applied every buffered part and the final marker.
+
+Join both owners with `eve.session.id` and `eve.handoff.attempt_key`.
+`workflow.run.id` identifies the emitting owner; submission events also include
+`eve.handoff.destination_run_id`. Counts and part indexes describe the transfer
+without recording message content. Step IDs and `eve.handoff.step_attempt`
+distinguish retries; these events are not exactly-once counters.
+
+The receiver records `eve.handoff.applied_at_ms` using Workflow's replay-stable
+clock, identified by `eve.handoff.applied_at_clock: workflow`. This is logical
+event time, not the host time when replay applied the marker. The event's own
+timestamp is when the next turn step exports the observation. No receiver
+observation is exported if no subsequent turn step runs. An abandoned handover
+does not emit a successful receipt. No additional Workflow steps or writes are
+created for tracing.
+
 ## Configure OpenTelemetry
 
 `otel()` and `otelIntegration()` are optional:

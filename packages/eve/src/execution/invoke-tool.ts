@@ -16,11 +16,6 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { deriveToolSessionId, validateToolSessionKey } from "#execution/tool-session/id.js";
-import {
-  assertToolSessionSandboxSupport,
-  releaseToolSessionHandle,
-  ToolSessionSandboxUnsupportedError,
-} from "#execution/tool-session/sandbox.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   AuthorizationHookKey,
@@ -40,6 +35,7 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SandboxAccess } from "#sandbox/state.js";
+import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   type InvokeToolObserver,
@@ -215,7 +211,7 @@ interface CallSandbox {
  * through the provider's `start`, an upsert on the session id, and kept after
  * the call. Concurrent first calls in this process share one start. The call
  * does not own the sandbox, so a failed start never deletes it, and release
- * only lets go of this call's handle: an overlapping call keeps its own.
+ * only closes this call's connection: an overlapping call keeps its own.
  */
 async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const access = await ensureSandboxAccess({
@@ -224,21 +220,10 @@ async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Prom
     ownsSandbox: false,
     registry: runtime.sandboxRegistry,
     sessionId,
+    shutdownTracking: "call",
     state: null,
   });
-  return {
-    access: {
-      ...access,
-      async get() {
-        assertToolSessionSandboxSupport(runtime.sandboxRegistry);
-        return await access.get();
-      },
-    },
-    async release() {
-      const handle = await access.detach();
-      if (handle !== undefined) await releaseToolSessionHandle(runtime.sandboxRegistry, handle);
-    },
-  };
+  return { access, release: () => access.release() };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
@@ -6,6 +7,7 @@ import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
+import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep } from "#context/run-step.js";
 import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
 import {
@@ -76,6 +78,7 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import {
   resolveEffectiveAgentRuntime,
   resolveSessionUsageLimit,
@@ -109,6 +112,18 @@ interface PendingStepAttributes {
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
+  if (input.handover !== undefined) {
+    traceSessionHandover(
+      "inbox_unblocked",
+      input.sessionState.sessionId,
+      input.handover.attemptKey,
+      {
+        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
+        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
+        "eve.handoff.applied_at_clock": "workflow",
+      },
+    );
+  }
   return await withSessionStateDelta(input, (state) =>
     runSessionStep({
       ...state,
@@ -513,6 +528,7 @@ async function runSessionStepBody(
         handleEvent,
         prepareApprovalTurn: (event) => dynamicConnections.dispatch(turnStartedForResolvers(event)),
         signInCompletions,
+        typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
@@ -541,6 +557,10 @@ async function runSessionStepBody(
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
           const result = await runStep(ctx, session, async (enrichedSession) => {
+            // Races session resources against the model call; their users wait for what remains.
+            if (firstCall && input.input?.control === undefined) {
+              startSessionPrewarmers(ctx, "turn");
+            }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
             let schemaSession =

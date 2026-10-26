@@ -77,6 +77,8 @@ export type InternalAgentModelDefinition = {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
+  /** Field of the `source` agent config export that holds this model; absent means `model`. */
+  sourceField?: "compaction.model";
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
 };

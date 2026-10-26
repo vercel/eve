@@ -99,7 +99,6 @@ interface OwnedInitialSession {
   readonly kind: "owned";
   readonly timeoutControl: SessionTimeoutControl | undefined;
   readonly turnControl: TurnControl;
-  dispose(): Promise<void>;
 }
 
 type InitialOwnerPreparation = OwnedInitialSession | { readonly kind: "alias-conflict" };
@@ -108,57 +107,42 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
+    /** The claims confirm after it, so it runs inline while their hooks commit. */
+    readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
     readonly sessionTimeoutMs: number | false;
   },
 ): Promise<InitialOwnerPreparation> {
+  const owner: OwnedInitialSession = {
+    kind: "owned",
+    // The session loop starts the timer once the claims are confirmed; one
+    // started sooner could signal a command hook that is not registered yet.
+    timeoutControl: createSessionTimeoutControl({
+      sessionId: input.sessionId,
+      timeoutMs: input.sessionTimeoutMs,
+    }),
+    // Created before any await so its abort hooks commit with the session's
+    // hooks instead of beside the first turn's step.
+    turnControl: createTurnControl(),
+  };
+  const claim = { confirmAfter: input.sessionCreation };
   const [stableClaim, aliasClaim] = await Promise.allSettled([
-    inbox.claimSessionHook(sessionCommandHookToken(input.sessionId)),
+    inbox.claimSessionHook(sessionCommandHookToken(input.sessionId), claim),
     input.continuationToken === ""
       ? Promise.resolve()
-      : inbox.claimSessionHook(input.continuationToken),
+      : inbox.claimSessionHook(input.continuationToken, claim),
   ]);
   if (stableClaim.status === "rejected") throw stableClaim.reason;
   if (aliasClaim.status === "rejected") {
     if (isHookConflictError(aliasClaim.reason)) return { kind: "alias-conflict" };
     throw aliasClaim.reason;
   }
-
-  const turnControl = createTurnControl();
-  const timeoutControl = createSessionTimeoutControl({
-    sessionId: input.sessionId,
-    timeoutMs: input.sessionTimeoutMs,
-  });
-  const owner: OwnedInitialSession = {
-    kind: "owned",
-    timeoutControl,
-    turnControl,
-    async dispose() {
-      turnControl.dispose();
-      await timeoutControl?.dispose();
-    },
-  };
-  // The session loop joins this startup. Handling the promise here prevents a
-  // rejection from becoming unhandled if another boot branch fails first.
-  void timeoutControl?.start().catch(() => {});
   return owner;
 }
 
 function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
   if (result.status === "rejected") throw result.reason;
   return result.value;
-}
-
-async function disposeInitialBoot(
-  inbox: SessionInboxHandle,
-  owner: OwnedInitialSession | undefined,
-): Promise<void> {
-  const [ownerDisposal, inboxDisposal] = await Promise.allSettled([
-    owner?.dispose(),
-    inbox.dispose(),
-  ]);
-  if (ownerDisposal.status === "rejected") throw ownerDisposal.reason;
-  if (inboxDisposal.status === "rejected") throw inboxDisposal.reason;
 }
 
 /** Returns `undefined` when a competing continuation owner already exists. */
@@ -175,7 +159,6 @@ export async function bootInitialOwner(
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
-  let owner: OwnedInitialSession | undefined;
   try {
     const sessionCreationPromise = createSessionStep({
       agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
@@ -195,6 +178,7 @@ export async function bootInitialOwner(
     });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       continuationToken,
+      sessionCreation: sessionCreationPromise,
       sessionId,
       sessionTimeoutMs,
     });
@@ -206,9 +190,6 @@ export async function bootInitialOwner(
       ownerPreparationPromise,
       callerResolutionPromise,
     ]);
-    if (ownerPreparation.status === "fulfilled" && ownerPreparation.value.kind === "owned") {
-      owner = ownerPreparation.value;
-    }
     const created = unwrapSettled(sessionCreation);
     const prepared = unwrapSettled(ownerPreparation);
     if (prepared.kind === "alias-conflict") {
@@ -218,7 +199,7 @@ export async function bootInitialOwner(
           continuationToken,
         });
       }
-      await disposeInitialBoot(inbox, owner);
+      await inbox.dispose();
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);
@@ -246,7 +227,7 @@ export async function bootInitialOwner(
       },
     };
   } catch (error) {
-    await disposeInitialBoot(inbox, owner);
+    await inbox.dispose();
     return await failSession({
       error,
       serializedContext,
@@ -454,6 +435,7 @@ async function startSuccessor(
       sessionId,
       sessionState: checkpoint.sessionState,
       sessionTimeoutControl: createSessionTimeoutControl({
+        deadline: input.reason === "prewarm" ? input.sessionTimeoutDeadline : undefined,
         sessionId,
         timeoutMs: checkpoint.sessionTimeoutMs,
       }),

@@ -578,6 +578,7 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
+    sourceField: z.literal("compaction.model").optional(),
     promptCache: z
       .object({
         anthropic: z
@@ -1367,6 +1368,9 @@ function cloneCompiledRuntimeModelReference(
   }
   if (model.source !== undefined) {
     clone.source = { ...model.source };
+  }
+  if (model.sourceField !== undefined) {
+    clone.sourceField = model.sourceField;
   }
   return clone;
 }

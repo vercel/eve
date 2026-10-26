@@ -650,6 +650,9 @@ describe("defineChannel", () => {
           async cancel() {
             return { status: "no_active_turn" as const };
           },
+          async prewarm() {
+            return { status: "ready" as const };
+          },
           async compact() {
             return { sessionId: channelId, status: "accepted" as const };
           },

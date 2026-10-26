@@ -66,23 +66,32 @@ export async function readSessionStreamTailIndex(sessionId: string): Promise<num
   // The readable is never consumed; cancel it so the unread source does not linger.
   const readable = getRun(sessionId).getReadable();
   try {
-    const world = await getWorld();
-    const [run, tailIndex] = await Promise.all([
-      world.runs.get(sessionId, { resolveData: "none" }),
+    const [, tailIndex] = await Promise.all([
+      assertSessionHistoryReadable(sessionId),
       readable.getTailIndex(),
     ]);
-    // Purging can leave chunk records behind; their count does not imply readable data.
-    if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
-      throw new RunExpiredError(
-        "Session history is no longer available.",
-        sessionId,
-        run.status,
-        run.expiredAt,
-      );
-    }
     return tailIndex;
   } finally {
     await readable.cancel().catch(() => {});
+  }
+}
+
+/**
+ * Throws when the session's run does not exist or its recorded history has
+ * passed retention. Cheaper than {@link readSessionStreamTailIndex}, whose
+ * lookup on the local world opens every chunk file.
+ */
+export async function assertSessionHistoryReadable(sessionId: string): Promise<void> {
+  const world = await getWorld();
+  const run = await world.runs.get(sessionId, { resolveData: "none" });
+  // Purging can leave chunk records behind; their count does not imply readable data.
+  if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
+    throw new RunExpiredError(
+      "Session history is no longer available.",
+      sessionId,
+      run.status,
+      run.expiredAt,
+    );
   }
 }
 

@@ -1,3 +1,4 @@
+import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
@@ -42,7 +43,16 @@ export interface SessionHandoverPayload {
   readonly payloads: readonly Exclude<SessionInboxPayload, SessionHandoverPayload>[];
 }
 
+/** Replay-stable evidence that every buffered part and the final marker were applied. */
+export interface SessionHandoverObservation {
+  readonly attemptKey: string;
+  readonly payloadCount: number;
+  /** Workflow event time, not the host wall clock when replay reached this point. */
+  readonly appliedAtMs: number;
+}
+
 export type SessionInboxPayload =
+  | SessionPrewarmPayload
   | SessionFailurePayload
   | SessionHandoverPayload
   | HookPayload
@@ -65,6 +75,7 @@ interface Source {
  * reads expose nothing; interrupt handlers still fire on arrival.
  */
 export interface SessionInboxReader {
+  readonly handoverObservation?: SessionHandoverObservation;
   /**
    * Waits for and removes the next accepted payload in arrival order, or
    * `undefined` once no hook can deliver any more (released or taken over).
@@ -105,6 +116,13 @@ export interface SessionHookClaimOptions {
    * token this inbox already holds is claimed again on a fresh hook.
    */
   readonly force?: boolean;
+  /**
+   * Creates the hook at once but confirms its registration only after this
+   * settles. While a registration is awaited, Workflow queues every step
+   * started beside it instead of running it inline, so a claim made next to a
+   * step confirms after that step; the hook still commits alongside it.
+   */
+  readonly confirmAfter?: Promise<unknown>;
 }
 
 export interface SessionHookBatchClaimOptions extends SessionHookClaimOptions {
@@ -192,6 +210,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         readonly parts: Map<number, SessionHandoverPayload>;
       }
     | undefined;
+  let handoverObservation: SessionHandoverObservation | undefined;
   const blockedWaiters = new Set<() => void>();
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
@@ -242,6 +261,11 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const next = current.parts.get(current.nextPart);
       if (next === undefined) break;
       if (next.final === true) {
+        handoverObservation = {
+          attemptKey: current.attemptKey,
+          payloadCount: current.nextPart,
+          appliedAtMs: Date.now(),
+        };
         observe(interruptHandlers, restored, isInterrupt);
         openHandover();
         return;
@@ -346,7 +370,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     }
     stopped = false;
     try {
-      source.registered = claimHookOwnership(source.hook);
+      const confirm = () => claimHookOwnership(source.hook);
+      source.registered = options.confirmAfter?.then(confirm, confirm) ?? confirm();
       await source.registered;
       // A takeover this run has reclaimed from no longer counts toward the next one.
       takenOver = false;
@@ -364,6 +389,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   return {
+    get handoverObservation() {
+      return handoverObservation;
+    },
     get claimedTokens() {
       return sources.map(({ token }) => token);
     },

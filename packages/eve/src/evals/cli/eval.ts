@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import {
   EVE_DEV_STATE_DIR_ENV,
   EVE_EVALUATION_ENV_FLAG,
@@ -34,6 +34,7 @@ export interface EvalCliOptions {
   url?: string;
   timeout?: string;
   maxConcurrency?: string;
+  repeat?: string;
   json?: boolean;
   junit?: string;
   skipReport?: boolean;
@@ -41,6 +42,7 @@ export interface EvalCliOptions {
   list?: boolean;
   tag?: string[];
   excludeTag?: string[];
+  keepState?: boolean;
   verbose?: boolean;
 }
 
@@ -114,9 +116,11 @@ export async function runEvalCommand(
 
   let maxConcurrency: number | undefined;
   let timeoutMs: number | undefined;
+  let repeat: number | undefined;
   try {
     maxConcurrency = parsePositiveInteger(options.maxConcurrency, "--max-concurrency");
     timeoutMs = parseNonNegativeInteger(options.timeout, "--timeout");
+    repeat = parsePositiveInteger(options.repeat, "--repeat");
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
@@ -143,6 +147,11 @@ export async function runEvalCommand(
     setupContext = await config.setup?.();
 
     if (options.url) {
+      if (options.keepState === true) {
+        logger.error(
+          "--keep-state has no effect with --url: the remote server keeps its own state.",
+        );
+      }
       client = await createEvalClient(
         { kind: "remote", url: options.url },
         { workspaceRoot: appRoot },
@@ -195,6 +204,7 @@ export async function runEvalCommand(
       includeEvalReporters: options.skipReport !== true,
       maxConcurrency,
       timeoutMs,
+      repeat,
       onEvalLog:
         options.verbose === true
           ? (evalId, message) => logger.log(`[${evalId}] ${message}`)
@@ -216,8 +226,13 @@ export async function runEvalCommand(
   } finally {
     for (const cleanup of [
       () => devServer?.close(),
-      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
-      () => devStateDirectory && removeEvalStateDirectory(devStateDirectory),
+      () =>
+        devServer && shutdownActiveSandboxConnections({ log: (message) => logger.error(message) }),
+      async () => {
+        if (devStateDirectory === undefined) return;
+        if (options.keepState !== true) return await removeEvalStateDirectory(devStateDirectory);
+        logger.error(`Kept the eval server's state in ${relative(appRoot, devStateDirectory)}.`);
+      },
       () => config.teardown?.(setupContext),
     ]) {
       try {
@@ -265,7 +280,7 @@ async function flushStream(stream: NodeJS.WriteStream): Promise<void> {
 // Option parsing
 // ---------------------------------------------------------------------------
 
-/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`). */
+/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`, `--repeat`). */
 function parsePositiveInteger(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);

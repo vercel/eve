@@ -384,9 +384,14 @@ export function createCliProgram(
     .option("--list", "Print discovered evals without running them")
     .option("--timeout <ms>", "Per-eval timeout in milliseconds")
     .option("--max-concurrency <n>", "Max concurrent eval executions")
+    .option("--repeat <n>", "Run every eval n times to measure repeatability")
     .option("--json", "Output results as JSON")
     .option("--junit <path>", "Write JUnit XML results to a file")
     .option("--skip-report", "Skip eval-defined reporters (e.g. Braintrust)")
+    .option(
+      "--keep-state",
+      "Keep the local eval server's state, including its Workflow data, after the run",
+    )
     .option("--verbose", "Stream per-eval logs and workflow run IDs to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());

@@ -6,6 +6,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { SessionHandoverObservation } from "#execution/session-inbox/inbox.js";
 
 /** Trusted runtime-action results collected by the session owner. */
 export interface RuntimeActionResultStepInput {
@@ -28,6 +29,7 @@ export interface TurnStepPayload {
 
 /** Input for one atomic, session-owner-executed turn step. */
 export interface TurnStepInput {
+  readonly handover?: SessionHandoverObservation;
   readonly abortSignal?: AbortSignal;
   /** The delegated caller to bind into the context before the step runs; sent on a turn's first step. */
   readonly caller?: TurnCaller;

@@ -16,6 +16,12 @@ event stream. A deployment or compaction handoff changes the executing run, not
 the session ID or stream. Stream namespaces belong to a run; eve does not support
 caller-assigned session IDs or globally addressed streams.
 
+Before handoff, eve validates that the saved session state has no pending work
+inside the workflow. The current owner keeps its inbox while the successor
+starts and validates the checkpoint. Once the successor takes over the session
+hooks, the original owner forwards messages it accepted during the move and
+parks on the stream anchor until the final owner reports the session result.
+
 Authored channels also have channel-local continuation tokens. A token addresses
 whichever session currently owns a platform conversation, such as a Slack thread.
 That identity stays behind the channel boundary and is never accepted or returned
@@ -133,6 +139,8 @@ A call to a tool that runs as a task, such as an agent tool, `agentRouter()`, th
 A turn doesn't end while tasks are working. When the model ends its text early, eve holds the turn and the stream emits `turn.waiting` for it; the turn continues once a result arrives or its caller writes. In a root session, that text completes as an ordinary `message.completed`. In a child session or a schedule's session, it reports `finishReason: "tool-calls"`, so channels post only the final reply. When the model calls `eve__task_wait` and no result is ready yet, the stream also emits `turn.waiting`. Either way, the next `step.started` for the same `turnId` means the turn resumed, and `session.waiting` comes only after the turn ends. See [Tasks](/docs/tools/tasks#turns-wait-for-their-tasks).
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.failed` also carries `terminal`: `true` when the failure ends the session and `session.failed` follows, `false` when `session.waiting` follows and the next message can retry. Events from eve versions before `terminal` was added omit it. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, and discards incomplete assistant output. Tool calls the cancellation stopped stay in history, each answered as cancelled, so the model sees that the work started and stopped instead of a request left unanswered. Before `turn.cancelled`, the stream reports requests the cancel strands as `cancelled` in `input.resolved`. These include the turn's own questions, the session-limit prompt, and requests relayed from the work it stops. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`). Both carry `data.principalId` when a session principal started the sign-in. It holds the same value as `responderPrincipalId` on approval events, so a channel can deliver the challenge privately to that person even after someone else starts a later turn.
+
+Before the next model request, eve repairs unambiguous orphaned local tool calls in saved history only when no result was recorded anywhere. An error result states that the execution outcome is unknown and external state must be checked before repeating side effects. This repair never executes the old call, moves recorded results, or settles work still owned by approvals, sign-in, workflows, or tasks. Provider-executed calls, SDK approvals, and duplicate call IDs are left unchanged.
 
 A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
 `details.semanticErrorId: "model-response-content-filtered"`, and

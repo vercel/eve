@@ -150,10 +150,12 @@ const noPolicy = (stepInput?: StepInput): ResponsePolicyPass => ({
 });
 
 /** Answers through `deliver` and `answer`, as the tool loop does with no response policy. */
-async function respond(machine: Machine, input: StepInput) {
-  const delivered = deliver(machine.view(), input, { takeQueued: true });
+async function respond(machine: Machine, input: StepInput, { typedAnswers = true } = {}) {
+  const delivered = deliver(machine.view(), input, { takeQueued: true, typedAnswers });
   // The intake answers a typed approval before the policy pass, as a press.
-  const typed = resolveTypedApproval(machine.view(), delivered.input);
+  const typed = typedAnswers
+    ? resolveTypedApproval(machine.view(), delivered.input)
+    : delivered.input;
   return machine.apply(
     answer(machine.view(), {
       approvalKey: () => undefined,
@@ -161,6 +163,7 @@ async function respond(machine: Machine, input: StepInput) {
       policy: noPolicy(typed),
       searchable: () => false,
       takeQueued: delivered.takeQueued,
+      typedAnswers,
     }),
   );
 }
@@ -640,6 +643,16 @@ describe("answers", () => {
     expect(decision.resolved[0]?.inputs[0]?.outcome).toBe("approved");
   });
 
+  it("does not take a plain-text answer when typed answers are off", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+
+    const decision = await respond(machine, { message: "Approve" }, { typedAnswers: false });
+
+    expect(decision.input?.message).toBe("Approve");
+    expect(decision.resolved[0]?.inputs[0]?.outcome).toBe("ignored");
+  });
+
   it("grants a once() approval's key, except to a call still asking for it", async () => {
     const machine = createMachine();
     await parkOnApprovals(machine, "call-1");
@@ -735,6 +748,17 @@ describe("answers", () => {
 
       expect(decision.limit).toEqual({ granted: true });
       expect(callStatus(machine.projection, "call-1")).toBe("awaiting-input");
+    });
+
+    it("queues text instead of answering when typed answers are off", async () => {
+      const machine = await exhausted();
+
+      const decision = await respond(machine, { message: "Continue" }, { typedAnswers: false });
+
+      expect(decision.next).toBe("park");
+      expect(decision.limit).toBeUndefined();
+      expect(machine.projection.inputs[request.requestId]?.status).toBe("open");
+      expect(machine.view().turn.queued?.message).toBe("Continue");
     });
   });
 });

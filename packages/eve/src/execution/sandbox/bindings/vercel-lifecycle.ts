@@ -10,64 +10,44 @@ import type {
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
-export async function deleteVercelSandbox(input: {
-  readonly createOptions: VercelCreateOptions;
-  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
-  readonly sandbox: VercelSandbox;
-  readonly signal?: AbortSignal;
-}): Promise<void> {
-  await stopVercelSandbox(input.sandbox);
-  await deleteVercelSandboxRecord(input);
-}
-
 /** Deletes the sandbox with this name, if there is one. */
 export async function deleteNamedVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
-  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
+  readonly sandboxModule: VercelModule;
   readonly sandboxName: string;
+  readonly signal?: AbortSignal;
 }): Promise<void> {
   const sandbox = await getNamedVercelSandbox({
-    createOptions: input.createOptions,
-    sandboxModule: await input.loadDeleteSandboxModule(),
+    createOptions:
+      input.signal === undefined
+        ? input.createOptions
+        : { ...input.createOptions, signal: input.signal },
+    sandboxModule: input.sandboxModule,
     sandboxName: input.sandboxName,
   });
   if (sandbox === null) return;
   try {
     await stopVercelSandbox(sandbox);
-    await sandbox.delete({ deleteOrphanSnapshots: true });
+    await sandbox.delete({ deleteOrphanSnapshots: true, signal: input.signal });
   } catch (error) {
     // Another cleanup attempt deleted it first.
     if (!isVercelSandboxMissingError(error)) throw error;
   }
 }
 
+/** Deletes a sandbox that can no longer resume, without stopping it first. */
 export async function deleteUnusableVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
-  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
-  readonly sandbox: VercelSandbox;
+  readonly sandboxModule: VercelModule;
+  readonly sandboxName: string;
 }): Promise<void> {
-  await deleteVercelSandboxRecord(input);
-}
-
-async function deleteVercelSandboxRecord(input: {
-  readonly createOptions: VercelCreateOptions;
-  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
-  readonly sandbox: VercelSandbox;
-  readonly signal?: AbortSignal;
-}): Promise<void> {
-  const credentials = await resolveVercelSandboxCredentials(input.createOptions);
-  const sandboxModule = await input.loadDeleteSandboxModule();
-  const sandbox = await sandboxModule.Sandbox.get({
-    ...credentials,
+  const sandbox = await input.sandboxModule.Sandbox.get({
+    ...(await resolveVercelSandboxCredentials(input.createOptions)),
     fetch: getVercelSandboxFetch(input.createOptions),
-    name: input.sandbox.name,
+    name: input.sandboxName,
     resume: false,
-    signal: input.signal,
   });
-  await sandbox.delete({
-    deleteOrphanSnapshots: true,
-    signal: input.signal,
-  });
+  await sandbox.delete({ deleteOrphanSnapshots: true });
 }
 
 export async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {

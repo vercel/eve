@@ -52,7 +52,9 @@ import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { maybeCompact } from "#harness/compaction/step.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { compactedTurnInput, maybeCompact } from "#harness/compaction/step.js";
+import { reportCompactionFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import { isEmptyModelResponse, rethrowNoOutputAsEmptyResponse } from "./recovery.js";
 import {
@@ -117,6 +119,8 @@ export class ModelCaller {
   private readonly attributionHeaders: Record<string, string> | undefined;
   /** The prompt as the model reads it, projected for its history view. */
   private projectedMessages: HarnessModelMessage[];
+  /** The step's announcements go before the first of these the prompt has. */
+  private turnMessages: readonly HarnessModelMessage[];
   /** The latest attempt's request; its history is what the step commits. */
   request: RequestMessages;
   /** The messages the latest attempt sent, after attachments were hydrated. */
@@ -145,6 +149,7 @@ export class ModelCaller {
       step.config.runtimeIdentity,
     );
     this.projectedMessages = input.projectedMessages;
+    this.turnMessages = input.turnMessages;
     this.request = this.buildRequest();
   }
 
@@ -188,9 +193,18 @@ export class ModelCaller {
     }
   }
 
-  /** A failed compaction fails the step, whatever recovery the call attempted. */
-  throwIfCompactionFailed(): void {
-    if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
+  /**
+   * A failed compaction fails the step, whatever recovery the call attempted.
+   * One that left the history over the limit ends the session with its message;
+   * any other failure throws.
+   */
+  async failIfCompactionFailed(): Promise<StepResult | undefined> {
+    if (this.compactionFailure === undefined) return undefined;
+    const { error } = this.compactionFailure;
+    if (error instanceof CompactionOverLimitError) {
+      return reportCompactionFailure(this.step, error);
+    }
+    throw error;
   }
 
   /** Steering interrupted the call: the step ends with what it committed, and runs again. */
@@ -227,7 +241,7 @@ export class ModelCaller {
       messages: this.prompt.messages,
       pendingApprovalsNote: this.input.pendingApprovalsNote,
       projectedMessages: this.projectedMessages,
-      turnMessages: this.input.turnMessages,
+      turnMessages: this.turnMessages,
     });
   }
 
@@ -279,14 +293,21 @@ export class ModelCaller {
         telemetry: step.instrumentation?.telemetry(),
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
+      step.session = compaction.session;
       if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
-    step.session = compaction.session;
     if (!compaction.compacted) return tools;
     compactPrompt(step, prompt, compaction.messages);
+    // Compaction cleared what earlier requests announced, so this request announces it again. A
+    // step that continues from tool results has no input of its own, so the announcement goes
+    // before the turn's input, not after those results where the model reads it as the newest
+    // message.
+    const turnInput = compactedTurnInput(prompt.messages);
+    this.turnMessages =
+      turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
     const { compaction: settings } = step.session;
     step.session = {
       ...step.session,

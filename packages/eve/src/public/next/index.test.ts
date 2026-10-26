@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("#shared/resolve-eve-binary.js", async () => {
@@ -465,6 +468,23 @@ describe("withEve", () => {
         },
       ),
     ).toThrow("eve Next.js agent name");
+  });
+});
+
+describe("eve/next package manifest", () => {
+  // The emitted declarations import `NextConfig` from "next". Without a peer
+  // entry, pnpm resolves that import to whichever next is hoisted rather than
+  // the app's own, so withEve's types can come from a different next copy.
+  it("declares next as an optional peer", () => {
+    const manifest = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8"),
+    ) as {
+      readonly peerDependencies?: Record<string, string>;
+      readonly peerDependenciesMeta?: Record<string, { readonly optional?: boolean }>;
+    };
+
+    expect(manifest.peerDependencies).toHaveProperty("next");
+    expect(manifest.peerDependenciesMeta?.next).toEqual({ optional: true });
   });
 });
 

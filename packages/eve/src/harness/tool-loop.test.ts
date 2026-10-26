@@ -49,6 +49,8 @@ import {
   type ConversationContext,
 } from "#shared/conversation-context.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { getTurnUsageState } from "#harness/turn-tag-state.js";
 import { compactMessages, shouldCompact } from "#harness/compaction/engine.js";
 import {
   createFrameworkUserMessage,
@@ -1488,6 +1490,57 @@ describe("createToolLoopHarness", () => {
     await expect(
       contextStorage.run(ctx, () => runStep(second.session, { message: "Back" })),
     ).rejects.toThrow(/Dynamic model selection is required/);
+  });
+
+  // Regression for #5128: the resolver heard the previous step's index from the second step on.
+  it("gives the dynamic model resolver the index of the step it selects for", async () => {
+    const addStep = (toolCallId: string) => {
+      const toolCall = { input: {}, toolCallId, toolName: "add", type: "tool-call" };
+      const toolResult = { ...toolCall, output: "42", type: "tool-result" };
+      return {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [toolCall], role: "assistant" },
+            { content: [toolResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [toolCall],
+        toolResults: [toolResult],
+      };
+    };
+    setupMockAgentSequence([
+      addStep("call-1"),
+      addStep("call-2"),
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "84", role: "assistant" }] },
+        text: "84",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const { emit, events } = createEventCollector();
+    const resolverStepIndexes: number[] = [];
+    const runStep = createToolLoopHarness(
+      createTestConfig(emit, {
+        dispatchDynamicModelEvent: async ({ event }) => {
+          if (event.type === "step.started") resolverStepIndexes.push(event.data.stepIndex);
+        },
+      }),
+    );
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      let result = await runStep(createTestSession(), { message: "Add twice." });
+      while (typeof result.next === "function") result = await result.next(result.session);
+    });
+
+    const streamStepIndexes = events.flatMap((event) =>
+      event.type === "step.started" ? [event.data.stepIndex] : [],
+    );
+    expect(streamStepIndexes).toEqual([0, 1, 2]);
+    expect(resolverStepIndexes).toEqual(streamStepIndexes);
   });
 
   it("adds delivered history before each turn's context and message", async () => {
@@ -8279,6 +8332,56 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("ends the session with the compaction message when the history stays over the limit", async () => {
+    const message =
+      "Context compaction could not bring the conversation under its limit. Start a new session, or send a smaller message.";
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockRejectedValue(new CompactionOverLimitError(message));
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(createTestSession(), { message: "Hi" }),
+    );
+
+    expect(result.next).toEqual({ done: true, output: "" });
+    expect(compactMessages).toHaveBeenCalledOnce();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(events.find((event) => event.type === "turn.failed")?.data.message).toBe(message);
+    expect(events.at(-1)?.type).toBe("session.failed");
+  });
+
+  it("keeps the usage of a summary call when compaction then ends over the limit", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    mockCompaction([]);
+    vi.mocked(compactMessages).mockImplementation(async (_messages, _config, summarize) => {
+      await summarize({ messages: [], system: "" });
+      throw new CompactionOverLimitError("Still over the limit.");
+    });
+    const runStep = createToolLoopHarness(createTestConfig());
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(createTestSession(), { message: "Hi" }),
+    );
+
+    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 2,
+    });
+  });
+
+  it("still throws a compaction failure that is not an over-limit result", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockRejectedValue(new Error("summarizer unavailable"));
+    const runStep = createToolLoopHarness(createTestConfig());
+
+    await expect(
+      contextStorage.run(new ContextContainer(), () =>
+        runStep(createTestSession(), { message: "Hi" }),
+      ),
+    ).rejects.toThrow("summarizer unavailable");
+  });
+
   it("groups Gateway compaction under the forwarded trace conversation", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
     mockCompaction([
@@ -11032,6 +11135,94 @@ describe("createToolLoopHarness", () => {
         | undefined;
       const modelCall = agent?.stream.mock.calls[0]?.[0] as { messages: ModelMessage[] };
       expect(JSON.stringify(modelCall.messages)).toContain(base64);
+    });
+
+    it("hands the model a file URL a tool projects without downloading or staging it", async () => {
+      const { withParkedStep } = await import("#internal/testing/session-machine.js");
+      const { toolOutput, toolOutputPart } = await import("#tools/model-output.js");
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Read.", role: "assistant" }] },
+        text: "Read.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const url = "https://bucket.example.com/report.pdf?X-Amz-Signature=abc";
+      const tools: ToolLoopHarnessConfig["tools"] = new Map([
+        [
+          "fetch_report",
+          {
+            description: "Fetch a report.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "fetch_report",
+            toModelOutput: (output: unknown) =>
+              toolOutput.content([
+                toolOutputPart.fileUrl((output as { url: string }).url, {
+                  mediaType: "application/pdf",
+                }),
+              ]),
+            workflowId: "workflow//./agent/tools/fetch_report//execute",
+          },
+        ],
+      ]);
+      const parked = withParkedStep(createTestSession(), {
+        event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        messages: [
+          {
+            content: [
+              { input: {}, toolCallId: "report-1", toolName: "fetch_report", type: "tool-call" },
+            ],
+            role: "assistant",
+          },
+        ],
+        tasks: [
+          {
+            callId: "report-1",
+            entry: { entryPoint: "execute" },
+            input: {},
+            kind: "workflow-task",
+            toolName: "fetch_report",
+            workflowId: "workflow//./agent/tools/fetch_report//execute",
+          },
+        ],
+      });
+      const sandbox = mockSandbox({ id: "sbx_workflow_file_url" });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+
+      await contextStorage.run(ctx, () =>
+        createToolLoopHarness(createTestConfig(undefined, { tools }))(parked, {
+          runtimeActionResults: [
+            {
+              callId: "report-1",
+              kind: "tool-result",
+              output: { url },
+              toolName: "fetch_report",
+            },
+          ],
+        }),
+      );
+
+      expect(sandbox.writes).toHaveLength(0);
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as
+        | { stream: ReturnType<typeof vi.fn> }
+        | undefined;
+      const modelCall = agent?.stream.mock.calls[0]?.[0] as { messages: ModelMessage[] };
+      const toolMessage = modelCall.messages.find((message) => message.role === "tool");
+      expect(toolMessage?.content).toEqual([
+        expect.objectContaining({
+          output: {
+            type: "content",
+            value: [
+              {
+                data: { type: "url", url: new URL(url) },
+                mediaType: "application/pdf",
+                type: "file",
+              },
+            ],
+          },
+        }),
+      ]);
     });
 
     it("stages non-inlinable FilePart bytes into the sandbox and hands the model a text reference instead of bytes", async () => {

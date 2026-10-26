@@ -33,6 +33,7 @@ import {
 } from "#internal/testing/catalog-fixtures.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
+import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
@@ -741,6 +742,56 @@ describe("compileAgentManifest source graph", () => {
     });
 
     expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
+  });
+
+  it("resolves a direct compaction model to its own instance", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "");
+    const directModel = (modelId: string) =>
+      ({
+        doGenerate: async () => ({}),
+        doStream: async () => ({}),
+        modelId,
+        provider: "test-provider",
+        specificationVersion: "v3",
+      }) as never;
+    const turnModel = directModel("turn-model");
+    const summaryModel = directModel("summary-model");
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: turnModel,
+            modelContextWindowTokens: 8_192,
+            compaction: { model: summaryModel, modelContextWindowTokens: 8_192 },
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({
+      manifest: compiledAgentManifestSchema.parse(compiled),
+      moduleMap,
+    });
+    const scope = { moduleMap, nodeId: undefined };
+
+    try {
+      await expect(resolveRuntimeModelReference(resolved.config!.model!, scope)).resolves.toBe(
+        turnModel,
+      );
+      await expect(
+        resolveRuntimeModelReference(resolved.config!.compaction!.model!, scope),
+      ).resolves.toBe(summaryModel);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("rejects prompt cache options on an AI Gateway model", async () => {

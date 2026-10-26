@@ -16,6 +16,7 @@ import {
 } from "#internal/nitro/development-generation.js";
 import {
   createDevelopmentHostWorkspace,
+  type DevelopmentHostWorkspace,
   removeDevelopmentHostWorkspace,
 } from "#internal/nitro/host/dev-host-workspace.js";
 import {
@@ -38,6 +39,8 @@ export async function prepareDevelopmentApplicationHost(
     readonly changedPaths?: readonly string[];
     readonly developmentExtensions?: DevelopmentExtensionSelection;
     readonly previousExtensions?: readonly WorkspaceExtension[];
+    /** An empty workspace created by the caller; one is created otherwise. */
+    readonly workspace?: DevelopmentHostWorkspace;
   } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
   const extensionPreparation: {
@@ -52,7 +55,7 @@ export async function prepareDevelopmentApplicationHost(
     extensionPreparation.previousExtensions = options.previousExtensions;
   }
   const workspaceExtensions = await prepareDevelopmentWorkspaceExtensions(extensionPreparation);
-  const workspace = await createDevelopmentHostWorkspace(appRoot);
+  const workspace = options.workspace ?? (await createDevelopmentHostWorkspace(appRoot));
   let generation: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
 
   try {

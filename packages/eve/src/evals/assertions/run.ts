@@ -40,9 +40,7 @@ export function succeeded(): RunAssertion {
       const failure = runFailure(result);
       if (failure !== undefined) return failure;
       if (result.derived.parked) {
-        return fail(
-          `run parked on ${result.derived.inputRequests.length} unanswered input request(s)`,
-        );
+        return fail("run parked on unanswered input request(s)");
       }
       return PASS;
     },

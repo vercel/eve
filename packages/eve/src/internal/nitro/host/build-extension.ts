@@ -26,6 +26,13 @@ export { tryReadExtensionBuildConfig };
 export type { ExtensionBuildConfig };
 
 /**
+ * Prefix of the per-build staging directory created inside the extension
+ * package. It must share a filesystem with the output directory so the final
+ * swap is a rename.
+ */
+export const EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX = ".eve-extension-build-";
+
+/**
  * Builds a dist-only extension package. Authored modules are transformed as a
  * path-preserving graph, declarations and assets are emitted beside them, and
  * compatibility-only metadata is written at the agent-shaped dist root.
@@ -62,7 +69,7 @@ export async function buildExtensionPackage(
     );
   }
 
-  const transactionRoot = await mkdtemp(join(appRoot, ".eve-extension-build-"));
+  const transactionRoot = await mkdtemp(join(appRoot, EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX));
   const stagedOutDir = join(transactionRoot, "output");
   const stagedDistRoot = join(stagedOutDir, relative(config.outDir, config.distRoot));
   let preserveTransactionRoot = false;

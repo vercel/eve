@@ -36,15 +36,12 @@ export async function writeArtifacts(
 
   await Promise.all(
     summary.results.map(async (result) => {
-      const detailPath = join(evalsDir, `${sanitizeArtifactPath(result.id)}.json`);
-      await mkdir(dirname(detailPath), { recursive: true });
-      await writeFile(detailPath, JSON.stringify(buildEvalArtifact(result), null, 2));
+      const basePath = join(evalsDir, artifactBaseName(result));
+      await mkdir(dirname(basePath), { recursive: true });
+      await writeFile(`${basePath}.json`, JSON.stringify(buildEvalArtifact(result), null, 2));
 
       const eventLines = result.result.events.map((event) => JSON.stringify(event)).join("\n");
-      await writeFile(
-        join(evalsDir, `${sanitizeArtifactPath(result.id)}.events.ndjson`),
-        `${eventLines}\n`,
-      );
+      await writeFile(`${basePath}.events.ndjson`, `${eventLines}\n`);
     }),
   );
 }
@@ -62,6 +59,7 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
     totalEvals: summary.results.length,
     evals: summary.results.map((result) => ({
       id: result.id,
+      attempt: result.attempt,
       verdict: result.verdict,
       status: result.result.status,
       assertions: result.assertions.map((a) => ({
@@ -77,6 +75,8 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
       })),
       error: result.error,
       skipReason: result.skipReason,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
       traceContexts: result.result.traceContexts,
     })),
   };
@@ -85,12 +85,15 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
 function buildResultLine(result: EveEvalResult): Record<string, unknown> {
   return {
     id: result.id,
+    attempt: result.attempt,
     verdict: result.verdict,
     status: result.result.status,
     output: result.result.output,
     assertions: result.assertions,
     error: result.error,
     skipReason: result.skipReason,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
     traceContexts: result.result.traceContexts,
   };
 }
@@ -98,6 +101,7 @@ function buildResultLine(result: EveEvalResult): Record<string, unknown> {
 function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
   return {
     id: result.id,
+    attempt: result.attempt,
     result: {
       output: result.result.output,
       finalMessage: result.result.finalMessage,
@@ -113,7 +117,18 @@ function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
     assertions: result.assertions,
     error: result.error,
     skipReason: result.skipReason,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
   };
+}
+
+/**
+ * Repeated attempts get an `.attempt-<n>` suffix. Sanitizing replaces `.` in
+ * ids, so the suffix cannot collide with another eval's artifact path.
+ */
+function artifactBaseName(result: EveEvalResult): string {
+  const base = sanitizeArtifactPath(result.id);
+  return result.attempt === undefined ? base : `${base}.attempt-${result.attempt}`;
 }
 
 /**

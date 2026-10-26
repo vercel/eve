@@ -1,91 +1,110 @@
-import { defineSandbox, type SandboxSession } from "eve/sandbox";
-import { defineSandboxProvider } from "eve/sandbox/provider";
+import { randomUUID } from "node:crypto";
+
+import { defineSandbox } from "eve/sandbox";
+import {
+  defineSandboxProvider,
+  SandboxSessionGoneError,
+  type SandboxConnection,
+} from "eve/sandbox/provider";
 
 export const CUSTOM_PROVIDER_TOKEN = "custom-provider-session-ok-P7M";
+/** The machine keeps its working files outside eve's default `/workspace`. */
+export const CUSTOM_WORKSPACE_ROOT = "/srv/app";
 
-type CustomSession = SandboxSession & { probe(): Promise<string> };
-type CustomState = { readonly marker: string; readonly version: 1 };
+/**
+ * One in-memory machine per session, standing in for a remote sandbox
+ * service. A machine lives in this process only, so a step that runs in
+ * another process finds it gone and continues in a fresh one, as it would
+ * after the service reclaimed it.
+ */
+interface Machine {
+  readonly files: Map<string, Uint8Array>;
+  readonly id: string;
+}
 
-const provider = defineSandboxProvider<undefined, undefined, null, CustomState, CustomSession>({
+type CustomExtensions = {
+  /** Returns the session marker the selector writes into each new machine. */
+  probe(): Promise<string>;
+  /** The machine backing this sandbox; a fresh sandbox has a new one. */
+  machineId(): string;
+  /** Removes the machine from the service, as maintenance would. */
+  retireForMaintenance(): Promise<void>;
+};
+
+const machines = new Map<string, Machine>();
+
+const CustomSandbox = defineSandboxProvider({
   name: "custom-provider-session",
   environment() {
     return {
-      // Each handle keeps its files in memory, so nothing outlives the session.
-      async onSessionEnd() {},
-      async prepare() {
-        return null;
+      async prepare(ctx) {
+        return { templateKey: ctx.templateKey({ machine: "memory", version: 1 }) };
       },
-      async resume(_context, _artifact, state) {
-        return createHandle(state.marker);
-      },
-      async start(context) {
-        const marker = `${CUSTOM_PROVIDER_TOKEN}:${context.session.id}`;
+      async start(ctx) {
+        // An upsert on the session id: a live machine is returned unchanged.
+        let machine = machines.get(ctx.session.id);
+        if (machine === undefined) {
+          machine = { files: new Map(), id: randomUUID() };
+          machines.set(ctx.session.id, machine);
+        }
         return {
-          handle: createHandle(marker),
-          state: { marker, version: 1 },
+          connection: connect(ctx.session.id, machine),
+          state: { machineId: machine.id, version: 1 },
         };
+      },
+      async resume(ctx, _artifact, state) {
+        const machine = machines.get(ctx.session.id);
+        if (machine?.id !== state.machineId) {
+          throw new SandboxSessionGoneError(`Machine "${state.machineId}" no longer exists.`);
+        }
+        return connect(ctx.session.id, machine);
+      },
+      async onSessionEnd(ctx) {
+        machines.delete(ctx.session.id);
       },
     };
   },
 });
 
-export const environment = provider.environment();
+export const environment = CustomSandbox.environment();
 
 export default defineSandbox(async () => {
   const sandbox = await environment.open();
-  await sandbox.writeTextFile({ content: await sandbox.probe(), path: "/workspace/probe.txt" });
+  await sandbox.writeTextFile({ content: await sandbox.probe(), path: "probe.txt" });
   return sandbox;
 });
 
-function createHandle(marker: string) {
-  const files = new Map<string, Uint8Array>([["/workspace/probe.txt", Buffer.from(marker)]]);
-  const resolvePath = (path: string) =>
-    path.startsWith("/") ? path : `/workspace/${path.replace(/^\.\//u, "")}`;
-  const session = {
-    async probe() {
-      return marker;
-    },
-    async readBinaryFile({ path }: { path: string }) {
-      const content = files.get(resolvePath(path));
-      if (content === undefined) throw new Error(`Missing fixture file: ${path}`);
-      return content;
-    },
-    async readFile({ path }: { path: string }) {
-      const content = files.get(resolvePath(path));
-      if (content === undefined) throw new Error(`Missing fixture file: ${path}`);
-      return new Blob([Buffer.from(content)]).stream();
-    },
-    async readTextFile({ path }: { path: string }) {
-      const content = files.get(resolvePath(path));
-      if (content === undefined) throw new Error(`Missing fixture file: ${path}`);
-      return Buffer.from(content).toString("utf8");
-    },
-    async removePath({ path }: { path: string }) {
-      files.delete(resolvePath(path));
-    },
-    resolvePath,
-    async run() {
-      return { exitCode: 0, stderr: "", stdout: "" };
-    },
-    async spawn() {
-      throw new Error("spawn is not used by this fixture.");
-    },
-    async writeBinaryFile({ content, path }: { content: Uint8Array; path: string }) {
-      files.set(resolvePath(path), content);
-    },
-    async writeFile({ content, path }: { content: ReadableStream<Uint8Array>; path: string }) {
-      const chunks: Uint8Array[] = [];
-      for await (const chunk of content) chunks.push(chunk);
-      files.set(resolvePath(path), Buffer.concat(chunks));
-    },
-    async writeTextFile({ content, path }: { content: string; path: string }) {
-      files.set(resolvePath(path), Buffer.from(content));
-    },
-  } satisfies CustomSession;
+function connect(sessionId: string, machine: Machine): SandboxConnection<CustomExtensions> {
   return {
-    sandbox: Object.freeze(session),
-    async onRuntimeShutdown() {},
-    async onSandboxDelete() {},
-    async onSandboxStop() {},
+    async spawn() {
+      return {
+        kill: async () => {},
+        stderr: new Blob(["This fixture machine runs no commands.\n"]).stream(),
+        stdout: new Blob([]).stream(),
+        wait: async () => ({ exitCode: 127 }),
+      };
+    },
+    async readFile({ path }) {
+      return machine.files.get(path) ?? null;
+    },
+    async writeFiles({ files }) {
+      for (const file of files) machine.files.set(file.path, file.content);
+    },
+    async removePath({ force, path, recursive }) {
+      const removed = [...machine.files.keys()].filter(
+        (file) => file === path || (recursive === true && file.startsWith(`${path}/`)),
+      );
+      if (removed.length === 0 && force !== true) throw new Error(`No such path: ${path}`);
+      for (const file of removed) machine.files.delete(file);
+    },
+    async stop() {},
+    workspaceRoot: CUSTOM_WORKSPACE_ROOT,
+    extensions: {
+      machineId: () => machine.id,
+      probe: async () => `${CUSTOM_PROVIDER_TOKEN}:${sessionId}`,
+      async retireForMaintenance() {
+        if (machines.get(sessionId) === machine) machines.delete(sessionId);
+      },
+    },
   };
 }

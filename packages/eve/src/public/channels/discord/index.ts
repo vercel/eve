@@ -66,6 +66,7 @@ export {
   commandInteractionMessage,
   formatDiscordContextBlock,
   parseDiscordInteraction,
+  type DiscordAttachment,
   type DiscordCommandInteraction,
   type DiscordCommandOption,
   type DiscordComponentInteraction,
@@ -89,7 +90,19 @@ export {
   renderInputRequestComponents,
 } from "#public/channels/discord/hitl.js";
 
-export { defaultDiscordAuth } from "#public/channels/discord/defaults.js";
+export {
+  defaultDiscordAuth,
+  defaultDiscordMessageAuth,
+} from "#public/channels/discord/defaults.js";
+
+export type {
+  DiscordGatewayConfig,
+  DiscordGatewayMessage,
+  DiscordMessageResult,
+  DiscordMessageResultOrPromise,
+  DiscordStartThreadOptions,
+  DiscordThreadAutoArchiveMinutes,
+} from "#public/channels/discord/messages.js";
 
 export {
   verifyDiscordRequest,

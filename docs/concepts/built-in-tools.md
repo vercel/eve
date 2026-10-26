@@ -81,7 +81,7 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths and paths beginning with `$HOME/`.
+`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`. Results and errors name the resolved absolute path.
 
 ```sh
 eve add tool/read_file
@@ -113,7 +113,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
 
 ```sh
 eve add tool/write_file
@@ -131,10 +131,15 @@ import { writeFile } from "eve/tools/write_file";
 
 export default defineTool({
   ...writeFile,
-  description: "Write approved project files in the sandbox.",
+  description: "Write notes in the sandbox's notes directory.",
   async execute(input, ctx) {
-    if (!input.filePath.startsWith("/workspace/")) {
-      throw new Error("write_file is limited to /workspace");
+    const sandbox = await ctx.getSandbox();
+    const notes = `${sandbox.resolvePath("notes")}/`;
+    if (
+      input.filePath.startsWith("$HOME") ||
+      !sandbox.resolvePath(input.filePath).startsWith(notes)
+    ) {
+      throw new Error("write_file is limited to the notes directory");
     }
     return writeFile.execute(input, ctx);
   },
@@ -332,7 +337,7 @@ Entries the agent declares count from the session's first step. An entry a dynam
 - A query whose first word contains `__` searches one namespace: everything before its last `__`, without trailing underscores. The namespace only filters. `eve__search` keeps names under `<namespace>__` and anything named exactly the namespace, such as a connection's sign-in entry, then ranks them by the whole query, so `eve__search({ query: "linear__" })` returns only the `linear` connection's tools, or its sign-in result, and an exact name that contains `__` still ranks first. eve lists only the connections that can own names in that namespace, so other connections make no network call and don't appear in `unavailable`. A namespace that matches nothing fails with the closest connection names. Characters that can't appear in a name, such as a leading `^`, are ignored; `query` isn't a regular expression.
 - `eve__search` never asks the user to sign in. A connection whose server won't list its tools until the user signs in appears as one result named after the connection, such as `linear`; a connection whose server lists its tools without a token is searched like any other. A connection whose tools fail to load, or don't load within 10 seconds, appears under `unavailable` with its `error`, such as `"crm" did not list its tools within 10s. Try again later.` Matches from everything else are still returned, so a slow server doesn't hold up the search. An `eve__tool` call on that connection's tools fails with the same error.
 - `eve__tool({ name: "linear" })`, with a connection's own name, asks the user to sign in to that connection when its tools need it, and returns once they can be listed, so the next `eve__search` finds them. On a server that lists its tools without sign-in, it confirms the tools are available without asking.
-- `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes.
+- `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes. A connection tool call the server doesn't answer within 5 minutes is cancelled and fails with an error such as `"linear" did not answer list_issues within 5 minutes. It may still have run, so check before you retry.` The server may finish the call after eve stops waiting, so a tool that changes data may already have made the change.
 - `eve__skill({ name })` loads the named skill, deferred or not, and returns its instructions. An unknown name fails with the closest skill names, a tool's name fails with a reminder to call it with `eve__tool` or directly, and a name that matches a connection says to find its tools with `eve__search({ query: "<connection>__" })`.
 
 After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load reports a `load-skill` action and a `load-skill-result`, both with the skill's `name`, and an `execute_tool eve:load-skill` span. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
@@ -374,7 +379,7 @@ export default askQuestion();
 
 ### `glob`
 
-`glob` finds sandbox files by glob pattern. Add it:
+`glob` finds sandbox files by glob pattern. It searches the workspace root unless the model passes a directory, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/glob
@@ -400,7 +405,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `glob
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. Add it:
+`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/grep

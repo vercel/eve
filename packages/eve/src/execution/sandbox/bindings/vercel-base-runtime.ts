@@ -35,8 +35,15 @@ export function createVercelNetworkPolicySetter(
   sandbox: VercelSandbox,
 ): (policy: SandboxNetworkPolicy) => Promise<void> {
   return async (policy) => {
-    await sandbox.update({ networkPolicy: policy });
+    await sandbox.update({ networkPolicy: toVercelNetworkPolicy(policy) });
   };
+}
+
+/** eve's policy is the SDK's shape with readonly members, and the SDK never mutates it. */
+export function toVercelNetworkPolicy(
+  policy: SandboxNetworkPolicy,
+): NonNullable<VercelCreateOptions["networkPolicy"]> {
+  return policy as NonNullable<VercelCreateOptions["networkPolicy"]>;
 }
 
 async function runSandboxInitializationStep(

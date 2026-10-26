@@ -638,6 +638,26 @@ describe("Datadog", () => {
     ]);
   });
 
+  it("shares one dataset record across repeated attempts and tags each span's iteration", async () => {
+    const { config, datasets, experiment } = makeConfig();
+    const reporter = Datadog(config);
+
+    await reporter.onRunStart([makeEval()], makeTarget());
+    await reporter.onRunComplete({
+      ...makeSummary(),
+      results: [1, 2, 3].map((attempt) => makeEvalResult({ attempt })),
+    });
+
+    const records = datasets.get("test-project evals")?.records ?? [];
+    expect(records).toHaveLength(1);
+    expect(
+      experiment.submitSpan.mock.calls.map(([row]) => ({
+        datasetRecordId: (row as { datasetRecordId?: string }).datasetRecordId,
+        runIteration: (row as { runIteration?: number }).runIteration,
+      })),
+    ).toEqual([1, 2, 3].map((runIteration) => ({ datasetRecordId: records[0]?.id, runIteration })));
+  });
+
   it("pins the latest version without pushing when records are unchanged", async () => {
     const { client, config } = makeConfig();
     const reporter = Datadog(config);

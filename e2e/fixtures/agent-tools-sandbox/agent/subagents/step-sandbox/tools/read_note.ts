@@ -6,6 +6,6 @@ export default defineTool({
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     const sandbox = await ctx.getSandbox();
-    return await sandbox.readTextFile({ path: "/workspace/step-note.txt" });
+    return await sandbox.readTextFile({ path: "step-note.txt" });
   },
 });

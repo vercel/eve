@@ -211,10 +211,10 @@ describe("tool-loop structured compaction accounting", () => {
 
     const result = await runStep(
       createTestSession({
-        compaction: { recentWindowSize: 0, threshold: 100 },
+        compaction: { recentWindowSize: 0, threshold: 1_000 },
         history: [
           ...validateHarnessModelMessages(recalled.history),
-          { content: `ordinary ${"conversation ".repeat(100)}`, kind: "user", role: "user" },
+          { content: `ordinary ${"conversation ".repeat(1_000)}`, kind: "user", role: "user" },
         ],
         state: recalled.state,
       }),
@@ -229,6 +229,62 @@ describe("tool-loop structured compaction accounting", () => {
     expect(JSON.stringify(result.session.history)).toContain("eve.memory");
   });
 
+  it("fails before summarizing when memory alone takes the compaction limit", async () => {
+    mockSummary("ordinary summary");
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "profile",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    const recalled = applyMemoryRecallBatches({
+      batches: [
+        {
+          lock: memoryLock,
+          messages: validateMemoryRecallResult(
+            { messages: [{ content: "PRIVATE_MEMORY_SENTINEL", id: "profile" }] },
+            "profile",
+          ),
+          operationId: "recall_1",
+        },
+      ],
+      history: [],
+      state: undefined,
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        historyProjector: projectMemoryHistoryFromSessionState,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ provider: "test", modelId: "test-model" } as LanguageModel),
+      }),
+    );
+
+    const result = await runStep(
+      createTestSession({
+        compaction: { recentWindowSize: 0, threshold: 60 },
+        history: [
+          ...validateHarnessModelMessages(recalled.history),
+          { content: `ordinary ${"conversation ".repeat(1_000)}`, kind: "user", role: "user" },
+        ],
+        state: recalled.state,
+      }),
+      { message: "continue" },
+    );
+
+    expect(vi.mocked(streamText)).not.toHaveBeenCalled();
+    expect(result.next).toEqual({ done: true, output: "" });
+  });
   it("compacts before the continuation step when structured tool results were appended", async () => {
     mockSummary("summary");
 
@@ -372,10 +428,10 @@ describe("tool-loop structured compaction accounting", () => {
     const session = withParkedStep(
       createTestSession({
         compaction: {
-          lastKnownInputTokens: 100,
+          lastKnownInputTokens: 5_000,
           lastKnownPromptMessageCount: 1,
           recentWindowSize: 10,
-          threshold: 101,
+          threshold: 5_001,
         },
         history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),

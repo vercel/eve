@@ -146,9 +146,21 @@ continue a child from an earlier call. Agent authorization, questions, approvals
 behave as they do for sessions an authored workflow tool opens with `ctx.agent`.
 
 The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
-fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
-A failed child turn throws at the corresponding `ctx.agent` call, so generated code can catch it.
-The program must return a JSON-serializable value.
+fan-out followed by fan-in. The program must await every `ctx.agent` call before it returns. A call
+that is still pending at that point, such as one that is never awaited or one that loses a
+`Promise.race` or `Promise.any`, fails the workflow.
+
+A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a
+`WorkflowProgramAgentError` at that `ctx.agent` call, which the program can catch; the message
+says which.
+
+The sandbox converts the program's return value and each `ctx.agent` input with `JSON.stringify`,
+so a `Date` becomes a string and functions and `undefined` members drop. A return value that
+converts to nothing, such as `undefined`, becomes `null`. Each converted value may be up to 1 MiB of
+JSON, each child reply up to 4 MiB of JSON, and the program source up to 256 KiB.
+
+Each start or resume may spend up to 30 seconds running JavaScript and up to 5 minutes in total.
+Time spent waiting for child agents does not count toward either limit.
 
 ### Migrate from `experimental_workflow`
 
@@ -483,8 +495,8 @@ async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string
   that is still running when the session ends can open the sandbox again after that cleanup, and
   nothing removes the new one.
 - When the eve server shuts down, it stops the sandboxes its sessions opened, but not one that
-  only a step opened. With Docker or microsandbox, that container or VM keeps running until the
-  session ends or you stop it.
+  only a step opened. With Docker, that container keeps running until the session ends or you
+  stop it.
 - A step can use the sandbox while the session's turns use it too, as subagents that share a
   sandbox do. Give each one its own files to write.
 - Steps run at least once and retry after a failure, so make sandbox writes safe to repeat. Write

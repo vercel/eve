@@ -8,9 +8,9 @@ import { defineEval } from "../../src/evals/define-eval.js";
 
 import { runCli } from "../../src/cli/run.js";
 import {
-  shutdownActiveSandboxHandles,
-  trackActiveSandboxHandle,
-} from "../../src/execution/sandbox/active-handles.js";
+  shutdownActiveSandboxConnections,
+  trackActiveSandboxConnection,
+} from "../../src/execution/sandbox/active-connections.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const mockedEvalDependencies = vi.hoisted(() => ({
@@ -100,7 +100,7 @@ afterEach(async () => {
   clearDevelopmentEnvironment();
   process.exitCode = undefined;
   vi.restoreAllMocks();
-  await shutdownActiveSandboxHandles();
+  await shutdownActiveSandboxConnections();
   mockedEvalDependencies.createDevelopmentServer.mockReset();
   mockedEvalDependencies.discoverAndImportEvals.mockReset();
   mockedEvalDependencies.discoverEvalConfig.mockReset();
@@ -360,7 +360,7 @@ describe("eve eval environment loading", () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
-  it("shuts down tracked sandbox handles after a local eval run", async () => {
+  it("shuts down tracked sandbox connections after a local eval run", async () => {
     const fixtureRoot = await createEnvironmentFixture();
     const previousCwd = process.cwd();
     const logger = {
@@ -369,10 +369,10 @@ describe("eve eval environment loading", () => {
     };
     const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
     const close = vi.fn(async () => {});
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
+    const connection = { stop: vi.fn(async () => {}) };
     const evaluation = makeEvaluation("local");
 
-    trackActiveSandboxHandle({ providerName: "microsandbox", handle, sessionId: "session-1" });
+    trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
     process.chdir(fixtureRoot);
     mockedEvalDependencies.createDevelopmentServer.mockReturnValue({
       close,
@@ -401,7 +401,7 @@ describe("eve eval environment loading", () => {
     }
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
+    expect(connection.stop).toHaveBeenCalledTimes(1);
     expect(process.env.EVE_EVALUATION).toBe("1");
     expect(process.env.EVE_EVALUATION_RUN_ID).toMatch(/^[0-9a-f-]{36}$/u);
     expect(exit).toHaveBeenCalledWith(0);

@@ -48,7 +48,9 @@ export default defineTool({
 | `defineHook`                                          | `eve/hooks`                                                             | `agent/hooks/<slug>.ts`                                                                | [Hooks](../guides/hooks)                               |
 | `defineSchedule`                                      | `eve/schedules`                                                         | `agent/schedules/<name>.ts`                                                            | [Schedules](../schedules)                              |
 | `defineState`                                         | `eve/context`                                                           | tools, hooks, lifecycle                                                                | [Session context](../guides/session-context)           |
-| `defineSandbox`                                       | `eve/sandbox`                                                           | `agent/sandbox.ts`                                                                     | [Sandbox](../sandbox)                                  |
+| `defineSandbox`                                       | `eve/sandbox`                                                           | `agent/sandbox.ts` or `agent/sandbox/sandbox.ts`                                       | [Sandbox](../sandbox)                                  |
+| `defineParentSandbox`                                 | `eve/sandbox`                                                           | `agent/subagents/<name>/sandbox.ts`                                                    | [Sandbox](../sandbox#share-a-parent-sandbox)           |
+| `defineSandboxProvider`                               | `eve/sandbox/provider`                                                  | custom sandbox provider modules                                                        | [Custom providers](../sandbox/custom-providers)        |
 | `defineInstrumentation`                               | `eve/instrumentation`                                                   | `agent/instrumentation/<name>.ts`                                                      | [Instrumentation](../observability/instrumentation)    |
 | `otel`, `otelIntegration`                             | `eve/instrumentation/otel`                                              | `agent/instrumentation/<destination>.ts`                                               | [OpenTelemetry](../observability/otel)                 |
 | `defineRemoteAgent`                                   | `eve`                                                                   | `agent/subagents/<id>/agent.ts`                                                        | [Remote agents](../guides/remote-agents)               |
@@ -97,7 +99,9 @@ import icon from "../../assets/icon.png";
 import template from "../../prompts/template.txt?raw";
 ```
 
-`?raw` embeds the file as UTF-8 text. Other non-code asset imports produce a data URL with an inferred media type. Compilation, local development, and production builds use the same resolution behavior. Imports that escape the project package are rejected; package those files with the application instead.
+`?raw` embeds any file as UTF-8 text, including code files such as `.json` and files without an extension, such as a `Dockerfile`. Other non-code asset imports produce a data URL with an inferred media type. Compilation, local development, and production builds use the same resolution behavior.
+
+A workspace package bundled from TypeScript source can import its own assets the same way. Each import may reach files inside the project package or inside the package that contains the importing module. Imports that escape both are rejected; package those files with the application or the workspace package instead.
 
 ## Runtime context (`ctx`)
 
@@ -140,7 +144,11 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/memory/file`                                                                 | `fileMemory`, `inMemory`, and the conditional document backend contract                                                        |
 | `eve/memory/file/vercel`                                                          | `vercelBlob` and Vercel Blob backend options                                                                                   |
 | `eve/context`                                                                     | `defineState`, session and state types                                                                                         |
-| `eve/sandbox`                                                                     | `defineSandbox`, provider environments, and sandbox session types                                                              |
+| `eve/sandbox`                                                                     | `defineSandbox`, `defineParentSandbox`, `DefaultSandbox`, and sandbox session and network policy types                         |
+| [`eve/sandbox/provider`](../sandbox/custom-providers)                             | `defineSandboxProvider`, provider errors, `SANDBOX_AGENT_ENV`, and connection and lifecycle types                              |
+| [`eve/sandbox/docker`](../sandbox/docker)                                         | `DockerSandbox` and Docker environment and session types                                                                       |
+| [`eve/sandbox/vercel`](../sandbox/vercel)                                         | `VercelSandbox` and Vercel environment, session, and mount types                                                               |
+| [`eve/sandbox/just-bash`](../sandbox/just-bash)                                   | `JustBashSandbox` and just-bash environment types                                                                              |
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `isChannel`, lifecycle provider types                                       |
 | `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                              |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |

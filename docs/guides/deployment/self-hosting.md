@@ -28,6 +28,10 @@ Don’t rely on `vercelOidc()` as the only production authenticator outside Verc
 
 The default local Workflow world stores run state under `.eve/.workflow-data`. Mount that directory on persistent storage so runs survive process and container replacement.
 
+With the default local world, each `eve start` process accepts workflow queue deliveries only from its own queue. Keep deliveries on the process that enqueued them. Do not point `WORKFLOW_LOCAL_BASE_URL` at a load balancer that can forward deliveries to another replica; that replica rejects them with HTTP 401. Use a custom world designed for shared queue delivery when scaling across replicas.
+
+On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
+
 You can instead select an installed Workflow world package in the root `agent.ts`:
 
 ```typescript
@@ -90,9 +94,13 @@ This adds conversation text as context to the replacement session.
 
 ## Select a sandbox provider
 
-The default sandbox environment selects Docker, microsandbox, or just-bash according to local availability. You can select one explicitly or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+The default sandbox environment selects Docker when `eve build` can reach a Docker daemon and records that choice in the build. A production build never falls back to just-bash: when Docker is unreachable during the build, the build succeeds, but each session fails when it opens the sandbox. Run `eve build` where Docker is reachable, select a provider explicitly, or implement a [custom provider](../../sandbox/custom-providers) with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+
+A `RUN eve build` step in a Dockerfile usually has no Docker daemon, so the build records no provider even when the running container later mounts `/var/run/docker.sock`. In that setup, select `DockerSandbox.environment()` from `eve/sandbox/docker` explicitly in your sandbox module, or run `eve build` in an environment where Docker is reachable and copy the output into the image.
 
 Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
+
+Self-hosted deployments don’t support deployed self-modification. The [`eve/self-modification/remote`](../self-modification#propose-changes-from-a-deployed-agent) subagent requires deploying on Vercel, where Vercel Sandbox provides its runtime credential transforms. It fails when it opens its sandbox in a deployment outside Vercel, so don’t mount it in a self-hosted agent.
 
 ## Configure proxy routes
 

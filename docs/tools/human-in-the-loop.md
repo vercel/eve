@@ -254,6 +254,8 @@ The run picks back up exactly where it parked. Because the pause is durable, not
 
 When a subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
+A message from the parent agent to a subagent never answers the subagent's tool approval or session-limit request, even when its text matches an option such as `approve` or `continue`. Only a person's structured answer, routed through the parent session, settles these requests. The subagent still receives the parent's message as an ordinary message. It steers the turn past a pending approval, which resolves as `ignored`, and waits behind a session-limit request until a person answers it.
+
 Approval is consent only. An approved tool call runs with the requesting user's identity, connections, and credentials, including its policy recheck. The approver's access is never lent to the call. Subsequent tool calls in the turn also stay with the original owner.
 
 A `defineTool` tool can still act on the approver's behalf when it chooses to. While an approved `defineTool` call runs, `ctx.approval.responder` is the principal who approved it, and `ctx.approval.responder.getToken(provider)` resolves that person's token for an inline provider, as `ctx.getToken(provider)` does for the requester. `ctx.session.auth.current` stays the requester. `ctx.approval` is absent for calls that needed no approval, and workflow tools don't receive it. `ctx.approval.responder.getToken(provider)` never starts a sign-in: when the approver has no token, it throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"`.
@@ -287,7 +289,7 @@ The message answers that request when it matches one of its options, or when the
 
 An approval for a tool call made in the same step as a workflow tool call, such as `ask_question`, is not requested until the workflow tool call finishes, because the approved call can't run before then. The person answers the question first, then sees the approval.
 
-Channels that show only text show one request at a time, in this order, and post the next once the current one is answered, so a reply answers the request the person sees. Twilio, GitHub, Linear, and Chat SDK channels work this way. Chat SDK can't tell whether an adapter shows buttons, so every Chat SDK channel shows requests one at a time, including Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request so a person can press any of them, and a typed reply still answers the first.
+Channels that show only text show one request at a time, in this order, and post the next once the current one is answered, so a reply answers the request the person sees. Twilio, GitHub, Linear, and Chat SDK channels work this way. Chat SDK can't tell whether an adapter shows buttons, so every Chat SDK channel shows requests one at a time, including Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request so a person can press any of them, and a typed reply still answers the first. A Slack app that sets `onInputResponse` or `approvalChannel` takes answers only through its controls; see [Restrict who can invoke the agent](/docs/channels/slack#restrict-who-can-invoke-the-agent).
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
 
