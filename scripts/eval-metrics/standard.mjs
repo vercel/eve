@@ -44,7 +44,7 @@ import { coveredLengthBetween, pairIntervals, stepKey } from "./measurements/int
 import { sessionMarks } from "./measurements/marks.mjs";
 
 /** Bump whenever a definition below changes meaning. */
-export const METRICS_VERSION = 2;
+export const METRICS_VERSION = 3;
 
 /**
  * Where the framework definitions come from. The conformance data in
@@ -80,12 +80,12 @@ export const STANDARD_METRICS = Object.freeze({
   "attribution.compaction_ms": model("ms", "lower"),
   "attribution.framework_ms": framework("ms", "lower", { pooled: false }),
   "overhead.pre_model_ms": framework("ms", "lower", { per: "turn", pooled: true }),
-  "overhead.tool_hop_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "overhead.tool_hop_ms": framework("ms", "lower", { per: "batch", pooled: true }),
   "overhead.finalize_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.agent_start_ms": framework("ms", "lower", { per: "call", pooled: true }),
   "overhead.first_output_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.turn_ms": framework("ms", "lower", { per: "turn", pooled: true }),
-  "overhead.tool_call_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "overhead.tool_call_ms": framework("ms", "lower", { per: "batch", pooled: true }),
   "session.not_ready_ms": framework("ms", "lower", { per: "send", pooled: true }),
   "session.create_ms": framework("ms", "lower", { per: "session", pooled: true }),
   "durability.workflow_steps_per_turn": framework("ratio", "lower", { pooled: true }),

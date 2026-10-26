@@ -459,6 +459,49 @@ for (const [name, expected] of Object.entries(durableHarness.fixtures)) {
   });
 }
 
+test("concurrent tools count once in turn overhead, and a batch is one tool hop", () => {
+  const first = { turnId: "t", stepIndex: 0 };
+  const second = { turnId: "t", stepIndex: 1 };
+  const started = event("turn.started", 0, { turnId: "t" });
+  started.meta.deliveryIds = ["d"];
+  const events = [
+    started,
+    event("step.started", 100, first),
+    // eve streams one actions.requested per call of the step.
+    ...["a", "b", "c"].map((callId, i) =>
+      event("actions.requested", 400 + i * 10, {
+        ...first,
+        actions: [{ kind: "tool-call", callId }],
+      }),
+    ),
+    event("step.completed", 430, first),
+    event("action.result", 500, { ...first, result: { callId: "a" } }),
+    event("action.result", 600, { ...first, result: { callId: "c" } }),
+    event("action.result", 900, { ...first, result: { callId: "b" } }),
+    event("step.started", 950, second),
+    event("message.appended", 1000, { ...second, messageDelta: "done" }),
+    event("step.completed", 1100, second),
+    event("turn.completed", 1200, { turnId: "t" }),
+  ];
+  const artifact = synthetic(events);
+  const zero = Date.parse(at(0));
+  // Every event reaches the client 10 ms after it is written.
+  artifact.result.sessions[0].clock = {
+    receivedAt: events.map((e) => Date.parse(e.meta.at) + 10),
+    sends: [
+      { kind: "message", deliveryId: "d", startedAt: zero - 20, notReadyMs: 0, acceptedAt: zero },
+    ],
+  };
+  const { metrics } = deriveAttemptMetrics(artifact);
+  // The tools ran from 400 to 900: 500 ms, not the 770 ms their durations add
+  // up to. The rest is sent→first request (130), last tool→next request (50),
+  // and the second step's output→idle (200).
+  assert.deepEqual(metrics["overhead.turn_ms"].samples, [380]);
+  // One hop for the batch, from model.done at 400 to the next request at 950.
+  assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [50]);
+  assert.deepEqual(metrics["overhead.tool_call_ms"].samples, [50]);
+});
+
 test("a session created with its first message times that turn from the create request", () => {
   const { clock, turn } = durableHarness.fixtures["eve-tool-turn"];
   const message = clock.sends.find((send) => send.kind === "message");
