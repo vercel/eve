@@ -3,16 +3,16 @@ title: "Dynamic Schedules"
 description: "Create and manage creator-owned recurring or one-time schedules at runtime."
 ---
 
-`defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it unless you set [`id`](#keep-a-stable-identity). Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](../schedules) instead.
+`defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it unless you set [`id`](#keep-a-stable-identity). Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](./schedules) instead.
 
-The definition gives the model tools to manage schedules, and gives you a `run` callback that runs each time a schedule fires. Each firing is an occurrence. This API is experimental and may change. Import it from `eve/experimental/schedules`.
+The definition gives the model tools to manage schedules, and gives you a `run` callback that runs each time a schedule fires. Each firing is an occurrence. Import it from `eve/schedules`.
 
 ## Define scheduled work
 
 The model supplies a payload that matches `inputSchema`. eve records who created the schedule separately, and checks that creator's current access each time the schedule fires.
 
 ```ts title="agent/schedules/requests.ts"
-import { byPrincipal, defineDynamicSchedules } from "eve/experimental/schedules";
+import { byPrincipal, defineDynamicSchedules } from "eve/schedules";
 import { z } from "zod";
 import slack from "../channels/slack";
 // Application code: look up accounts and destinations.
@@ -81,9 +81,9 @@ export default defineDynamicSchedules({
 });
 ```
 
-An `id` has up to 64 ASCII letters, digits, `_`, and `-`, with `/` allowed between segments. The build fails when two collections, or a collection and a [static schedule](../schedules), in one agent have the same name, whether it comes from `id` or the path.
+An `id` has up to 64 ASCII letters, digits, `_`, and `-`, with `/` allowed between segments. The build fails when two collections, or a collection and a [static schedule](./schedules), in one agent have the same name, whether it comes from `id` or the path.
 
-In an [extension](../extensions), a path-derived name takes the mount's prefix, such as `crm__requests`, so it changes with the mount filename. eve uses an `id` as written, without the prefix, so the extension's schedules keep one name in every agent that mounts it. Mounting that extension twice in one agent fails the build.
+In an [extension](./extensions), a path-derived name takes the mount's prefix, such as `crm__requests`, so it changes with the mount filename. eve uses an `id` as written, without the prefix, so the extension's schedules keep one name in every agent that mounts it. Mounting that extension twice in one agent fails the build.
 
 ## Expose management tools
 
@@ -98,11 +98,11 @@ Each definition adds one tool for each operation: `create`, `get`, `list`, `upda
 
 Set `tool` to choose how the model reaches these operations:
 
-| `tool`           | Behavior                                                                                                                                                                                                          |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `true` (default) | Direct tools.                                                                                                                                                                                                     |
-| `"deferred"`     | The same tools, names, schemas, approval policies, and authorization checks, discovered with `eve__search` and called with `eve__tool`. See [Dynamic capabilities](../guides/dynamic-capabilities#dynamic-tools). |
-| `false`          | No tools; code-only scheduling.                                                                                                                                                                                   |
+| `tool`           | Behavior                                                                                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true` (default) | Direct tools.                                                                                                                                                                                                    |
+| `"deferred"`     | The same tools, names, schemas, approval policies, and authorization checks, discovered with `eve__search` and called with `eve__tool`. See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-tools). |
+| `false`          | No tools; code-only scheduling.                                                                                                                                                                                  |
 
 By default, reads need no approval and changes need user approval. Set top-level `approval`, keyed by operation, with ordinary request and response policies. Each operation's `once()` grants are independent.
 
@@ -174,7 +174,7 @@ scopes: {
 ## Use the authenticated client
 
 ```ts title="agent/tools/list-requests.ts"
-import { schedules } from "eve/experimental/schedules";
+import { schedules } from "eve/schedules";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import requests from "../schedules/requests";
@@ -251,11 +251,11 @@ On Vercel, schedules belong to the deployment's track, selected by its OIDC cred
 
 Under `vc dev`, local queue errors appear in the dev server logs and retry after five seconds.
 
-Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to configure the Vercel endpoint explicitly. Import the in-memory provider from `eve/experimental/schedules/testing` for code-driven tests.
+Import `vercelScheduleProvider` from `eve/schedules/vercel` to configure the Vercel endpoint explicitly. Import the in-memory provider from `eve/schedules/testing` for code-driven tests.
 
 ### Create a provider for your use case
 
-Create a provider when your application needs a different scheduling backend, storage system, or deployment environment. Implement `ScheduleProvider` from `eve/experimental/schedules` and pass it as `provider` to `defineDynamicSchedules`.
+Create a provider when your application needs a different scheduling backend, storage system, or deployment environment. Implement `ScheduleProvider` from `eve/schedules` and pass it as `provider` to `defineDynamicSchedules`.
 
 Your provider owns schedule storage, timing, and occurrence delivery. eve handles payload validation, management authorization, approvals, and creator revalidation.
 
@@ -268,17 +268,17 @@ Your provider owns schedule storage, timing, and occurrence delivery. eve handle
 | Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.      |
 | Timing checks        | Optional `validateExpression`, sync or async. Throw for a cron or one-time expression your backend can't run. eve calls it before it prepares a write. |
 
-`ScheduleProviderContext` is also exported from `eve/experimental/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
+`ScheduleProviderContext` is also exported from `eve/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
 
-For fixed cron jobs without runtime management, use [Schedules](../schedules).
+For fixed cron jobs without runtime management, use [Schedules](./schedules).
 
 ## Handle occurrences and retries
 
 `run` receives `payload`, `occurrence`, `auth`, `schedule`, `to`, and `waitUntil`. It can start any number of sessions or do application work directly.
 
-`to(channel, target).send(message, options)` runs as the resolved creator and takes no auth argument. `options` takes `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off). It takes no `turnPolicy`, because a send only reaches sessions the schedule started. It always starts a new session with no one present, through one of your channels, even when the target names an existing thread. Those sessions can't wait for approvals or questions, so configure tools to match.
+`to(channel, target).send(message, options)` runs as the resolved creator and takes no auth argument. `options` takes `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](./channels/custom#cross-channel-hand-off). It takes no `turnPolicy`, because a send only reaches sessions the schedule started. It always starts a new session with no one present, through one of your channels, even when the target names an existing thread. Those sessions can't wait for approvals or questions, so configure tools to match.
 
-`schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish. The handle's type, `ScheduleHandle`, is exported from `eve/experimental/schedules`.
+`schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish. The handle's type, `ScheduleHandle`, is exported from `eve/schedules`.
 
 ```ts
 async run({ payload, schedule, to }) {
@@ -295,7 +295,7 @@ After the callback and its `waitUntil` promises finish, eve calls `occurrence.di
 
 Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.
 
-A retried callback doesn't start its sessions again. eve keys each send by the occurrence, the target, and the message, so a repeat of the same send reaches the session the first attempt started. A message that differs between attempts, such as one that includes the current time, starts another session; pass your own `idempotencyKey`, such as `` `${occurrence.executionId}:digest` ``, to keep it to one. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+A retried callback doesn't start its sessions again. eve keys each send by the occurrence, the target, and the message, so a repeat of the same send reaches the session the first attempt started. A message that differs between attempts, such as one that includes the current time, starts another session; pass your own `idempotencyKey`, such as `` `${occurrence.executionId}:digest` ``, to keep it to one. Keys are scoped to the schedule, and the [usual limits](./channels/custom#retried-deliveries) apply.
 
 `occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 
@@ -310,7 +310,7 @@ A retried callback doesn't start its sessions again. eve keys each send by the o
 | `null`                      | The occurrence fails without a retry, and `run` isn't called.                                                                         |
 | A thrown error              | The provider retries the occurrence. Throw when a lookup fails, so an outage doesn't read as a denial.                                |
 
-A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/experimental/schedules`.
+A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/schedules`.
 
 A denial fails only the current occurrence; a recurring schedule keeps firing and failing. When a denial is permanent, such as a removed account, stop the schedule through `schedule` before you return `null`:
 
@@ -373,6 +373,6 @@ eve doesn't save the conversation that created a schedule. To reply in that thre
 
 ## What to read next
 
-- [Schedules](../schedules): author fixed cron jobs with `defineSchedule`.
+- [Schedules](./schedules): author fixed cron jobs with `defineSchedule`.
 - [Channels](/docs/channels): deliver schedule output to users.
-- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): inspect a scheduled run.
+- [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming): inspect a scheduled run.
