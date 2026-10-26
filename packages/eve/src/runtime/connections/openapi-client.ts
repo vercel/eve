@@ -6,6 +6,7 @@ import {
   resolveProvidedArguments,
 } from "#runtime/connections/provided-arguments.js";
 import {
+  declaredOperationId,
   HTTP_METHODS,
   type OpenApiOperation,
   operationDescription,
@@ -170,6 +171,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
         description: operation.description,
         inputSchema,
         name: operation.toolName,
+        ...(operation.operationId !== undefined && { operationId: operation.operationId }),
       });
     }
 
@@ -302,6 +304,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
 
         operations.push({
           toolName,
+          operationId: declaredOperationId(operationValue),
           method,
           pathTemplate,
           description: operationDescription(operationValue),

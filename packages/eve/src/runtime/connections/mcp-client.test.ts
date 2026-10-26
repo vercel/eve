@@ -706,38 +706,38 @@ describe("isMcpAuthChallengeResult", () => {
 
 describe("passesToolFilter", () => {
   it("passes all tools when filter is undefined", () => {
-    expect(passesToolFilter("any_tool", undefined)).toBe(true);
+    expect(passesToolFilter(["any_tool"], undefined)).toBe(true);
   });
 
   it("passes tools in the allow list", () => {
     const filter = { allow: ["tool_a", "tool_b"] } as const;
-    expect(passesToolFilter("tool_a", filter)).toBe(true);
-    expect(passesToolFilter("tool_b", filter)).toBe(true);
+    expect(passesToolFilter(["tool_a"], filter)).toBe(true);
+    expect(passesToolFilter(["tool_b"], filter)).toBe(true);
   });
 
   it("rejects tools not in the allow list", () => {
     const filter = { allow: ["tool_a"] } as const;
-    expect(passesToolFilter("tool_c", filter)).toBe(false);
+    expect(passesToolFilter(["tool_c"], filter)).toBe(false);
   });
 
   it("rejects all tools when allow list is empty", () => {
     const filter = { allow: [] as string[] } as const;
-    expect(passesToolFilter("anything", filter)).toBe(false);
+    expect(passesToolFilter(["anything"], filter)).toBe(false);
   });
 
   it("passes tools not in the block list", () => {
     const filter = { block: ["dangerous_tool"] } as const;
-    expect(passesToolFilter("safe_tool", filter)).toBe(true);
+    expect(passesToolFilter(["safe_tool"], filter)).toBe(true);
   });
 
   it("rejects tools in the block list", () => {
     const filter = { block: ["dangerous_tool"] } as const;
-    expect(passesToolFilter("dangerous_tool", filter)).toBe(false);
+    expect(passesToolFilter(["dangerous_tool"], filter)).toBe(false);
   });
 
   it("passes all tools when block list is empty", () => {
     const filter = { block: [] as string[] } as const;
-    expect(passesToolFilter("anything", filter)).toBe(true);
+    expect(passesToolFilter(["anything"], filter)).toBe(true);
   });
 });
 

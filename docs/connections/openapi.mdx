@@ -115,7 +115,7 @@ export default defineOpenAPIConnection({
 });
 ```
 
-Filters match `operationId`. If an operation does not declare one, use the deterministic name eve derives from the method and path.
+Filters match an operation's `operationId` and its generated tool name, so `block: ["repos.delete"]` also hides the `repos_delete` tool. If an operation does not declare an `operationId`, use the deterministic name eve derives from the method and path.
 
 ## Path parameters
 

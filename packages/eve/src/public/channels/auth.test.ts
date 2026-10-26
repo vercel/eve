@@ -327,8 +327,8 @@ describe("none", () => {
 
 describe("localDev", () => {
   // `localDev()` keys off the deployment (an `eve dev` or `vercel dev`
-  // process), never the inbound request. A spoofable request header such as
-  // `Host` must not be able to authenticate the local-dev principal.
+  // process). A spoofable request header such as `Host` must not be able to
+  // authenticate the local-dev principal; browser headers can only refuse it.
   function requestFor(url: string): Request {
     return new Request(url, { method: "POST" });
   }
@@ -356,6 +356,32 @@ describe("localDev", () => {
     expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
       principalType: "local-dev",
     });
+  });
+
+  it.each([
+    [
+      "a page on another site",
+      "http://127.0.0.1:3000/eve/v1/session",
+      { origin: "https://example.com" },
+    ],
+    ["an opaque origin", "http://127.0.0.1:3000/eve/v1/session", { origin: "null" }],
+    ["a DNS-rebound host name", "http://attacker.example:3000/eve/v1/session/s/stream", {}],
+  ])("refuses %s on an `eve dev` server", (_case, url, headers) => {
+    vi.stubEnv("EVE_DEV", "1");
+    expect(localDev()(new Request(url, { headers, method: "POST" }))).toBeNull();
+  });
+
+  it.each([
+    ["the same loopback host", "http://localhost:3000", "same-site"],
+    ["another loopback host", "http://localhost:3000", "cross-site"],
+  ])("accepts a page on another port of %s", (_case, origin, fetchSite) => {
+    vi.stubEnv("EVE_DEV", "1");
+    const url = fetchSite === "same-site" ? "http://localhost:3001/" : "http://127.0.0.1:3001/";
+    const request = new Request(url, {
+      headers: { origin, "sec-fetch-site": fetchSite },
+      method: "POST",
+    });
+    expect(localDev()(request)).toMatchObject({ principalType: "local-dev" });
   });
 
   it("rejects a `Host: localhost` request on a production deployment", () => {
