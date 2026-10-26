@@ -341,9 +341,9 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(auth: SessionAuthContext | null = null): Record<string, unknown> {
   const ctx = new ContextContainer();
-  ctx.set(AuthKey, null);
+  ctx.set(AuthKey, auth);
   ctx.set(BundleKey, createStubBundle());
   ctx.set(ChannelKey, threadContextAdapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
@@ -521,7 +521,7 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
-      serializedContext: createSerializedContext(),
+      serializedContext: createSerializedContext(auth),
       delivery: {
         kind: "deliver",
         auth,
@@ -584,7 +584,7 @@ describe("routeProxiedDeliverStep", () => {
       workflowWritesByNamespace.clear();
       const result = await runSessionStateStep(
         {
-          serializedContext: createSerializedContext(),
+          serializedContext: createSerializedContext(auth),
           delivery: { auth, kind: "deliver" as const, payloads: [{ message: "approve" }] },
           sessionWritable: createTestWritable(),
           sessionState,
@@ -1301,6 +1301,87 @@ describe("turnStep", () => {
     expect(positionOf(result.sessionState.snapshot.session).turnId).toBe("turn_0");
     expect(result.serializedContext[AuthKey.name]).toEqual(originalAuth);
     expect(result.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["original-delivery"]);
+  });
+
+  // #4923: an open turn runs as the principal that started it.
+  describe("input joining alice's open turn", () => {
+    const alice: SessionAuthContext = {
+      attributes: { role: "member" },
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user",
+      subject: "alice",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "bob", subject: "bob" };
+
+    function joinOpenTurn(input: NonNullable<Parameters<typeof turnStep>[0]["input"]>) {
+      const adapter: ChannelAdapter = { kind: "default-deliver", state: {} };
+      const bundle = Object.assign({}, createStubBundle() as object, {
+        adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      }) as never;
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+      installSessionStoreMocks([
+        withOpenTurn(
+          createStubSession({ history: [{ role: "user", kind: "user", content: "hi" }] }),
+          {
+            sequence: 0,
+            stepIndex: 1,
+            turnId: "turn_0",
+          },
+        ),
+      ]);
+      const execute = vi.fn(async (session: HarnessSession): Promise<StepResult> => {
+        observed.push(loadContext().get(AuthKey));
+        return { next: null, session };
+      });
+      const observed: (SessionAuthContext | null | undefined)[] = [];
+      vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, alice);
+      ctx.set(BundleKey, bundle);
+      ctx.set(ChannelKey, adapter);
+      ctx.set(ContinuationTokenKey, "default-deliver");
+      ctx.set(SessionIdKey, "sess-test");
+      const result = turnStep({
+        input,
+        sessionWritable: createTestWritable(),
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      });
+      return { execute, observed, result };
+    }
+
+    it("rejects bob's message before the model runs", async () => {
+      const { execute, result } = joinOpenTurn({
+        auth: bob,
+        kind: "deliver",
+        payloads: [{ message: "approve" }],
+      });
+      await expect(result).rejects.toThrow("cannot join a running turn");
+      expect(execute).toHaveBeenCalledTimes(0);
+    });
+
+    it("runs alice's message with her refreshed claims", async () => {
+      const refreshed = { ...alice, attributes: { role: "admin" } };
+      const { observed, result } = joinOpenTurn({
+        auth: refreshed,
+        kind: "deliver",
+        payloads: [{ message: "also this" }],
+      });
+      await result;
+      expect(observed).toEqual([refreshed]);
+    });
+
+    it("keeps alice's auth when bob sends a stale answer", async () => {
+      const { observed, result } = joinOpenTurn({
+        auth: bob,
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "gone" }] }],
+      });
+      await result;
+      expect(observed).toEqual([alice]);
+    });
   });
   it("runs the configured number of model calls inside one Workflow step", async () => {
     const bundle = createTurnStepTestBundle(3);

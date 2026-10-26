@@ -23,7 +23,7 @@ export async function routeDeliverToChildren(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   if (!input.sessionState.hasProxyInputRequests) {
-    return { kind: "continue", remainder: input.delivery, stateDelta: {} };
+    return { approved: [], kind: "continue", remainder: input.delivery, stateDelta: {} };
   }
 
   return await routeProxiedDeliverStep(input);

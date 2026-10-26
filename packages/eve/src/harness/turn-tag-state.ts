@@ -20,13 +20,16 @@
  * zero. {@link toUsage} drops that internal marker when a total crosses into
  * the shared {@link TokenUsage} contract.
  */
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import { openInputs } from "#protocol/session-projection.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
 const SESSION_USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
 const SESSION_USAGE_WINDOW_INDEX_KEY = "eve.harness.sessionUsageWindowIndex";
+const SESSION_USAGE_GRANT_KEY = "eve.harness.sessionUsageGrant";
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -87,21 +90,82 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
 
 /**
  * What the session spent since the last approved continuation, or since it
- * started. This is the `window` the session usage limit sees.
+ * started. This is the `window` the session usage limit sees. A window that
+ * starts at spend a child hasn't reported yet reads zero until it does.
  */
 export function getSessionUsageWindow(session: Pick<HarnessSession, "state">): TokenUsage {
-  return toUsage(subtractTokenUsage(getSessionTokenUsage(session), getWindowStart(session)));
+  return toUsage(
+    maxTokenUsage(
+      subtractTokenUsage(getSessionTokenUsage(session), getWindowStart(session)),
+      ZERO_TOKEN_USAGE,
+    ),
+  );
 }
 
-/** Starts a new usage window at the session's current totals, after an approved continuation. */
-export function resetSessionUsageWindow<T extends Pick<HarnessSession, "state">>(session: T): T {
+/**
+ * One session-limit Continue, minted by the root of the delegation tree that
+ * asked. Every copy of it, forwarded with an answer or pushed to a run, is the
+ * same value, and `seq` only grows within a tree.
+ */
+export interface SessionUsageGrant {
+  readonly seq: number;
+  /** The prompts it approved, with the total each one showed. */
+  readonly askers: readonly { readonly requestId: string; readonly total?: TokenUsageDelta }[];
+}
+
+/**
+ * Starts a new usage window for `grant`, at the session's totals plus
+ * `unreported`: spend its children showed in their prompts but haven't
+ * reported yet. A grant the session already applied, or an older one, changes
+ * nothing.
+ */
+export function resetSessionUsageWindow<T extends Pick<HarnessSession, "state">>(
+  session: T,
+  grant: SessionUsageGrant,
+  unreported?: TokenUsageDelta,
+): T {
+  if (grant.seq <= (getSessionUsageGrant(session)?.seq ?? 0)) return session;
+  const start = maxTokenUsage(
+    addTokenUsage(getSessionTokenUsage(session), toTokenUsageDelta(unreported)),
+    getWindowStart(session),
+  );
   return {
     ...session,
     state: {
       ...session.state,
+      [SESSION_USAGE_GRANT_KEY]: grant,
       [SESSION_USAGE_WINDOW_INDEX_KEY]: getSessionUsageWindowIndex(session) + 1,
-      [SESSION_USAGE_WINDOW_START_KEY]: getSessionTokenUsage(session),
+      [SESSION_USAGE_WINDOW_START_KEY]: start,
     },
+  };
+}
+
+/** The grant that started the current window. */
+export function getSessionUsageGrant(
+  session: Pick<HarnessSession, "state">,
+): SessionUsageGrant | undefined {
+  return session.state?.[SESSION_USAGE_GRANT_KEY] as SessionUsageGrant | undefined;
+}
+
+/**
+ * A new grant at the root of a tree: the one place its grants are minted. It
+ * approves every session-limit prompt open in the session, not only the ones
+ * answered, because applying it below closes every parked asker's prompt, and
+ * all of their spend has to count in the window it starts.
+ */
+export function mintSessionUsageGrant(session: Pick<HarnessSession, "state">): SessionUsageGrant {
+  return {
+    askers: openInputs(storedProjection(session.state)).flatMap(({ request }) =>
+      request.kind === "session-limit"
+        ? [
+            {
+              requestId: request.requestId,
+              total: request.action.input["total"] as TokenUsageDelta | undefined,
+            },
+          ]
+        : [],
+    ),
+    seq: (getSessionUsageGrant(session)?.seq ?? 0) + 1,
   };
 }
 
@@ -272,6 +336,17 @@ function subtractTokenUsage(total: TokenUsageTotals, base: TokenUsageTotals): To
     inputTokens: total.inputTokens - base.inputTokens,
     outputTokens: total.outputTokens - base.outputTokens,
     sawCost: total.sawCost || base.sawCost,
+  };
+}
+
+function maxTokenUsage(a: TokenUsageTotals, b: TokenUsageTotals): TokenUsageTotals {
+  return {
+    cacheReadTokens: Math.max(a.cacheReadTokens, b.cacheReadTokens),
+    cacheWriteTokens: Math.max(a.cacheWriteTokens, b.cacheWriteTokens),
+    costUsd: Math.max(a.costUsd, b.costUsd),
+    inputTokens: Math.max(a.inputTokens, b.inputTokens),
+    outputTokens: Math.max(a.outputTokens, b.outputTokens),
+    sawCost: a.sawCost || b.sawCost,
   };
 }
 

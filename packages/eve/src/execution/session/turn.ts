@@ -3,6 +3,9 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { pushSessionUsageContinuationStep } from "#execution/session-usage-continuation.js";
+import { getSessionUsageWindowIndex } from "#harness/turn-tag-state.js";
 import {
   dispatchCoordinationStep,
   publishTaskStartedStep,
@@ -11,6 +14,7 @@ import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import { renderTaskWaitResult } from "#execution/tasks/render.js";
 import {
   answerTaskCancel,
@@ -106,11 +110,15 @@ export class SessionExecution {
       readonly control?: TurnControl;
     } = {},
   ): Promise<TurnOutcome> {
+    const { cursor } = this.input;
+    // A resumed turn keeps its principal; another person's answer that
+    // resumes it does not make them its owner.
+    const starts = isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
     const turn = new ActiveTurn(
       this.input,
       {
         caller: options.caller,
-        principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+        principal: resolveTurnPrincipal(starts ? delivery : undefined, cursor.serializedContext),
       },
       options.control,
     );
@@ -187,6 +195,7 @@ export class SessionExecution {
       const observation = this.input.inbox.handoverObservation;
       const handover =
         observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
+      const windowBefore = getSessionUsageWindowIndex(readDurableSession(cursor.sessionState));
       const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
@@ -199,6 +208,10 @@ export class SessionExecution {
       );
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
+      // The step applied a Continue on this session's own prompt; its runs raise their allowances too.
+      if (getSessionUsageWindowIndex(readDurableSession(cursor.sessionState)) !== windowBefore) {
+        await pushSessionUsageContinuationStep({ sessionState: cursor.sessionState });
+      }
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;

@@ -1,4 +1,5 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import type { SessionUsageGrant } from "#harness/turn-tag-state.js";
 import { toolStubOutput } from "#tool-stubs/output.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { callToolStubStep } from "#execution/tool-stubs/steps.js";
@@ -69,6 +70,8 @@ export interface StartedWorkflowBody {
   /** Releases what the body opened, such as its `ctx.agent` sessions, once the run ends. */
   close(): Promise<void>;
   readonly control: WorkflowBodyControl;
+  /** Passes a session-limit Continue to the body's `ctx.agent` sessions. */
+  continueUsage(grant: SessionUsageGrant): Promise<void>;
   readonly outcome: Promise<WorkflowToolRunOutcome>;
   /** What the body's `ctx.agent` sessions spent, which the run's outcome carries. */
   readonly usage: RunUsageTally;
@@ -158,6 +161,7 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
   return {
     asks,
     close: agentSessions.close,
+    continueUsage: agentSessions.continueUsage,
     control: signals,
     outcome: executeCallBody(input, ctx, signals, from),
     usage,

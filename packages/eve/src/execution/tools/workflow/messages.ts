@@ -1,4 +1,5 @@
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
+import type { SessionUsageGrant } from "#harness/turn-tag-state.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
 import type { SessionAuth } from "#context/session-context.js";
@@ -256,16 +257,27 @@ export type WorkflowBodyCommand =
  * inbox. Only the session writes to it, so the run receives commands and
  * decisions in the order the session made them.
  */
-export type WorkflowToolRunControlMessage = WorkflowBodyCommand | WorkflowToolRunAskDecision;
+export type WorkflowToolRunControlMessage =
+  | WorkflowBodyCommand
+  | WorkflowToolRunAskDecision
+  | WorkflowToolRunUsageContinued;
+
+/** A session-limit Continue above raised the run's caller's allowance; its sessions raise theirs. */
+export interface WorkflowToolRunUsageContinued {
+  readonly kind: "usage-continued";
+  readonly grant: SessionUsageGrant;
+}
 
 export function isWorkflowToolRunControlMessage(
   value: unknown,
 ): value is WorkflowToolRunControlMessage {
   if (typeof value !== "object" || value === null) return false;
-  const { call, kind, reason, requestId, response } = value as Record<string, unknown>;
+  const { call, grant, kind, reason, requestId, response } = value as Record<string, unknown>;
   switch (kind) {
     case "interrupt":
       return true;
+    case "usage-continued":
+      return typeof (grant as { seq?: unknown } | null)?.seq === "number";
     case "cancel":
     case "end":
       return typeof reason === "string";

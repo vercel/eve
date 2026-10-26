@@ -366,6 +366,7 @@ export function startServeBody(input: WorkflowBodyInput): StartedWorkflowBody {
   return {
     asks: calls.asks,
     close: agentSessions.close,
+    continueUsage: agentSessions.continueUsage,
     control: calls,
     outcome: executeServeBody(input, calls, ctx),
     usage: calls.usage,

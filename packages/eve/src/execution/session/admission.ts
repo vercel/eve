@@ -9,12 +9,20 @@ import {
 } from "#execution/session-inbox/protocol.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { SessionUsageGrant } from "#harness/turn-tag-state.js";
 
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
+  | {
+      readonly kind: "usage-continued";
+      readonly grant: SessionUsageGrant;
+      /** The prompts the delivery carrying the grant answers itself. */
+      readonly answered: readonly string[];
+      readonly delivery?: DeliveryAdmission;
+    }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -30,6 +38,9 @@ export async function admitSessionInboxPayload(
   },
 ): Promise<SessionAdmission> {
   if (value.kind === "session-failure") throw new Error(value.error);
+  if (value.kind === "usage-continued") {
+    return { answered: [], grant: value.grant, kind: "usage-continued" };
+  }
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
@@ -58,6 +69,18 @@ export async function admitSessionInboxPayload(
       return { kind: "consumed" };
     case "deliver": {
       const admission = input.queue.enqueueDelivery(command);
+      // A forwarded answer carries its grant, which applies before the answer
+      // reaches the turn, whether or not the push for it has arrived.
+      if (command.usageGrant !== undefined) {
+        return {
+          answered: command.payloads.flatMap((payload) =>
+            (payload.inputResponses ?? []).map((response) => response.requestId),
+          ),
+          delivery: admission,
+          grant: command.usageGrant,
+          kind: "usage-continued",
+        };
+      }
       return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
     }
     case "clear":

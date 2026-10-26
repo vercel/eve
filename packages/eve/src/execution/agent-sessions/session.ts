@@ -1,5 +1,6 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
+import type { SessionUsageGrant } from "#harness/turn-tag-state.js";
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import {
   forwardAgentSessionRequest,
@@ -7,6 +8,7 @@ import {
 } from "#execution/agent-sessions/requests.js";
 import {
   cancelAgentSessionTurnStep,
+  continueAgentSessionsUsageStep,
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
@@ -44,6 +46,7 @@ export function createAgentSessions(
   usage: RunUsageTally,
 ): {
   readonly close: () => Promise<void>;
+  readonly continueUsage: (grant: SessionUsageGrant) => Promise<void>;
   readonly open: (name: string, options?: AgentSessionOptions) => AgentSession;
 } {
   const sessions: OpenedAgentSession[] = [];
@@ -56,6 +59,11 @@ export function createAgentSessions(
       const key = `${run.from.runId}:${String(handles)}`;
       handles += 1;
       return new RunAgentSession({ key, name, options, run, sessions, usage });
+    },
+    // A session still opening misses it, and asks once itself.
+    continueUsage: async (grant) => {
+      if (sessions.length === 0) return;
+      await continueAgentSessionsUsageStep({ grant, sessions: [...sessions] });
     },
     close: async () => {
       if (sessions.length === 0) return;

@@ -14,7 +14,9 @@ import type { SessionView, SuspendedStep } from "#harness/session-machine/view.j
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { resetSessionUsageWindow } from "#harness/turn-tag-state.js";
+import type { SessionLimitAnswer } from "#harness/hitl/budget-request.js";
+import { continueSessionUsage } from "#execution/session-usage-continuation.js";
+import { getSessionUsageWindowIndex, mintSessionUsageGrant } from "#harness/turn-tag-state.js";
 import type { HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
@@ -60,7 +62,7 @@ export type HumanInputIntake =
  * The calls themselves wait in their suspended steps until the turn's next model step.
  */
 export interface ApprovedWork {
-  readonly limit?: { readonly granted: boolean };
+  readonly limit?: SessionLimitAnswer;
   /** The entries a parked step's calls run with: those of the step that asked. */
   readonly toolsOf: (step: SuspendedStep | undefined) => HarnessToolLookup;
 }
@@ -221,7 +223,12 @@ export async function acceptHumanInput(
 export async function admitApprovedWork(step: Step, work: ApprovedWork): Promise<void> {
   if (work.limit !== undefined) {
     if (!work.limit.granted) throw new SessionLimitDeclinedError();
-    step.session = resetSessionUsageWindow(step.session);
+    // A grant from above, or one this session minted routing the same payload, may already have
+    // started the next window.
+    const current = getSessionUsageWindowIndex(step.session);
+    if ((work.limit.windowIndex ?? current) === current) {
+      step.session = continueSessionUsage(step.session, mintSessionUsageGrant(step.session));
+    }
   }
   await step.apply(settle(step.view(), { results: [] }));
 }

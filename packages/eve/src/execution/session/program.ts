@@ -241,6 +241,7 @@ async function runSessionLoop(
   > => {
     while (true) {
       const next = await nextTurnDelivery({
+        caller: progress.caller,
         cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         inbox,

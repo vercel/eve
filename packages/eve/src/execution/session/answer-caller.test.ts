@@ -76,4 +76,40 @@ describe("attributeAnswers", () => {
       }),
     ).toBeUndefined();
   });
+
+  const alice: SessionAuthContext = { ...bob, principalId: "alice" };
+  const stale = { optionId: "approve", requestId: "answered-earlier" };
+
+  it("attributes another person's live approval to them and drops their stale answer", () => {
+    expect(
+      attributeAnswers({
+        owner: alice,
+        responder: bob,
+        state,
+        stepInput: { inputResponses: [stale, approve] },
+      }),
+    ).toEqual({ attributedInputResponses: [{ auth: bob, response: approve }] });
+    expect(
+      attributeAnswers({
+        owner: alice,
+        responder: bob,
+        state,
+        stepInput: { inputResponses: [stale] },
+      }),
+    ).toEqual({ attributedInputResponses: [] });
+  });
+
+  it("keeps the turn's own principal's stale answer for the turn to read", () => {
+    expect(
+      attributeAnswers({
+        owner: bob,
+        responder: bob,
+        state,
+        stepInput: { inputResponses: [stale, approve] },
+      }),
+    ).toEqual({
+      attributedInputResponses: [{ auth: bob, response: approve }],
+      inputResponses: [stale],
+    });
+  });
 });

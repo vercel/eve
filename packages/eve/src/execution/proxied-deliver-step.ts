@@ -6,7 +6,19 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  type DurableSessionState,
+  readDurableSession,
+  replaceDurableSessionSnapshot,
+} from "#execution/durable-session-store.js";
+import {
+  continueSessionUsage,
+  pushSessionUsageContinuation,
+  settledSessionLimitPrompts,
+} from "#execution/session-usage-continuation.js";
+import { mintSessionUsageGrant } from "#harness/turn-tag-state.js";
+import { isSteeringDelivery } from "#execution/session/input-queue.js";
+import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
   publishSessionEvents,
   type PublishedSessionEvents,
@@ -43,6 +55,8 @@ export type RoutedDeliverResult =
     }
   | {
       readonly kind: "continue";
+      /** The session's own session-limit prompts this delivery's grant settled. */
+      readonly approved: readonly string[];
       readonly remainder: DeliverHookPayload | undefined;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
@@ -84,9 +98,17 @@ async function routeProxiedDeliver(
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
-  // Only a person's own message may answer a pending prompt by text.
+  const continued: string[] = [];
+  // A typed answer joins the open turn, so only the turn's own principal may
+  // send one, as only they steer it. Anyone else's text waits for the turn to
+  // end; their button answers still settle a request as its responder.
   const resolveMessage =
-    !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
+    !hasDelegatedSessionContext(serializedContext) &&
+    isSteeringDelivery(
+      sourceDelivery,
+      { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },
+      { heldOnPerson: true },
+    );
   // Every payload routes against the same state, so a request a `ctx.ask()`
   // answer or typed reply resolved in an earlier payload is hidden from later
   // ones; it takes one answer, and later messages must reach the parent instead.
@@ -104,6 +126,7 @@ async function routeProxiedDeliver(
       state: durableSession.state,
     });
     parentAction ??= routed.parentAction;
+    continued.push(...routed.continued);
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
@@ -164,11 +187,15 @@ async function routeProxiedDeliver(
   };
   if (answerMessages.length > 0) {
     // Like a steering message, the answer joins the open turn, so the turn's
-    // later events carry its delivery ids too. Its hooks run before the answer
-    // goes down, so `ctx.cancel()` stops the turn instead of answering.
+    // later events carry its delivery ids and run as its caller. Its hooks run
+    // before the answer goes down, so `ctx.cancel()` stops the turn instead of
+    // answering.
     published = await publishSessionEvents(
       {
-        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+        serializedContext: joinAnswerToTurn(published.serializedContext, {
+          auth: sourceDelivery.auth,
+          deliveryIds: answerDeliveryIds,
+        }),
         sessionState: published.sessionState,
         sessionWritable: input.sessionWritable,
       },
@@ -179,6 +206,11 @@ async function routeProxiedDeliver(
   // The turn owner lives outside this durable step and consumes its result.
   if (published.cancelled) parentAction = { kind: "cancel-turn" };
 
+  // The root mints one grant for the Continues in this payload; below it, the
+  // answer brings the root's grant, and every child it reaches gets that one.
+  const usageGrant =
+    sourceDelivery.usageGrant ??
+    (continued.length === 0 ? undefined : mintSessionUsageGrant(durableSession));
   const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of published.cancelled ? [] : children.values()) {
     if (child.workflowAsk !== undefined) {
@@ -193,6 +225,7 @@ async function routeProxiedDeliver(
         ...sourceDelivery,
         deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
         payloads: child.payloads,
+        ...(usageGrant !== undefined && { usageGrant }),
       };
       const remote = child.remote;
       if (remote !== undefined) {
@@ -227,6 +260,23 @@ async function routeProxiedDeliver(
     ),
   );
   const retired = new Set(answered.flatMap((child) => child.resolutions.map((r) => r.requestId)));
+  // The grant raises this session's allowance before the prompts it credits close.
+  const current = readDurableSession(published.sessionState);
+  const session = usageGrant === undefined ? current : continueSessionUsage(current, usageGrant);
+  let approved: readonly string[] = [];
+  if (session !== current && !published.cancelled) {
+    await pushSessionUsageContinuation(session);
+    approved = settledSessionLimitPrompts(
+      session,
+      sourceDelivery.payloads.flatMap((payload) =>
+        (payload.inputResponses ?? []).map((response) => response.requestId),
+      ),
+    );
+    published = {
+      ...published,
+      sessionState: replaceDurableSessionSnapshot({ session, state: published.sessionState }),
+    };
+  }
   const holds =
     children.size > 0 &&
     parentPayloads.size === 0 &&
@@ -253,20 +303,23 @@ async function routeProxiedDeliver(
           deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
-  return { ...context, kind: "continue", remainder };
+  return { ...context, approved, kind: "continue", remainder };
 }
 
-function joinTurnDeliveryIds(
+function joinAnswerToTurn(
   serializedContext: Record<string, unknown>,
-  deliveryIds: readonly string[],
+  answer: { readonly auth: DeliverHookPayload["auth"]; readonly deliveryIds: readonly string[] },
 ): Record<string, unknown> {
-  if (deliveryIds.length === 0) return serializedContext;
-  const current =
-    (serializedContext[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
-  return {
-    ...serializedContext,
-    [TurnDeliveryIdsKey.name]: [...new Set([...current, ...deliveryIds])],
-  };
+  const joined = { ...serializedContext };
+  joined[AuthKey.name] = continueTurnAuth(
+    serializedContext[AuthKey.name] as DeliverHookPayload["auth"],
+    answer.auth,
+  );
+  if (answer.deliveryIds.length > 0) {
+    const current = (joined[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
+    joined[TurnDeliveryIdsKey.name] = [...new Set([...current, ...answer.deliveryIds])];
+  }
+  return joined;
 }
 
 /**

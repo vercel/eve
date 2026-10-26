@@ -26,6 +26,7 @@ import {
   respondAsSurveyParent,
   respondAsSurveyToolParent,
 } from "./lib/survey.js";
+import { isLeaseDirective, respondAsLeaseParent } from "./lib/lease.js";
 
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
@@ -152,6 +153,7 @@ const remoteDirectHitlModel = mockModel({
 });
 const notebookParent = mockModel({ modelId: "notebook-parent", respond: respondAsNotebookParent });
 const surveyParent = mockModel({ modelId: "survey-parent", respond: respondAsSurveyParent });
+const leaseParent = mockModel({ modelId: "lease-parent", respond: respondAsLeaseParent });
 const surveyToolParent = mockModel({
   modelId: "survey-tool-parent",
   respond: respondAsSurveyToolParent,
@@ -232,6 +234,9 @@ export default defineAgent({
         }
         if (messages.some(isSurveyToolDirective)) {
           return { model: surveyToolParent, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isLeaseDirective)) {
+          return { model: leaseParent, modelContextWindowTokens: 1_000_000 };
         }
         return { model: defaultModel, modelContextWindowTokens };
       },

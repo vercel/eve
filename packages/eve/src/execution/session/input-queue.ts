@@ -191,17 +191,44 @@ export class SessionInputQueue {
   /**
    * Takes the next turn or control. Sign-ins end with the turn that raised
    * them, so a callback still queued between turns is stale and dropped.
+   *
+   * While a parked turn is still open, only input that may join it is taken:
+   * its own principal's deliveries, and anyone else's answers, which settle
+   * its requests as their responder. The rest of another principal's input
+   * waits for the turn to end.
    */
   takeNext(options?: {
     /** Sequence of a delivery admitted while nothing else was pending. */
     readonly freshSequence?: number;
+    readonly openTurn?: SteeringTurn;
   }): SessionInputSelection | undefined {
     this.retain((entry) => entry.kind !== "authorization");
-    const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
-    if (first === undefined) return undefined;
+    const openTurn = options?.openTurn;
+    const at = this.entries.findIndex(
+      (entry) =>
+        entry.kind !== "delivery" ||
+        openTurn === undefined ||
+        isSteeringDelivery(entry.delivery, openTurn, { heldOnPerson: true }) ||
+        entry.delivery.payloads.some((payload) => payload.inputResponses !== undefined),
+    );
+    if (at < 0) return undefined;
+    const first = this.entries.splice(at, 1)[0] as QueuedDelivery | QueuedControl;
     if (first.kind === "control") return { control: first.control, kind: "control" };
+    if (
+      openTurn !== undefined &&
+      !isSteeringDelivery(first.delivery, openTurn, { heldOnPerson: true })
+    ) {
+      const split = splitAnswers(first.delivery);
+      if (split.rest !== undefined) this.entries.splice(at, 0, { ...first, delivery: split.rest });
+      return {
+        delivery: split.answers,
+        handoffEligible: false,
+        kind: "turn",
+        sequences: [first.sequence],
+      };
+    }
 
-    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first)];
+    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first, at)];
     const sequences = turnEntries.map(({ sequence }) => sequence);
     const combined = combine(turnEntries);
     return {
@@ -221,12 +248,12 @@ export class SessionInputQueue {
    * call share a turn, as they would steer it. Claims may change between
    * them; the turn runs with the latest.
    */
-  private takeFollowingDeliveriesFrom(first: QueuedDelivery): QueuedDelivery[] {
+  private takeFollowingDeliveriesFrom(first: QueuedDelivery, at: number): QueuedDelivery[] {
     const principal = principalOf(first.delivery.auth);
     const following: QueuedDelivery[] = [];
     let callId = first.delivery.caller?.callId;
     while (true) {
-      const next = this.entries[0];
+      const next = this.entries[at];
       if (
         next?.kind !== "delivery" ||
         principal === ANONYMOUS_PRINCIPAL ||
@@ -238,7 +265,7 @@ export class SessionInputQueue {
         break;
       }
       following.push(next);
-      this.entries.shift();
+      this.entries.splice(at, 1);
       callId ??= next.delivery.caller?.callId;
     }
     return following;
@@ -299,6 +326,24 @@ export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTu
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
   if (entries.length === 1) return entries[0]!.delivery;
   return coalesceDeliveries(entries.map(({ delivery }) => delivery));
+}
+
+/** Splits a delivery's answers to requests from the rest of it. */
+export function splitAnswers(delivery: DeliverHookPayload): {
+  readonly answers: DeliverHookPayload;
+  readonly rest: DeliverHookPayload | undefined;
+} {
+  const answers = delivery.payloads.flatMap((payload) =>
+    payload.inputResponses === undefined ? [] : [{ inputResponses: payload.inputResponses }],
+  );
+  const rest = delivery.payloads.flatMap((payload) => {
+    const { inputResponses: _answers, ...other } = payload;
+    return Object.keys(other).length === 0 ? [] : [other];
+  });
+  return {
+    answers: { ...delivery, payloads: answers },
+    rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
+  };
 }
 
 function authorizationAttemptId(payload: DeliverPayload): string | undefined {

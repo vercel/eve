@@ -89,6 +89,7 @@ type WaitInput = {
 function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
+    caller: undefined,
     hasWorkingTasks: () => false,
     inbox: inbox,
     cursor,
@@ -287,11 +288,13 @@ describe("nextTurnDelivery", () => {
     const inbox = createMockInbox([messageRead("child response"), messageRead("parent turn")]);
     vi.mocked(routeDeliverToChildren)
       .mockResolvedValueOnce({
+        approved: [],
         kind: "continue",
         remainder: undefined,
         stateDelta: { sessionState: { kind: "value", value: retiredState } },
       })
       .mockResolvedValueOnce({
+        approved: [],
         kind: "continue",
         remainder: { kind: "deliver", payloads: [{ message: "parent turn" }] },
         stateDelta: {},
@@ -338,6 +341,7 @@ function authenticatedDelivery(message: string, auth: SessionAuthContext): Deliv
 function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
   const input = waitInput(createMockInbox([]));
   vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery }) => ({
+    approved: [],
     kind: "continue",
     remainder: delivery,
     stateDelta: {},

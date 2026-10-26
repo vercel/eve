@@ -1,4 +1,6 @@
-import { storedProjection } from "#harness/session-machine/view.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
+import type { TurnCaller } from "#channel/types.js";
+import { resolveTurnPrincipal } from "#execution/session/principal.js";
 import { openInputs } from "#protocol/session-projection.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
@@ -8,6 +10,7 @@ import type {
 } from "#execution/session/input-queue.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import { applySessionUsageContinuation } from "#execution/session/usage-continuation.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
@@ -27,6 +30,8 @@ export type NextTurnInstruction =
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
+  /** The delegated caller of the open turn, if it has one. */
+  readonly caller: TurnCaller | undefined;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -36,12 +41,21 @@ export async function nextTurnDelivery(input: {
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
+    const parkedOpen = !isBetweenTurns(
+      storedProjection(cursor.sessionState.snapshot.session.state),
+    );
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
+      ...(parkedOpen && {
+        openTurn: {
+          callerCallId: input.caller?.callId,
+          principal: resolveTurnPrincipal(undefined, cursor.serializedContext),
+        },
+      }),
     });
     if (selected?.kind === "control") return { kind: selected.control };
     if (selected?.kind === "turn") {
-      const routed = await routeSelectedDelivery(selected, cursor);
+      const routed = await routeSelectedDelivery(selected, { cursor, queue });
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;
@@ -64,6 +78,10 @@ export async function nextTurnDelivery(input: {
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
+    if (admitted.kind === "usage-continued") {
+      await applySessionUsageContinuation({ ...input, ...admitted });
+      continue;
+    }
     if (
       admitted.kind === "cancel" &&
       openInputs(storedProjection(cursor.sessionState.snapshot.session.state)).some(

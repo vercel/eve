@@ -372,6 +372,14 @@ way; those of an `execute` or `task` tool count when the tool finishes. Remote
 agents' reported usage counts the same way, cost included. Approving a
 continuation starts a new window without erasing `total`.
 
+Continue on a delegated child's prompt raises the whole asking tree: every
+session the prompt passed through starts a new window, and the child's spend
+that hasn't reported up yet counts in the window being approved, not the next.
+The running sessions below get the new window before their next model call,
+and a child waiting on its own prompt closes it. This is best-effort: a
+session that misses it asks once more itself. In trees three or more levels
+deep, a higher ancestor may ask once more when that spend reports up.
+
 Some delegated usage doesn't count against the parent: a `ctx.agent` turn
 still running when its workflow tool finishes or is cancelled; the `ctx.agent`
 usage of an `execute` tool whose parent turn is cancelled while it waits; and

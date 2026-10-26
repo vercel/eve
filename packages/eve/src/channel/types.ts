@@ -274,6 +274,8 @@ export interface DeliverHookPayload {
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;
+  /** The session-limit Continue a forwarded answer carries from the root of its tree. */
+  readonly usageGrant?: import("#harness/turn-tag-state.js").SessionUsageGrant;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */

@@ -723,7 +723,7 @@ describe("answers", () => {
         const decision = await respond(machine, {
           inputResponses: [{ optionId, requestId: request.requestId }],
         });
-        expect(decision.limit).toEqual({ granted });
+        expect(decision.limit).toMatchObject({ granted, windowIndex: 0 });
         expect(machine.projection.inputs[request.requestId]?.status).toBe("settled");
       }
     });
@@ -746,7 +746,7 @@ describe("answers", () => {
 
       const decision = await respond(machine, { message: "Continue" });
 
-      expect(decision.limit).toEqual({ granted: true });
+      expect(decision.limit).toMatchObject({ granted: true, windowIndex: 0 });
       expect(callStatus(machine.projection, "call-1")).toBe("awaiting-input");
     });
 
