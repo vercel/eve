@@ -5,15 +5,20 @@ name: Mirror Stress Artifacts
 # (scripts/eval-benchmark/mirror-stress-artifacts.mjs), then derives a
 # benchmark run from each release build
 # (scripts/eval-benchmark/import-stress-artifacts.mjs). Both skip what they
-# already wrote, so a daily run keeps every release build.
+# already wrote. Each release imports its build once Release finishes; the
+# daily run catches anything that missed, such as a renamed release PR.
 on:
   schedule:
     - cron: "41 6 * * *"
   workflow_dispatch:
-
-concurrency:
-  group: mirror-stress-artifacts
-  cancel-in-progress: false
+  # Runs after Release, never inside it, so it cannot block or slow a publish.
+  # By then the release PR is merged and its final head's e2e-vercel run, a
+  # required check, has uploaded the archive. workflow_run runs main's copy of
+  # this file, and only Release on main triggers it.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -22,6 +27,15 @@ permissions:
 jobs:
   mirror:
     name: mirror
+    # Release runs on every push to main; only a release PR merge adds a build.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      startsWith(github.event.workflow_run.head_commit.message, 'Version Packages')
+    # On the job, not the workflow: a skipped run must not take the place of a
+    # pending release run.
+    concurrency:
+      group: mirror-stress-artifacts
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
