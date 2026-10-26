@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-issuer.js";
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import {
@@ -356,6 +358,24 @@ describe("localDev", () => {
     expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
       principalType: "local-dev",
     });
+  });
+
+  it.each([
+    ["refuses", "192.168.1.20", null],
+    ["refuses", "2001:db8::20", null],
+    ["accepts", "127.0.0.1", "local-dev"],
+    ["accepts", "::ffff:127.0.0.1", "local-dev"],
+  ])("%s an `eve dev` caller whose socket address is %s", async (_verb, address, principalType) => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "transport-secret");
+    const headers = new Headers();
+    stampDevelopmentClientAddress(headers, address, "transport-secret");
+    const result = await localDev()(
+      new Request("http://localhost:3000/eve/v1/session", { headers }),
+    );
+    expect(result instanceof Response ? result : (result?.principalType ?? null)).toBe(
+      principalType,
+    );
   });
 
   it("rejects a `Host: localhost` request on a production deployment", () => {

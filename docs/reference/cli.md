@@ -273,7 +273,7 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 
 | Flag                                | Type   | Default            | Description                                                     |
 | ----------------------------------- | ------ | ------------------ | --------------------------------------------------------------- |
-| `--host <host>`                     | string | all interfaces     | Host interface to bind                                          |
+| `--host <host>`                     | string | `127.0.0.1`        | Host interface to bind                                          |
 | `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                               |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                      |
 | `--resume`                          | flag   | off                | Attempt recovery of retained runs from previous dev invocations |
@@ -287,6 +287,8 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
+
+`localDev()` authenticates only callers on the same machine. When `--host` binds another interface, such as `0.0.0.0`, callers on other machines need an authenticator that runs before `localDev()` in the channel's `auth` list.
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
