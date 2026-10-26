@@ -48,13 +48,14 @@ export class OptimisticMessageSubmissions {
     for (const [id, submission] of this.#submissions) {
       const row =
         submission.deliveryId === undefined ? undefined : view.deliveries[submission.deliveryId];
+      if (submission.turnId === undefined && row?.turnId !== undefined)
+        this.#submissions.set(id, { ...submission, turnId: row.turnId });
       if (row?.consumedAt !== undefined) this.#submissions.delete(id);
       else if (
-        row !== undefined &&
-        (row.status === "settled" || view.session.status === "ended") &&
+        (row?.status === "settled" || view.session.status === "ended") &&
         submission.error === undefined
       ) {
-        this.fail(new Error(row.reason ?? "The message was not consumed."), id);
+        this.fail(new Error(row?.reason ?? "The message was not consumed."), id);
       }
     }
     this.#publish();

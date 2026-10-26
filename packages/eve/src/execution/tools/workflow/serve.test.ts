@@ -258,7 +258,12 @@ it("serves every call to its task, one stretch of work at a time, until the sess
     "reviewer-replacement",
     "release-captain-session",
   ]);
-  // Questions, sign-ins, `agent.started`, `ctx.session`, and `ctx.agents`
+  expect(sent("agent-started").map(({ from }) => from.callId)).toEqual([
+    "call-1",
+    "call-1",
+    "call-2",
+  ]);
+  // Questions, sign-ins, `ctx.session`, and `ctx.agents`
   // while serving a later call describe that call, not the call that started
   // the task.
   expect(servingSecond).toMatchObject({

@@ -53,10 +53,7 @@ import {
   defaultOnMessage,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
-import {
-  withFinalReplyDelivery,
-  withUndeliveredReplyNote,
-} from "#public/channels/slack/reply-delivery.js";
+import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
 import {
   composeSlackRenderers,
   type SlackRenderChain,
@@ -107,6 +104,10 @@ import {
   type UploadPolicyInput,
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
+import {
+  type UndeliveredReplyState,
+  withUndeliveredReplyNote,
+} from "#public/channels/undelivered-reply.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { markEventHandled } from "./utils.js";
@@ -208,7 +209,7 @@ export interface SlackPendingApprovalCard {
   readonly messageTs: string;
 }
 
-export interface SlackChannelState {
+export interface SlackChannelState extends UndeliveredReplyState {
   /** Audience classification captured before the session is dispatched. */
   audience?: ChannelAudience;
   /** Slack channel id seeded by the inbound mention. */
@@ -268,11 +269,6 @@ export interface SlackChannelState {
    * sign-in `interaction.opened` and approval events.
    */
   slackUsersByPrincipal?: Record<string, string>;
-  /**
-   * Error id of a final reply that never reached Slack. The next delivered
-   * message tells the model the reply was not seen, then clears it.
-   */
-  undeliveredReplyErrorId?: string | null;
   /**
    * Whether eve has posted in this thread. Once it has, deleting the root
    * leaves a tombstone that keeps the thread, so the final reply skips the
@@ -923,7 +919,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       channel: SlackChannelContext & { readonly session: ChannelContext["session"] },
     ) {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
-      return withUndeliveredReplyNote(channel.state, payload);
+      return withUndeliveredReplyNote(channel.state, payload, "Slack");
     },
 
     routes: [

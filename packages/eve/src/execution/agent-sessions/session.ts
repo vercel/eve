@@ -89,6 +89,7 @@ class RunAgentSession implements AgentSession {
   /** What the run's sessions spent, which the run reports to its calling session. */
   readonly #usage: RunUsageTally;
   #opened: Promise<OpenedAgentSession> | undefined;
+  #opener: WorkflowToolRunContext["from"] | undefined;
   /** Oldest first: the order the messages were sent, which is the order the agent admits them. */
   readonly #awaited: AwaitedReply[] = [];
   /**
@@ -264,7 +265,7 @@ class RunAgentSession implements AgentSession {
         this.#opened = Promise.resolve(redirected);
         await this.#run.owner.send({
           context: opened.context,
-          from,
+          from: this.#opener!,
           kind: "agent-started",
           session: redirected.address,
         });
@@ -288,6 +289,7 @@ class RunAgentSession implements AgentSession {
     message: AgentSessionMessage,
     { context, from }: AgentSessionSender,
   ): Promise<{ readonly opened: OpenedAgentSession; readonly receipt: AgentSessionReceipt }> {
+    this.#opener = from;
     let opened: OpenedAgentSession | undefined;
     try {
       const { address, deliveryId } = await openAgentSessionStep({
@@ -303,6 +305,7 @@ class RunAgentSession implements AgentSession {
       return { opened, receipt: { deliveryId, sessionId: address.sessionId } };
     } catch (error) {
       this.#opened = undefined;
+      this.#opener = undefined;
       if (opened !== undefined) await stopLateAgentSessionStep(opened).catch(() => undefined);
       throw error;
     }

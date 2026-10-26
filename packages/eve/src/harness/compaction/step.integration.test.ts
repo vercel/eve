@@ -3,6 +3,8 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import * as compaction from "#harness/compaction/engine.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { eventsOf } from "#harness/publication.js";
@@ -113,6 +115,98 @@ async function compactWith(
 }
 
 describe("compaction summary call", () => {
+  it.each([
+    { error: new CompactionOverLimitError("Still over the limit."), terminal: true },
+    { error: new Error("Summary validation failed."), terminal: false },
+  ])(
+    "keeps summary usage after a late compaction failure ($terminal terminal)",
+    async ({ error, terminal }) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(compaction, "compactMessages").mockImplementation(
+        async (_messages, _config, summarize) => {
+          await summarize({
+            messages: [{ role: "user", content: "Summarize Alice's research notes." }],
+            system: "",
+          });
+          throw error;
+        },
+      );
+      const doStream = vi.fn(async () => summaryStream());
+      const events: SessionEvent[] = [];
+      const run = createToolLoopHarness({
+        handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+        resolveModel: async () => new MockLanguageModelV3({ doStream }),
+        tools: new Map(),
+      })(
+        {
+          agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
+          compaction: { recentWindowSize: 1, threshold: 2_000 },
+          continuationToken: "http:late-compaction-failure",
+          history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
+          sessionId: "late-compaction-failure",
+        },
+        { message: "Please continue." },
+      );
+
+      if (terminal) {
+        const result = await run;
+        expect(result.next).toEqual({ done: true, output: "" });
+        expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+        expect(events.at(-1)).toMatchObject({
+          type: "session.ended",
+          data: { outcome: "failed", error: { code: "COMPACTION_FAILED", message: error.message } },
+        });
+      } else {
+        await expect(run).rejects.toThrow(error.message);
+        expect(events.some((event) => event.type === "session.ended")).toBe(false);
+      }
+      expect(doStream).toHaveBeenCalledOnce();
+      expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+        { data: { outcome: "failed" } },
+      ]);
+      expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
+        { data: { usage: { inputTokens: 120, outputTokens: 8 } } },
+      ]);
+    },
+  );
+
+  it("ends before summarizing when protected request context alone exceeds the limit", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const doStream = vi.fn(async () => summaryStream());
+    const events: SessionEvent[] = [];
+    const result = await createToolLoopHarness({
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(
+      {
+        agent: {
+          modelReference: { id: "summary-model" },
+          system: "Protected instructions. ".repeat(1_000),
+          tools: [],
+        },
+        compaction: { recentWindowSize: 1, threshold: 2_000 },
+        continuationToken: "http:fixed-part-over-limit",
+        history: [],
+        sessionId: "fixed-part-over-limit",
+      },
+      { message: "Please continue." },
+    );
+
+    expect(result.next).toEqual({ done: true, output: "" });
+    expect(doStream).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      type: "session.ended",
+      data: {
+        outcome: "failed",
+        error: {
+          code: "COMPACTION_FAILED",
+          message: expect.stringContaining("system prompt, tools, memory and context"),
+        },
+      },
+    });
+  });
+
   it("settles a failed manual compaction and its summary run exactly once", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const model = new MockLanguageModelV3({

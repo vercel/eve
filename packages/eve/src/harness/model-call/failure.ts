@@ -4,6 +4,7 @@ import {
   extractModelCallErrorDetails,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import type { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
@@ -101,4 +102,30 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
     };
   step.session = { ...step.session, outputSchema: undefined };
   return { next: null, session: step.session, settledTurn: { isError: true, output } };
+}
+
+/**
+ * Compaction could not bring the history under the limit. The next attempt
+ * would fail the same way, so the session ends with the message instead of
+ * the step being retried.
+ */
+export async function reportCompactionFailure(
+  step: Step,
+  error: CompactionOverLimitError,
+): Promise<StepResult> {
+  const { sessionId } = step.session;
+  log.error(error.message, { sessionId, turnId: step.position().turnId });
+  await step.apply(
+    fail(step.view(), {
+      code: "COMPACTION_FAILED",
+      message: error.message,
+      terminal: true,
+    }),
+  );
+  return {
+    next: step.hasDelegatedCaller
+      ? { done: true, isError: true, output: error.message }
+      : { done: true, output: "" },
+    session: step.session,
+  };
 }

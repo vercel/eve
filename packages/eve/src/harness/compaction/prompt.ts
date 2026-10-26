@@ -28,6 +28,7 @@ Large tool outputs are the main thing to compress: reduce each to the findings t
 // Fallback cap for conversational text, applied oldest-first only when the
 // rendered transcript exceeds the caller's token budget.
 const DEGRADED_TEXT_LIMIT = 2_000;
+const DEGRADE_SLACK_CHARS = 64;
 
 interface CompactionTranscriptEntry {
   readonly content: string;
@@ -108,7 +109,15 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    const degraded = renderCompactionMessageContent(message, DEGRADED_TEXT_LIMIT);
+    // Cut only what the budget still needs, never below the floor: a single large
+    // entry (the cut-out middle of an oversized message) keeps as much as fits. The
+    // slack absorbs the estimate's rounding so a sliver of excess does not
+    // reach into the next entry.
+    const limit = Math.max(
+      DEGRADED_TEXT_LIMIT,
+      entry.content.length - Math.ceil(excessTokens * 4) - DEGRADE_SLACK_CHARS,
+    );
+    const degraded = renderCompactionMessageContent(message, limit);
     if (degraded.length >= entry.content.length) {
       continue;
     }

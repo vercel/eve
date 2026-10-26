@@ -3,13 +3,14 @@ import type { SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
-import { simulateReadableStream } from "ai";
+import { simulateReadableStream, type LanguageModel } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { conversationOf } from "#client/conversation.js";
 import type { EveToolPart } from "#client/message-types.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { mockModel } from "#evals/mock-model.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
 import {
@@ -285,7 +286,8 @@ async function withSession(
   options: {
     readonly message: string;
     readonly tools: readonly ToolSpec[];
-    readonly model: MockLanguageModelV4;
+    readonly model: LanguageModel;
+    readonly modelCallsPerStep?: number;
     readonly hooks?: Readonly<Record<string, HookDefinition>>;
     readonly parent?: SessionParent;
     readonly sessionUsage?: SessionUsageLimit;
@@ -298,6 +300,9 @@ async function withSession(
     agent: {
       definition: defineAgent({
         model: defineDynamic(() => ({ model: options.model, modelContextWindowTokens: 200_000 })),
+        ...(options.modelCallsPerStep !== undefined && {
+          experimental: { workflow: { modelCallsPerStep: options.modelCallsPerStep } },
+        }),
         ...(options.sessionUsage !== undefined && {
           limits: { sessionUsage: options.sessionUsage },
         }),
@@ -1726,6 +1731,93 @@ describe("deliveries a child session reads", () => {
 });
 
 describe("controls between turns", () => {
+  it.each([1, 4])(
+    "keeps summary usage when a context.settled hook cancels with %s model calls per step",
+    async (modelCallsPerStep) => {
+      let summaries = 0;
+      let continuedUsage: number | undefined;
+      const model = mockModel(({ messages, toolResults, lastUserMessage }) => {
+        if (messages.some((message) => message.text.includes("previous checkpoint"))) {
+          summaries += 1;
+          return {
+            text: "Alice's fern has brown tips and dry soil.",
+            usage: { inputTokens: 2_000, outputTokens: 300 },
+          };
+        }
+        if (lastUserMessage?.includes("Should Alice water it more?")) {
+          if (toolResults.length > 0) throw new Error("The hook must cancel before another call.");
+          return {
+            toolCalls: [{ name: "check_soil" }],
+            usage: { inputTokens: 200_000, outputTokens: 10 },
+          };
+        }
+        return {
+          text: "Brown tips can mean underwatering.",
+          usage: { inputTokens: 1_000, outputTokens: 10 },
+        };
+      });
+      const { events, ran } = await withSession(
+        `edge-summary-hook-cancel-${modelCallsPerStep}`,
+        {
+          hooks: {
+            stop: defineHook({
+              events: {
+                "context.settled": (event, ctx) => {
+                  if (event.data.kind === "compaction" && event.data.outcome === "completed")
+                    ctx.cancel();
+                },
+              },
+            }),
+          },
+          message: "Alice's fern has brown tips.",
+          model,
+          modelCallsPerStep,
+          sessionUsage: ({ window }) => {
+            if (window.inputTokens < 203_000) return false;
+            continuedUsage = window.inputTokens;
+            return true;
+          },
+          tools: [{ name: "check_soil" }],
+        },
+        async (session) => {
+          await session.next("first reply");
+          await session.send("Should Alice water it more?");
+          await session.next("cancelled after summary");
+          // A later turn's budget reads the checkpoint, not only the live stream. In the batched
+          // case it must retain the cut call's summary spend above the completed tool call.
+          await session.send("Bob asks for the next care steps.");
+          await session.until(
+            "budget after cancellation",
+            (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
+          );
+        },
+      );
+
+      expect(continuedUsage).toBe(203_000);
+      expect(ran).toEqual(["check_soil"]);
+      expect(summaries).toBe(1);
+      expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:cancelled"]);
+      expect(ofType(events, "context.settled")).toHaveLength(1);
+      const [change] = ofType(events, "context.settled");
+      expect(change?.data).toMatchObject({ kind: "compaction", outcome: "completed" });
+      const summaryRun = ofType(events, "model.requested").find(
+        (event) => "changeId" in event.data.owner,
+      );
+      expect(summaryRun).toBeDefined();
+      expect(ofType(events, "usage.recorded").map((event) => event.data)).toContainEqual(
+        expect.objectContaining({
+          owner: { runId: summaryRun!.data.runId },
+          usage: expect.objectContaining({ inputTokens: 2_000, outputTokens: 300 }),
+        }),
+      );
+      expect(viewOfEvents(events).view.usage.total).toMatchObject({
+        inputTokens: 203_000,
+        outputTokens: 320,
+      });
+      expect(ofType(events, "session.ended")).toEqual([]);
+    },
+  );
+
   it("clears the conversation so the next turn's model reads only the new message", async () => {
     const prompts: number[] = [];
     const { events } = await withSession(

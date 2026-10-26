@@ -81,6 +81,8 @@ export async function createCancelledModelCallBatchResult(input: {
   const interruptedContext = serializeContext(input.ctx);
   // Without a completed call, the batch keeps what its last call applied before the cut, such as
   // answers it resolved and published, so the session never rolls back past its own events.
+  // With one, keep its private state; the live projection below retains every committed usage
+  // fact, including summary spend published by the cut call before a hook cancelled it.
   const cancelledSession =
     input.checkpoint?.result.session ??
     (await cancelledWithoutCheckpoint(input.ctx, input.initialSession, input.stepInput));

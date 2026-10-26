@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildAdapterContext } from "#channel/adapter-context.js";
 import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
@@ -17,6 +18,13 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Message, parseMarkdown } from "#compiled/chat/index.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+import {
+  callChannelEvent,
+  channelEvent,
+  compiledChannel,
+  stubSessionAccessor,
+} from "#internal/testing/mocks/mock-channel-calls.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { chatSdkChannel, type ChatSdkChannelState } from "#public/channels/chat-sdk/index.js";
@@ -177,6 +185,151 @@ describe("chatSdkChannel typed answers", () => {
   });
 });
 
+describe("chatSdkChannel completing a streamed reply", () => {
+  function streamingReply(streamingEditIntervalMs = 0) {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      logger: "warn",
+      state: memoryState(),
+      streamingEditIntervalMs,
+      userName: "bot",
+    });
+    const compiled = compiledChannel<ChatSdkChannelState>(bridge.channel);
+    function open(state: ChatSdkChannelState) {
+      const channel = { ...compiled.adapter, state };
+      const ctx = buildAdapterContext(channel, stubSessionAccessor());
+      return {
+        channel,
+        async delta(delta: string, first = false) {
+          await callChannelEvent(
+            channel,
+            channelEvent("content.delta", {
+              delta,
+              partId: "part-1",
+              ...(first && { kind: "text" }),
+            }),
+            ctx,
+          );
+        },
+        async complete(phase: "narration" | "reply" = "reply") {
+          await callChannelEvent(
+            channel,
+            channelEvent("content.completed", {
+              kind: "text",
+              partId: "part-1",
+              phase,
+              runId: "run-1",
+              value: "Hello",
+            }),
+            ctx,
+          );
+        },
+      };
+    }
+    const state: ChatSdkChannelState = {
+      thread: {
+        _type: "chat:Thread",
+        adapterName: "test",
+        channelId: CHANNEL_ID,
+        id: THREAD_ID,
+        isDM: false,
+      },
+    };
+    return { adapter, open, state, ...open(state) };
+  }
+
+  it("keeps the shown text across JSON restore and skips an unchanged final edit", async () => {
+    const reply = streamingReply();
+    await reply.delta("Hel", true);
+    const restored = reply.open(JSON.parse(JSON.stringify(reply.state)));
+    await restored.delta("lo");
+    const completed = reply.open(JSON.parse(JSON.stringify(restored.channel.state)));
+    await completed.complete();
+
+    expect(reply.adapter.posted).toEqual([{ message: { markdown: "Hel" }, threadId: THREAD_ID }]);
+    expect(reply.adapter.edited).toEqual([
+      { message: { markdown: "Hello" }, messageId: "posted-1", threadId: THREAD_ID },
+    ]);
+    expect(completed.channel.state.anchorMessageId).toBeNull();
+  });
+
+  it("finishes a throttled reply with one edit to the full text", async () => {
+    const reply = streamingReply(60_000);
+    await reply.delta("Hel", true);
+    await reply.delta("lo");
+    expect(reply.adapter.edited).toEqual([]);
+    await reply.complete();
+
+    expect(reply.adapter.posted).toHaveLength(1);
+    expect(reply.adapter.edited).toEqual([
+      { message: { markdown: "Hello" }, messageId: "posted-1", threadId: THREAD_ID },
+    ]);
+  });
+
+  it.each(["network", "final-not-implemented", "stream-not-implemented"])(
+    "reports %s without reposting the reply, and tells the model once",
+    async (failure) => {
+      const logs = captureLogRecords();
+      const reply = streamingReply();
+      await reply.delta("Hel", true);
+      reply.adapter.editError =
+        failure === "network"
+          ? new Error("Network error calling editMessage")
+          : new NotImplementedError("editMessage");
+      if (failure === "stream-not-implemented") await reply.delta("lo");
+      await reply.complete();
+
+      const errorId = reply.state.undeliveredReplyErrorId;
+      expect(errorId).toEqual(expect.any(String));
+      expect(reply.adapter.posted).toEqual([
+        { message: { markdown: "Hel" }, threadId: THREAD_ID },
+        {
+          message: `I finished, but couldn't deliver my answer in this chat (error id \`${errorId}\`). Please ask me to resend it.`,
+          threadId: THREAD_ID,
+        },
+      ]);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          fields: expect.objectContaining({ turnId: "test-turn" }),
+          level: "error",
+          message: "final reply was not delivered to this chat",
+        }),
+      );
+      expect(reply.state.anchorMessageId).toBeNull();
+      if (failure !== "network") expect(reply.state.editSupported).toBe(false);
+
+      const ctx = {
+        session: { auth: { current: null } },
+        state: reply.state,
+      } as never;
+      const next = await reply.channel.deliver?.(
+        { context: ["Alice asks about her report."], message: "Please resend it." },
+        ctx,
+      );
+      expect(next?.context).toEqual([
+        expect.stringContaining(
+          `Your previous reply was not delivered to this chat (error id ${errorId})`,
+        ),
+        "Alice asks about her report.",
+      ]);
+      const after = await reply.channel.deliver?.({ message: "Thank you." }, ctx);
+      expect(after?.context).toBeUndefined();
+    },
+  );
+
+  it("does not report unsupported narration edits as undelivered replies", async () => {
+    const reply = streamingReply();
+    await reply.delta("Hel", true);
+    reply.adapter.editError = new NotImplementedError("editMessage");
+    await reply.complete("narration");
+
+    expect(reply.adapter.posted).toEqual([{ message: { markdown: "Hel" }, threadId: THREAD_ID }]);
+    expect(reply.state.undeliveredReplyErrorId).toBeUndefined();
+    expect(reply.state.editSupported).toBe(false);
+  });
+});
+
 function testAdapter(): TestAdapter & Adapter {
   return new TestAdapter() as TestAdapter & Adapter;
 }
@@ -195,6 +348,7 @@ class TestAdapter {
   readonly name = "test";
   readonly userName = "bot";
   chat: ChatInstance | null = null;
+  posted: Array<{ message: AdapterPostableMessage; threadId: string }> = [];
   edited: Array<{ message: AdapterPostableMessage; messageId: string; threadId: string }> = [];
   editError: Error | null = null;
   postEphemeral?: (
@@ -278,7 +432,8 @@ class TestAdapter {
   }
 
   async postMessage(threadId: string, posted: AdapterPostableMessage): Promise<RawMessage> {
-    return { id: "posted", raw: posted, threadId };
+    this.posted.push({ message: posted, threadId });
+    return { id: `posted-${this.posted.length}`, raw: posted, threadId };
   }
 
   async editMessage(

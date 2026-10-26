@@ -1582,6 +1582,88 @@ export const result = true;
     }
   });
 
+  it("loads ?raw imports inside a symlinked workspace package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_image.ts": [
+          'import { image } from "@repo/sandbox-image";',
+          "",
+          "export default image;",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-asset-import",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-package-asset-import-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "sandbox-image");
+      await writeWorkspaceSourcePackage(packageRoot, {
+        "image.ts": [
+          'import config from "./config.json?raw";',
+          'import dockerfile from "./Dockerfile?raw";',
+          'import tools from "./mise.toml?raw";',
+          "",
+          "export const image = { config, dockerfile, tools };",
+          "",
+        ].join("\n"),
+        "config.json": '{ "telemetry": false }\n',
+        Dockerfile: "FROM ubuntu:26.04\n",
+        "mise.toml": '[tools]\nnode = "24"\n',
+      });
+      await linkWorkspacePackage(app.appRoot, packageRoot);
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_image.ts"),
+      );
+
+      expect(moduleNamespace.default).toEqual({
+        config: '{ "telemetry": false }\n',
+        dockerfile: "FROM ubuntu:26.04\n",
+        tools: '[tools]\nnode = "24"\n',
+      });
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects asset imports that leave a symlinked workspace package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_image.ts": [
+          'import { image } from "@repo/sandbox-image";',
+          "",
+          "export default image;",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-outside-asset-import",
+    });
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "eve-workspace-package-outside-asset-import-"),
+    );
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "sandbox-image");
+      await writeWorkspaceSourcePackage(packageRoot, {
+        "image.ts": [
+          'import secret from "../../secret.txt?raw";',
+          "",
+          "export const image = secret;",
+          "",
+        ].join("\n"),
+      });
+      await writeFile(join(workspaceRoot, "secret.txt"), "outside\n");
+      await linkWorkspacePackage(app.appRoot, packageRoot);
+
+      await expect(
+        loadAuthoredModuleNamespace(join(app.appRoot, "agent", "tools", "use_image.ts")),
+      ).rejects.toThrow(/resolves outside package root/);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   it("recovers in the same process once a missing package is installed", async () => {
     // Regression: bundling used to emit unresolvable package imports as
     // bare externals, so the loader handed Node an import that could not
@@ -1748,3 +1830,27 @@ export async function run() { "use workflow"; return add(1); }
     expect(generation.sourceModules.some((id) => id.includes("/packages/shared/"))).toBe(false);
   });
 });
+
+async function writeWorkspaceSourcePackage(
+  packageRoot: string,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    join(packageRoot, "package.json"),
+    JSON.stringify(
+      { exports: { ".": "./image.ts" }, name: "@repo/sandbox-image", type: "module" },
+      null,
+      2,
+    ),
+  );
+  await Promise.all(
+    Object.entries(files).map(([path, content]) => writeFile(join(packageRoot, path), content)),
+  );
+}
+
+/** Links the package into the app's `node_modules`, as a pnpm workspace does. */
+async function linkWorkspacePackage(appRoot: string, packageRoot: string): Promise<void> {
+  await mkdir(join(appRoot, "node_modules", "@repo"), { recursive: true });
+  await symlink(packageRoot, join(appRoot, "node_modules", "@repo", "sandbox-image"), "junction");
+}

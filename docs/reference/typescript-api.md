@@ -115,7 +115,9 @@ import icon from "../../assets/icon.png";
 import template from "../../prompts/template.txt?raw";
 ```
 
-`?raw` embeds the file as UTF-8 text. Other non-code asset imports produce a data URL with an inferred media type. Compilation, local development, and production builds use the same resolution behavior. Imports that escape the project package are rejected; package those files with the application instead.
+`?raw` embeds any file as UTF-8 text, including code files such as `.json` and files without an extension, such as a `Dockerfile`. Other non-code asset imports produce a data URL with an inferred media type. Compilation, local development, and production builds use the same resolution behavior.
+
+A workspace package bundled from TypeScript source can import its own assets the same way. Each import may reach files inside the project package or inside the package that contains the importing module. Imports that escape both are rejected; package those files with the application or the workspace package instead.
 
 ## Runtime context (`ctx`)
 

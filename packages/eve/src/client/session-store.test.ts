@@ -5,6 +5,7 @@ import {
   openInteractions,
   turn,
   position,
+  session,
 } from "#protocol/session-projection/public-view.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -646,6 +647,116 @@ describe("SessionStore acceptance and observation", () => {
 });
 
 describe("SessionStore Stop during submission", () => {
+  it.each([
+    { outcome: "cancelled" as const, early: true },
+    { outcome: "cancelled" as const, early: false },
+    { outcome: "failed" as const, early: true },
+    { outcome: "failed" as const, early: false },
+  ])(
+    "fails an unread message when its turn is $outcome (before receipt: $early)",
+    async ({ outcome, early }) => {
+      const ended: SessionEvent[] = [
+        { type: "delivery.admitted", data: { deliveryId: "d_0" } },
+        {
+          type: "turn.started",
+          data: { turnId: "turn_0", cause: { deliveryId: "d_0" }, follows: null },
+        },
+        { type: "turn.settled", data: { turnId: "turn_0", outcome } },
+        {
+          type: "delivery.settled",
+          data: { deliveryId: "d_0", turnId: "turn_0", outcome: "failed", reason: "Not read." },
+        },
+      ];
+      const server = agent(async (id) => {
+        if (!early || id !== "d_0") return;
+        server.append(ended, true);
+        await vi.waitFor(() =>
+          expect(turn(current.snapshot.view, "turn_0")?.status).toBe("settled"),
+        );
+      });
+      const current = store({ initialSession });
+      const sent = await current.send({ message: "Alice asks for the report." });
+      if (!early) server.append(ended, true);
+      await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+      const failedId = current.snapshot.messages[0]!.id;
+      expect(texts(current)).toEqual(["user: Alice asks for the report."]);
+      expect(current.snapshot.messages[0]?.metadata).toMatchObject({
+        optimistic: true,
+        status: "failed",
+      });
+      await expect(sent.result()).resolves.toMatchObject({ status: "failed" });
+
+      await current.send({ message: "second." });
+      server.append(testTurnFacts(1, "Second.", ["d_1"]));
+      await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+      expect(current.snapshot.messages[0]?.id).toBe(failedId);
+      expect(current.snapshot.messages[0]?.metadata?.status).toBe("failed");
+      const second = current.snapshot.messages.filter((message) => message.role === "user")[1];
+      expect(second?.metadata?.optimistic).not.toBe(true);
+      expect(texts(current)).toEqual([
+        "user: Alice asks for the report.",
+        "user: second.",
+        "assistant: Second.",
+      ]);
+    },
+  );
+
+  it("does not fail an unread steering message until its own delivery settles", async () => {
+    const server = agent();
+    const current = store({ initialSession });
+    await current.send({ message: "first." });
+    const first = testTurnFacts(0, "First.", ["d_0"]);
+    server.append(first.slice(0, 4));
+    await vi.waitFor(() => expect(activeTurn(current.snapshot.view)?.turnId).toBe("turn_0"));
+    await current.send({ message: "instead.", turnPolicy: "steer" });
+    server.append([{ type: "delivery.admitted", data: { deliveryId: "d_1" } }]);
+    server.append(
+      first
+        .slice(4)
+        .map((event): SessionEvent =>
+          event.type === "turn.settled"
+            ? { ...event, data: { ...event.data, outcome: "cancelled" } }
+            : event,
+        ),
+    );
+    await vi.waitFor(() => expect(turn(current.snapshot.view, "turn_0")?.status).toBe("settled"));
+    const users = () => current.snapshot.messages.filter((message) => message.role === "user");
+    expect(users()[0]?.metadata?.optimistic).not.toBe(true);
+    expect(users()[1]?.metadata).toMatchObject({ optimistic: true, status: "submitted" });
+
+    server.append([
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "d_1", turnId: "turn_0", outcome: "failed" },
+      },
+    ]);
+    await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+    expect(users()).toHaveLength(2);
+    expect(users()[0]?.metadata?.optimistic).not.toBe(true);
+    expect(users()[1]?.metadata).toMatchObject({ optimistic: true, status: "failed" });
+  });
+
+  it.each([false, true])(
+    "fails an unadmitted message when the session ends (before receipt: %s)",
+    async (early) => {
+      const ended: SessionEvent[] = [{ type: "session.ended", data: { outcome: "completed" } }];
+      const server = agent(async () => {
+        if (!early) return;
+        server.append(ended);
+        await vi.waitFor(() => expect(session(current.snapshot.view).status).toBe("ended"));
+      });
+      const current = store({ initialSession });
+      await current.send({ message: "Alice asks for the report." });
+      if (!early) server.append(ended);
+      await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+      expect(texts(current)).toEqual(["user: Alice asks for the report."]);
+      expect(current.snapshot.messages[0]?.metadata).toMatchObject({
+        optimistic: true,
+        status: "failed",
+      });
+    },
+  );
+
   it.each([undefined, initialSession])(
     "waits for the submitted delivery's turn before cancelling (session: %j)",
     async (savedSession) => {

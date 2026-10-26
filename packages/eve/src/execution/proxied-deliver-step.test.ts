@@ -5,6 +5,7 @@ import { answersIdempotencyKey } from "#execution/proxied-deliver-step.js";
 
 function delivery(...deliveryIds: string[]): DeliverHookPayload {
   return {
+    kind: "deliver",
     deliveryMetadata: deliveryIds.map((deliveryId, payloadIndex) => ({
       channelKind: "http",
       channelName: "http",
@@ -12,7 +13,7 @@ function delivery(...deliveryIds: string[]): DeliverHookPayload {
       payloadIndex,
     })),
     payloads: deliveryIds.map(() => ({ answers: [{ interactionId: "approval-1" }] })),
-  } as unknown as DeliverHookPayload;
+  };
 }
 
 describe("answersIdempotencyKey", () => {

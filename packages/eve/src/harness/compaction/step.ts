@@ -1,6 +1,8 @@
 import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
 import {
@@ -63,6 +65,23 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 
 const log = createLogger("harness.tool-loop");
+/**
+ * Throws when the fixed part of the request (instructions, tools, memory)
+ * leaves no room for any history: compacting the history cannot help then.
+ */
+export function assertFixedPartFits(input: {
+  readonly protectedTokens: number;
+  readonly requestEnvelopeTokens: number;
+  readonly threshold: number;
+}): void {
+  const fixed = input.requestEnvelopeTokens + input.protectedTokens;
+  if (fixed >= input.threshold) {
+    throw new CompactionOverLimitError(
+      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory.`,
+    );
+  }
+}
+
 /**
  * Processes the step result: extracts input requests, decides whether to
  * park, continue the tool loop, or terminate.
@@ -355,9 +374,14 @@ async function compactOnce(input: {
 
   const ordinary = validateHarnessModelMessages(messages);
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
+  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
+  const protectedTokens = Math.max(
+    0,
+    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
+  );
   const historyCompaction: CompactionConfig = {
     ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens),
+    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens - protectedTokens),
     lastKnownInputTokens:
       session.compaction.lastKnownInputTokens === undefined
         ? undefined
@@ -375,6 +399,11 @@ async function compactOnce(input: {
     captureFailure === undefined ? undefined : { error: captureFailure };
   try {
     if (needsSummary && failure === undefined) {
+      assertFixedPartFits({
+        protectedTokens,
+        requestEnvelopeTokens,
+        threshold: session.compaction.threshold,
+      });
       compactedOrdinary = await compactMessages(
         [...ordinary],
         historyCompaction,
@@ -389,7 +418,9 @@ async function compactOnce(input: {
                 session.compaction,
                 requestEnvelopeTokens,
                 session.compaction.requestEnvelopeTokens,
-              ) - requestEnvelopeTokens,
+              ) -
+                requestEnvelopeTokens -
+                protectedTokens,
             ),
       );
     }

@@ -43,6 +43,7 @@ import {
   enterSessionProjection,
   enterSessionProjectionAt,
   nextLinePosition,
+  recordAppliedSession,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
@@ -681,6 +682,8 @@ async function runSessionStepBody(
           if (result.settledTurn === undefined) throwIfTurnAborted(abortSignal);
           // The call's result carries the lifecycle it published, which batching reads.
           const saved = { ...result, session: saveSessionProjection(result.session, ctx) };
+          // A cut continuation starts from this completed call's private state.
+          recordAppliedSession(ctx, saved.session);
           completedModelCall = { result: saved, serializedContext: serializeContext(ctx) };
           return saved;
         },

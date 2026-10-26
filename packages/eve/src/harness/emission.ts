@@ -13,6 +13,7 @@ type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
 import { announcedKind, callRequested, callSettledFrom } from "#harness/call-facts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -51,6 +52,8 @@ interface StreamActionEmissionOptions {
    * can't end it: its text narrates, and only the reply after the tasks report is the turn's.
    */
   readonly held?: boolean;
+  /** A child or schedule's caller reads only the final reply, including at an explicit task wait. */
+  readonly finalReplyOnly?: boolean;
   readonly tools: HarnessToolLookup;
   /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
   readonly interruptSignal?: AbortSignal;
@@ -103,6 +106,11 @@ function finalPhase(finishReason: AssistantStepFinishReason, held: boolean) {
   return "reply";
 }
 
+/** A root session's text before `eve__task_wait` is a reply the person reads while the turn waits. */
+function textPhaseBefore(toolName: string, finalReplyOnly: boolean): "narration" | "reply" {
+  return toolName === TASK_WAIT_TOOL_NAME && !finalReplyOnly ? "reply" : "narration";
+}
+
 async function consumeStreamContent(
   emitFn: HarnessEmitFn,
   state: TurnPosition,
@@ -137,11 +145,11 @@ async function consumeStreamContent(
     await emitFn({ data: { kind, partId, phase, runId, value }, type: "content.completed" });
   };
 
-  const flushCurrentMessage = async (): Promise<void> => {
+  const flushCurrentMessage = async (phase: "narration" | "reply" = "narration"): Promise<void> => {
     if (currentMessage.length === 0 || messagePartId === undefined) {
       return;
     }
-    await completePart(messagePartId, "text", currentMessage, "narration");
+    await completePart(messagePartId, "text", currentMessage, phase);
     currentMessage = "";
     messagePartId = undefined;
   };
@@ -180,7 +188,11 @@ async function consumeStreamContent(
     }
 
     if (currentMessage.trim().length > 0) {
-      await flushCurrentMessage();
+      await flushCurrentMessage(
+        action.kind === "tool-call"
+          ? textPhaseBefore(action.toolName, options?.finalReplyOnly === true)
+          : "narration",
+      );
     }
 
     emittedActionCallIds.add(action.callId);
@@ -351,7 +363,9 @@ async function consumeStreamContent(
           }
           await providerActionBatch.flush();
           if (currentMessage.trim().length > 0) {
-            await flushCurrentMessage();
+            await flushCurrentMessage(
+              textPhaseBefore(part.toolName, options.finalReplyOnly === true),
+            );
           }
           streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
           break;

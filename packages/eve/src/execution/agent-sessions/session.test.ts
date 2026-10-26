@@ -4,8 +4,8 @@ import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
-import type { RunUsageTally } from "#execution/agent-sessions/usage.js";
-import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import { createRunUsageTally } from "#execution/agent-sessions/usage.js";
+import { WorkflowToolRunAsks, type WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunRef,
@@ -105,13 +105,17 @@ function agentContext(callId: string): AgentSessionContext {
   return {
     agents: { reviewer: { description: "Review the plan." } },
     capabilities: { requestInput: true },
+    bundle: { source: { kind: "development" } },
+    dynamicSelections: {},
+    sandbox: { sessionId: "session" },
+    trace: { originAudience: "unknown" },
     parent: {
       callId,
       rootSessionId: "session",
       sessionId: "session",
       turn: { id: `turn-${callId}`, sequence: 1 },
     },
-  } as unknown as AgentSessionContext;
+  };
 }
 
 /** A serve run whose `auth`, `from`, and `agentContext` follow the call it serves now. */
@@ -122,22 +126,30 @@ function serveRun() {
     get agentContext() {
       return agentContext(current.callId);
     },
-    asks: {} as WorkflowToolRunContext["asks"],
+    asks: new WorkflowToolRunAsks("run"),
     get auth() {
       return current.auth;
     },
     control: "control",
     get from(): WorkflowToolRunRef {
-      return { callId: current.callId, runId: "run" } as WorkflowToolRunRef;
+      return {
+        callId: current.callId,
+        input: {},
+        runId: "run",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "review",
+        turnId: `turn-${current.callId}`,
+      };
     },
     owner: {
       send: async (message: WorkflowToolRunMessage) => {
         sent.push(message);
       },
       sent: 0,
-    } as unknown as WorkflowToolRunContext["owner"],
+    },
   };
-  const usage = { record: () => {} } as unknown as RunUsageTally;
+  const usage = createRunUsageTally();
   return {
     sessions: createAgentSessions(run, usage),
     sent,

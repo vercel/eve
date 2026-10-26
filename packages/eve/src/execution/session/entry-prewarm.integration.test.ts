@@ -5,7 +5,10 @@ import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  readTurnStepStates,
+  waitForParkedTurnStep,
+} from "#internal/testing/session-test-helpers.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
@@ -392,6 +395,19 @@ describe("idle session prewarm handoff", () => {
               data: expect.objectContaining({ value: expect.stringContaining("Alice confirms") }),
             }),
           );
+          // Publication and hook takeover precede the successor's durable turn commit.
+          await waitForParkedTurnStep(successorId!);
+          const states = await readTurnStepStates(successorId!);
+          const userHistory = states
+            .at(-1)!
+            .history.filter((message) => message.role === "user")
+            .map((message) => JSON.stringify(message.content));
+          expect(userHistory).toEqual([
+            ...(conversation
+              ? [expect.stringContaining("Alice records the research milestone.")]
+              : []),
+            expect.stringContaining("Alice confirms the research milestone."),
+          ]);
           expect((await waitForCommandHookOwner(token)).runId).toBe(successorId);
           expect(await deadline(successorId!)).toEqual(preparedDeadline);
           await workflowRuntime.dispatchSession({

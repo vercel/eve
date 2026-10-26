@@ -145,7 +145,11 @@ This policy controls overlapping eve turns. Chat SDK's separate `concurrency` op
 
 The default handlers post the agent's reply back to the thread — no `events` override required. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
 
-Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`content.delta`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn or can't edit sent messages — email and WhatsApp, for example — so the reply posts once on completion instead of editing:
+Streaming is on by default: the channel posts an initial message and edits it as text arrives (`content.delta`), throttled by `streamingEditIntervalMs` (default `1000`). On completion it edits the message once more to show the full text, skipping that edit when the message already shows it.
+
+The streamed message is the reply, so the channel never posts the reply a second time. When the final reply edit fails, it logs the error, posts a short notice with the error id, and tells the model on the next message that the user hasn't seen its reply.
+
+Set `streaming: false` for surfaces that deliver one message per turn or can't edit sent messages — email and WhatsApp, for example — so the reply posts once on completion instead of editing:
 
 ```ts
 chatSdkChannel({
@@ -160,7 +164,7 @@ Typing indicators post automatically where the adapter supports them: `Working�
 
 ### Optional capabilities degrade gracefully
 
-Adapters do not all implement every operation. When an adapter's `startTyping` or `editMessage` throws a `NotImplementedError` (or an error with code `NOT_IMPLEMENTED`), the channel swallows it: typing indicators are skipped, and a streaming edit falls back to a single final post for the rest of the session. You never have to guard optional capabilities in your own handlers. The same predicate is exported as `isNotImplemented` if you want it in custom `events`:
+Adapters do not all implement every operation. When an adapter's `startTyping` throws a `NotImplementedError` (or an error with code `NOT_IMPLEMENTED`), typing indicators are skipped. An unsupported `editMessage` disables streaming edits for the rest of the session, so later replies post once on completion. If a reply already has a streamed message, eve still attempts the final edit and reports a failure as described above; it never posts the reply again beside that message. The same predicate is exported as `isNotImplemented` if you want it in custom `events`:
 
 ```ts
 import { isNotImplemented } from "eve/channels/chat-sdk";
@@ -175,8 +179,9 @@ chatSdkChannel({
   state: createMemoryState(),
   events: {
     "content.completed"(event, ctx) {
-      const { phase, value } = event.data;
-      if (phase !== "reply" || typeof value !== "string" || !ctx.channel.thread) return;
+      const { kind, phase, value } = event.data;
+      if (kind !== "text" || phase !== "reply" || typeof value !== "string" || !ctx.channel.thread)
+        return;
       return ctx.channel.thread.post({ markdown: value });
     },
   },

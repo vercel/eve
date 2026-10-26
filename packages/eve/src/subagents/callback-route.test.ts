@@ -4,7 +4,6 @@ const resumeRunnableHook = vi.hoisted(() => vi.fn());
 vi.mock("#execution/session-inbox/owner.js", () => ({ resumeRunnableHook }));
 
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
-import type { RouteContext } from "#public/definitions/channel.js";
 
 const position = { sequence: 1, stepIndex: 0, turnId: "child-turn" };
 
@@ -16,7 +15,7 @@ function post(body: unknown, url = AGREED, token = "parent-hook") {
       body: JSON.stringify(body),
       method: "POST",
     }),
-    { params: { token } } as unknown as RouteContext,
+    { params: { token }, requestIp: null, waitUntil: () => {} },
   );
 }
 

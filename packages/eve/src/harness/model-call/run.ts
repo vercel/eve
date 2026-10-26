@@ -106,7 +106,8 @@ export async function runModelStep(
   try {
     result = await caller.call();
   } catch (error) {
-    caller.throwIfCompactionFailed();
+    const compactionFailed = await caller.failIfCompactionFailed();
+    if (compactionFailed !== undefined) return compactionFailed;
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     return reportModelCallFailure(step, error);

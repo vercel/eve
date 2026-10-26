@@ -207,8 +207,9 @@ result yet, the turn keeps running: it pauses only for interactions. The next `m
 same `turnId` means the turn took its results, and `turn.settled` comes only when the turn really
 ends. The model's text before the wait depends on the session:
 
-- **Root sessions:** the text completes as an ordinary reply part (`phase: "reply"`). The person can
-  keep writing, and the turn resumes under the same id.
+- **Root sessions:** the text completes as an ordinary reply part (`phase: "reply"`), including text
+  written before `eve__task_wait` in the same step. The person can keep writing, and the turn resumes
+  under the same id.
 - **Child sessions and a schedule's sessions:** the held text completes as `phase: "narration"`, so
   channels post only the final reply.
 
