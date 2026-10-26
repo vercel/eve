@@ -8,6 +8,10 @@ import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import type { DockerSandboxSession } from "#public/sandbox/docker.js";
 import type { SandboxConnection } from "#public/sandbox/provider.js";
+import { mapConcurrent } from "#shared/map-concurrent.js";
+
+/** Each write is its own `docker exec`, so keep a batch from spawning one per file at once. */
+const DOCKER_WRITE_CONCURRENCY = 8;
 
 export type DockerSandboxExtensions = Pick<DockerSandboxSession, "setNetworkPolicy">;
 
@@ -148,20 +152,26 @@ export function createDockerConnection(input: {
     },
     stop: () => stopDockerContainerIfRunning(cli, containerIdentity),
     async writeFiles(options) {
-      for (const file of options.files) {
-        const result = await cli.run(
-          [
-            "exec",
-            "-i",
-            containerIdentity,
-            "bash",
-            "-lc",
-            `mkdir -p ${shellQuote(posixDirname(file.path))} && cat > ${shellQuote(file.path)}`,
-          ],
-          { signal: options.abortSignal, stdin: file.content },
-        );
-        expectDockerSuccess(result, `write "${file.path}" into sandbox container`);
-      }
+      options.abortSignal?.throwIfAborted();
+      // A batch is not atomic: files written before a rejection stay written.
+      await mapConcurrent(
+        options.files,
+        async (file) => {
+          const result = await cli.run(
+            [
+              "exec",
+              "-i",
+              containerIdentity,
+              "bash",
+              "-lc",
+              `mkdir -p ${shellQuote(posixDirname(file.path))} && cat > ${shellQuote(file.path)}`,
+            ],
+            { signal: options.abortSignal, stdin: file.content },
+          );
+          expectDockerSuccess(result, `write "${file.path}" into sandbox container`);
+        },
+        DOCKER_WRITE_CONCURRENCY,
+      );
     },
   };
 }
