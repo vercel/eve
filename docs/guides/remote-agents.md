@@ -218,6 +218,8 @@ A remote subagent call runs a child session in the remote deployment as a task:
 2. The remote accepts the child and runs its turn while the task works.
 3. The callback delivers the child's reply, which becomes the task's result.
 
+The callback URL must use `http` or `https` and reach the parent at a public address. The remote rejects a create-session request whose callback host is a private, link-local, or reserved IP address, and refuses to deliver a callback to a hostname that resolves to one. Loopback hosts such as `localhost` and `127.0.0.1` work only when the remote runs as a local development server (`eve dev` or `vercel dev`), so parents and remotes that reach each other over a private network can't exchange callbacks.
+
 The parent stream carries the same `task.started`, `child.opened`, and `call.settled` facts as local delegation. A remote child's deployment binding is private: only the parent's stream proxy reads it.
 
 Clients follow a remote child through the parent. [`session.agent(opened).stream()`](./client/streaming#follow-a-subagent) reads the `child.opened` event's `stream` path, a route on the parent deployment. The parent verifies that its session recorded the child for that tool call, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.

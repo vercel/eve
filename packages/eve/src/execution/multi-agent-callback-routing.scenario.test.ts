@@ -267,6 +267,9 @@ describe("multi-agent callback routing", () => {
     // and (post-fix) the agent's public route prefix.
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
+    // The stand-in deployment listens on loopback, which callbacks may only
+    // target on local development servers.
+    vi.stubEnv("EVE_DEV", "1");
     if (publicRoutePrefix !== undefined) {
       vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", publicRoutePrefix);
     }

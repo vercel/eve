@@ -10,7 +10,10 @@ import { decodeJwt } from "#compiled/jose/index.js";
 
 import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import {
+  isEveDevEnvironment,
+  isLocalDevelopmentServer,
+} from "#internal/application/dev-environment.js";
 import {
   isLocalMachineAddress,
   readTrustedDevelopmentPeer,
@@ -874,13 +877,6 @@ function isCrossSiteBrowserRequest(request: Request): boolean {
  */
 function isFromRemotePeer(request: Request): boolean {
   return readTrustedDevelopmentPeer(request.headers) === "remote";
-}
-
-function isLocalDevelopmentServer(): boolean {
-  if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
-    return true;
-  }
-  return isEveDevEnvironment();
 }
 
 const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {

@@ -1,3 +1,9 @@
+import {
+  assertPublicHostname,
+  createPublicDispatcher,
+  fetchWithDispatcher,
+} from "#execution/public-destination.js";
+import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { isObject } from "#shared/guards.js";
 
@@ -11,26 +17,33 @@ const VERCEL_CALLBACK_HOST_ENVS = [
 ] as const;
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 
-/** Posts one framework callback payload with the shared callback transport policy. */
+/** Status of a delivered callback; the response body is discarded. */
+interface SessionCallbackResponse {
+  readonly ok: boolean;
+  readonly status: number;
+}
+
+/**
+ * Posts one framework callback payload with the shared callback transport policy.
+ *
+ * Callback URLs are caller-supplied, so delivery only connects to public
+ * addresses (loopback is also allowed on local development servers), checked
+ * against every resolved address at connect time.
+ */
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
   /** Set false when the caller owns failure logging, such as best-effort activity. */
   readonly logFailures?: boolean;
   readonly timeoutMs?: number;
   readonly url: string;
-}): Promise<Response> {
+}): Promise<SessionCallbackResponse> {
   const timeoutMs = input.timeoutMs ?? SESSION_CALLBACK_TIMEOUT_MS;
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
-    response = await fetch(input.url, {
+    response = await requestCallback(input.url, {
       body: JSON.stringify(input.body),
       headers: await resolveSessionCallbackHeaders(input.url),
-      method: "POST",
-      // Do not follow redirects: a validated callback host could otherwise
-      // 3xx-bounce the framework to an internal/metadata address after the
-      // path/token check has already passed.
-      redirect: "error",
       signal,
     });
   } catch (error) {
@@ -54,7 +67,40 @@ export async function postSessionCallbackRequest(input: {
       error: new Error(`Callback request failed with HTTP ${response.status}.`),
     });
   }
-  return response;
+  return { ok: response.ok, status: response.status };
+}
+
+async function requestCallback(
+  urlText: string,
+  init: {
+    readonly body: string;
+    readonly headers: Record<string, string>;
+    readonly signal: AbortSignal;
+  },
+): Promise<Response> {
+  const url = new URL(urlText);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Callback URL must use http or https.");
+  }
+  const policy = { allowLoopback: isLocalDevelopmentServer() };
+  assertPublicHostname(url.hostname, policy);
+  const dispatcher = await createPublicDispatcher(policy);
+  try {
+    const response = await fetchWithDispatcher(urlText, {
+      ...init,
+      dispatcher,
+      method: "POST",
+      // Do not follow redirects: a validated callback host could otherwise
+      // 3xx-bounce the framework to an internal/metadata address after the
+      // path/token check has already passed.
+      redirect: "error",
+    });
+    // Callers only read the status; drain the body so the dispatcher can close.
+    await response.body?.cancel().catch(() => undefined);
+    return response;
+  } finally {
+    await dispatcher.close();
+  }
 }
 
 function callbackLogFields(input: { readonly body: unknown; readonly url: string }) {

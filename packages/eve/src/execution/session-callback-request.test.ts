@@ -41,7 +41,7 @@ describe("postSessionCallbackRequest", () => {
           },
           url: "https://user:password@agent.example.com/eve/v1/eve/v1/callback/private-token?secret=query#fragment",
         }),
-      ).resolves.toBe(response);
+      ).resolves.toEqual({ ok: false, status: 404 });
 
       expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
         "[eve:execution.session-callback] callback delivery failed",
@@ -136,7 +136,7 @@ describe("postSessionCallbackRequest", () => {
     ],
     [
       "a non-HTTPS callback",
-      { VERCEL: "1", VERCEL_URL: "localhost:3000" },
+      { VERCEL: "1", VERCEL_ENV: "development", VERCEL_URL: "localhost:3000" },
       "http://localhost:3000/eve/v1/activity/token",
     ],
   ])("does not attach ambient credentials for %s", async (_name, env, url) => {
@@ -149,6 +149,38 @@ describe("postSessionCallbackRequest", () => {
     expect(
       new Headers(fetchMock.mock.calls[0]?.[1]?.headers).has("x-vercel-trusted-oidc-idp-token"),
     ).toBe(false);
+  });
+
+  it.each([
+    ["a loopback address", {}, "http://127.0.0.1:3000/eve/v1/callback/token"],
+    ["an IPv6 loopback address", {}, "http://[::1]:3000/eve/v1/callback/token"],
+    ["a localhost name", {}, "http://localhost:3000/eve/v1/callback/token"],
+    ["a private address", { EVE_DEV: "1" }, "http://10.0.0.5/eve/v1/callback/token"],
+    ["cloud metadata", { EVE_DEV: "1" }, "http://169.254.169.254/eve/v1/callback/token"],
+    ["a non-HTTP scheme", { EVE_DEV: "1" }, "file:///eve/v1/callback/token"],
+  ])("rejects %s before connecting", async (_name, env, url) => {
+    vi.stubEnv("EVE_DEV", "");
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+    const fetchMock = stubFetch();
+
+    await expect(postSessionCallbackRequest({ body: { ok: true }, url })).rejects.toThrow(
+      /must not target localhost, private|must use http or https/,
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows loopback callbacks on a local development server", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const fetchMock = stubFetch();
+    const url = "http://127.0.0.1:3000/eve/v1/callback/token";
+
+    await expect(postSessionCallbackRequest({ body: { ok: true }, url })).resolves.toEqual({
+      ok: true,
+      status: 202,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "POST" }));
   });
 });
 
