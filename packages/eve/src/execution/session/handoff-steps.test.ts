@@ -307,10 +307,15 @@ describe("startSuccessorStep", () => {
   it.each([undefined, 0, "default"] as const)(
     "starts a version 3 successor on the original stream with retention=%s",
     async (retention) => {
-      const sessionWritable = new WritableStream<Uint8Array>();
-      getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
+      const chunks: Uint8Array[] = [];
+      const sessionWritable = new WritableStream<Uint8Array>({
+        write(chunk) {
+          chunks.push(chunk);
+        },
+      });
+      getRunMock.mockReturnValue({ getWritable: () => new WritableStream<Uint8Array>() });
       startWorkflowOnDeploymentMock.mockResolvedValue({ runId: "owner-2" });
-      const input = startInput();
+      const input = { ...startInput(), sessionWritable };
       const checkpoint = { ...input.checkpoint, retention };
 
       await expect(startSuccessorStep({ ...input, checkpoint })).resolves.toEqual({
@@ -318,7 +323,11 @@ describe("startSuccessorStep", () => {
         runId: "owner-2",
       });
 
-      expect(getRunMock).toHaveBeenCalledWith("anchor-1");
+      const forwarded = startWorkflowOnDeploymentMock.mock.calls[0]![1][0].sessionWritable;
+      const writer = forwarded.getWriter();
+      await writer.write(new Uint8Array([1, 2, 3]));
+      writer.releaseLock();
+      expect(chunks).toEqual([new Uint8Array([1, 2, 3])]);
       expect(startWorkflowOnDeploymentMock).toHaveBeenCalledWith(
         expect.objectContaining({ workflowId: expect.stringContaining("workflowEntry") }),
         [
@@ -352,6 +361,7 @@ describe("startSuccessorStep", () => {
       checkpoint: createCheckpoint(),
       delivery: { kind: "deliver", payloads: [{ message: "hello" }] },
       hookTokens: ["eve:session:anchor-1:inbox", "http:alias"],
+      sessionWritable: new WritableStream<Uint8Array>(),
       sourceRunId: "owner-1",
       targetDeploymentId: "deployment-b",
     };

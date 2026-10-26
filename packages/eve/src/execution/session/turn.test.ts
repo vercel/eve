@@ -25,7 +25,9 @@ import {
   readTaskTable,
   recordTaskRun,
   settleTaskCalls,
+  tasksWithResults,
   writeTaskTable,
+  type TaskTable,
 } from "#execution/tasks/table.js";
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
@@ -37,6 +39,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { traceTaskToolCallStep } from "#execution/session/task-tool-tracing-step.js";
+import { cancelTasksStep } from "#execution/tasks/steps.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -66,6 +69,10 @@ vi.mock("#execution/session/task-tool-tracing-step.js", () => ({
   startTaskToolCallsStep: vi.fn(async () => Date.now()),
   traceTaskToolCallStep: vi.fn(async () => ({ stateDelta: {} })),
 }));
+vi.mock("#execution/tasks/steps.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#execution/tasks/steps.js")>();
+  return { ...actual, cancelTasksStep: vi.fn(actual.cancelTasksStep) };
+});
 vi.mock("#execution/tools/workflow/apply-run-messages-step.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("#execution/tools/workflow/apply-run-messages-step.js")>();
@@ -75,6 +82,7 @@ vi.mock("#execution/tools/workflow/apply-run-messages-step.js", async (importOri
 beforeEach(() => {
   // Tests that record publishing replace the real step; the rest apply messages for real.
   vi.mocked(applyRunMessagesStep).mockReset();
+  vi.mocked(cancelTasksStep).mockReset();
   vi.mocked(traceTaskToolCallStep).mockClear();
   vi.mocked(routeDeliverToChildren)
     .mockReset()
@@ -1478,6 +1486,135 @@ describe("SessionExecution checkpoints", () => {
     ]);
   });
 
+  it("keeps another principal's message out of a turn held on its task until the task reports", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "BOB" };
+    const created = workingResearchTask();
+    const sessionState = stateWithTasks(created.table);
+    const reportedState = stateWithTasks(
+      settleTaskCalls(created.table, {
+        callIds: ["research-call"],
+        outcome: { output: "Research is done.", status: "completed" },
+        taskId: created.taskId,
+      }).table,
+    );
+    const bobsMessage: DeliverHookPayload = {
+      auth: bob,
+      kind: "deliver",
+      payloads: [{ message: "Add a meeting to my calendar." }],
+    };
+    const payloads: SessionInboxPayload[] = [
+      bobsMessage,
+      {
+        from: {
+          callId: "research-call",
+          input: {},
+          runId: "research-run",
+          sequence: 0,
+          stepIndex: 0,
+          taskId: created.taskId,
+          toolName: "research",
+          turnId: "turn_0",
+        },
+        kind: "outcome",
+        result: { output: "Research is done.", status: "completed" },
+      },
+    ];
+    const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(async () => payloads.shift()) };
+    // The outcome records the task's result, as the real step does before publishing `task.settled`.
+    vi.mocked(applyRunMessagesStep).mockImplementation(
+      stepWork(async (input: Parameters<typeof applyRunMessagesStep>[0]) => ({
+        cancelled: false,
+        serializedContext: input.serializedContext,
+        sessionState: reportedState,
+      })),
+    );
+    const queue = new SessionInputQueue([]);
+    const resumed: { input?: TurnStepInput["input"]; reportedTaskIds?: readonly string[] }[] = [];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "held",
+          hold: "tasks",
+          serializedContext: input.serializedContext,
+          sessionState,
+          taskIds: [created.taskId],
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          resumed.push({
+            input: input.input,
+            reportedTaskIds: tasksWithResults(
+              readTaskTable(input.sessionState.snapshot.session.state),
+            ).map((record) => record.id),
+          });
+          return {
+            action: "park",
+            serializedContext: input.serializedContext,
+            sessionState: reportedState,
+            settled: { output: "Here is the research." },
+          };
+        }),
+      );
+
+    await expect(
+      createExecution({ inbox, queue, sessionState }).runTurn({
+        delivery: {
+          auth: alice,
+          kind: "deliver",
+          payloads: [{ message: "Research the launch." }],
+        },
+      }),
+    ).resolves.toMatchObject({ kind: "park", settled: { output: "Here is the research." } });
+
+    // Alice's turn resumes only once her task reported, with no new delivery, so it keeps her auth.
+    expect(resumed).toEqual([{ input: undefined, reportedTaskIds: [created.taskId] }]);
+    // Bob's message waits for a turn of its own, which carries his auth.
+    expect(queue.takeNext()).toMatchObject({ delivery: bobsMessage, kind: "turn" });
+  });
+
+  it("cancels the tasks still working when a turn ends anyway, so none outlives it", async () => {
+    const created = workingResearchTask();
+    const sessionState = stateWithTasks(created.table);
+    const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(() => new Promise<never>(() => {})) };
+    // A turn that fails settles even though the turn rule would have held it for its task.
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async (input) => ({
+          action: "park",
+          serializedContext: input.serializedContext,
+          sessionState,
+          settled: { isError: true, output: "The model provider failed." },
+        })),
+      );
+    // The real step tells the run to stop and publishes `task.settled`; this test reads the request.
+    vi.mocked(cancelTasksStep).mockImplementationOnce(
+      stepWork(async (input: Parameters<typeof cancelTasksStep>[0]) => ({
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      })),
+    );
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Research the launch." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "park", settled: { isError: true } });
+
+    expect(cancelTasksStep).toHaveBeenCalledTimes(1);
+    expect(cancelTasksStep).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "turn_ended", taskIds: [created.taskId] }),
+    );
+  });
+
   it("does not let steering that woke a wait interrupt the step that reads it", async () => {
     const base = state("");
     const working = createTask(readTaskTable(undefined), {
@@ -1774,6 +1911,27 @@ function createExecution(input: {
     queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
   });
+}
+
+/** A `research` task the turn's call started, whose run is still working. */
+function workingResearchTask(): { readonly table: TaskTable; readonly taskId: string } {
+  const created = createTask(readTaskTable(undefined), {
+    callId: "research-call",
+    kind: "tool",
+    name: "research",
+    resumable: false,
+    turnId: "turn_0",
+  });
+  const table = recordTaskRun(created.table, created.taskId, {
+    hookToken: "research-control",
+    runId: "research-run",
+  });
+  return { table, taskId: created.taskId };
+}
+
+function stateWithTasks(table: TaskTable): DurableSessionState {
+  const base = state("");
+  return { ...base, snapshot: { session: writeTaskTable(base.snapshot.session, table) } };
 }
 
 /** A session whose turn waits on a workflow tool run, so cancelling it has a run to cancel. */

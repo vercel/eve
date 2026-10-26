@@ -21,7 +21,7 @@ import {
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
   hasRunEnded,
   startWorkflowOnDeployment,
@@ -58,6 +58,7 @@ export type SuccessorStartInput = SessionHandoffStart & {
   readonly attemptKey: string;
   readonly checkpoint: SessionCheckpoint;
   readonly hookTokens: readonly string[];
+  readonly sessionWritable: WritableStream<Uint8Array>;
   /** The owner starting the successor, which hands over what it accepts meanwhile. */
   readonly sourceRunId: string;
   readonly targetDeploymentId: string;
@@ -75,7 +76,14 @@ export type SuccessorStart =
  */
 export async function startSuccessorStep(input: SuccessorStartInput): Promise<SuccessorStart> {
   "use step";
-  const { activationToken, anchorRunId, checkpoint, targetDeploymentId, ...start } = input;
+  const {
+    activationToken,
+    anchorRunId,
+    checkpoint,
+    sessionWritable,
+    targetDeploymentId,
+    ...start
+  } = input;
   const { capabilities } = await getWorld();
   // Forced claims move the addresses; the attempt lease must outlive its candidate.
   if (capabilities?.hookForceClaim !== true || capabilities.hookRetention?.active !== true) {
@@ -92,7 +100,8 @@ export async function startSuccessorStep(input: SuccessorStartInput): Promise<Su
     handoffVersion: SESSION_HANDOFF_VERSION,
     kind: "handoff",
     ownerDeploymentId: targetDeploymentId,
-    sessionWritable: getRun(anchorRunId).getWritable<Uint8Array>(),
+    // Preserve the original stream's public encryption metadata across owners.
+    sessionWritable,
     sessionId: anchorRunId,
   };
   // The successor is stamped with this eve version at start, because the

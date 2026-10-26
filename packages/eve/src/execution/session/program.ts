@@ -119,6 +119,7 @@ export async function runPreparedSession(
     inbox,
     isInitialOwner: boot.anchor.kind === "self",
     sessionId: boot.sessionId,
+    sessionWritable: boot.sessionWritable,
   });
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;

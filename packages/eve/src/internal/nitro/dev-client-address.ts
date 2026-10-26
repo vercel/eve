@@ -71,13 +71,16 @@ export function readTrustedDevelopmentPeer(headers: Headers): "local" | "remote"
 }
 
 /**
- * Whether a socket peer address belongs to this machine. With `--host` bound
+ * Whether a socket peer address or URL host name belongs to this machine. With `--host` bound
  * to a LAN address, the developer's own clients connect from that address
  * rather than loopback.
  */
 export function isLocalMachineAddress(address: string): boolean {
   if (isLoopbackHostname(address)) return true;
-  const unmapped = address.toLowerCase().replace(/^::ffff:/u, "");
+  const unmapped = address
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/u, "$1")
+    .replace(/^::ffff:/u, "");
   return Object.values(networkInterfaces()).some((entries) =>
     entries?.some((entry) => entry.address.toLowerCase() === unmapped),
   );

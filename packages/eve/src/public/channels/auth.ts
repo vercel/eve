@@ -11,7 +11,10 @@ import { decodeJwt } from "#compiled/jose/index.js";
 import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { readTrustedDevelopmentPeer } from "#internal/nitro/dev-client-address.js";
+import {
+  isLocalMachineAddress,
+  readTrustedDevelopmentPeer,
+} from "#internal/nitro/dev-client-address.js";
 import { createLogger } from "#internal/logging.js";
 import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
@@ -834,6 +837,14 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * neither flag, so `localDev()` authenticates nothing there. Layer a real
  * authenticator on those hosts.
  *
+ * On a development server, `localDev()` also refuses requests a browser sent
+ * on behalf of another site: a request addressed to a host that is neither
+ * loopback nor one of this machine's addresses, or one whose `Origin` is not. Browsers set both themselves and
+ * send `Origin` on every cross-origin request that can change state, so a web
+ * page cannot use the developer's browser to reach the local agent, including
+ * through DNS rebinding. Frontends on any loopback host and port, or on this
+ * machine's own address, still authenticate.
+ *
  * On `eve dev`, `localDev()` also refuses callers whose connection comes from
  * another machine, such as LAN clients of a server started with
  * `--host 0.0.0.0`. A tunnel or reverse proxy on this machine still forwards
@@ -842,9 +853,18 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  */
 export function localDev(): AuthFn<Request> {
   return (request) =>
-    isLocalDevelopmentServer() && !isFromRemotePeer(request)
+    isLocalDevelopmentServer() && !isCrossSiteBrowserRequest(request) && !isFromRemotePeer(request)
       ? LOCAL_DEV_SESSION_AUTH_CONTEXT
       : null;
+}
+
+function isCrossSiteBrowserRequest(request: Request): boolean {
+  // Under DNS rebinding the browser addresses the attacker's own host name.
+  if (!isLocalMachineAddress(new URL(request.url).hostname)) return true;
+  const origin = request.headers.get("origin");
+  if (origin === null) return false;
+  const hostname = URL.parse(origin)?.hostname;
+  return hostname === undefined || !isLocalMachineAddress(hostname);
 }
 
 /**
