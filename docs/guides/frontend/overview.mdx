@@ -119,19 +119,21 @@ only a tool or hook that uses the sandbox waits for the rest of its start. If th
 to start during prewarming, the first turn that uses it starts it instead. eve deletes the
 sandbox when the session ends, including when an unused prewarmed session times out.
 
-For an existing session, `prewarm()` checks the owner against the exact deployment accepting
-that request. On Vercel, an idle owner on another deployment can transfer in the background
-before the next `send()`. The session ID, history, stream, and expiry stay the same; no model
-call runs. An owner already serving that deployment needs no workflow wake-up. Active turns are
-never interrupted; an active turn can finish before preparation, and a queued real message takes
-priority. An owner with pending tasks or input requests can skip the hint. Older owners without
-preparation support and Worlds without deployment affinity are left alone.
+For an existing session, `prewarm()` checks which deployment runs the session against the exact
+deployment accepting that request. On Vercel, an idle session on another deployment can move to
+the accepting deployment in the background before the next `send()`. The session ID, history,
+stream, and expiry stay the same; no model call runs. A session already running on that
+deployment is not woken. Active turns are never interrupted; an active turn can finish before
+preparation, and a queued real message takes priority. A session with pending tasks or input
+requests can skip the hint. A session started by an eve version without preparation support, or
+running on a workflow backend without deployment routing, is not moved.
 
 Call `agent.prewarm()` once when a new typing burst begins, with an application-level cooldown
 if you also retry during long drafts. eve shares concurrent calls; it does not listen to inputs
 or poll deployments. A production alias targets its current deployment; a preview alias targets
 that preview. Requests pinned to an immutable deployment (including deployment-skew routing)
-cannot discover a newer deployment. Local development retains session-creation behavior.
+cannot discover a newer deployment. In local development, `prewarm()` can create a new session,
+but does not move an existing one.
 
 `client.sessions.attach(sessionId).prewarm({ signal })` returns `ready`, `accepted`,
 `unsupported`, or `no_active_session`. `accepted` means the hint was persisted, not that handoff

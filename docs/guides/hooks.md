@@ -70,7 +70,7 @@ export default defineHook({
 });
 ```
 
-A route-only `defineChannel` with no event handlers keeps the kind `"http"`, so `isChannel` does not match it in a hook. Compare `ctx.channel.kind === "http"` for those channels instead.
+Route-only channels use the same path-derived identity, even when they have no event handlers. Use `isChannel` with the authored channel definition rather than checking for the former `"http"` kind.
 
 For typed channel metadata in dynamic resolvers or instrumentation, narrow with `isChannel` the same way; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
 
@@ -207,12 +207,14 @@ See [Positions](../concepts/sessions-runs-and-streaming#positions) for the full 
 
 ## Execution order
 
-When a session commits facts while it runs, the step that owns the session does four things in order:
+Each committed line is published in this order:
 
 1. Write. The line is written to the durable stream.
 2. Channel delivery. The channel adapter handler runs for each fact.
 3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-4. Before an ordinary model call, dynamic functions compute the model and capabilities from the latest committed session. They do not subscribe to events.
+4. Cancellation requests queued by `ctx.cancel()` take effect after the handlers return.
+
+Before an ordinary model call, dynamic functions compute the model and capabilities from the latest committed session. They do not subscribe to events.
 
 Hooks always run after the line is durably recorded, so if a hook throws, the stream stays consistent.
 

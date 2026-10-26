@@ -15,7 +15,7 @@ export default defineEvalConfig({});
 
 ## Single-turn evals
 
-The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and the returned turn’s `.message` is the assistant reply:
+The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and the returned turn’s `.reply` is the assistant reply:
 
 ```ts title="evals/weather/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
@@ -25,7 +25,7 @@ export default defineEval({
   async test(t) {
     const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
-    t.check(turn.message, includes("Sunny"));
+    t.check(turn.reply, includes("Sunny"));
   },
 });
 ```
@@ -69,8 +69,8 @@ import { includes } from "eve/evals/expect";
 export default defineEval({
   async test(t) {
     const draft = await t.send("Draft the follow-up email.");
-    t.check(draft.message, includes("Best regards"));
-    t.judge("professional tone", { on: draft.message }).atLeast(0.6);
+    t.check(draft.reply, includes("Best regards"));
+    t.judge("professional tone", { on: draft.reply }).atLeast(0.6);
 
     await draft.session.send("Now send it.");
     t.calledTool("send_email");
@@ -106,7 +106,7 @@ export default defineEval({
 Every `t.session()` or `t.send()` creates a new independent conversation. Continue an existing conversation through its session handle. Events from all sessions feed the same run-level assertions.
 
 - `t.session(options?)` creates a session without starting a turn or consuming its stream. It resolves on `202 Accepted` with an `EveEvalSession` whose `.id` and `.state` are available. Options accept per-request `headers` and `signal`; creation uses the eval timeout signal by default.
-- `t.send(message, options?)` creates a new session with its first message in one request and waits for the turn to settle. The returned turn carries `.session`, `.message`, and `.expectOk()`.
+- `t.send(message, options?)` creates a new session with its first message in one request and waits for the turn to settle. The returned turn carries `.session`, `.reply`, and `.expectOk()`.
 - `session.send(message, options?)` sends a follow-up on that session and waits for it to settle.
 - `session.start(message, options?)` starts a text turn and returns as soon as the server accepts it. The live turn exposes `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`.
 - `session.cancel()` returns a delivery for cooperative cancellation. A live idle session also accepts a no-op cancellation; an inactive session throws `SessionNotActiveError`.
@@ -153,7 +153,7 @@ and participate in timeout cleanup even when no message was sent.
 Replace `t.newSession()` and `t.prewarm()` with `const session = await t.session()`.
 Replace consecutive `t.send()` calls with `session.send()` calls, or continue the first
 returned turn through `turn.session.send()`. Read identity, cursor, events, and transcript
-from `session`; read replies from `turn.message`. Session operations such as `respond()`,
+from `session`; read replies from `turn.reply`. Session operations such as `respond()`,
 `requireInteraction()`, and `cancel()` also move from `t` to `session`.
 
 ## In-flight turns
@@ -207,7 +207,7 @@ export default rows.map((row) =>
     async test(t) {
       const turn = await t.send(row.prompt);
       t.succeeded();
-      t.check(turn.message, equals(row.sql));
+      t.check(turn.reply, equals(row.sql));
     },
   }),
 );

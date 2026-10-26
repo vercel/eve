@@ -102,13 +102,13 @@ approval: ({ session, toolInput }) => {
 
 For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
 
-Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. A denied call never starts: it settles `call.settled` with `outcome: "rejected"`, `cause: { policy: "approval" }`, and a `TOOL_EXECUTION_DENIED` output, whether the policy denies it as the model calls it or when an approved call is checked again. A tool that runs and throws settles `failed`. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by an approval `once()` remembered records the same `{ policy: "approval" }`; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. A denied call never starts: it settles `call.settled` with `outcome: "rejected"`, `cause: { policy: "approval" }`, and a `TOOL_EXECUTION_DENIED` output, whether the policy denies it as the model calls it or when an approved call is checked again. A tool that runs and throws settles `failed`. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by a remembered `once()` approval records the same `{ policy: "approval" }`; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
 Approval is not an exactly-once guarantee for a charge or email. Give non-idempotent side effects their own idempotency keys.
 
 ### Remember approval for a tool
 
-`once()` remembers the latest decision people gave its prompts for the resolved tool name, across turns and context clears, until the session ends. A remembered approval covers later calls to that tool regardless of their input; it does not clear a different tool. A later denial of a `once()` prompt for the tool replaces it, so the next call asks again. When one delivery answers several of those prompts, a denial among its answers stands. Approving a prompt asked by `always()` or by a policy that does not return `once()`'s decision remembers nothing, and consulting `once()` before choosing another branch records nothing. Existing pending prompts still need their own answers.
+`once()` remembers the latest decision people gave its prompts for the resolved tool name, across turns and context clears, until the session ends. A remembered approval covers later calls to that tool regardless of their input; it does not clear a different tool. A later denial of a `once()` prompt for the tool replaces it, so the next call asks again. When one delivery answers several of those prompts, a denial among its answers stands. Approving a prompt asked by `always()` or by a policy that does not return `once()`'s decision remembers nothing, and so does a wrapping policy that calls `once()` but returns a different status. Existing pending prompts still need their own answers.
 
 A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions. When wrapping `once()` in another policy, forward the policy context and return its status object unchanged.
 
@@ -148,7 +148,7 @@ export default defineTool({
 The `response` policy receives:
 
 - `request`: the stable `interactionId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `principal`: the authenticated principal whose turn requested the call, or `null` when that caller was unauthenticated or anonymous. eve captures `request.principal` when the approval is requested, so it stays the same while other people continue the session.
-- `response`: the submitted `decision`, `"approve"` or `"deny"`, plus `principal`: the authenticated principal that submitted it, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity. The policy runs for both decisions, so a responder it rejects can neither approve nor cancel the call.
+- `response`: the submitted `decision`, `"approve"` or `"deny"`, plus `principal`: the authenticated principal that submitted it, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity. The policy runs for both decisions, so a responder it rejects can neither approve nor deny the call.
 - `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
 - `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
 
@@ -188,7 +188,7 @@ export default defineTool({
 });
 ```
 
-A refused response settles `refused` and leaves the approval open for another answer. An allowed answer is admitted, but submitting it alone does not approve the call: wait for `interaction.settled` to confirm the decision.
+When the policy refuses a response, its `response.settled` reports `outcome: "refused"` and the approval stays open for another answer. Submitting an answer does not approve the call on its own: wait for `interaction.settled` to confirm the decision.
 
 ### Skipping approval for schedule-dispatched turns
 
@@ -262,7 +262,7 @@ The run picks back up exactly where it parked. Because the pause is durable, not
 
 When a subagent requests input, its parent session relays it as its own `interaction.opened`, with `origin` naming the child session and request, and `origin.call` naming the child's call. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
-A message from the parent agent to a subagent never answers the subagent's tool approval or session-limit request, even when its text matches an option such as `approve` or `continue`. Only a person's structured answer, routed through the parent session, settles these requests. The subagent still receives the parent's message as an ordinary message. It steers the turn past a pending approval, which resolves as `ignored`, and waits behind a session-limit request until a person answers it.
+A message from the parent agent to a subagent never answers the subagent's tool approval or session-limit request, even when its text matches an option such as `approve` or `continue`. Only a person's structured answer, routed through the parent session, settles these requests. The subagent still receives the parent's message as an ordinary message. It steers the turn past a pending approval, whose interaction settles `withdrawn`, and waits behind a session-limit request until a person answers it.
 
 Approval is consent only. An approved tool call runs with the requesting user's identity, connections, and credentials, including its policy recheck. The approver's access is never lent to the call. Subsequent tool calls in the turn also stay with the original owner.
 

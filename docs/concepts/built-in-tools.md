@@ -342,7 +342,7 @@ Entries the agent declares count from the session's first step. An entry a dynam
 - `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes. A connection tool call the server doesn't answer within 5 minutes is cancelled and fails with an error such as `"linear" did not answer list_issues within 5 minutes. It may still have run, so check before you retry.` The server may finish the call after eve stops waiting, so a tool that changes data may already have made the change.
 - `eve__skill({ name })` loads the named skill, deferred or not, and returns its instructions. An unknown name fails with the closest skill names, a tool's name fails with a reminder to call it with `eve__tool` or directly, and a name that matches a connection says to find its tools with `eve__search({ query: "<connection>__" })`.
 
-After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load reports a `load-skill` action and a `load-skill-result`, both with the skill's `name`, and an `execute_tool eve:load-skill` span. Approval policies, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
+After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load publishes `call.requested` with `capability: { kind: "skill", name }`, followed by `call.settled` for its outcome. Approval policies, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
 
 eve tells the model what it can reach in an append-only context message rather than in the system prompt: which kinds of deferred entries exist, up to 20 namespaces (the first `__` segment of deferred names, such as `sre` for `sre__list_alerts`), and up to 20 connections with their descriptions. It never names a deferred entry, so deferred entries stay out of context until `eve__search` finds them. A later step appends the listing again only when that changes; a deferred entry added to a listed namespace, or without one, changes nothing. After the session first reaches each kind of entry, adding or removing entries, signing in, or resolving more dynamic connections doesn't change the catalog tools, so the cached prompt prefix holds.
 
@@ -439,7 +439,7 @@ and line bounds. Relative paths resolve against the workspace root; `$HOME` path
 outside it are rejected. Ripgrep respects `.gitignore`; the POSIX fallback does not.
 
 Results contain `content`, `matchCount`, `outputMode`, `path`, and `truncated`. Use
-`outputMode: "content"` when migrating a caller that previously expected matching lines.
+`outputMode: "content"` to return matching lines.
 
 ### `no_reply`
 

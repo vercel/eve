@@ -128,9 +128,9 @@ return {
 eve adds each message to the model calls as a user-role message attributed to
 the slot. Provider content is never promoted to system instructions.
 
-What a turn recalls stays for the rest of the session: every model call reads
-each turn's recall just ahead of that turn's input, where earlier calls read it,
-so the prompt ahead of it stays cached. The `id` decides what a later recall
+What a turn recalls stays for the rest of the session: each turn's recall sits
+just before that turn's input in every later model call, so the prompt prefix
+stays cached. The `id` decides what a later recall
 does with it:
 
 | Message           | Effect                                                                                                                      |
@@ -156,10 +156,10 @@ authored tools.
 
 A tool closes over the locked scope, so it cannot be redirected to another
 tenant or caller by the model. Like recall, eve resolves the scope once per
-turn and principal and keeps it for that turn, so the tools and recall read the
-same channel. A new turn or principal resolves it again. A fresh process in the
+turn and principal and keeps it for that turn, so the tools and recall use the
+same scope. A new turn or principal resolves it again. A fresh process in the
 same turn, after a restart, calls `tools()` again with the kept scope rather
-than resolving it again, so its tools reach the same scope.
+than resolving it again.
 
 ## Lifecycle
 
@@ -171,8 +171,8 @@ than resolving it again, so its tools reach the same scope.
 
 eve recalls before the first model call of each turn, and again when the
 session's principal changes. Recalled messages stay outside history, so
-compaction never summarizes them: recall for a turn compaction summarized moves
-to just after the summary.
+compaction never summarizes them. When compaction summarizes a turn, that
+turn's recalled messages move to just after the summary.
 
 Before automatic or requested compaction rewrites history, eve calls
 `capture["compaction.requested"]` with the history it is about to rewrite, so a
@@ -190,7 +190,7 @@ A new scope, such as another principal's, also starts over.
   continues with any queued follow-up. An `AbortError` with an active
   signal still fails the turn.
 - A throwing or invalid `tools()` result fails the turn before the model call,
-  like any other [dynamic tool](../guides/dynamic-capabilities#failures).
+  like any other [dynamic tool](../guides/dynamic-capabilities#errors-and-recovery).
 - A throwing `capture["turn.completed"]` is logged after the response and does
   not rewrite the completed turn.
 - A throwing `capture["compaction.requested"]` fails the compaction before it

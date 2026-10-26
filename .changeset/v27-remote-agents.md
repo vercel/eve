@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Remote agents now use protocol 3 to relay approvals, questions, and sign-ins. Upgrade parents and children together, or let in-flight child work finish first: older peers can still exchange results, but cannot relay interactions through an upgraded parent.
+Remote agents now use protocol 3 and can still relay approvals, questions, and sign-ins from protocol-2 children. Upgrade callers before their remote agents, or both together: protocol-3 children cannot relay human-input requests to older callers.

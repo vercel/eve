@@ -146,7 +146,7 @@ session:
   model writes while its turn holds for tasks is narration (`content.completed` with
   `phase: "narration"`): clients that render the stream show it, and channels don't post it.
 
-**Receipts.** A task call returns a receipt with a `taskId`; a resumable task can be called again using that ID. The result arrives later as a `task.result` message.
+**Receipts.** A task call returns a receipt with a `taskId`; a resumable task can be called again using that ID.
 
 **Results.** Each result arrives once, as a `<task_result>` block in a `task.result` message that
 eve appends at the next step boundary, right after `eve__task_wait` returns, or when a held turn
@@ -173,7 +173,7 @@ deploy-4hd8sa completed; its result follows. 1 task is still working: researcher
 ```
 
 **`eve__task_cancel({ taskId })`** stops a task's current work and says so. A cancelled agent task
-ends; to delegate again, start a new agent task. The task stops reporting immediately; eve asks a local child whose address arrives afterward to end through its own cleanup, without holding the next parent turn. Cleanup is best effort: failures are logged, and a child whose inbox is unavailable may remain running. Other resumable tasks stay available, and their
+ends; to delegate again, start a new agent task. The task stops reporting immediately. If a local child's opening request completes after cancellation, eve asks it to end without holding the next parent turn. Cleanup is best effort: failures are logged, and a child whose inbox is unavailable may remain running. Other resumable tasks stay available, and their
 answer tells the model how to give them new work. When the task has no work to stop, because it
 already finished or is an idle resumable task, `eve__task_cancel` says that instead:
 
@@ -232,7 +232,7 @@ correct an agent by calling it again with its `taskId`, or stop a task with `eve
 - **A failed turn** cancels every working task.
 - **The end of the session** ends every task.
 
-Cancelled agent and one-shot tasks end immediately; cleanup of a late child does not hold the next turn. Cancelled work's usage still counts toward session limits. A `serve` task stays available if its body catches the abort and returns to `receive()` within 30 seconds; otherwise it ends.
+Cancelled agent and one-shot tasks end immediately. Cancelled work's usage still counts toward session limits. A `serve` task stays available if its body catches the abort and returns to `receive()` within 30 seconds; otherwise it ends.
 
 ## Stream events
 

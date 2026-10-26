@@ -23,8 +23,8 @@ agent/instrumentation/
   audit.ts  lifecycle instrumentation
 ```
 
-This instrumentation records tool timing and identity without receiving tool
-arguments or results:
+This instrumentation measures the time from a call being requested until it
+settles, including any approval wait, without receiving arguments or results:
 
 ```ts title="agent/instrumentation/audit.ts"
 import { defineInstrumentation } from "eve/instrumentation";
@@ -152,11 +152,10 @@ Prefer `recordInputs: false` or `recordOutputs: false` when the destination does
 
 ## Lifecycle events
 
-`defineInstrumentation({ events })` supports the following event names. What a
-session's stream records keeps the stream's names and outcomes: `turn.settled`
-carries the turn's `outcome` as its fact does. A start and its terminal event
-share an `idempotencyKey`; use it as a stable operation key when upserting
-records across replays.
+Lifecycle events derived from session facts use the same names and outcomes as
+the stream. For example, `turn.settled` carries the turn's `outcome`. Match an
+operation's start and terminal events by their shared `idempotencyKey` when
+upserting records across replays.
 
 | Lifecycle        | Events                                                 | Meaning                                                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

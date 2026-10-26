@@ -290,13 +290,12 @@ provider replays from its prompt cache on every step. `costUsd` is the model
 token cost in US dollars that AI Gateway reports with each step, not tool or
 infrastructure spend; it is unset when no step reported a cost.
 
-A window starts on the stream line where the session's own budget prompt
-settles `accepted`: `window` is `total` minus the session's
-[total](./concepts/sessions-runs-and-streaming#replies-and-narration) as of that line. Before
+A window starts when the session's own budget prompt is accepted: `window` is
+`total` minus the session's
+[total](./concepts/sessions-runs-and-streaming#replies-and-narration) at that point. Before
 the first approval, `window` equals `total`. Accepting a budget prompt that a
-subagent relayed starts the subagent's window, not the parent's. eve derives
-the window from the stream rather than separate saved state, so it stays the
-same across deployment handoffs and replayed lines.
+subagent relayed starts the subagent's window, not the parent's. The window
+stays the same across deployment handoffs and replays.
 
 When `sessionUsage` is omitted, the limit is `40_000_000` new input tokens per
 window:

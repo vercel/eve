@@ -370,7 +370,7 @@ Local `eve dev` also mounts bundled development extensions without creating a pr
 
 `eve extension build` records the eve version used to build the extension. When you mount a package, eve checks its distribution before loading extension code. A distribution built with a newer eve release needs that release or later; build with the oldest eve release you want to support and test the same distribution with newer consumers. An unsupported distribution generation needs a rebuilt extension or a compatible release. npm peer ranges do not replace this check.
 
-**Extensions built with the old epoch-based manifest need a rebuild** when you upgrade to the first eve release that uses the new format. Upgrade to a compatible extension release, or rebuild a source-backed workspace extension with that eve release. An installed, source-free extension cannot be rebuilt by the consuming app. A distribution built with the release candidate can continue to work on 1.0 if eve retains its distribution generation; a breaking change may require another rebuild.
+**Extensions built with the old epoch-based manifest need a rebuild** when you upgrade to the first eve release that uses the new format. Upgrade to a compatible extension release, or rebuild a source-backed workspace extension with that eve release. An installed, source-free extension cannot be rebuilt by the consuming app.
 
 ## What to read next
 

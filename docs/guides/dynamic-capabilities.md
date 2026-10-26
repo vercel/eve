@@ -44,7 +44,7 @@ export default defineDynamic(async (ctx) => {
 });
 ```
 
-After a cold start, eve evaluates the function again. The memo returns the saved tables without querying the database, and ordinary code rebuilds the tools and their callbacks. Helpers, factories, schemas in variables, and provider packages work without compiler rewriting. `defineDurableCallback` and `defineDurableSchema` are no longer needed or exported.
+After a cold start, eve evaluates the function again. The memo returns the saved tables without querying the database, and ordinary code rebuilds the tools and their callbacks. Helpers, factories, schemas in variables, and provider packages work without compiler rewriting.
 
 ### Choose a lifetime
 
@@ -112,7 +112,7 @@ export default defineDynamic((ctx) =>
 
 Filesystem resources still compile, including the child's tools, instructions, skills, and nested subagents. The dynamic config supplies runtime settings. Local child configs require a static string model ID. Put packaging configuration such as `build.externalDependencies` on the root agent, not beside or inside the dynamic function. Build and Workflow-world configuration cannot be chosen at runtime.
 
-Single-file remote subagents return `defineRemoteAgent(...)` or `null`. Their URL is a string; compute it in the dynamic function. Credentials can close over memo results. Later requests rebuild credentials from the child's private binding, not from a new caller. Memos must have a bound result, and the child name and URL must match. `ctx.messages()` is unavailable during this restoration; keep conversation-based decisions inside a memo. See [Remote agents](./remote-agents).
+Single-file remote subagents return `defineRemoteAgent(...)` or `null`. Their URL is a string; compute it in the dynamic function. Credentials can close over memo results. Later requests to the same child rebuild those credentials from the session as it was when the child was opened, not from a newer caller. The rebuild fails if it reads a memo the child wasn't opened with, or if the child's name or URL changed. `ctx.messages()` is unavailable during that rebuild; keep conversation-based decisions inside a memo. See [Remote agents](./remote-agents).
 
 Availability is capability composition, not an authorization boundary. Sensitive child tools still need authorization and approval checks.
 
@@ -159,7 +159,7 @@ Build callbacks and schemas with ordinary code. Save observations in memos when 
 
 ### Create dynamic tools in a package
 
-Packages can return ordinary `defineTool` values, including callbacks made by factories. There is no separate callback-registration API. Prefer an [extension](../extensions) when distributing a namespaced collection of capabilities.
+Packages can return ordinary `defineTool` values, including callbacks made by factories. There is no separate callback-registration API; `defineDurableCallback` and `defineDurableSchema` were removed. Prefer an [extension](../extensions) when distributing a namespaced collection of capabilities.
 
 ### Identity and redeploys
 
@@ -177,9 +177,11 @@ Names use ASCII letters, digits, underscores, and dashes, start with a letter, a
 
 Dynamic tools, connections, and skills can override authored static capabilities of the same kind by name. Two dynamic connection definitions cannot emit the same name. For tools and skills, the earlier definition keeps a duplicate name and eve logs an error for the other. Dynamic tools cannot take workflow-tool or subagent names. Other invalid results and name conflicts fail the turn rather than silently omitting capabilities.
 
-### Events
+<span id="events"></span>
 
-Dynamic values have no lifecycle event map. Every ordinary model call evaluates them against the latest committed session. A steering message or completed sign-in is therefore visible without starting a new turn. A turn-keyed memo stays fixed until a new turn.
+### Steering and sign-in
+
+Every ordinary model call evaluates dynamic values against the latest committed session. A steering message or completed sign-in is therefore visible without starting a new turn. A turn-keyed memo stays fixed until a new turn.
 
 ### Execution order
 
@@ -202,7 +204,14 @@ export default defineDynamic((ctx) => {
 });
 ```
 
-A skill with only `content` does not start a sandbox. Skills with files install their package in the sandbox; changed packages replace earlier files. Installing does not delay the model call: eve writes the package in the background, and a tool or hook that uses the sandbox waits until the write finishes. If the write fails twice in a row, eve logs a warning and writes the package again on the next model call. When the session detects that its sandbox was recreated, the next evaluation reinstalls the package even when its content is unchanged. A replacement made by a subagent or workflow step sharing that sandbox may go undetected; in that case the files are not rewritten until the package changes. Omitting `files` from a skill that remains available keeps its installed files; withdraw the skill to remove them. Keep caller-specific instructions in `content`, or withdraw the skill when the caller should no longer have its files.
+A skill with only `content` does not start a sandbox. Skills with files install their package in the sandbox; changed packages replace earlier files:
+
+- Installing does not delay the model call: eve writes the package in the background, and a tool or hook that uses the sandbox waits until the write finishes.
+- If the write fails twice in a row, eve logs a warning and writes the package again on the next model call.
+- When the session detects that its sandbox was recreated, the next evaluation reinstalls the package even when its content is unchanged. A replacement made by a subagent or workflow step sharing that sandbox may go undetected; in that case the files are not rewritten until the package changes.
+- Omitting `files` from a skill that remains available keeps its installed files; withdraw the skill to remove them.
+
+Keep caller-specific instructions in `content`, or withdraw the skill when the caller should no longer have its files.
 
 `deferred: true` keeps a skill out of the announcement, while leaving it discoverable through `eve__search` and loadable with `eve__skill`.
 

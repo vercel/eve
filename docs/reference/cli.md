@@ -334,11 +334,11 @@ eve remote info --url https://agent.example.com
 ### `eve remote connect`
 
 ```bash
-eve remote connect --url <url> [-H "Name: value"]
+eve remote connect --url <url> [--input <text>] [-H "Name: value"]
 eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
 
-Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. To answer that session's pending request, use the client API; `eve remote connect` opens a new conversation instead. `--print` does not answer pending requests or continue a session. For scripted multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
+Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. `--print` starts a new conversation each time and does not answer pending requests; to answer that session's pending request or script multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
 

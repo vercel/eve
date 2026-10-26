@@ -167,7 +167,7 @@ export default defineTool({
 
 The choice above is typed as `"billing" | "support"`. Each question appears under
 its authored key in `result.answers`. Results also include normalized token usage in `usage`.
-These are eve-owned contracts, independent of the AI SDK's experimental result metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
+To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
 `decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`.
 Pass `signal: ctx.abortSignal` to cancel the request. Import `DecisionModel`, `DecisionState`,

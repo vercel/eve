@@ -9,7 +9,7 @@ A skill is an on-demand procedure. The model pulls it in with `eve__skill({ name
 
 ## A playbook per principal
 
-`ctx.session.auth.current` holds the most recent caller, or `null` if there isn't one. Its `attributes` are the claims your auth layer stamped on, including the team. Select the team, then render that team's playbook as a skill:
+`ctx.session.auth.current` holds the most recent caller, or `null` if there isn't one. Its `attributes` are the claims your auth layer stamped on, including the team. Select the team, then return that team's playbook as a skill:
 
 ```ts title="agent/skills/team-playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
@@ -71,7 +71,7 @@ export default eveChannel({
 });
 ```
 
-Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model loads the skill with `eve__skill`, queries the sample data, and applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and ask again. The selected team changed, so eve installs Finance's playbook before the next model call, and the same question uses Finance's reconciliation rules.
+Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model loads the skill with `eve__skill`, queries the sample data, and applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and ask again. The selected team changed, so eve offers Finance's playbook before the next model call, and the same question uses Finance's reconciliation rules.
 
 Because the team comes from authenticated claims, not from the message, one tenant can't borrow another's playbook through the message content.
 

@@ -62,7 +62,7 @@ Before a model call, eve checks the projected history together with the effectiv
 
 Compaction reserves space for those instructions and tools while reducing conversation history. It cannot shrink the instructions or tool catalog themselves, so keep them within the selected model's context window.
 
-User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without rerunning their static definitions or dynamic definitions. System-role instructions remain outside history and continue to apply after either operation.
+User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without reinserting unchanged instructions. System-role instructions remain outside history and continue to apply after either operation.
 
 Recalled memory stays outside history too. eve recalls before the first model call of each turn, and every later model call reads that turn's recall just ahead of the turn's input. Compaction does not summarize it; a provider can capture before compaction rewrites history. Clear drops what earlier turns recalled, though not the provider's external data, and the next turn recalls again.
 

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Remote session stream proxies now reject unexpected response types and enforce non-executable MIME types with `nosniff`, including upstream errors. Unexpected error content types produce generic JSON without changing the upstream error status.
+Remote session stream proxies now reject unexpected content types and prevent upstream responses from being served as executable content. Error responses with unexpected content types are replaced with generic JSON while preserving the error status.

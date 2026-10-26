@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Breaking: replace `eve remote invoke` and its resumable JSON workflow with `eve remote connect --print <prompt>` for one-shot remote requests. The new mode prints the final assistant text to stdout and exits; interactive `eve remote connect` remains unchanged. Use the `eve/client` API for scripted multi-turn sessions and input responses.
+Replace `eve remote invoke` and its resumable JSON workflow with `eve remote connect --print <prompt>` for one-shot requests that print the final assistant text and exit. Interactive `eve remote connect` is unchanged; use `eve/client` for scripted multi-turn sessions and input responses.

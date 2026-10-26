@@ -41,19 +41,17 @@ using another entry does not require them.
 | `eve/next`                                 | `next` 16 and `react` 19                              |
 | `eve/sveltekit`, `eve/tanstack`            | `vite` 8.3.1 or later in v8                           |
 | `eve/nuxt`                                 | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
-| Chat SDK, Linq, and Photon channels        | `chat` 4 for their SDK-backed handles                 |
+| Chat SDK, Linq, and Photon channels        | `chat` 4.42 or later in v4                            |
 | `eve/channels/linq`                        | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
 | `eve/sandbox/just-bash`                    | `just-bash` 3.6 or later in v3                        |
 | `@vercel/connect/eve` with eve connections | `@vercel/connect` 2.5.2 or later in v2                |
 
-Connect events additionally require a Connect release that supplies its events bridge.
-The packed-consumer matrix checks every typed public entry with `skipLibCheck: false`,
-using only required peers for core entries and explicit integration peers for the rest.
-It has no diagnostic baseline. SDK-backed handles keep the app's SDK identity rather than copied classes.
+Connections with `experimental.events` require a static Connect auth provider with its events bridge.
+SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
 
-The AI SDK is a required peer and has its own Zod peer requirement. Client inspection types
-(`AgentInfoResult`, its entry types, and `HealthResult`) are eve-owned data contracts, not
-inferences from eve's runtime validators.
+The AI SDK is a required peer and has its own Zod peer requirement. To type the results of
+`client.info()` and `client.health()`, import `AgentInfoResult`, its entry types (such as
+`AgentInfoToolEntry`), and `HealthResult` from `eve/client`.
 
 ## The define\* helpers
 

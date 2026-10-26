@@ -133,8 +133,8 @@ last 1,024 keys, so use a new key for new input. The compact and clear routes
 accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; reset accepts `reason`.
 
 Open payload objects such as `clientContext` keep their existing contracts. Delegated requests
-with a `callback` also recognize the retired `activityObserver` field as an explicit legacy no-op.
-This does not allow arbitrary advisory fields. Authentication and existing value validation still
+with a `callback` accept, and ignore, the retired `activityObserver` field so older senders keep
+working. No other unknown fields are accepted. Authentication and existing value validation still
 apply, including permission checks for forwarded principals and tool stubs.
 
 A newer client sending an unsupported field to an older server with strict validation fails

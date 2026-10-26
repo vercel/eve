@@ -169,7 +169,7 @@ const { delivery } = await client.sessions.create({
 const turn = await delivery.result();
 if (turn.status === "failed") throw new Error("The agent turn failed. Check the dev server logs.");
 if (turn.interactions.length > 0) {
-  const prompts = turn.interactions.map((request) => request.prompt).join("\n");
+  const prompts = turn.interactions.map((interaction) => interaction.request.prompt).join("\n");
   throw new Error(
     `Session ${turn.sessionId} needs your input before it can create the chart:\n${prompts}`,
   );
@@ -177,14 +177,12 @@ if (turn.interactions.length > 0) {
 
 const chartOutput = z.object({ pngBase64: z.string().min(1).max(1_398_104) });
 let saved = false;
-const charts = new Set(
-  turn.events.flatMap((event) =>
-    event.type === "call.requested" && event.data.capability.name === "chart_series"
-      ? [event.data.callId]
-      : [],
-  ),
-);
-for (const event of turn.events) {
+const charts = new Set<string>();
+for await (const event of delivery.stream()) {
+  if (event.type === "call.requested" && event.data.capability.name === "chart_series") {
+    charts.add(event.data.callId);
+    continue;
+  }
   if (event.type !== "call.settled" || !charts.has(event.data.callId)) continue;
   if (event.data.outcome !== "completed") continue;
 
@@ -200,7 +198,7 @@ for (const event of turn.events) {
   saved = true;
 }
 if (!saved) {
-  console.error(turn.message ?? "The agent returned no explanation.");
+  console.error(turn.reply ?? "The agent returned no explanation.");
   throw new Error("No chart was returned. Check the agent's response above and sandbox setup.");
 }
 console.log(`Saved ${resolve("chart.png")}`);
