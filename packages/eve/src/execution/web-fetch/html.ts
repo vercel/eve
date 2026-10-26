@@ -43,11 +43,13 @@ export function extractTextFromHtml(html: string): string {
   return text;
 }
 
-const RAW_TEXT_CLOSE_TAGS: Record<string, RegExp> = {
-  noscript: /<\/noscript(?=[\s/>])/gi,
-  script: /<\/script(?=[\s/>])/gi,
-  style: /<\/style(?=[\s/>])/gi,
-};
+// A Map, not an object literal: tag names come from untrusted HTML, and
+// `<constructor>` must not resolve to an inherited property.
+const RAW_TEXT_CLOSE_TAGS = new Map([
+  ["noscript", /<\/noscript(?=[\s/>])/gi],
+  ["script", /<\/script(?=[\s/>])/gi],
+  ["style", /<\/style(?=[\s/>])/gi],
+]);
 
 const BLOCK_ELEMENTS = new Set([
   "article",
@@ -115,7 +117,7 @@ function stripTags(html: string): string {
       continue;
     }
 
-    const rawTextClose = isClosing ? undefined : RAW_TEXT_CLOSE_TAGS[tagName];
+    const rawTextClose = isClosing ? undefined : RAW_TEXT_CLOSE_TAGS.get(tagName);
     if (rawTextClose) {
       rawTextClose.lastIndex = pos;
       const end = rawTextClose.exec(html) ? html.indexOf(">", rawTextClose.lastIndex) : -1;

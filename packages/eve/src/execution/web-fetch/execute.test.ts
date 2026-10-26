@@ -111,6 +111,7 @@ describe("extractTextFromHtml", () => {
     ["<p>A</p><style-guide>B</style-guide><p>C</p>", "A\nBC"],
     ["<!-- a > <script> --><p>Visible</p>", "Visible"],
     ["<p>Before</p><!-- unclosed <p>hidden</p>", "Before"],
+    ["<constructor>A</constructor><__proto__>B", "AB"],
   ])("extracts the text browsers would show from %j", (html, expected) => {
     expect(extractTextFromHtml(html)).toBe(expected);
   });
@@ -123,6 +124,8 @@ describe("extractTextFromHtml", () => {
     ["<", "<".repeat(KIB_256)],
     ["< x ", "< x ".repeat(KIB_256 / 4)],
     ["<a>", "<a>".repeat(KIB_256 / 3)],
+    ["<br>", "<br>".repeat(KIB_256 / 4)],
+    ["<script></script>", "<script></script>".repeat(KIB_256 / 17)],
     ["<script></script ", `<script>${"</script ".repeat(KIB_256 / 9)}`],
     ["<!-- >", "<!-- >".repeat(KIB_256 / 6)],
   ])("processes 256 KiB of repeated %j in linear time", (_label, html) => {
