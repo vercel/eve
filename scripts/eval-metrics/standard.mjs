@@ -126,6 +126,16 @@ export const STANDARD_METRICS = Object.freeze({
 });
 
 const TURN_TERMINALS = ["turn.completed", "turn.failed", "turn.cancelled"];
+// eve before 0.69.0 delegated through these events instead of `agent.started`
+// and `task.*`: its child sessions read as root sessions and its delegated
+// work as nothing, so no metric of such an attempt means what it does today.
+const LEGACY_DELEGATION_EVENTS = new Set([
+  "subagent.called",
+  "subagent.started",
+  "subagent.completed",
+  "subagent.event",
+  "execution.background_task",
+]);
 const FAILURE_EVENTS = ["step.failed", "turn.failed", "session.failed"];
 const TOOL_ACTION_KINDS = new Set(["tool-call", "workflow-tool-call"]);
 
@@ -153,6 +163,8 @@ export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
   }
   if (capture === undefined) return everyMetric(unavailable("missing-session-capture"));
   if (capture.bySession.size === 0) return everyMetric(notApplicable("no-sessions"));
+  if (capture.events.some((event) => LEGACY_DELEGATION_EVENTS.has(event.type)))
+    return everyMetric(unavailable("legacy-delegation-events"));
 
   const rootIds = rootSessionIds(capture);
   if (rootIds.length === 0) return everyMetric(unavailable("missing-root-session"));
