@@ -296,7 +296,7 @@ it("serves every call to its task, one stretch of work at a time, until the sess
   expect(fourth?.aborted).toBe(true);
 });
 
-it("announces a replacement child once before linking concurrent accepted sends to it", async () => {
+it("announces a replacement child once, before linking concurrent sends to it, in send order", async () => {
   const announced = Promise.withResolvers<void>();
   mocks.deliver.mockClear();
   mocks.deliver.mockImplementation(async (_inbox, message) => {
@@ -330,10 +330,15 @@ it("announces a replacement child once before linking concurrent accepted sends 
     },
   );
   const started = startServeBody(input);
-  await vi.waitFor(() => expect(mocks.sendAgent).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(mocks.sendAgent).toHaveBeenCalledTimes(1));
+  // Bob's message waits until Alice's, sent first, is accepted, so the child admits them in order.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(mocks.sendAgent).toHaveBeenCalledTimes(1);
   accept.resolve();
   await vi.waitFor(() => expect(sent("agent-started")).toHaveLength(2));
+  // No delivery links to the replacement, and none is sent to it, before it is announced.
   expect(sent("agent-sent")).toHaveLength(1);
+  expect(mocks.sendAgent).toHaveBeenCalledTimes(1);
   announced.resolve();
   await vi.waitFor(() => expect(sent("reply")).toHaveLength(1));
   started.control.apply({ kind: "end", reason: "The session ended." });
@@ -354,9 +359,11 @@ it("announces a replacement child once before linking concurrent accepted sends 
     "sent:replacement:followup-1",
     "sent:replacement:followup-2",
   ]);
-  expect(mocks.sendAgent.mock.calls[2]?.[0]).toMatchObject({
-    address: { sessionId: "replacement" },
-  });
+  expect(mocks.sendAgent.mock.calls.map(([sentInput]) => sentInput)).toMatchObject([
+    { address: { sessionId: "original" }, message: "Alice adds a checklist." },
+    { address: { sessionId: "replacement" }, message: "Bob adds a rollout note." },
+    { address: { sessionId: "replacement" }, message: "Alice confirms the inputs." },
+  ]);
 });
 
 it("withdraws a question once its call has a reply, without aborting the stretch", async () => {
