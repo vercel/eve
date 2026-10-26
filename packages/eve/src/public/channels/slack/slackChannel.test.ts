@@ -547,7 +547,7 @@ describe("slackChannel()", () => {
   });
 
   it("keeps build metadata when spread with replaced routes", () => {
-    const channel = slackChannel({ botName: "Support Bot" });
+    const channel = slackChannel({ app: { name: "Support Bot" } });
     const wrapped = { ...channel, routes: [...channel.routes] };
 
     expect(getChannelBuildMetadata(wrapped, "support")).toEqual(

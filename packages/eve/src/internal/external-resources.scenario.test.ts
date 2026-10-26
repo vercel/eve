@@ -61,6 +61,11 @@ describe("Connect manifest compiler handoff", () => {
           "",
           "export default slackChannel({",
           '  credentials: connectSlackCredentials("slack/manifest-test"),',
+          '  app: { name: "Support agent", description: "Answers support questions." },',
+          '  bot: { displayName: "support-bot" },',
+          '  scopes: ["im:history"],',
+          '  optionalScopes: ["reactions:write", "chat:write"],',
+          '  eventSubscriptions: ["message.im"],',
           "});",
           "",
         ].join("\n"),
@@ -108,13 +113,24 @@ describe("Connect manifest compiler handoff", () => {
           connect: {
             manifest: {
               $type: "https://docs.slack.dev/reference/app-manifest/",
-              display_information: { name: "slack" },
-              features: { bot_user: { display_name: "slack" } },
+              display_information: {
+                name: "Support agent",
+                description: "Answers support questions.",
+              },
+              features: { bot_user: { display_name: "support-bot" } },
               oauth_config: {
-                scopes: { bot: expect.arrayContaining(["app_mentions:read", "chat:write"]) },
+                scopes: {
+                  bot: expect.arrayContaining([
+                    "app_mentions:read",
+                    "chat:write",
+                    "im:history",
+                    "reactions:write",
+                  ]),
+                  bot_optional: ["reactions:write"],
+                },
               },
               settings: {
-                event_subscriptions: { bot_events: ["app_mention"] },
+                event_subscriptions: { bot_events: ["app_mention", "message.im"] },
               },
             },
             service: "slack",
