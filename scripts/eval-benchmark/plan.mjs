@@ -377,7 +377,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { live, mock } = planLegs({ ...selection, models });
   const plannedAt =
     release === undefined ? new Date().toISOString() : await releasePublishedAt(release);
-  const flags = evalFlags(eveVersion);
+  // main's eval runner has every flag the benchmark passes.
+  const flags = release === undefined ? { keepState: true } : evalFlags(release);
   const plan = {
     schema_version: PLAN_SCHEMA_VERSION,
     sha,

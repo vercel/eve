@@ -41,8 +41,9 @@ on:
 
 concurrency:
   # One group per backfilled release: a group holds a single pending run, so
-  # dispatching several releases into one would cancel all but the last.
-  group: eval-benchmark-${{ inputs.release || 'main' }}
+  # dispatching several releases into one would cancel all but the last. The
+  # prefix keeps an unvalidated input (e.g. "main") out of main's group.
+  group: eval-benchmark-${{ inputs.release && format('release-{0}', inputs.release) || 'main' }}
   cancel-in-progress: false
 
 permissions:
@@ -91,6 +92,19 @@ jobs:
         with:
           ref: ${{ steps.target.outputs.ref }}
           persist-credentials: false
+
+      - name: Require a release on main
+        # Legs run the planned commit with model credentials, so a backfill
+        # may only run a commit main has: a tag can point anywhere.
+        if: inputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/$(git rev-parse HEAD)...${GITHUB_SHA}" --jq .status)"
+          if [ "$status" != "ahead" ] && [ "$status" != "identical" ]; then
+            echo "::error::$(git rev-parse HEAD) is not on main (compare status: ${status})."
+            exit 1
+          fi
 
       - name: Checkout benchmark harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
