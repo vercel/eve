@@ -9,8 +9,7 @@ afterEach(() => {
 // The browser client builds its response schemas with eve's bundled Zod. A page
 // whose CSP `script-src` omits 'unsafe-eval' reports every string compilation
 // as a violation, even one that is caught.
-// TODO(#5365): expected failure until eve's Zod stops compiling code from strings.
-it.fails("builds object schemas with eve's Zod without compiling code from strings", async () => {
+it("builds object schemas with eve's Zod without compiling code from strings", async () => {
   const compiled: unknown[][] = [];
   globalThis.Function = new Proxy(RealFunction, {
     apply(target, thisArg, args) {
