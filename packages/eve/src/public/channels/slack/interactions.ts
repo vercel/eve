@@ -135,6 +135,7 @@ export function parseBlockActionsPayload(
       selectedOptionValue: extractSelectedOptionValue(a),
       messageTs: message?.ts,
       triggerId: typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined,
+      responseUrl: typeof rawBody.response_url === "string" ? rawBody.response_url : undefined,
       label: extractActionLabel(a),
       user,
     })),
@@ -165,6 +166,7 @@ function parseSharedBlockActionsPayload(
       selectedOptionValue: action.selectedOptionValue,
       messageTs: body.messageTs,
       triggerId: body.triggerId,
+      responseUrl: body.responseUrl,
       label: action.label,
       user: {
         id: action.user?.id ?? body.userId,
