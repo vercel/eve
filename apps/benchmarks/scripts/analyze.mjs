@@ -65,7 +65,7 @@ function reportRuns(records, target) {
     );
     const docs = Object.entries(record.docsRead);
     console.log(
-      `      docs: entered at ${record.docsEntry}${docs.length === 0 ? "" : ` — ${docs.map(([page, count]) => (count > 1 ? `${page}×${count}` : page)).join(", ")}`}`,
+      `      docs: entered at ${record.docsEntry ?? "(none)"}${docs.length === 0 ? "" : ` — ${docs.map(([page, count]) => (count > 1 ? `${page}×${count}` : page)).join(", ")}`}`,
     );
     for (const stall of record.stalls) console.log(`      ! ${stall}`);
     for (const failure of record.failures) console.log(`      ! ${failure}`);

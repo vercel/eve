@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { publishedBenchmark } from "../../apps/benchmarks/lib/benchmark-config.ts";
 import { parseDirective, resolveSelection } from "./resolve-authoring-benchmark.mjs";
 
 const context = { caseExists: (name) => name.startsWith("author-") };
@@ -23,7 +24,7 @@ test("defaults to the published cases and one run", () => {
     resolveSelection(parseDirective("authoring-benchmark: models=kimi-k3"), context),
     {
       models: ["kimi-k3"],
-      cases: "",
+      cases: publishedBenchmark.caseIds.join(","),
       runs: "1",
     },
   );

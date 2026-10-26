@@ -61,7 +61,7 @@ export function analyzeRun(runPath) {
     docsRead: docsCounts(docsSequence(toolCalls)),
     // Which page the agent opened first. `README.md` means the routing index did
     // its job; anything else means the agent guessed or searched its way in.
-    docsEntry: docsSequence(toolCalls)[0] ?? "(none)",
+    docsEntry: docsSequence(toolCalls)[0] ?? null,
     registryCalls: commands.filter((command) => /\beve\s+(registry|add)\b/.test(command)).length,
     failedCommands: failedCommands(commands),
     stalls: (timings ?? [])

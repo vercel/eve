@@ -169,9 +169,8 @@ jobs:
 
       - name: Run benchmark
         working-directory: apps/benchmarks
-        # An empty CASES selects the published cases.
         run: |
-          pnpm benchmark ${CASES:+"$CASES"} --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
+          pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
             --treatment "$TREATMENT"
 
       - name: Summarize results

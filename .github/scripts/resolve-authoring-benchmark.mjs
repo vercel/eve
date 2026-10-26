@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   benchmarkModels,
+  publishedBenchmark,
   publishedBenchmarkModels,
 } from "../../apps/benchmarks/lib/benchmark-config.ts";
 
@@ -55,8 +56,10 @@ function resolveModels(value) {
   });
 }
 
+// Defaults resolve to the concrete list, so the run and publish jobs share one plan.
 function resolveCases(value, caseExists) {
   const cases = splitList(value);
+  if (cases.length === 0) return publishedBenchmark.caseIds.join(",");
   for (const name of cases) {
     if (!/^[a-z0-9-]+$/u.test(name) || !caseExists(name)) {
       throw new Error(`Unknown benchmark case ${JSON.stringify(name)}.`);

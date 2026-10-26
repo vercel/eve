@@ -23,8 +23,8 @@
 // Usage: node scripts/publish-results.mjs <artifacts-dir>
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT,
 // and the planned BENCHMARK_SHA, BENCHMARK_EVE_REVISION, BENCHMARK_TREATMENT,
-// BENCHMARK_MODELS (JSON array of model ids), BENCHMARK_CASES (comma-separated,
-// empty for the published cases), and BENCHMARK_RUNS.
+// BENCHMARK_MODELS (JSON array of model ids), BENCHMARK_CASES (comma-separated),
+// and BENCHMARK_RUNS.
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -38,7 +38,7 @@ import {
   putImmutable,
   vercelBlobStore,
 } from "../../../scripts/eval-benchmark/publish.mjs";
-import { findBenchmarkModel, publishedBenchmark } from "../lib/benchmark-config.ts";
+import { findBenchmarkModel } from "../lib/benchmark-config.ts";
 import { modelPricing, priceUsage } from "./cost.mjs";
 import { analyzeRun, collectRuns } from "./run-analysis.mjs";
 
@@ -85,6 +85,11 @@ export function buildRecords({ plan, artifacts, githubRunId, runAttempt }) {
       const key = `${record.case}/${record.run}`;
       if (!plan.cases.includes(record.case))
         throw new Error(`${runPath}: case "${record.case}" was not planned.`);
+      const run = Number(/^run-(\d+)$/u.exec(record.run)?.[1]);
+      if (!(run >= 1 && run <= plan.runs))
+        throw new Error(
+          `${runPath}: "${record.run}" is outside the planned run-1..run-${plan.runs}.`,
+        );
       if (results.has(key)) throw new Error(`${modelId} has more than one result for ${key}.`);
       results.set(key, record);
     }
@@ -218,15 +223,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error("Usage: node scripts/publish-results.mjs <artifacts-dir>");
     process.exit(1);
   }
-  const cases = process.env.BENCHMARK_CASES ?? "";
   const plan = {
     sha: requiredEnv("BENCHMARK_SHA"),
     eve_revision: requiredEnv("BENCHMARK_EVE_REVISION"),
     treatment: requiredEnv("BENCHMARK_TREATMENT"),
     models: JSON.parse(requiredEnv("BENCHMARK_MODELS")),
-    cases: cases === "" ? [...publishedBenchmark.caseIds] : cases.split(","),
+    cases: requiredEnv("BENCHMARK_CASES").split(","),
     runs: Number(requiredEnv("BENCHMARK_RUNS")),
   };
+  if (!Number.isSafeInteger(plan.runs) || plan.runs < 1)
+    throw new Error(
+      `BENCHMARK_RUNS must be a positive integer, got "${process.env.BENCHMARK_RUNS}".`,
+    );
   const result = await publishResults({
     plan,
     artifactsDir,

@@ -18,11 +18,11 @@ const plan = {
 };
 const docs = "/vercel/sandbox/node_modules/eve/docs";
 
-function artifactsDirectory(t, meta = {}) {
+function artifactsDirectory(t, meta = {}, run = "run-1") {
   const root = mkdtempSync(join(tmpdir(), "eve-authoring-publish-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const artifact = join(root, `authoring-benchmark-kimi-k3-${plan.sha}`);
-  const runPath = join(artifact, "current/2026-10-26T00-00-00.000Z/author-001-weather-tool/run-1");
+  const runPath = join(artifact, "current/2026-10-26T00-00-00.000Z/author-001-weather-tool", run);
   mkdirSync(runPath, { recursive: true });
   writeFileSync(
     join(artifact, "meta.json"),
@@ -137,7 +137,7 @@ test("publishes raw results and per-run records before the manifest, immutably",
   );
 });
 
-test("rejects artifacts that ran another revision or an unplanned model", async (t) => {
+test("rejects artifacts that ran another revision, an unplanned model, or an unplanned run", async (t) => {
   const input = { plan, githubRunId: "123", runAttempt: 1, store: memoryStore() };
   await assert.rejects(
     publishResults({ ...input, artifactsDir: artifactsDirectory(t, { sha: "c".repeat(40) }) }),
@@ -146,5 +146,9 @@ test("rejects artifacts that ran another revision or an unplanned model", async 
   await assert.rejects(
     publishResults({ ...input, artifactsDir: artifactsDirectory(t, { model_id: "grok-4-6" }) }),
     /model "grok-4-6" was not planned/,
+  );
+  await assert.rejects(
+    publishResults({ ...input, artifactsDir: artifactsDirectory(t, {}, "run-3") }),
+    /"run-3" is outside the planned run-1\.\.run-2/,
   );
 });
