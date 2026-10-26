@@ -82,6 +82,7 @@ test("publishes raw results and per-run records before the manifest, immutably",
     artifactsDir: artifactsDirectory(t),
     githubRunId: "123",
     runAttempt: 1,
+    publishedAt: "2026-10-27T07:00:00.000Z",
     store,
   };
 
@@ -119,6 +120,7 @@ test("publishes raw results and per-run records before the manifest, immutably",
   assert.deepEqual(measured.docs_read, { "README.md": 1 });
 
   const manifest = JSON.parse(store.objects.get(`${prefix}/manifest.json`));
+  assert.equal(manifest.published_at, "2026-10-27T07:00:00.000Z");
   assert.equal(manifest.files.records.count, 4);
   assert.deepEqual(
     manifest.models.map(({ model_id, uploaded }) => ({ model_id, uploaded })),
@@ -129,8 +131,8 @@ test("publishes raw results and per-run records before the manifest, immutably",
   );
 
   const writes = store.writes.length;
-  await publishResults(input);
-  assert.equal(store.writes.length, writes, "identical re-run is a no-op");
+  await publishResults({ ...input, publishedAt: "2026-10-27T08:00:00.000Z" });
+  assert.equal(store.writes.length, writes, "a retry keeps the first publish time and is a no-op");
   await assert.rejects(
     publishResults({ ...input, plan: { ...plan, runs: 1 } }),
     /records.jsonl was already published with different content/,

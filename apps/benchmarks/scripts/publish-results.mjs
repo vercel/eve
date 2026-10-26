@@ -15,6 +15,8 @@
 //   meta.json                    { model_id, sha, eve_revision, treatment, runner_os }
 //   <experiment>/<timestamp>/<case>/run-N/   agent-eval's results tree
 //
+// The manifest's `published_at` is when the run was first published (ISO 8601).
+//
 // Each record is one run of one case on one model, keyed by (github_run_id,
 // run_attempt, model_id, case, run). Planned runs with no result, including
 // every run of a model whose job uploaded nothing, become `missing` records so
@@ -154,9 +156,16 @@ function runMetrics(result, benchmark) {
 }
 
 /**
- * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
+ * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
  */
-export async function publishResults({ plan, artifactsDir, githubRunId, runAttempt, store }) {
+export async function publishResults({
+  plan,
+  artifactsDir,
+  githubRunId,
+  runAttempt,
+  publishedAt,
+  store,
+}) {
   const artifacts = readModelArtifacts(plan, artifactsDir);
   const records = buildRecords({ plan, artifacts, githubRunId, runAttempt });
   const prefix = `authoring/runs/${githubRunId}/${runAttempt}`;
@@ -175,10 +184,14 @@ export async function publishResults({ plan, artifactsDir, githubRunId, runAttem
 
   const recordsBody = Buffer.from(records.map((record) => `${JSON.stringify(record)}\n`).join(""));
   await putImmutable(store, `${prefix}/records.jsonl`, recordsBody, "application/x-ndjson");
+  const manifestPath = `${prefix}/manifest.json`;
+  // A retry keeps the first publish time, so an identical re-run stays a no-op.
+  const published = await store.read(manifestPath);
   const manifest = {
     schema_version: RECORD_SCHEMA_VERSION,
     github_run_id: String(githubRunId),
     run_attempt: runAttempt,
+    published_at: published === null ? publishedAt : JSON.parse(published).published_at,
     sha: plan.sha,
     eve_revision: plan.eve_revision,
     treatment: plan.treatment,
@@ -204,7 +217,7 @@ export async function publishResults({ plan, artifactsDir, githubRunId, runAttem
   };
   await putImmutable(
     store,
-    `${prefix}/manifest.json`,
+    manifestPath,
     Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`),
     "application/json",
   );
@@ -240,6 +253,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     artifactsDir,
     githubRunId: requiredEnv("GITHUB_RUN_ID"),
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
+    publishedAt: new Date().toISOString(),
     store: await vercelBlobStore(requiredEnv("EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN")),
   });
   console.error(
