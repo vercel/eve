@@ -44,9 +44,9 @@ export function extractTextFromHtml(html: string): string {
 }
 
 const RAW_TEXT_CLOSE_TAGS: Record<string, RegExp> = {
-  noscript: /<\/noscript\s*>/gi,
-  script: /<\/script\s*>/gi,
-  style: /<\/style\s*>/gi,
+  noscript: /<\/noscript(?=[\s/>])/gi,
+  script: /<\/script(?=[\s/>])/gi,
+  style: /<\/style(?=[\s/>])/gi,
 };
 
 const BLOCK_ELEMENTS = new Set([
@@ -75,7 +75,7 @@ const BLOCK_ELEMENTS = new Set([
   "tr",
 ]);
 
-const TAG_NAME_PATTERN = /^(\/?)([a-z][a-z0-9]*)/i;
+const TAG_NAME_PATTERN = /^(\/?)([^\s/>]+)/;
 
 /**
  * Removes tags in a single forward pass. Fetched HTML is untrusted and can be
@@ -90,6 +90,14 @@ function stripTags(html: string): string {
   while (pos < html.length) {
     const open = html.indexOf("<", pos);
     if (open === -1) break;
+
+    if (html.startsWith("<!--", open)) {
+      parts.push(html.slice(pos, open));
+      const end = html.indexOf("-->", open + 4);
+      pos = end === -1 ? html.length : end + 3;
+      continue;
+    }
+
     const close = html.indexOf(">", open + 1);
     // No `>` remains, so nothing after this point can be a tag.
     if (close === -1) break;
@@ -110,9 +118,9 @@ function stripTags(html: string): string {
     const rawTextClose = isClosing ? undefined : RAW_TEXT_CLOSE_TAGS[tagName];
     if (rawTextClose) {
       rawTextClose.lastIndex = pos;
-      const end = rawTextClose.exec(html);
+      const end = rawTextClose.exec(html) ? html.indexOf(">", rawTextClose.lastIndex) : -1;
       // Like browsers, an unclosed raw-text element swallows the rest.
-      pos = end ? end.index + end[0].length : html.length;
+      pos = end === -1 ? html.length : end + 1;
     }
   }
 
