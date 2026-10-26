@@ -84,12 +84,13 @@ describe("postSessionCallbackRequest destination guard", () => {
     vi.stubEnv("EVE_DEV", "1");
     dnsMocks.addresses = [{ address: "127.0.0.1", family: 4 }];
 
-    await expect(
-      postSessionCallbackRequest({
-        body: { kind: "session.completed" },
-        url: `http://callback.example.test:${String(port)}/eve/v1/callback/token`,
-      }),
-    ).resolves.toEqual({ ok: true, status: 202 });
+    const delivered = await postSessionCallbackRequest({
+      body: { kind: "session.completed" },
+      url: `http://callback.example.test:${String(port)}/eve/v1/callback/token`,
+    });
+
+    expect(delivered.status).toBe(202);
+    await expect(delivered.text()).resolves.toBe("accepted");
     expect(received).toEqual([JSON.stringify({ kind: "session.completed" })]);
   });
 });

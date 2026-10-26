@@ -2,8 +2,10 @@ import type { Dispatcher1Wrapper } from "undici";
 
 import {
   assertPublicHostname,
+  cancelResponseBody,
   createPublicDispatcher,
   fetchWithDispatcher,
+  readBoundedResponse,
 } from "#execution/public-destination.js";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -46,7 +48,7 @@ export async function requestPublicUrl(
         continue;
       }
 
-      return await consumeResponse(response, options.maxResponseSize);
+      return await readBoundedResponse(response, options.maxResponseSize);
     } finally {
       await dispatcher.close();
     }
@@ -88,80 +90,4 @@ async function requestOnce(
     await dispatcher.close();
     throw error;
   }
-}
-
-async function consumeResponse(response: Response, maxResponseSize: number): Promise<Response> {
-  const declaredLength = parseContentLength(response.headers.get("content-length"));
-
-  if (declaredLength !== undefined && declaredLength > maxResponseSize) {
-    await cancelResponseBody(response);
-    throw createResponseTooLargeError(maxResponseSize);
-  }
-
-  const body = await readBoundedBody(response, maxResponseSize);
-  const responseBody = body.byteLength === 0 ? null : Uint8Array.from(body).buffer;
-
-  return new Response(responseBody, {
-    headers: response.headers,
-    status: response.status,
-    statusText: response.statusText,
-  });
-}
-
-function parseContentLength(value: string | null): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-async function readBoundedBody(response: Response, maxResponseSize: number): Promise<Uint8Array> {
-  if (response.body === null) {
-    return new Uint8Array();
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let byteLength = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      byteLength += value.byteLength;
-      if (byteLength > maxResponseSize) {
-        await reader.cancel();
-        throw createResponseTooLargeError(maxResponseSize);
-      }
-
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const body = new Uint8Array(byteLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
-
-async function cancelResponseBody(response: Response): Promise<void> {
-  try {
-    await response.body?.cancel();
-  } catch {
-    // The connection will still be closed with its per-request dispatcher.
-  }
-}
-
-function createResponseTooLargeError(maxResponseSize: number): Error {
-  return new Error(`Response too large (exceeds ${maxResponseSize} bytes).`);
 }

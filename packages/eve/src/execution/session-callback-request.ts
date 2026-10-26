@@ -4,6 +4,7 @@ import {
   createPublicDispatcher,
   fetchWithDispatcher,
   findUnsafeDestinationError,
+  readBoundedResponse,
   UnsafeDestinationError,
 } from "#execution/public-destination.js";
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
@@ -12,6 +13,8 @@ import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
+/** Callback replies are small JSON acknowledgements. */
+const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1024;
 const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
 const VERCEL_CALLBACK_HOST_ENVS = [
   "VERCEL_URL",
@@ -19,12 +22,6 @@ const VERCEL_CALLBACK_HOST_ENVS = [
   "VERCEL_PROJECT_PRODUCTION_URL",
 ] as const;
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
-
-/** Status of a delivered callback; the response body is discarded. */
-interface SessionCallbackResponse {
-  readonly ok: boolean;
-  readonly status: number;
-}
 
 /**
  * Posts one framework callback payload with the shared callback transport policy.
@@ -39,7 +36,7 @@ export async function postSessionCallbackRequest(input: {
   readonly logFailures?: boolean;
   readonly timeoutMs?: number;
   readonly url: string;
-}): Promise<SessionCallbackResponse> {
+}): Promise<Response> {
   const timeoutMs = input.timeoutMs ?? SESSION_CALLBACK_TIMEOUT_MS;
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
@@ -83,7 +80,7 @@ export async function postSessionCallbackRequest(input: {
       error: new Error(`Callback request failed with HTTP ${response.status}.`),
     });
   }
-  return { ok: response.ok, status: response.status };
+  return response;
 }
 
 async function requestCallback(
@@ -111,9 +108,7 @@ async function requestCallback(
       // path/token check has already passed.
       redirect: "error",
     });
-    // Callers only read the status; drain the body so the dispatcher can close.
-    await response.body?.cancel().catch(() => undefined);
-    return response;
+    return await readBoundedResponse(response, MAX_CALLBACK_RESPONSE_BYTES);
   } finally {
     await dispatcher.close();
   }

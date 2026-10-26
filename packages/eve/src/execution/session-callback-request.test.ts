@@ -27,21 +27,21 @@ describe("postSessionCallbackRequest", () => {
       const response = new Response("private response body", { status: 404 });
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
 
-      await expect(
-        postSessionCallbackRequest({
-          body: {
-            kind,
-            callId: "call-1",
-            sessionId: "child-session",
-            subagentName: "research",
-            message: "private update",
-            output: "private result",
-            error: "private failure",
-            token: "private-body-token",
-          },
-          url: "https://user:password@agent.example.com/eve/v1/eve/v1/callback/private-token?secret=query#fragment",
-        }),
-      ).resolves.toEqual({ ok: false, status: 404 });
+      const delivered = await postSessionCallbackRequest({
+        body: {
+          kind,
+          callId: "call-1",
+          sessionId: "child-session",
+          subagentName: "research",
+          message: "private update",
+          output: "private result",
+          error: "private failure",
+          token: "private-body-token",
+        },
+        url: "https://user:password@agent.example.com/eve/v1/eve/v1/callback/private-token?secret=query#fragment",
+      });
+
+      expect(delivered.status).toBe(404);
 
       expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
         "[eve:execution.session-callback] callback delivery failed",
@@ -180,10 +180,9 @@ describe("postSessionCallbackRequest", () => {
     const fetchMock = stubFetch();
     const url = "http://127.0.0.1:3000/eve/v1/callback/token";
 
-    await expect(postSessionCallbackRequest({ body: { ok: true }, url })).resolves.toEqual({
-      ok: true,
-      status: 202,
-    });
+    const delivered = await postSessionCallbackRequest({ body: { ok: true }, url });
+
+    expect(delivered.status).toBe(202);
 
     expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "POST" }));
   });
