@@ -50,10 +50,10 @@ export function analyzeRun(runPath) {
     path: runPath,
     status: result.status,
     durationSeconds: round(result.duration),
-    agentSeconds: round(sumPhases(timings, /^agent\.turn\.\d+$/) / 1000),
-    setupSeconds: round(sumPhases(timings, /^(subject|session)\./) / 1000),
-    // `null` when the transcript is missing or has no usage events, so an
-    // unreadable run never reports as zero turns or zero tokens.
+    // Metrics are `null` when their source file is missing or unreadable, so
+    // an unmeasured run never reports zero time, turns, or tokens.
+    agentSeconds: phaseSeconds(timings, /^agent\.turn\.\d+$/),
+    setupSeconds: phaseSeconds(timings, /^(subject|session)\./),
     turns: transcript?.summary?.totalTurns ?? null,
     toolCalls: toolCalls.length,
     commands: commands.length,
@@ -64,7 +64,7 @@ export function analyzeRun(runPath) {
     docsEntry: docsSequence(toolCalls)[0] ?? "(none)",
     registryCalls: commands.filter((command) => /\beve\s+(registry|add)\b/.test(command)).length,
     failedCommands: failedCommands(commands),
-    stalls: timings
+    stalls: (timings ?? [])
       .filter(
         (entry) => /^agent\.turn\.\d+\.summary$/.test(entry.phase) && entry.outcome !== "success",
       )
@@ -103,13 +103,15 @@ function scriptFailures(runPath) {
 
 function readTimings(runPath) {
   const path = join(runPath, "project/benchmark/timings.json");
-  return existsSync(path) ? readJson(path) : [];
+  return existsSync(path) ? readJson(path) : undefined;
 }
 
-function sumPhases(timings, pattern) {
-  return timings
+function phaseSeconds(timings, pattern) {
+  if (timings === undefined) return null;
+  const ms = timings
     .filter((entry) => pattern.test(entry.phase))
     .reduce((total, entry) => total + entry.durationMs, 0);
+  return round(ms / 1000);
 }
 
 function readJson(path) {
@@ -117,5 +119,5 @@ function readJson(path) {
 }
 
 function round(value) {
-  return typeof value === "number" ? Math.round(value * 10) / 10 : 0;
+  return typeof value === "number" ? Math.round(value * 10) / 10 : null;
 }

@@ -58,7 +58,7 @@ function reportRuns(records, target) {
   for (const record of records) {
     const mark = record.status === "passed" ? "PASS" : "FAIL";
     console.log(
-      `${mark}  ${record.case} ${record.run}  ${record.durationSeconds}s total / ${record.agentSeconds}s agent / ${record.setupSeconds}s setup`,
+      `${mark}  ${record.case} ${record.run}  ${seconds(record.durationSeconds)} total / ${seconds(record.agentSeconds)} agent / ${seconds(record.setupSeconds)} setup`,
     );
     console.log(
       `      turns=${record.turns ?? "n/a"} tools=${record.toolCalls} ${formatUsage(record.usage)} registry=${record.registryCalls}`,
@@ -78,6 +78,10 @@ function reportRuns(records, target) {
   }
   const passed = records.filter((record) => record.status === "passed").length;
   console.log(`${passed}/${records.length} passed`);
+}
+
+function seconds(value) {
+  return value === null ? "n/a" : `${value}s`;
 }
 
 function formatUsage(usage) {

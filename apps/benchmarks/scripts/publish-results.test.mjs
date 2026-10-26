@@ -112,6 +112,8 @@ test("publishes raw results and per-run records before the manifest, immutably",
   assert.equal(measured.raw_path, `raw/kimi-k3/${rawPath}`);
   assert.equal(measured.harness, "OpenCode");
   assert.equal(measured.turns, 1);
+  assert.equal(measured.duration_s, 12);
+  assert.equal(measured.agent_s, null, "no timings.json is unavailable, not zero");
   assert.equal(measured.usage.input_tokens, 1_000_000);
   assert.equal(measured.cost_usd, 3, "priced at kimi-k3's $3 per 1M input tokens");
   assert.deepEqual(measured.docs_read, { "README.md": 1 });
