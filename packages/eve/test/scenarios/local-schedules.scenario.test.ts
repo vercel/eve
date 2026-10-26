@@ -34,7 +34,7 @@ const localEnv = {
 const collectionSource = `import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { defineDynamicSchedules } from "eve/experimental/schedules";
+import { defineDynamicSchedules } from "eve/schedules";
 export default defineDynamicSchedules({
   inputSchema: z.object({ task: z.string() }),
   tool: false,

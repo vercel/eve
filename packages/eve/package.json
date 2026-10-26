@@ -429,6 +429,7 @@
       "default": "./dist/src/public/instrumentation/otel.js"
     },
     "./schedules": {
+      "eve-source": "./src/public/schedules/index.ts",
       "types": "./dist/src/public/schedules/index.d.ts",
       "import": "./dist/src/public/schedules/index.js",
       "default": "./dist/src/public/schedules/index.js"
@@ -438,23 +439,17 @@
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
     },
-    "./experimental/schedules/testing": {
-      "eve-source": "./src/public/experimental/schedules/testing.ts",
-      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
-      "import": "./dist/src/public/experimental/schedules/testing.js",
-      "default": "./dist/src/public/experimental/schedules/testing.js"
+    "./schedules/testing": {
+      "eve-source": "./src/public/schedules/testing.ts",
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
     },
-    "./experimental/schedules": {
-      "eve-source": "./src/public/experimental/schedules/index.ts",
-      "types": "./dist/src/public/experimental/schedules/index.d.ts",
-      "import": "./dist/src/public/experimental/schedules/index.js",
-      "default": "./dist/src/public/experimental/schedules/index.js"
-    },
-    "./experimental/schedules/vercel": {
-      "eve-source": "./src/public/experimental/schedules/vercel.ts",
-      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
-      "import": "./dist/src/public/experimental/schedules/vercel.js",
-      "default": "./dist/src/public/experimental/schedules/vercel.js"
+    "./schedules/vercel": {
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
     },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",

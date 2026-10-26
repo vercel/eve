@@ -4,9 +4,8 @@ import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/def
 import { loadContext } from "#context/container.js";
 import { AuthKey, ScheduleIdKey, OccurrenceIdKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { defineDynamicSchedules } from "#public/schedules/subscription.js";
-import { schedules } from "#public/experimental/schedules/client.js";
-import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { defineDynamicSchedules, schedules } from "#public/schedules/index.js";
+import { inMemoryScheduleProvider } from "#public/schedules/testing.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";

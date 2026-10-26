@@ -1,5 +1,5 @@
 import { defineTool } from "eve/tools";
-import { schedules } from "eve/experimental/schedules";
+import { schedules } from "eve/schedules";
 import { z } from "zod";
 import personal from "../schedules/requests";
 import { takeCollectionDelivery, takeCollectionOccurrence } from "../lib/collection-occurrences";

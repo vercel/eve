@@ -10,14 +10,14 @@ description: "Create and manage creator-owned recurring or one-time schedules at
 
 Use `defineDynamicSchedules` when users or agents need to create recurring or one-time schedules at runtime. Export the definition from `agent/schedules/`; eve derives its identity from the file path. The definition configures management tools and an occurrence callback. It does not create a schedule or set its timing.
 
-This API is experimental and may change. Import it from `eve/experimental/schedules`. For fixed, code-authored cron jobs, use [`defineSchedule`](../schedules) instead. For a self-hosted alternative with application-owned storage, see [Dynamic scheduling](../patterns/dynamic-scheduling).
+Import the API from `eve/schedules`. For fixed, code-authored cron jobs, use [`defineSchedule`](./schedules) instead. For a self-hosted alternative with application-owned storage, see [Dynamic scheduling](./patterns/dynamic-scheduling).
 
 ## Define scheduled work
 
 The model supplies schema-defined payload. eve captures the authenticated creator separately and resolves current execution auth whenever an occurrence fires.
 
 ```ts title="agent/schedules/requests.ts"
-import { byPrincipal, defineDynamicSchedules } from "eve/experimental/schedules";
+import { byPrincipal, defineDynamicSchedules } from "eve/schedules";
 import { z } from "zod";
 import slack from "../channels/slack";
 import { resolveCurrentUser } from "../lib/identity";
@@ -84,7 +84,7 @@ Each definition contributes tools for `create`, `get`, `list`, `update`, `enable
 
 Creation takes `{ name, expression, payload }`. Updates take `{ name, expression?, payload? }` and require at least an expression or a complete replacement payload. Listing takes optional `{ cursor, limit }`, with limits from 1 through 100. The remaining tools take `{ name }` using the unique identifier from receipts or reads.
 
-Set `tool: true` (the default) for direct tools, `tool: "deferred"` for catalog-discovered tools, or `tool: false` for code-only scheduling. Deferred operations keep the same names, schemas, approval policies, and authorization checks; the model finds them with `eve__search` and calls them with `eve__tool`. See [Dynamic capabilities](../guides/dynamic-capabilities#dynamic-tools).
+Set `tool: true` (the default) for direct tools, `tool: "deferred"` for catalog-discovered tools, or `tool: false` for code-only scheduling. Deferred operations keep the same names, schemas, approval policies, and authorization checks; the model finds them with `eve__search` and calls them with `eve__tool`. See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-tools).
 
 Reads need no approval by default; mutations require user approval. Configure top-level `approval`, keyed by operation, with ordinary request/response policies. Separate tool identities keep `once()` grants independent. Create and payload-replacement update policies receive a typed `payload` containing prepared data; `toolInput.payload` also contains prepared rather than raw data. Timing-only update policies receive `payload: undefined`.
 
@@ -101,7 +101,7 @@ Import `always` from `eve/tools/approval`; `target.audience` above is an applica
 ## Use the authenticated client
 
 ```ts title="agent/tools/list-requests.ts"
-import { schedules } from "eve/experimental/schedules";
+import { schedules } from "eve/schedules";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import requests from "../schedules/requests";
@@ -142,7 +142,7 @@ await client.update(created.name, {
 });
 ```
 
-Import `schedules` from `eve/experimental/schedules` and `requests` from your definition module. Run this code in an active eve context.
+Import `schedules` from `eve/schedules` and `requests` from your definition module. Run this code in an active eve context.
 
 ## Update and control schedules
 
@@ -168,19 +168,19 @@ Provider retries may repeat the callback and start new sessions. This is an at-l
 
 The default `vercelScheduleProvider()` supports these environments:
 
-| Environment                                      | Storage and delivery                                                                                                                               |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel production                                | Requires feature-flag enablement for your organization. Hosted Vercel Schedules delivers occurrences through Vercel Queues.                        |
-| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.                                       |
-| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve polls local Queues to deliver due occurrences automatically.                                         |
-| Vercel preview or self-hosted production         | The default provider rejects operations. Use a different provider or the [application-managed scheduling pattern](../patterns/dynamic-scheduling). |
+| Environment                                      | Storage and delivery                                                                                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel production                                | Requires feature-flag enablement for your organization. Hosted Vercel Schedules delivers occurrences through Vercel Queues.                       |
+| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.                                      |
+| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve polls local Queues to deliver due occurrences automatically.                                        |
+| Vercel preview or self-hosted production         | The default provider rejects operations. Use a different provider or the [application-managed scheduling pattern](./patterns/dynamic-scheduling). |
 
 For automatic local delivery, start eve through `vc dev` with a Vercel CLI that supports local Schedules and Queues. Plain `eve dev` still uses the in-memory fallback. Local queue-delivery errors appear in the dev server logs and retry after five seconds.
 
-Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to configure the Vercel endpoint explicitly. The in-memory provider is also available from `eve/experimental/schedules/testing` for code-driven tests.
+Import `vercelScheduleProvider` from `eve/schedules/vercel` to configure the Vercel endpoint explicitly. The in-memory provider is also available from `eve/schedules/testing` for code-driven tests.
 
 ## What to read next
 
-- [Schedules](../schedules): author fixed cron jobs with `defineSchedule`.
-- [Channels](../channels/overview): deliver schedule output to users.
-- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): inspect a scheduled run.
+- [Schedules](./schedules): author fixed cron jobs with `defineSchedule`.
+- [Channels](./channels/overview): deliver schedule output to users.
+- [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming): inspect a scheduled run.

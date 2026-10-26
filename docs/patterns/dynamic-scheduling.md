@@ -3,7 +3,7 @@ title: "Dynamic Scheduling"
 description: "Compose one minute-level eve schedule, proactive channel handoff, and CRUD tools into application-managed schedules."
 ---
 
-Use this pattern when your application needs to own schedule storage and dispatch, including on self-hosted infrastructure. For built-in creator-owned schedules, management tools, and Vercel-backed delivery, see [Experimental dynamic schedules](../experimental/dynamic-schedules).
+Use this pattern when your application needs to own schedule storage and dispatch, including on self-hosted infrastructure. For built-in creator-owned schedules, management tools, and Vercel-backed delivery, see [Dynamic schedules](../dynamic-schedules).
 
 This pattern uses a static `defineSchedule` file discovered at build time. Put schedule rows in your application store and use that authored schedule as a dispatcher:
 

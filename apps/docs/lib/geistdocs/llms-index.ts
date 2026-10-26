@@ -42,6 +42,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Durable State](${EVE_ORIGIN}/docs/concepts/state.md): Persist per-session memory across step boundaries.
 - [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
+- [Dynamic Schedules](${EVE_ORIGIN}/docs/dynamic-schedules.md): Create and manage creator-owned runtime schedules; includes updates, approvals, and local delivery.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
 
@@ -78,10 +79,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Dynamic Scheduling](${EVE_ORIGIN}/docs/patterns/dynamic-scheduling.md): Build application-managed schedules from an eve schedule and authored tools.
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
-
-## Experimental
-
-- [Dynamic Schedules](${EVE_ORIGIN}/docs/experimental/dynamic-schedules.md): Create and manage creator-owned runtime schedules with the experimental API; includes updates, approvals, and local delivery.
 
 ## API Reference and Discovery
 

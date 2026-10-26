@@ -12,7 +12,7 @@ import { ContextKey } from "#context/key.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { isApprovalRecheck } from "#harness/approval-recheck.js";
 import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
-import { bindScheduleCollection, schedules } from "#public/experimental/schedules/client.js";
+import { bindScheduleCollection, schedules } from "#public/schedules/client.js";
 import type {
   DefinedDynamicSchedules,
   DynamicSchedulesDefinition,

@@ -55,6 +55,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/project-layout", "/getting-started"),
   ...createDocsRedirects("/reference/project-layout", "/getting-started"),
   ...createDocsRedirects("/dynamic-capabilities", "/guides/dynamic-capabilities"),
+  ...createDocsRedirects("/experimental/dynamic-schedules", "/dynamic-schedules"),
   ...createDocsRedirects("/guides/state", "/concepts/state"),
   ...createDocsRedirects("/dynamic-workflows", "/concepts/built-in-tools"),
   ...createDocsRedirects("/guides/dynamic-workflows", "/concepts/built-in-tools"),

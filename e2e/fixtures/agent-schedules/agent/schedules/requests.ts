@@ -1,5 +1,5 @@
-import { defineDynamicSchedules } from "eve/experimental/schedules";
-import { inMemoryScheduleProvider } from "eve/experimental/schedules/testing";
+import { defineDynamicSchedules } from "eve/schedules";
+import { inMemoryScheduleProvider } from "eve/schedules/testing";
 import { z } from "zod";
 import outbox from "../channels/outbox";
 import { recordCollectionOccurrence } from "../lib/collection-occurrences";

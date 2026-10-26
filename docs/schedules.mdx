@@ -7,7 +7,7 @@ A schedule starts the agent on its own clock instead of waiting for an inbound m
 
 The name comes from the path under `schedules/` (`agent/schedules/billing/sweep.ts` → `"billing/sweep"`), and nested directories are fine. An extension mount prefixes that name (`extension/schedules/sweep.ts` mounted as `crm` → `"crm__sweep"`) without changing its cron expression.
 
-For creator-owned schedules created and managed at runtime, see [Experimental dynamic schedules](./experimental/dynamic-schedules). `defineSchedule` remains the fixed, code-authored cron API.
+For creator-owned schedules created and managed at runtime, see [Dynamic schedules](./dynamic-schedules). `defineSchedule` remains the fixed, code-authored cron API.
 
 ## `defineSchedule`
 
