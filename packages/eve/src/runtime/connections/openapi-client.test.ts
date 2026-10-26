@@ -284,15 +284,6 @@ describe("OpenApiConnectionClient", () => {
     expect(JSON.stringify(createItem?.inputSchema)).not.toContain("nullable");
   });
 
-  it("applies an operations allow filter", async () => {
-    const client = new OpenApiConnectionClient(
-      makeConnection({ tools: { allow: ["getProject"] } }),
-    );
-    const metadata = await client.getToolMetadata();
-
-    expect(metadata.map((m) => m.name)).toEqual(["getProject"]);
-  });
-
   it("substitutes path params, appends query, and attaches auth on execute", async () => {
     const fetchMock = vi.fn(
       async (_url: URL, _init: RequestInit) =>
@@ -324,6 +315,53 @@ describe("OpenApiConnectionClient", () => {
     expect(calledUrl.toString()).toBe("https://api.example.com/v1/projects/prj_1?teamId=team_9");
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
+  });
+
+  it.each([".", ".."])(
+    "rejects dot segments in path parameter %j before sending a request",
+    async (id) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new OpenApiConnectionClient(makeConnection());
+
+      await expect(client.executeTool("getProject", { id }, EXECUTE_OPTIONS)).rejects.toThrow(
+        'Path parameter "id" for tool "getProject" in connection "test" must not be "." or "..".',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("validates resolved application-provided path parameters", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OpenApiConnectionClient(
+      makeConnection({ toolCall: { providedArguments: { id: Promise.resolve("..") } } }),
+    );
+
+    await expect(
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    ).rejects.toThrow('Path parameter "id"');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["release.v1/café 100%", "release.v1%2Fcaf%C3%A9%20100%25"],
+    ["folder/../item", "folder%2F..%2Fitem"],
+    ["folder/./item", "folder%2F.%2Fitem"],
+  ])("preserves application-provided path value %j and its encoding", async (id, encodedId) => {
+    const fetchMock = vi.fn(async (_url: URL) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        toolCall: { providedArguments: { id } },
+      }),
+    );
+
+    await client.executeTool("getProject", { id: "..", teamId: ".." }, EXECUTE_OPTIONS);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [calledUrl] = fetchMock.mock.calls[0]!;
+    expect(calledUrl.toString()).toBe(`https://api.example.com/v1/projects/${encodedId}?teamId=..`);
   });
 
   it("resolves auth and headers from the active caller", async () => {
@@ -403,6 +441,98 @@ describe("OpenApiConnectionClient", () => {
 
     expect(result.status).toBe(404);
     expect(result.body).toEqual({ error: "nope" });
+  });
+
+  it("follows same-origin redirects with the connection's credentials", async () => {
+    const fetchMock = vi.fn(async (url: URL, _init: RequestInit) =>
+      url.pathname === "/v1/projects/prj_1"
+        ? new Response(null, { status: 308, headers: { location: "/v2/projects/prj_1" } })
+        : new Response(JSON.stringify({ id: "prj_1" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
+      }),
+    );
+    const result = await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
+
+    expect(result.body).toEqual({ id: "prj_1" });
+    const [calledUrl, init] = fetchMock.mock.calls[1]!;
+    expect(calledUrl.toString()).toBe("https://api.example.com/v2/projects/prj_1");
+    expect(init.redirect).toBe("manual");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
+  });
+
+  it("re-sends a POST redirected with 303 as a bodiless GET", async () => {
+    const fetchMock = vi.fn(async (url: URL, _init: RequestInit) =>
+      url.pathname === "/v1/projects"
+        ? new Response(null, { status: 303, headers: { location: "/v1/projects/prj_1" } })
+        : new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(makeConnection());
+    await client.executeTool("createProject", { body: { name: "demo" } }, EXECUTE_OPTIONS);
+
+    const [, init] = fetchMock.mock.calls[1]!;
+    expect(init.method).toBe("GET");
+    expect(init.body).toBeUndefined();
+    expect(init.headers).not.toHaveProperty("content-type");
+  });
+
+  it("returns a cross-origin redirect without sending credentials to its target", async () => {
+    const fetchMock = vi.fn(
+      async (_url: URL, _init: RequestInit) =>
+        new Response("moved", {
+          status: 302,
+          headers: { location: "https://storage.example.net/archive.tar.gz" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
+        spec: {
+          ...SPEC,
+          components: {
+            ...(SPEC.components as Record<string, unknown>),
+            securitySchemes: { apiKey: { type: "apiKey", in: "header", name: "X-API-Key" } },
+          },
+          security: [{ apiKey: [] }],
+        },
+      }),
+    );
+    const result = await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
+
+    expect(result).toEqual({
+      status: 302,
+      statusText: expect.any(String),
+      body: "moved",
+      location: "https://storage.example.net/archive.tar.gz",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init.redirect).toBe("manual");
+    expect(init.headers).toHaveProperty("X-API-Key", "secret");
+  });
+
+  it("fails with a clear error when same-origin redirects loop", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(null, { status: 302, headers: { location: "/v1/projects/prj_1" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(makeConnection());
+
+    await expect(
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    ).rejects.toThrow(/stopped after 10 redirects/);
   });
 
   it("throws for an unknown tool name", async () => {

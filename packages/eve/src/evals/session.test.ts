@@ -7,9 +7,11 @@ import { MessageResponse } from "#client/message-response.js";
 import { ClientSession } from "#client/session.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createEvalContext } from "#evals/context.js";
+import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { stampTestEvents } from "#internal/testing/events.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 const mocks = vi.hoisted(() => ({ decide: vi.fn() }));
 
@@ -119,6 +121,126 @@ describe("eval session compact", () => {
   });
 });
 
+describe("eval session clock", () => {
+  it("records when each send was accepted and when each event arrived", async () => {
+    const { session } = await setup();
+    const receipt = { deliveryId: "delivery_1", startedAt: 10, notReadyMs: 5, acceptedAt: 20 };
+    vi.mocked(ClientSession.prototype.send).mockImplementationOnce(
+      async () =>
+        new MessageResponse({
+          sessionId: "session_1",
+          cancelTurn: async () => ({ status: "no_active_turn" }),
+          createStream: events,
+          receipt,
+        }),
+    );
+
+    await session.send("Find Alice's order status.");
+
+    const { clock, events: captured } = session.snapshot();
+    expect(clock?.sends).toEqual([
+      {
+        kind: "prewarm",
+        startedAt: expect.any(Number),
+        notReadyMs: 0,
+        acceptedAt: expect.any(Number),
+      },
+      { kind: "message", ...receipt },
+    ]);
+    expect(captured.length).toBeGreaterThan(0);
+    expect(clock?.receivedAt).toHaveLength(captured.length);
+    expect(clock?.receivedAt.every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe("eval session partial respond", () => {
+  // https://github.com/vercel/eve/issues/5157
+  it("keeps the unanswered request pending", async () => {
+    const { session } = await answerOneOfTwoApprovals();
+
+    expect(session.pendingInputRequests.map((request) => request.requestId)).toEqual([
+      "approval_web",
+    ]);
+  });
+
+  // https://github.com/vercel/eve/issues/5157
+  it("reports the run and the respond turn as parked on the unanswered request", async () => {
+    const { collector, session, turn } = await answerOneOfTwoApprovals();
+    turn.parked();
+    turn.succeeded();
+
+    expect(session.snapshot().derived.parked).toBe(true);
+    const outcomes = await collector.finalize({
+      derived: createEmptyDerivedFacts(),
+      events: [],
+      finalMessage: null,
+      output: null,
+      status: "completed",
+      traceContexts: [],
+    });
+    expect(outcomes.map(({ name, passed }) => ({ name, passed }))).toEqual([
+      { name: "parked", passed: true },
+      { name: "succeeded", passed: false },
+    ]);
+  });
+});
+
+/**
+ * Parks on two approvals, then answers only the first. The runtime settles it and parks the
+ * same turn again on the second without re-raising it: `approval.settled`, `turn.waiting`.
+ */
+async function answerOneOfTwoApprovals() {
+  const { collector, session } = await setup();
+  vi.mocked(ClientSession.prototype.send).mockImplementation(async () =>
+    response(async function* () {
+      yield* stampTestEvents([
+        {
+          type: "input.requested",
+          data: {
+            requests: ["api", "web"].map((service) => ({
+              action: {
+                callId: `call_${service}`,
+                input: { service },
+                kind: "tool-call" as const,
+                toolName: "deploy_service",
+              },
+              kind: "tool-approval" as const,
+              prompt: `Deploy ${service}?`,
+              requestId: `approval_${service}`,
+            })),
+            sequence: 1,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+        { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "turn_1" } },
+      ]);
+    }),
+  );
+  vi.mocked(ClientSession.prototype.respond).mockImplementation(async () =>
+    response(async function* () {
+      yield* stampTestEvents([
+        {
+          type: "approval.settled",
+          data: {
+            outcome: "approved",
+            requestId: "approval_api",
+            responderPrincipalId: "alice",
+            sequence: 3,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+        { type: "turn.waiting", data: { on: "input", sequence: 4, turnId: "turn_1" } },
+      ]);
+    }),
+  );
+
+  await session.send("Deploy Alice's api and web services.");
+  const turn = await session.respond([{ requestId: "approval_api", optionId: "approve" }]);
+  return { collector, session, turn };
+}
+
 async function setup() {
   mocks.decide.mockResolvedValue({
     answers: { judgment: { type: "boolean", probability: 1 } },
@@ -146,14 +268,14 @@ async function setup() {
     judge: { model: "openai/gpt-5.4-mini" },
     log: () => {},
   });
-  return { context, session: await manager.session() };
+  return { collector, context, session: await manager.session() };
 }
 
-function response() {
+function response(createStream: () => AsyncGenerator<MessageStreamEvent> = events) {
   return new MessageResponse({
     sessionId: "session_1",
     cancelTurn: async () => ({ status: "no_active_turn" }),
-    createStream: events,
+    createStream,
   });
 }
 

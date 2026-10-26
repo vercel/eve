@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { DELIVERY_IDEMPOTENCY_WINDOW } from "#channel/delivery-idempotency.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
@@ -52,7 +53,30 @@ export type SessionInputSelection =
  */
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
+  private readonly admittedKeys: Set<string>;
   private nextSequence = 0;
+  private prewarmDeploymentId: string | undefined;
+
+  prepareOnDeployment(deploymentId: string): void {
+    this.prewarmDeploymentId = deploymentId;
+  }
+  takePrewarmDeployment(): string | undefined {
+    const target = this.prewarmDeploymentId;
+    this.prewarmDeploymentId = undefined;
+    return target;
+  }
+
+  constructor(admittedDeliveryKeys: readonly string[]) {
+    this.admittedKeys = new Set(admittedDeliveryKeys);
+  }
+
+  get admittedDeliveryKeys(): readonly string[] {
+    return [...this.admittedKeys];
+  }
+
+  isDuplicate(delivery: DeliverHookPayload): boolean {
+    return delivery.idempotencyKey !== undefined && this.admittedKeys.has(delivery.idempotencyKey);
+  }
 
   get pendingCount(): number {
     return this.entries.length;
@@ -63,7 +87,16 @@ export class SessionInputQueue {
     return this.nextSequence;
   }
 
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
+  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+    if (this.isDuplicate(delivery)) return undefined;
+    if (delivery.idempotencyKey !== undefined) {
+      this.admittedKeys.add(delivery.idempotencyKey);
+      if (this.admittedKeys.size > DELIVERY_IDEMPOTENCY_WINDOW) {
+        this.admittedKeys.delete(this.admittedKeys.values().next().value!);
+      }
+    }
+    // A real message supersedes any speculative hint.
+    this.prewarmDeploymentId = undefined;
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;

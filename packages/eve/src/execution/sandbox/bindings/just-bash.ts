@@ -5,108 +5,89 @@ import { dirname, join } from "node:path";
 
 import {
   copyDirectoryAtomically,
-  createFileBackedInternalSandboxSession,
   pathExists,
   resolveLocalProviderSessionRootPath,
   resolveLocalProviderTemplateRootPath,
   resolveLocalProviderTemplatesDirectory,
   touchDirectory,
-  writeSandboxSeedFiles,
 } from "#execution/sandbox/bindings/local-provider-utils.js";
 import {
   createBashSandbox,
-  createJustBashHandle,
+  importJustBashModule,
+  installJustBashModule,
 } from "#execution/sandbox/bindings/just-bash-runtime.js";
 import {
   LOCAL_SANDBOX_TEMPLATE_RECENT_WINDOW_MS,
   LOCAL_SANDBOX_TEMPLATE_RETAIN_COUNT,
   selectStaleTemplateEntries,
 } from "#execution/sandbox/bindings/local-template-prune.js";
-import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
-import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
-import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
-import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
 import {
-  isSandboxPreparedArtifactRecord,
-  providerResourceTargetFiles,
-  sandboxProviderResourceIdentity,
-  type SandboxPreparedArtifact,
+  SandboxSessionGoneError,
+  SandboxTemplateNotProvisionedError,
+  type SandboxJson,
   type SandboxProviderImplementation,
-  type SandboxProviderSessionContext,
-} from "#shared/sandbox-provider.js";
-import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+  type SandboxSessionContext,
+} from "#public/sandbox/provider.js";
+import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
+import { isObject } from "#shared/guards.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
 
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
 export const JUST_BASH_PROVIDER_NAME = "just-bash";
 
 // Holds the template key, not its path: the build and runtime app roots can differ.
 type JustBashPreparedArtifact = { readonly templateKey: string };
-type JustBashSessionState = {
-  readonly generation: string;
-  readonly rootPath: string;
-  readonly version: 2;
-};
+type JustBashSessionState = { readonly rootPath: string; readonly version: 2 };
 
 export function createJustBashSandboxProvider(
-  authoredOptions: JustBashSandboxCreateOptions | undefined = undefined,
-): SandboxProviderImplementation<
-  undefined,
-  JustBashPreparedArtifact,
-  JustBashSessionState,
-  SandboxSession
-> {
-  const options = authoredOptions ?? {};
+  options: JustBashSandboxCreateOptions = {},
+): SandboxProviderImplementation<undefined, JustBashPreparedArtifact, JustBashSessionState, {}> {
   const autoInstall = options.autoInstall ?? true;
-  const environmentIdentity = {
-    autoInstall,
-    customCommands: options.customCommands,
-    filesystem: options.filesystem,
-    version: 2,
-  };
 
-  // `start` reopens the session's root by session id, so keyed tool sessions
-  // can reuse it. The roots are local files, so there is nothing to sweep.
-  const implementation: ReturnType<typeof createJustBashSandboxProvider> = {
+  async function connect(context: SandboxSessionContext, rootPath: string) {
+    return await createBashSandbox({
+      customCommands: options.customCommands,
+      filesystem: options.filesystem,
+      justBash: await importJustBashModule(context.resolveProjectPath(".")),
+      resolveProjectPath: (path) => context.resolveProjectPath(path),
+      rootPath,
+      storagePath: context.storagePath,
+    });
+  }
+
+  return {
+    async onSessionEnd(context, state) {
+      await rm(state?.rootPath ?? sessionRootPath(context), { force: true, recursive: true });
+    },
     async prepare(context) {
-      const templateKey = createSandboxProviderIdentity({
-        ...environmentIdentity,
-        resources: sandboxProviderResourceIdentity(context.resources),
-        sourceRevision: context.sourceRevision,
-      }).slice(0, 24);
+      // Custom commands and the filesystem apply only to live sessions, so they stay out of the key.
+      const templateKey = context.templateKey({ version: 2 }).slice(0, 24);
       const templateRootPath = resolveTemplateRootPath(context.storagePath, templateKey);
       if (await pathExists(templateRootPath)) {
         await touchDirectory(templateRootPath);
-        context.log?.("reusing cached template filesystem");
+        context.log("reusing cached template filesystem");
         return { templateKey };
       }
 
       const temporaryTemplateRootPath = `${templateRootPath}.${randomUUID()}.tmp`;
       let published = false;
       const templateSandbox = await createBashSandbox({
-        autoInstall,
-        host: context.host,
+        justBash: await installJustBashModule({
+          appRoot: context.resolveProjectPath("."),
+          autoInstall,
+        }),
+        resolveProjectPath: (path) => context.resolveProjectPath(path),
         rootPath: temporaryTemplateRootPath,
-        sessionKey: `prepare-${templateKey}`,
         storagePath: context.storagePath,
       });
-      const templateSession = buildSandboxSession(
-        createFileBackedInternalSandboxSession({ sandbox: templateSandbox }),
-      );
 
       try {
-        await writeSandboxSeedFiles(
-          templateSession,
-          providerResourceTargetFiles(context.resources),
-        );
-        if (options.prepare !== undefined) {
-          context.log?.("running sandbox preparation");
-          await options.prepare(
-            createLoggingSandboxSession({ log: context.log, session: templateSession }),
-          );
-        }
+        await context.populate(templateSandbox);
         await templateSandbox.captureState();
         await mkdir(dirname(templateRootPath), { recursive: true });
         try {
@@ -117,57 +98,40 @@ export function createJustBashSandboxProvider(
           throw error;
         }
       } finally {
-        await templateSandbox.dispose();
+        await templateSandbox.stop();
         if (!published) await rm(temporaryTemplateRootPath, { force: true, recursive: true });
       }
       return { templateKey };
     },
-    async resume(context, artifactValue, stateValue) {
-      const artifact = requirePreparedJustBashArtifact(artifactValue);
-      const state = requireJustBashSessionState(stateValue);
-      const generation = createSandboxProviderIdentity({ artifact, version: 1 });
-      const expectedRootPath = sessionRootPath(context, artifact);
-      if (state.generation !== generation || state.rootPath !== expectedRootPath) {
-        throw new Error("just-bash session state is incompatible with this environment.");
+    async resume(context, _artifact, stateValue) {
+      const { rootPath } = requireJustBashSessionState(stateValue);
+      if (!(await pathExists(rootPath))) {
+        throw new SandboxSessionGoneError(`just-bash session root "${rootPath}" no longer exists.`);
       }
-      if (!(await pathExists(state.rootPath))) {
-        throw new Error(`just-bash session root "${state.rootPath}" no longer exists.`);
-      }
-      return await openHandle(context, state.rootPath, options);
+      return await connect(context, rootPath);
     },
     async start(context, _openOptions, artifactValue) {
       const artifact = requirePreparedJustBashArtifact(artifactValue);
-      const rootPath = sessionRootPath(context, artifact);
+      const rootPath = sessionRootPath(context);
       await ensureSessionRoot(
         resolveTemplateRootPath(context.storagePath, artifact.templateKey),
         rootPath,
       );
-      return {
-        handle: await openHandle(context, rootPath, options),
-        state: {
-          generation: createSandboxProviderIdentity({ artifact, version: 1 }),
-          rootPath,
-          version: 2,
-        },
-      };
+      return { connection: await connect(context, rootPath), state: { rootPath, version: 2 } };
     },
+    // eve never ends a keyed sandbox; just-bash keeps it only as files on the local disk.
+    toolSessions: true,
   };
-  // Each handle runs its own interpreter in this process; stopping it keeps the root's files.
-  return withToolSessionSandboxes(implementation, {
-    releaseHandle: (handle) => handle.onSandboxStop(),
-  });
 }
 
-function sessionRootPath(
-  context: SandboxProviderSessionContext,
-  artifact: JustBashPreparedArtifact,
-): string {
+/**
+ * The session's root, under the app's storage path. The template applies
+ * only when the root is created, so a session keeps its files across rebuilds.
+ */
+function sessionRootPath(context: SandboxSessionContext): string {
   return resolveSessionRootPath(
     context.storagePath,
-    createSandboxProviderIdentity({ artifact, sessionId: context.session.id, version: 1 }).slice(
-      0,
-      24,
-    ),
+    createSandboxProviderIdentity({ sessionId: context.session.id, version: 2 }).slice(0, 24),
   );
 }
 
@@ -176,27 +140,12 @@ async function ensureSessionRoot(templateRootPath: string, sessionRootPath: stri
   if (!(await pathExists(templateRootPath))) {
     throw new SandboxTemplateNotProvisionedError({
       providerName: JUST_BASH_PROVIDER_NAME,
+      reason:
+        "The template directory does not exist: it was deleted, or the build ran on another machine.",
       templateKey: templateRootPath,
     });
   }
   await copyDirectoryAtomically(templateRootPath, sessionRootPath);
-}
-
-async function openHandle(
-  context: SandboxProviderSessionContext,
-  rootPath: string,
-  options: JustBashSandboxCreateOptions,
-) {
-  const sandbox = await createBashSandbox({
-    autoInstall: options.autoInstall ?? true,
-    customCommands: options.customCommands,
-    filesystem: options.filesystem,
-    host: context.host,
-    rootPath,
-    sessionKey: context.session.id,
-    storagePath: context.storagePath,
-  });
-  return createJustBashHandle(sandbox);
 }
 
 export async function pruneJustBashSandboxTemplates(input: {
@@ -246,25 +195,18 @@ export async function pruneJustBashSandboxTemplates(input: {
   );
 }
 
-function requirePreparedJustBashArtifact(
-  artifact: SandboxPreparedArtifact,
-): JustBashPreparedArtifact {
-  if (!isSandboxPreparedArtifactRecord(artifact) || typeof artifact.templateKey !== "string") {
-    throw new Error("Invalid prepared just-bash artifact.");
+function requirePreparedJustBashArtifact(artifact: SandboxJson): JustBashPreparedArtifact {
+  if (!isObject(artifact) || typeof artifact.templateKey !== "string") {
+    throw invalidPreparedSandboxArtifactError("just-bash sandbox");
   }
   return { templateKey: artifact.templateKey };
 }
 
-function requireJustBashSessionState(state: SandboxPreparedArtifact): JustBashSessionState {
-  if (
-    !isSandboxPreparedArtifactRecord(state) ||
-    state.version !== 2 ||
-    typeof state.generation !== "string" ||
-    typeof state.rootPath !== "string"
-  ) {
-    throw new Error("Invalid just-bash session state.");
+function requireJustBashSessionState(state: SandboxJson): JustBashSessionState {
+  if (!isObject(state) || state.version !== 2 || typeof state.rootPath !== "string") {
+    throw invalidSandboxSessionStateError("just-bash sandbox");
   }
-  return { generation: state.generation, rootPath: state.rootPath, version: 2 };
+  return { rootPath: state.rootPath, version: 2 };
 }
 
 function resolveTemplateRootPath(storagePath: string, key: string): string {

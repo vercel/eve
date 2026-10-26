@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
+  clipMiddleUtf16Safe,
   COMPACTION_PROMPT_ENVELOPE,
   createCompactionPrompt,
   sliceUtf16Safe,
@@ -86,6 +87,59 @@ describe("createCompactionPrompt", () => {
     expect(result.prompt).not.toContain(big);
     expect(result.prompt).toContain("…");
   });
+
+  it("keeps the end of an oversized tool result in the transcript", () => {
+    const stdout = `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts\nTest Files  1 failed`;
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: {
+              type: "json",
+              value: { stderr: "", stdout, exitCode: 1, status: "completed" },
+            },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    const { prompt } = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+
+    expect(prompt).toContain("✓ passing test");
+    expect(prompt).toContain("chars omitted");
+    expect(prompt).toContain('Test Files 1 failed","exitCode":1,"status":"completed"}');
+  });
+
+  it.each([
+    ["text", { type: "text", value: `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts` }],
+    [
+      "content",
+      {
+        type: "content",
+        value: [{ text: `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts`, type: "text" }],
+      },
+    ],
+  ])(
+    "keeps the head and tail of an oversized %s tool output in the transcript",
+    (_name, output) => {
+      const messages = [
+        {
+          content: [{ output, toolCallId: "call-1", toolName: "bash", type: "tool-result" }],
+          role: "tool",
+        },
+      ] as ModelMessage[];
+
+      const { prompt } = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+
+      expect(prompt).toContain("Tool bash returned ✓ passing test");
+      expect(prompt.split("chars omitted").length - 1).toBe(1);
+      expect(prompt).toContain("✓ passing test FAIL src/auth.test.ts");
+    },
+  );
 
   it("stubs content-output file parts instead of reproducing base64", () => {
     const base64 = "iVBORw0KGgo".repeat(500);
@@ -219,5 +273,31 @@ describe("sliceUtf16Safe", () => {
     const sliced = sliceUtf16Safe(value, TRANSCRIPT_PAYLOAD_LIMIT);
     expect(sliced).toBe("x".repeat(1998) + "📥");
     expect(sliced).toBe(sliced.toWellFormed());
+  });
+});
+
+describe("clipMiddleUtf16Safe", () => {
+  it("returns values within the limit unchanged", () => {
+    expect(clipMiddleUtf16Safe("short", TRANSCRIPT_PAYLOAD_LIMIT)).toBe("short");
+  });
+
+  it("keeps both ends and counts the omitted middle within the limit", () => {
+    const value = `HEAD${"m".repeat(10_000)}TAIL`;
+    const clipped = clipMiddleUtf16Safe(value, TRANSCRIPT_PAYLOAD_LIMIT);
+
+    expect(clipped.length).toBeLessThanOrEqual(TRANSCRIPT_PAYLOAD_LIMIT);
+    expect(clipped.startsWith("HEAD")).toBe(true);
+    expect(clipped.endsWith("TAIL")).toBe(true);
+    const omitted = Number(/\[(\d+) chars omitted\]/.exec(clipped)?.[1]);
+    const marker = ` … [${omitted} chars omitted] … `;
+    expect(clipped.length - marker.length + omitted).toBe(value.length);
+  });
+
+  it.each([0, 1])("never splits a surrogate pair at either cut (offset %s)", (offset) => {
+    const value = "x".repeat(offset) + "📥".repeat(2_000);
+    const clipped = clipMiddleUtf16Safe(value, TRANSCRIPT_PAYLOAD_LIMIT);
+
+    expect(clipped.length).toBeLessThanOrEqual(TRANSCRIPT_PAYLOAD_LIMIT);
+    expect(clipped).toBe(clipped.toWellFormed());
   });
 });

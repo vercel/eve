@@ -65,19 +65,30 @@ export type AppliedRunMessage =
 /**
  * Applies run messages in the order they arrived, in one step however many
  * there are: a fan-out's starts, reports, and replies would otherwise cost a
- * step each.
+ * step each. Set `canCancelTurn` while a turn runs: a hook's `ctx.cancel()`
+ * on a report then returns `cancelled` for the turn to stop.
  */
 export async function applyRunMessagesStep(
-  input: SessionStepState & { readonly messages: readonly AppliedRunMessage[] },
-): Promise<SessionStateTransition> {
+  input: SessionStepState & {
+    readonly canCancelTurn?: boolean;
+    readonly messages: readonly AppliedRunMessage[];
+  },
+): Promise<SessionStateTransition & { readonly cancelled: boolean }> {
   "use step";
-  return await withSessionStateDelta(input, async ({ messages, ...target }) => {
+  return await withSessionStateDelta(input, async ({ canCancelTurn, messages, ...target }) => {
     let state: SessionStepState = target;
+    let cancelled = false;
     // Consecutive starts and reports publish together, as one turn's events do.
     let events: UnstampedMessageStreamEvent[] = [];
     const publish = async (): Promise<void> => {
       if (events.length === 0) return;
-      state = { ...state, ...(await publishSessionEvents(state, events)) };
+      const published = await publishSessionEvents(state, events, { canCancelTurn });
+      state = {
+        ...state,
+        serializedContext: published.serializedContext,
+        sessionState: published.sessionState,
+      };
+      cancelled ||= published.cancelled;
       events = [];
     };
     for (const message of messages) {
@@ -91,6 +102,10 @@ export async function applyRunMessagesStep(
       }
     }
     await publish();
-    return { serializedContext: state.serializedContext, sessionState: state.sessionState };
+    return {
+      cancelled,
+      serializedContext: state.serializedContext,
+      sessionState: state.sessionState,
+    };
   });
 }

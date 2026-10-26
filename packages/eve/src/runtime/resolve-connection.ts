@@ -65,6 +65,7 @@ export async function resolveConnectionDefinition(
       definition.protocol === "openapi" ? resolvedRecord.operations : resolvedRecord.tools;
 
     const result: {
+      experimental_events?: ResolvedConnectionDefinition["experimental_events"];
       approval?: ResolvedConnectionDefinition["approval"];
       authorization?: ResolvedConnectionDefinition["authorization"];
       connectionName: string;
@@ -131,6 +132,29 @@ export async function resolveConnectionDefinition(
         throw new Error('"forwardPrincipal" must be a boolean.');
       }
       result.forwardPrincipal = resolvedRecord.forwardPrincipal;
+    }
+
+    if (definition.experimental_events === true) {
+      const callbacks = normalizeMcpClientConnectionDefinition(
+        resolvedRecord,
+        `Connection "${definition.connectionName}":`,
+      ).experimental_events;
+      const authorization =
+        typeof result.authorization === "object" ? result.authorization : undefined;
+      if (
+        callbacks === undefined ||
+        authorization?.vercelConnect?.experimental_events === undefined
+      )
+        throw new ResolveAgentError(
+          `Connection "${definition.connectionName}": experimental_events requires a static Connect auth provider with the events bridge.`,
+          { logicalPath: definition.logicalPath, sourceId: definition.sourceId },
+        );
+      result.experimental_events = {
+        callbacks,
+        authorization,
+        connector: authorization.vercelConnect.connector,
+        backend: authorization.vercelConnect.experimental_events,
+      };
     }
 
     if (hasHeaders) {
@@ -216,6 +240,11 @@ export function resolveDynamicConnectionValue(
   }
 
   const normalized = normalizeMcpClientConnectionDefinition(value, message);
+  if (normalized.experimental_events !== undefined) {
+    throw new Error(
+      `${message} experimental_events requires a statically authored connection so eve can mount its receiver at build time.`,
+    );
+  }
   assertAuthenticatedDynamicInstanceKey(normalized.auth, normalized.instanceKey, message);
   return omitUndefined({
     approval: normalized.approval,

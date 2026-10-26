@@ -16,7 +16,8 @@ export interface DynamicSubagentAgentConfig {
     readonly thresholdPercent?: number;
   };
   readonly description: string;
-  readonly limits?: AgentLimitsDefinition;
+  /** Serialized into workflow input, so it can't carry the `sessionUsage` function. */
+  readonly limits?: Pick<AgentLimitsDefinition, "sessionTimeoutMs">;
   readonly model: DynamicSubagentModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly tool?: AgentToolExposure;
@@ -48,11 +49,16 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (isDynamicModelDefinition(definition.model)) {
     throw new Error(`${message} The returned "model" must be static.`);
   }
+  if (definition.limits?.sessionUsage !== undefined) {
+    throw new Error(
+      `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,
+    );
+  }
 
   const config: {
     compaction?: DynamicSubagentAgentConfig["compaction"];
     description: string;
-    limits?: AgentLimitsDefinition;
+    limits?: DynamicSubagentAgentConfig["limits"];
     model: DynamicSubagentModelReference;
     reasoning?: AgentReasoningDefinition;
     tool?: AgentToolExposure;

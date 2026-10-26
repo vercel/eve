@@ -489,6 +489,61 @@ describe("runEvals", () => {
     expect(peak).toBe(2);
   });
 
+  it("repeats every eval, reporting each numbered attempt in discovery order", async () => {
+    mockArtifacts();
+    mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));
+    const config: EveEvalConfig = { ...TEST_CONFIG, repeat: 2 };
+    const started: string[] = [];
+    const reported: string[] = [];
+    const reporter: EvalReporter = {
+      onRunStart: () => {},
+      onEvalStart: (event) => {
+        started.push(`${event.evaluation.id}#${event.attempt}`);
+      },
+      onEvalComplete: (result) => {
+        reported.push(`${result.id}#${result.attempt}`);
+      },
+      onRunComplete: () => {},
+    };
+
+    const fromConfig = await run({
+      evaluations: [createEval("a"), createEval("b")],
+      config,
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [reporter],
+      maxConcurrency: 1,
+    });
+
+    expect(started).toEqual(["a#1", "a#2", "b#1", "b#2"]);
+    expect(reported).toEqual(["a#1", "a#2", "b#1", "b#2"]);
+    expect(fromConfig.passed).toBe(4);
+
+    const fromCli = await run({
+      evaluations: [createEval("a")],
+      config,
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [],
+      repeat: 3,
+    });
+
+    expect(fromCli.results.map((result) => result.attempt)).toEqual([1, 2, 3]);
+
+    await expect(
+      run({
+        evaluations: [createEval("a")],
+        target: localTarget,
+        client: unusedClient,
+        appRoot: "/tmp/app",
+        reporters: [],
+        repeat: 0,
+      }),
+    ).rejects.toThrow(/repeat must be a positive integer/);
+  });
+
   it("applies config timeouts while preserving eval and CLI overrides", async () => {
     mockArtifacts();
     mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));

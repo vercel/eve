@@ -26,6 +26,7 @@ import {
 import { type InstrumentationLayout } from "#internal/instrumentation-layout.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import { BUILD_DEPLOYMENT_ID_PLACEHOLDER } from "#internal/nitro/host/build-deployment-id.js";
 
 export type BuiltInWorkflowWorldTarget = "local" | "vercel";
 
@@ -327,17 +328,24 @@ function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
     const deliveryTimeoutsImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-timeouts.ts"),
     );
+    const deliveryAuthImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-auth.ts"),
+    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const importLines = `
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from ${deliveryTimeoutsImportSpecifier};
+import { authenticateLocalWorkflowDeliveries } from ${deliveryAuthImportSpecifier};
 import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
     const createWorldSource = `
 applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-const workflowWorld = await workflowWorldModule.createWorld({
-  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
-});`.trimStart();
+const workflowWorld = authenticateLocalWorkflowDeliveries(
+  await workflowWorldModule.createWorld({
+    dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
+    recoverActiveRuns: false,
+  }),
+);`.trimStart();
     return {
       moduleImportSpecifier,
       extraImportLines: importLines.split("\n"),
@@ -391,7 +399,9 @@ export function createWorkflowWorldPluginSource(input: {
     `import * as workflowWorldModule from ${stringifyEsmImportSpecifier(wiring.moduleImportSpecifier)};`,
     ...wiring.extraImportLines,
     `import { installWorkflowWorld } from ${stringifyEsmImportSpecifier(resolveInstallWorldImportSpecifier())};`,
+    `import { installWorkflowDeploymentId } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/execution/install-workflow-deployment-id.ts"))};`,
     "",
+    `installWorkflowDeploymentId(${JSON.stringify(BUILD_DEPLOYMENT_ID_PLACEHOLDER)});`,
     wiring.createWorldSource,
     `await installWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
     "",

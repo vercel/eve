@@ -74,12 +74,14 @@ interface CreateExecutionNodeStepInput {
     readonly turnId: string;
   }) => Promise<void>;
   readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
+  readonly typedAnswers?: ToolLoopHarnessConfig["typedAnswers"];
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  readonly sessionUsageLimit?: ToolLoopHarnessConfig["sessionUsageLimit"];
 }
 
 /**
@@ -111,6 +113,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation: sessionInstrumentation,
     prepareApprovalTurn: input.prepareApprovalTurn,
     signInCompletions: input.signInCompletions,
+    typedAnswers: input.typedAnswers,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,
@@ -119,6 +122,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
+    sessionUsageLimit: input.sessionUsageLimit,
     tools,
     titleAttributeWrite: input.titleAttributeWrite,
   });

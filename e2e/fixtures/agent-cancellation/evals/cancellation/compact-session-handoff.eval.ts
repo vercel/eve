@@ -18,7 +18,9 @@ function expectCompaction(compacted: EveEvalTurn): void {
  * Each compaction moves the idle session to a fresh workflow run on the same
  * deployment. The session keeps its ID, event stream, and conversation, so
  * later messages still stream normally and a fact from before both
- * compactions is still known.
+ * compactions is still known. Bob's reply is sent the moment the first
+ * compaction reports `session.waiting`, while the session is moving, and must
+ * still run exactly once.
  */
 export default defineEval({
   description: "Continue a session and its conversation across repeated compactions.",
@@ -39,6 +41,7 @@ export default defineEval({
     );
     update.expectOk();
     update.notEvent("session.failed");
+    update.event("turn.started", { count: 1 });
     update.messageIncludes(/STATUS-AFTER-COMPACTION-OK/);
 
     expectCompaction(await session.compact());
@@ -49,6 +52,12 @@ export default defineEval({
     recall.expectOk();
     recall.notEvent("session.failed");
     recall.messageIncludes(/ORCHID-42/);
+
+    // One unbroken stream across both moves: it never restarted or ended.
+    session.event("session.started", { count: 1 });
+    session.notEvent("session.failed");
+    session.notEvent("session.completed");
+    session.event("turn.started", { count: 3 });
 
     t.succeeded();
   },

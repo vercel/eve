@@ -7,26 +7,43 @@ import {
   resolveSessionLimitContinuation,
 } from "#harness/hitl/budget-request.js";
 
-const VIOLATION = { kind: "input", limit: 40_000_000, usedTokens: 40_120_500 } as const;
+const TOTAL = {
+  cacheReadTokens: 500,
+  cacheWriteTokens: 0,
+  inputTokens: 40_120_000,
+  outputTokens: 500,
+} as const;
+const WINDOW = {
+  cacheReadTokens: 500,
+  cacheWriteTokens: 0,
+  inputTokens: 40_000_500,
+  outputTokens: 20,
+} as const;
+
+const PROMPT =
+  "This session has hit its usage limit. This is a guardrail against defective " +
+  "long-running sessions. If session activity looks fine, just approve to keep going.";
 
 function createTestRequest() {
   return createSessionLimitContinuationRequest({
     sessionId: "sess-test",
+    total: TOTAL,
     turnSequence: 0,
-    violation: VIOLATION,
+    window: WINDOW,
+    windowIndex: 0,
   });
 }
 
 describe("createSessionLimitContinuationRequest", () => {
-  it("derives a deterministic request from the violation", () => {
+  it("derives a deterministic request from the usage", () => {
     const first = createTestRequest();
     const second = createTestRequest();
 
     expect(first).toEqual(second);
     expect(first).toEqual({
       action: {
-        callId: "sess-test:0:limit:input:40120500",
-        input: { kind: "input", limit: 40_000_000, usedTokens: 40_120_500 },
+        callId: "sess-test:0:limit:usage:0",
+        input: { total: TOTAL, window: WINDOW },
         kind: "tool-call",
         toolName: "session_limit_continuation",
       },
@@ -35,7 +52,7 @@ describe("createSessionLimitContinuationRequest", () => {
       kind: "session-limit",
       options: [
         {
-          description: "Grant a fresh token budget",
+          description: "Start a new usage window",
           id: "continue",
           label: "Approve",
           style: "primary",
@@ -47,67 +64,47 @@ describe("createSessionLimitContinuationRequest", () => {
           style: "danger",
         },
       ],
-      prompt:
-        "This session has hit the input-token limit (40M) per session. This is a guardrail " +
-        "against defective long-running sessions. If session activity looks fine, just " +
-        "approve to keep going.",
-      requestId: "sess-test:0:limit:input:40120500",
+      prompt: PROMPT,
+      requestId: "sess-test:0:limit:usage:0",
     });
   });
 
-  it("creates a token-cost continuation prompt", () => {
+  it("carries a reported cost and omits an unreported one", () => {
     const request = createSessionLimitContinuationRequest({
       sessionId: "sess-test",
+      total: { ...TOTAL, costUsd: 1.5123 },
       turnSequence: 0,
-      violation: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.5123 },
+      window: WINDOW,
+      windowIndex: 0,
     });
 
-    expect(request).toMatchObject({
-      action: {
-        callId: "sess-test:0:limit:token-cost:1.5123",
-        input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.5123 },
-      },
-      prompt:
-        "This session has hit the $1.5 model token-cost limit per session. This is a guardrail " +
-        "against defective long-running sessions. If session activity looks fine, just " +
-        "approve to keep going.",
-      requestId: "sess-test:0:limit:token-cost:1.5123",
-    });
+    expect(request.action.input).toEqual({ total: { ...TOTAL, costUsd: 1.5123 }, window: WINDOW });
+    expect(request.action.input.window).not.toHaveProperty("costUsd");
+    expect(request.prompt).toBe(PROMPT);
   });
 
-  it("formats the limit compactly in the prompt copy", () => {
-    const promptFor = (limit: number): string =>
-      createSessionLimitContinuationRequest({
-        sessionId: "sess-test",
-        turnSequence: 0,
-        violation: { kind: "input", limit, usedTokens: limit + 1 },
-      }).prompt;
-
-    expect(promptFor(2_000_000)).toContain("(2M)");
-    expect(promptFor(1_872_014)).toContain("(1.9M)");
-    expect(promptFor(200_000)).toContain("(200K)");
-    expect(promptFor(1_500)).toContain("(1.5K)");
-    expect(promptFor(999)).toContain("(999)");
-
-    const tinyCost = createSessionLimitContinuationRequest({
-      sessionId: "sess-test",
-      turnSequence: 0,
-      violation: { kind: "token-cost", limitUsd: 5e-7, usedCostUsd: 6e-7 },
-    });
-    expect(tinyCost.prompt).toContain("$5e-7 model token-cost limit");
-    expect(isSessionLimitContinuationRequestId(tinyCost.requestId)).toBe(true);
-  });
-
-  it("gives each violation instance its own id as the session total grows", () => {
-    // The absolute total is strictly increasing across grants, so a stale
-    // response to an earlier prompt never resolves a later one.
+  it("gives each usage window its own id at the same usage", () => {
     const later = createSessionLimitContinuationRequest({
       sessionId: "sess-test",
+      total: TOTAL,
       turnSequence: 0,
-      violation: { ...VIOLATION, usedTokens: 80_500_000 },
+      window: WINDOW,
+      windowIndex: 1,
     });
 
     expect(later.requestId).not.toBe(createTestRequest().requestId);
+  });
+
+  it("tells the same usage apart across turns", () => {
+    const nextTurn = createSessionLimitContinuationRequest({
+      sessionId: "sess-test",
+      total: TOTAL,
+      turnSequence: 1,
+      window: WINDOW,
+      windowIndex: 0,
+    });
+
+    expect(nextTurn.requestId).toBe("sess-test:1:limit:usage:0");
   });
 
   it("is recognized by isSessionLimitContinuationRequest", () => {
@@ -116,10 +113,13 @@ describe("createSessionLimitContinuationRequest", () => {
 
   it("mints ids recognized by isSessionLimitContinuationRequestId", () => {
     expect(isSessionLimitContinuationRequestId(createTestRequest().requestId)).toBe(true);
+    expect(isSessionLimitContinuationRequestId("s:0:limit:usage:5")).toBe(true);
+    // Ids minted before the usage-window limit still resolve stale answers.
+    expect(isSessionLimitContinuationRequestId("sess-test:0:limit:input:40120500")).toBe(true);
     expect(isSessionLimitContinuationRequestId("sess-test:0:limit:output:12")).toBe(true);
     expect(isSessionLimitContinuationRequestId("sess-test:0:limit:token-cost:1.5123")).toBe(true);
     expect(isSessionLimitContinuationRequestId("approval-1")).toBe(false);
-    expect(isSessionLimitContinuationRequestId("sess-test:0:limit:input:")).toBe(false);
+    expect(isSessionLimitContinuationRequestId("sess-test:0:limit:usage:")).toBe(false);
   });
 });
 

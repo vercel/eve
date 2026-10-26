@@ -37,7 +37,8 @@ import {
 } from "#public/channels/slack/hitl.js";
 import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import {
-  updateAnsweredFreeformCard,
+  settleFreeformCard,
+  settleHitlCard,
   updateAnsweredHitlCard,
 } from "#public/channels/slack/interaction-cards.js";
 import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
@@ -52,6 +53,10 @@ import type {
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
 import {
   bindSlackSessionOperations,
   withSlackResponder,
@@ -496,17 +501,34 @@ async function dispatchBlockInputResponses(input: {
   });
   if (result === null) return;
 
-  try {
-    await input.ctx
-      .from(slackContinuationToken(channelId, threadTs))
-      .respond(input.submission.inputResponses, {
-        auth: result.auth,
-        state: withSlackResponder(undefined, input.submission.user.id),
-      });
-  } catch (error) {
-    log.error("HITL interaction delivery failed", { error });
-    return;
+  const response = await respondOrRetireInactivePrompt(
+    () =>
+      input.ctx
+        .from(slackContinuationToken(channelId, threadTs))
+        .respond(input.submission.inputResponses, {
+          auth: result.auth,
+          state: withSlackResponder(undefined, input.submission.user.id),
+        }),
+    {
+      retirePrompt: (label) =>
+        settleHitlCard(input.interaction, input.deps, { label, text: label }),
+    },
+    log,
+  );
+  if (response.outcome === "inactive") {
+    await Promise.all([
+      response.retirement,
+      postEphemeralNotice({
+        channelId: input.interaction.channelId,
+        deps: input.deps,
+        installationTeamId: input.interaction.installationTeamId,
+        teamId: input.interaction.teamId,
+        threadTs: input.interaction.threadTs,
+        userId: input.submission.user.id,
+      }),
+    ]);
   }
+  if (response.outcome !== "delivered") return;
 
   if (
     input.submission.actions.some((action) => decodeHitlResponse(action)?.kind === "tool-approval")
@@ -518,6 +540,30 @@ async function dispatchBlockInputResponses(input: {
     await updateAnsweredHitlCard(input.interaction, input.deps);
   } catch (error) {
     log.error("HITL answered-card update failed", { error });
+  }
+}
+
+/** Tells only `userId` that the card they answered is no longer active. */
+async function postEphemeralNotice(input: {
+  readonly channelId: string;
+  readonly deps: InteractionHandlerDeps;
+  readonly installationTeamId: string | undefined;
+  readonly teamId: string | undefined;
+  readonly threadTs: string;
+  readonly userId: string;
+}): Promise<void> {
+  const { thread } = buildSlackBinding({
+    api: input.deps.api,
+    botToken: input.deps.config.credentials?.botToken,
+    channelId: input.channelId,
+    installationTeamId: input.installationTeamId,
+    teamId: input.teamId,
+    threadTs: input.threadTs,
+  });
+  try {
+    await thread.postEphemeral(input.userId, INACTIVE_REQUEST_NOTICE);
+  } catch (error) {
+    log.error("inactive prompt notice failed", { error });
   }
 }
 
@@ -655,7 +701,9 @@ async function handleViewSubmission(
 }
 
 async function dispatchViewInputResponse(input: {
-  readonly ctx: { from: ChannelFrom<SlackChannelState> };
+  readonly ctx: {
+    from: ChannelFrom<SlackChannelState>;
+  };
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
   readonly metadata: HitlFreeformModalMetadata;
@@ -673,26 +721,52 @@ async function dispatchViewInputResponse(input: {
   });
   if (result === null) return;
 
-  try {
-    await input.ctx
-      .from(input.metadata.continuationToken)
-      .respond(input.submission.inputResponses, {
+  const cardChannelId = input.metadata.messageChannelId ?? input.metadata.channelId;
+  const response = await respondOrRetireInactivePrompt(
+    () =>
+      input.ctx.from(input.metadata.continuationToken).respond(input.submission.inputResponses, {
         auth: result.auth,
         state: withSlackResponder(undefined, input.submission.user.id),
-      });
-  } catch (error) {
-    log.error("freeform answer delivery failed", { error });
-    return;
+      }),
+    {
+      retirePrompt: (label) =>
+        settleFreeformCard({
+          card: { label, text: label },
+          channelId: cardChannelId,
+          deps: input.deps,
+          installationTeamId: input.installationTeamId,
+          messageTs: input.metadata.messageTs,
+        }),
+    },
+    log,
+  );
+  if (response.outcome === "inactive") {
+    await Promise.all([
+      response.retirement,
+      postEphemeralNotice({
+        channelId: cardChannelId,
+        deps: input.deps,
+        installationTeamId: input.installationTeamId,
+        teamId: input.teamId ?? undefined,
+        // A card routed to another conversation only records the thread it answers.
+        threadTs: cardChannelId === input.metadata.channelId ? input.metadata.threadTs : "",
+        userId: input.submission.user.id,
+      }),
+    ]);
   }
+  if (response.outcome !== "delivered") return;
 
   try {
-    await updateAnsweredFreeformCard({
-      channelId: input.metadata.messageChannelId ?? input.metadata.channelId,
-      messageTs: input.metadata.messageTs,
-      answerLabel: input.text,
-      userId: input.submission.user.id,
-      installationTeamId: input.installationTeamId,
+    await settleFreeformCard({
+      card: {
+        label: input.text,
+        text: `Answered: ${input.text}`,
+        userId: input.submission.user.id,
+      },
+      channelId: cardChannelId,
       deps: input.deps,
+      installationTeamId: input.installationTeamId,
+      messageTs: input.metadata.messageTs,
     });
   } catch (error) {
     log.error("freeform answered-card update failed", { error });

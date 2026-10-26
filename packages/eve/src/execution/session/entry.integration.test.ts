@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
-import { hydrateWorkflowArguments } from "@workflow/core/serialization";
+import { cancelRun, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -100,53 +100,75 @@ describe("workflowEntry integration", () => {
       }
     });
   });
-  it("registers first-turn abort hooks before a prewarmed session receives a message", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
+  it.each([
+    { firstMessage: undefined, start: "a prewarmed session" },
+    { firstMessage: "Say hello.", start: "a session started with a message" },
+  ])(
+    "registers each turn's abort hooks before its message for $start",
+    async ({ firstMessage }) => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {},
-          serializedContext: buildSerializedContext({ channelKind: "http" }),
-          sessionTimeoutMs: false,
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-      try {
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
-        );
-        let abortTokensBeforeMessage: string[] = [];
-        await vi.waitFor(async () => {
-          abortTokensBeforeMessage = (
-            await (await getWorld()).hooks.list({ runId: run.runId })
-          ).data
-            .map((hook) => hook.token)
-            .filter((token) => token.startsWith("abrt_"));
-          expect(abortTokensBeforeMessage).toHaveLength(2);
-        });
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: firstMessage === undefined ? {} : { message: firstMessage },
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+            sessionTimeoutMs: false,
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        const world = await getWorld();
+        const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+        try {
+          await waitForHook({ runId: run.runId }, { token: inboxToken });
+          let turns = 0;
+          if (firstMessage !== undefined) {
+            await stream.nextTurn();
+            turns++;
+          }
+          for (const message of ["Say hello.", "Say hello again."].slice(turns)) {
+            await vi.waitFor(async () => {
+              const hooks = (await world.hooks.list({ runId: run.runId })).data;
+              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
+                2 * (turns + 1),
+              );
+            });
+            await resumeHook(inboxToken, { kind: "send", payload: { message } });
+            await stream.nextTurn();
+            turns++;
+          }
 
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "send",
-          payload: { message: "Say hello." },
-        });
-        await stream.nextTurn();
-
-        const abortTokensAfterTurn = (
-          await (await getWorld()).hooks.list({ runId: run.runId })
-        ).data
-          .map((hook) => hook.token)
-          .filter((token) => token.startsWith("abrt_"));
-        expect(abortTokensAfterTurn).toEqual(abortTokensBeforeMessage);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
+          const events = (
+            await world.events.list({
+              pagination: { limit: 1000 },
+              resolveData: "all",
+              runId: run.runId,
+            })
+          ).data;
+          let abortHooks = 0;
+          const abortHooksBeforeEachTurn: number[] = [];
+          for (const event of events) {
+            if (event.eventType === "hook_created" && event.eventData.token.startsWith("abrt_")) {
+              abortHooks++;
+            }
+            if (
+              event.eventType === "step_created" &&
+              event.eventData.stepName.endsWith("turnStep")
+            ) {
+              abortHooksBeforeEachTurn.push(abortHooks);
+            }
+          }
+          // Each turn uses the pair registered before its message; none starts its own.
+          expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+  );
 
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
@@ -669,6 +691,50 @@ describe("workflowEntry integration", () => {
           expect(hookRead).toEqual(ids.slice(0, hookRead.length));
         }
       } finally {
+        await run.cancel();
+      }
+    });
+  });
+
+  it("keeps a session open when its timer fires within the idle window of its last turn", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-idle-timeout" } });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+          sessionTimeoutMs: 60_000,
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+        let armedAtCreation: SessionTimer | undefined;
+        await vi.waitFor(async () => {
+          [armedAtCreation] = await readSessionTimers(run.runId);
+          expect(armedAtCreation).toBeDefined();
+        });
+
+        // Stand in for the creation timer firing early: end its run, then deliver its signal.
+        await cancelRun(await getWorld(), armedAtCreation!.runId);
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "session-timeout",
+          ownerRunId: run.runId,
+        });
+
+        let timers: SessionTimer[] = [];
+        await vi.waitFor(async () => {
+          timers = await readSessionTimers(run.runId);
+          expect(timers).toHaveLength(2);
+        });
+        // The first turn moved the deadline, so the replacement timer targets a later one.
+        expect(timers[1]!.deadline.getTime()).toBeGreaterThan(armedAtCreation!.deadline.getTime());
+        await expect(run.status).resolves.toBe("running");
+      } finally {
+        stream.dispose();
         await run.cancel();
       }
     });
@@ -1217,7 +1283,7 @@ describe("workflowEntry integration", () => {
     await withHeldApprovalRun(
       {
         agent: {
-          limits: { maxInputTokensPerSession: 1 },
+          limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
           name: "workflow-entry-steer-held-limit",
         },
         auth: ALICE,
@@ -1804,4 +1870,28 @@ async function resetAndRelease(run: HeldApprovalRun["run"]): Promise<void> {
     "reset",
   );
   await withTimeout(run.returnValue, "session release");
+}
+
+interface SessionTimer {
+  readonly deadline: Date;
+  readonly runId: string;
+}
+
+/** Timers an owner armed, oldest first, with the deadline each one sleeps until. */
+async function readSessionTimers(ownerRunId: string): Promise<SessionTimer[]> {
+  const world = await getWorld();
+  const steps = await world.steps.list({ runId: ownerRunId, resolveData: "all" });
+  const timers: SessionTimer[] = [];
+  for (const step of steps.data) {
+    if (!step.stepName.endsWith("//startSessionTimeoutStep") || step.output === undefined) continue;
+    const { runId } = (await hydrateStepReturnValue(step.output, ownerRunId, undefined)) as {
+      runId: string;
+    };
+    const run = await world.runs.get(runId);
+    const [input] = (await hydrateWorkflowArguments(run.input, runId, undefined)) as [
+      { deadline: Date },
+    ];
+    timers.push({ deadline: input.deadline, runId });
+  }
+  return timers.sort((a, b) => a.deadline.getTime() - b.deadline.getTime());
 }

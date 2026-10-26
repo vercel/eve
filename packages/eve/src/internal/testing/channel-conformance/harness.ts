@@ -20,7 +20,7 @@ import {
   askDayAndTimeWorkflow,
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
-import { getWorld } from "#internal/workflow/runtime.js";
+import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   type ConnectionAuthorizationChallenge,
@@ -246,6 +246,11 @@ export interface ChannelConversation {
   waitForToolOutcome(tool: string): Promise<ToolOutcome>;
   /** Waits until every session has stopped working and waits only on a person. */
   waitForRest(): Promise<void>;
+  /**
+   * Cancels every session's workflow run through the workflow world, as an
+   * operator would, so no eve code runs for those sessions again.
+   */
+  cancelRunsInWorld(): Promise<void>;
   /** How many times a gated tool actually executed, as its side effect would show. */
   runsOf(tool: GatedTool): number;
   /**
@@ -792,6 +797,8 @@ async function converse(
     });
     const sessions = new Map<string, Session>();
     const background: Promise<unknown>[] = [];
+    // A cancelled run's hooks are gone, so its address is never claimed again.
+    let runsCancelledInWorld = false;
 
     function track(session: Session): Session {
       sessions.set(session.id, session);
@@ -810,7 +817,7 @@ async function converse(
               ...source,
               send: async (...sendArgs) => track(await source.send(...sendArgs)),
               respond: async (...respondArgs) => {
-                await waitForAddress(address);
+                if (!runsCancelledInWorld) await waitForAddress(address);
                 return track(await source.respond(...respondArgs));
               },
             };
@@ -964,6 +971,13 @@ async function converse(
       runsOf: (tool) => runs[tool],
       callersOf: () => callers,
       waitForRest: () => waitForRest([...sessions.values()], wait),
+      async cancelRunsInWorld() {
+        await waitForStepsToFinish([...sessions.values()], wait);
+        await Promise.all([...sessions.keys()].map((runId) => getRun(runId).cancel()));
+        runsCancelledInWorld = true;
+        // A cancelled run never rests, so there is nothing left to settle.
+        sessions.clear();
+      },
       async shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
         return await view.shownPrompt(prompt);

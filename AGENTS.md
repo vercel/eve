@@ -41,6 +41,11 @@ report only checks actually run. Never create an issue solely to accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
+Once the first implementation is done, use the
+[`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill to open the PR
+early, run a fresh-context review, address and resolve comments, get CI green,
+and merge.
+
 ## Commands
 
 ```sh
@@ -256,6 +261,24 @@ changed and what they'll see differently, in 1–2 sentences.
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When
 in doubt, add one.
+
+## Crediting contributors
+
+External contributors propose changes through issues, prompts, and plans, and
+maintainers implement them (see [CONTRIBUTING.md](./CONTRIBUTING.md)). When a
+change builds on someone else's work, such as an issue, reproduction, prompt,
+implementation plan, or a closed outside pull request, credit them by GitHub
+handle:
+
+- Thank them in the changeset body, for example: "Thanks @octocat for the
+  original implementation in #1234." or "Thanks @octocat for reporting this in
+  #1234." If the change needs no changeset, put the thanks in the PR
+  description.
+- When they wrote code or an implementation plan that the change follows, add
+  a `Co-authored-by: Name <email>` trailer to the commit and keep it in the
+  squash-merge message. Use their GitHub noreply address
+  (`<id>+<login>@users.noreply.github.com`) when they have no public email.
+- Link their issue or pull request from the PR description.
 
 ## Security
 

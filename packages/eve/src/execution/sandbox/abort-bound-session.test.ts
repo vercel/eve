@@ -51,6 +51,9 @@ function createRecordingSession(calls: RecordedCall[]): SandboxSession {
     writeTextFile: async (options) => {
       record("writeTextFile", options.abortSignal);
     },
+    writeFiles: async (options) => {
+      record("writeFiles", options.abortSignal);
+    },
     removePath: async (options) => {
       record("removePath", options.abortSignal);
     },
@@ -71,6 +74,7 @@ describe("bindSandboxAbortSignal", () => {
     await bound.writeFile({ content: new ReadableStream<Uint8Array>(), path: "a.txt" });
     await bound.writeBinaryFile({ content: new Uint8Array(), path: "a.bin" });
     await bound.writeTextFile({ content: "hello", path: "a.txt" });
+    await bound.writeFiles({ files: [{ content: new Uint8Array(), path: "a.bin" }] });
     await bound.removePath({ path: "a.txt" });
 
     expect(calls.map((call) => call.method)).toEqual([
@@ -82,6 +86,7 @@ describe("bindSandboxAbortSignal", () => {
       "writeFile",
       "writeBinaryFile",
       "writeTextFile",
+      "writeFiles",
       "removePath",
     ]);
     for (const call of calls) {

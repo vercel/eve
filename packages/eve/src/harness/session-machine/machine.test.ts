@@ -22,17 +22,22 @@ import {
   parkOnApprovals as parkOnApprovalsTransition,
   requestLimit,
   requireSignIn,
+  withdrawSignIns,
   type ResponsePolicyPass,
 } from "#harness/hitl/approvals.js";
 import { deliver, resolveTypedApproval } from "#harness/hitl/delivery.js";
 import { applyTransition, sessionView, type Transition } from "./commit.js";
 import { saveProjection } from "./current.js";
 import {
+  CANCELLED_CALL_RESULT,
   cancel,
+  awaitSignIns,
   clear,
   completeSignIn,
   hold,
+  matchSignIns,
   receive,
+  runnableCalls,
   relay,
   settle,
   suspendStep,
@@ -116,6 +121,14 @@ function callMessage(...callIds: string[]): ModelMessage {
   };
 }
 
+/** A call a sign-in for `connection` stopped. */
+function stopped(callId: string, connection: string) {
+  return {
+    action: { callId, input: { service: "api" }, kind: "tool-call" as const, toolName: "deploy" },
+    connections: [connection],
+  };
+}
+
 function result(callId: string, value = "ok"): SettledCall {
   return {
     part: {
@@ -137,10 +150,12 @@ const noPolicy = (stepInput?: StepInput): ResponsePolicyPass => ({
 });
 
 /** Answers through `deliver` and `answer`, as the tool loop does with no response policy. */
-async function respond(machine: Machine, input: StepInput) {
-  const delivered = deliver(machine.view(), input, { takeQueued: true });
+async function respond(machine: Machine, input: StepInput, { typedAnswers = true } = {}) {
+  const delivered = deliver(machine.view(), input, { takeQueued: true, typedAnswers });
   // The intake answers a typed approval before the policy pass, as a press.
-  const typed = resolveTypedApproval(machine.view(), delivered.input);
+  const typed = typedAnswers
+    ? resolveTypedApproval(machine.view(), delivered.input)
+    : delivered.input;
   return machine.apply(
     answer(machine.view(), {
       approvalKey: () => undefined,
@@ -148,6 +163,7 @@ async function respond(machine: Machine, input: StepInput) {
       policy: noPolicy(typed),
       searchable: () => false,
       takeQueued: delivered.takeQueued,
+      typedAnswers,
     }),
   );
 }
@@ -419,7 +435,7 @@ describe("session machine", () => {
 
     await machine.apply(
       requireSignIn(machine.view(), {
-        callIdsByName: new Map([["google", ["call-1"]]]),
+        calls: [stopped("call-1", "google")],
         challenges: [challenge],
       }),
     );
@@ -434,6 +450,105 @@ describe("session machine", () => {
     expect(machine.eventsSince(before).map((event) => event.type)).toEqual([
       "authorization.completed",
     ]);
+  });
+
+  it("runs each call a sign-in stopped once its own sign-ins call back, and fails the rest when steered", async () => {
+    const machine = createMachine();
+    await machine.apply(receive(machine.view(), { message: "Read both." }));
+    await machine.apply(startStep(machine.view(), { modelId: "test-model" }));
+    const challenge = (name: string, attemptId: string): AuthorizationChallenge => ({
+      attemptId,
+      challenge: { instructions: `Sign in to ${name}.` },
+      hookUrl: `https://example.test/${attemptId}`,
+      name,
+    });
+    const google = challenge("google", "attempt-google");
+    const slack = challenge("slack", "attempt-slack");
+    await machine.apply(
+      suspendStep(machine.view(), {
+        event: { ...machine.position() },
+        messages: [callMessage("call-1", "call-2")],
+        tasks: [],
+      }),
+    );
+    await machine.apply(
+      requireSignIn(machine.view(), {
+        calls: [stopped("call-1", "google"), stopped("call-2", "slack")],
+        challenges: [google, slack],
+      }),
+    );
+    const waiting = () => suspendedSteps(machine.session.state)[0];
+    const runnable = () =>
+      runnableCalls(machine.view(), waiting()!).map((call) => call.action.callId);
+    expect(waiting()?.approved?.map((call) => call.action.callId)).toEqual(["call-1", "call-2"]);
+    expect(runnable()).toEqual([]);
+    expect(machine.session.history).toEqual([]);
+
+    // The first sign-in calls back: its call runs, and the call reports it, not the callback.
+    await machine.apply(matchSignIns(machine.view(), { attemptIds: ["attempt-google"] }));
+    const before = machine.events.length;
+    await machine.apply(completeSignIn(machine.view(), { completions: [google] }));
+    expect(machine.eventsSince(before)).toEqual([]);
+    expect(runnable()).toEqual(["call-1"]);
+
+    // A new message ends the second sign-in, and the call that waited for it fails with why.
+    await machine.apply(
+      withdrawSignIns(machine.view(), "Cancelled because a new message arrived."),
+    );
+    expect(machine.eventsSince(before).map((event) => event.type)).toEqual([
+      "authorization.completed",
+      "action.result",
+    ]);
+    expect(machine.projection.authorizations["attempt-slack"]?.status).toBe("declined");
+    expect(waiting()?.approved?.map((call) => call.action.callId)).toEqual(["call-1"]);
+    expect(runnable()).toEqual(["call-1"]);
+  });
+
+  it("keeps the request of an approved call that a sign-in stops again", async () => {
+    const machine = createMachine();
+    await machine.apply(receive(machine.view(), { message: "Deploy." }));
+    await machine.apply(startStep(machine.view(), { modelId: "test-model" }));
+    const call = stopped("call-1", "google");
+    const step = {
+      event: { ...machine.position() },
+      messages: [callMessage("call-1")],
+      requests: [],
+      tasks: [],
+      approved: [{ action: call.action, requestId: "approval-1" }],
+    };
+    const next = awaitSignIns(step, { stopped: [call], challenges: [] });
+    expect(next.approved?.map((approved) => approved.requestId)).toEqual(["approval-1"]);
+  });
+
+  it("cancels the call a sign-in stopped with its turn, answering it as cancelled", async () => {
+    const machine = createMachine();
+    await machine.apply(receive(machine.view(), { message: "Read my calendar." }));
+    await machine.apply(startStep(machine.view(), { modelId: "test-model" }));
+    const challenge: AuthorizationChallenge = {
+      attemptId: "attempt-1",
+      challenge: { instructions: "Sign in to Google." },
+      hookUrl: "https://example.test/callback",
+      name: "google",
+    };
+    await machine.apply(
+      suspendStep(machine.view(), {
+        event: { ...machine.position() },
+        messages: [callMessage("call-1")],
+        tasks: [],
+      }),
+    );
+    await machine.apply(
+      requireSignIn(machine.view(), {
+        calls: [stopped("call-1", "google")],
+        challenges: [challenge],
+      }),
+    );
+
+    await machine.apply(cancel(machine.view()));
+
+    expect(machine.projection.authorizations["attempt-1"]?.status).toBe("declined");
+    expect(suspendedSteps(machine.session.state)).toEqual([]);
+    expect(JSON.stringify(machine.session.history)).toContain(CANCELLED_CALL_RESULT);
   });
 
   it("retains a child's request coordinates while holding the parent turn", async () => {
@@ -528,6 +643,16 @@ describe("answers", () => {
     expect(decision.resolved[0]?.inputs[0]?.outcome).toBe("approved");
   });
 
+  it("does not take a plain-text answer when typed answers are off", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+
+    const decision = await respond(machine, { message: "Approve" }, { typedAnswers: false });
+
+    expect(decision.input?.message).toBe("Approve");
+    expect(decision.resolved[0]?.inputs[0]?.outcome).toBe("ignored");
+  });
+
   it("grants a once() approval's key, except to a call still asking for it", async () => {
     const machine = createMachine();
     await parkOnApprovals(machine, "call-1");
@@ -569,8 +694,10 @@ describe("answers", () => {
   describe("the session-limit prompt", () => {
     const request = createSessionLimitContinuationRequest({
       sessionId: "session-test",
+      total: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 101, outputTokens: 0 },
       turnSequence: 1,
-      violation: { kind: "input", limit: 100, usedTokens: 101 },
+      window: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 101, outputTokens: 0 },
+      windowIndex: 0,
     });
 
     async function exhausted() {
@@ -621,6 +748,17 @@ describe("answers", () => {
 
       expect(decision.limit).toEqual({ granted: true });
       expect(callStatus(machine.projection, "call-1")).toBe("awaiting-input");
+    });
+
+    it("queues text instead of answering when typed answers are off", async () => {
+      const machine = await exhausted();
+
+      const decision = await respond(machine, { message: "Continue" }, { typedAnswers: false });
+
+      expect(decision.next).toBe("park");
+      expect(decision.limit).toBeUndefined();
+      expect(machine.projection.inputs[request.requestId]?.status).toBe("open");
+      expect(machine.view().turn.queued?.message).toBe("Continue");
     });
   });
 });

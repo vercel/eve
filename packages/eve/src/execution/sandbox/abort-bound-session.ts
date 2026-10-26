@@ -8,6 +8,7 @@ import type {
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,
+  SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 
@@ -40,6 +41,8 @@ export function bindSandboxAbortSignal<TSession extends SandboxSession>(
       session.writeBinaryFile({ ...options, abortSignal: compose(options.abortSignal) }),
     writeTextFile: (options: SandboxWriteTextFileOptions) =>
       session.writeTextFile({ ...options, abortSignal: compose(options.abortSignal) }),
+    writeFiles: (options: SandboxWriteFilesOptions) =>
+      session.writeFiles({ ...options, abortSignal: compose(options.abortSignal) }),
     removePath: (options: SandboxRemovePathOptions) =>
       session.removePath({ ...options, abortSignal: compose(options.abortSignal) }),
   } satisfies SandboxSession;

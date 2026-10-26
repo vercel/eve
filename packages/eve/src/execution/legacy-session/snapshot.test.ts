@@ -3,13 +3,12 @@ import { importConversation, normalizeHistory } from "./snapshot.js";
 import type { LegacySession } from "./snapshot.js";
 import { nextStepIndex, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 describe("conversation import", () => {
-  it("preserves authored state, budget, emission coordinates and storage", () => {
+  it("preserves authored state, emission coordinates and storage", () => {
     const session: LegacySession = {
       sessionId: "old",
       continuationToken: "slack:thread",
       history: [{ role: "user", content: "Alice chose blue." }],
       agent: { system: "old prompt" },
-      limits: { maxInputTokensPerSession: 40 },
       sandboxState: { session: null },
       state: {
         "app.color": "blue",
@@ -27,7 +26,6 @@ describe("conversation import", () => {
     const { history, sessionState: result } = importConversation(session);
     expect(result.snapshot.session).toMatchObject({
       sessionId: "old",
-      limits: session.limits,
       sandboxState: session.sandboxState,
       state: {
         "app.color": "blue",

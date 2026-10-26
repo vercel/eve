@@ -342,7 +342,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
       "chat.update",
       expect.objectContaining({
         channel: "C123",
-        text: "Answered: No longer needed",
+        text: "No longer needed",
         ts: "card-ts",
       }),
     );
@@ -351,6 +351,38 @@ describe("defaultInputRequestedHandler private input requests", () => {
     expect(logs.records).toContainEqual(
       expect.objectContaining({ level: "error", message: "failed to retire approval message" }),
     );
+  });
+
+  it("announces an approval answered by an unmapped responder as answered, crediting nobody", async () => {
+    const { channel, post, request } = buildChannelStub();
+    post
+      .mockResolvedValueOnce({ id: "details-ts", raw: { ok: true } })
+      .mockResolvedValueOnce({ id: "card-ts", raw: { ok: true } });
+
+    await defaultInputRequestedHandler()(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "custom:unmapped",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
+      blocks?: unknown[];
+      text?: string;
+    };
+    expect(update.text).toBe("Answered: Approve");
+    expect(JSON.stringify(update.blocks)).not.toContain("<@");
   });
 });
 

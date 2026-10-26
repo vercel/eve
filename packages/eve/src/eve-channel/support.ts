@@ -2,11 +2,13 @@ import type { UserContent } from "ai";
 
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
+  type ClientContextValue,
   defaultEveAuth,
   type EveChannelCors,
   type EveChannelCorsOptions,
@@ -17,6 +19,8 @@ import {
 } from "#eve-channel/types.js";
 
 const log = createLogger("eve.channel");
+
+const CLIENT_CONTEXT_PREFIX = "Client context:\n";
 
 export function healthResponse(): Response {
   return Response.json({
@@ -68,17 +72,18 @@ export async function findRemoteAgentBinding(
 
   const events = await input.parent.getEventStream({ startIndex: 0 });
   const reader = events.getReader();
-  let binding: RemoteAgentBinding | undefined;
   try {
     for (let index = 0; index <= tailIndex; index += 1) {
       const next = await reader.read();
       if (next.done) break;
-      binding = readRemoteAgentBinding(next.value, input) ?? binding;
+      // One child session has one binding, so stop reading the parent at the first match.
+      const binding = readRemoteAgentBinding(next.value, input);
+      if (binding !== undefined) return binding;
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return binding;
+  return undefined;
 }
 
 function readRemoteAgentBinding(
@@ -155,12 +160,16 @@ function normalizeEveCorsOrigin(
 
 interface OnMessageOutcome {
   readonly auth: SessionAuthContext | null;
+  /** Model-ready turn context: `onMessage`'s replacement, or the request's labeled entries. */
+  readonly clientContext?: readonly string[];
   readonly context?: readonly string[];
+  readonly history?: readonly SessionHistoryMessage[];
   readonly title?: string;
 }
 
 export async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
+  readonly clientContext?: ClientContextValue;
   readonly config: EveChannelInput;
   readonly invocation?: EveHandle["invocation"];
   readonly message: string | UserContent;
@@ -171,7 +180,11 @@ export async function resolveOnMessage(input: {
 
   let result: EveMessageResult;
   try {
-    const base = { caller: input.auth, request: input.request };
+    const base: EveHandle = {
+      caller: input.auth,
+      clientContext: input.clientContext,
+      request: input.request,
+    };
     const eve: EveHandle =
       input.sessionId === undefined
         ? input.invocation === undefined
@@ -193,7 +206,36 @@ export async function resolveOnMessage(input: {
     );
   }
 
-  return { auth: result.auth, context: result.context, title: result.title };
+  return {
+    auth: result.auth,
+    clientContext: resolveTurnClientContext(result.clientContext, input.clientContext),
+    context: result.context,
+    history: result.history,
+    title: result.title,
+  };
+}
+
+/**
+ * The turn's model context messages: `onMessage`'s replacement as written, otherwise
+ * the request's entries labeled as client-supplied. Empty means none.
+ */
+export function resolveTurnClientContext(
+  replacement: ClientContextValue | undefined,
+  requested: ClientContextValue | undefined,
+): readonly string[] | undefined {
+  const messages =
+    replacement === undefined
+      ? toContextEntries(requested).map((entry) => `${CLIENT_CONTEXT_PREFIX}${entry}`)
+      : toContextEntries(replacement);
+  return messages.length === 0 ? undefined : messages;
+}
+
+/** One model message per string; an object is JSON-serialized into one. */
+function toContextEntries(value: ClientContextValue | undefined): readonly string[] {
+  if (value === undefined || value === "") return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value;
+  return [JSON.stringify(value)];
 }
 
 function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {

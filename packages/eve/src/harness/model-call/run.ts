@@ -18,7 +18,7 @@ import {
 } from "#harness/hitl/index.js";
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { startStep } from "#harness/session-machine/transitions.js";
-import { activeTurnId } from "#harness/session-machine/view.js";
+import { activeTurnId, nextStepIndex } from "#harness/session-machine/view.js";
 import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
@@ -133,7 +133,8 @@ export async function runModelStep(
   try {
     result = await caller.call({ suppressStepStartedEmission: true });
   } catch (error) {
-    caller.throwIfCompactionFailed();
+    const compactionFailed = await caller.failIfCompactionFailed();
+    if (compactionFailed !== undefined) return compactionFailed;
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     const recovery = await recoverModelCall({
@@ -142,7 +143,8 @@ export async function runModelStep(
       sessionId: step.session.sessionId,
       turnId: step.position().turnId,
     });
-    caller.throwIfCompactionFailed();
+    const compactionFailedAgain = await caller.failIfCompactionFailed();
+    if (compactionFailedAgain !== undefined) return compactionFailedAgain;
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     if (!("result" in recovery)) return reportModelCallFailure(step, recovery.error);
@@ -194,7 +196,8 @@ async function selectModel(
         event: stepStartedForResolvers({
           modelId: step.session.agent.modelReference?.id ?? "dynamic",
           sequence: position.sequence,
-          stepIndex: position.stepIndex,
+          // Selection runs before `startStep` records the step, so the position is still the last one.
+          stepIndex: nextStepIndex(step.view().projection),
           turnId: activeTurnId(position),
         }),
         messages: validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),

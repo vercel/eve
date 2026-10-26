@@ -11,9 +11,17 @@ export interface AgentToolInput {
   readonly message: string;
 }
 
+export interface AgentWithModelToolInput extends AgentToolInput {
+  readonly model: string;
+}
+
 type AgentToolCall = WorkflowServeCall<AgentToolInput>;
 
 type AgentToolReceive = WorkflowServeReceive<AgentToolInput>;
+
+type AgentWithModelToolCall = WorkflowServeCall<AgentWithModelToolInput>;
+
+type AgentWithModelToolReceive = WorkflowServeReceive<AgentWithModelToolInput>;
 
 /** One turn of the agent's session, and the signal of the calls it answers. */
 interface AgentTurn {
@@ -24,6 +32,10 @@ interface AgentTurn {
 
 type AgentTurnEvent =
   | { readonly kind: "call"; readonly call: AgentToolCall }
+  | { readonly kind: "result"; readonly result: AgentMessageResult };
+
+type AgentWithModelTurnEvent =
+  | { readonly kind: "call"; readonly call: AgentWithModelToolCall }
   | { readonly kind: "result"; readonly result: AgentMessageResult };
 
 /**
@@ -74,8 +86,63 @@ export async function agentToolServeWorkflow(
   }
 }
 
+/** The opt-in root-copy tool whose model-facing input selects the child model. */
+export async function agentWithModelServeWorkflow(
+  receive: AgentWithModelToolReceive,
+  ctx: WorkflowServeContext<string>,
+): Promise<never> {
+  "use workflow";
+
+  const first = await receive();
+  const model = first.input.model.trim();
+  if (model === "") throw new TypeError("agent model must not be empty.");
+  const agent = ctx.agent("agent", { model });
+  let turn = sendToModelAgent(agent, first, model);
+  let next = receive();
+  for (;;) {
+    const event = await nextModelCallOrResult(next, turn);
+    if (event.kind === "call") {
+      turn = await forwardModelCall(agent, turn, event.call, model);
+      next = receive();
+      continue;
+    }
+    if (!turn.signal.aborted) {
+      if (event.result.status === "failed") {
+        throw new Error(
+          `The agent's turn failed: ${event.result.error?.message ?? "no reason given"}\nThis task has ended; to retry, call ${ctx.toolName} without taskId.`,
+        );
+      }
+      const following = receive();
+      if (following !== next) {
+        turn = sendToModelAgent(agent, await next, model);
+        next = following;
+        continue;
+      }
+      ctx.reply(event.result.message ?? "");
+    }
+    turn = sendToModelAgent(agent, await next, model);
+    next = receive();
+  }
+}
+
 /** A cancel aborts the call's `abortSignal`, which cancels the agent's turn. */
 function sendToAgent(agent: AgentSession, call: AgentToolCall): AgentTurn {
+  const result = agent
+    .send(call.input.message, { signal: call.abortSignal })
+    .then((response) => response.result());
+  return { result, signal: call.abortSignal };
+}
+
+function sendToModelAgent(
+  agent: AgentSession,
+  call: AgentWithModelToolCall,
+  model: string,
+): AgentTurn {
+  if (call.input.model !== model) {
+    throw new Error(
+      "An agent task keeps the model it started with. This task has ended; start a new task to use another model.",
+    );
+  }
   const result = agent
     .send(call.input.message, { signal: call.abortSignal })
     .then((response) => response.result());
@@ -87,6 +154,16 @@ async function nextCallOrResult(
   next: Promise<AgentToolCall>,
   turn: AgentTurn,
 ): Promise<AgentTurnEvent> {
+  return await Promise.race([
+    turn.result.then((result) => ({ kind: "result", result }) as const),
+    next.then((call) => ({ call, kind: "call" }) as const),
+  ]);
+}
+
+async function nextModelCallOrResult(
+  next: Promise<AgentWithModelToolCall>,
+  turn: AgentTurn,
+): Promise<AgentWithModelTurnEvent> {
   return await Promise.race([
     turn.result.then((result) => ({ kind: "result", result }) as const),
     next.then((call) => ({ call, kind: "call" }) as const),
@@ -105,4 +182,14 @@ async function forwardCall(
 ): Promise<AgentTurn> {
   if (turn.signal.aborted) await turn.result.catch(() => undefined);
   return sendToAgent(agent, call);
+}
+
+async function forwardModelCall(
+  agent: AgentSession,
+  turn: AgentTurn,
+  call: AgentWithModelToolCall,
+  model: string,
+): Promise<AgentTurn> {
+  if (turn.signal.aborted) await turn.result.catch(() => undefined);
+  return sendToModelAgent(agent, call, model);
 }

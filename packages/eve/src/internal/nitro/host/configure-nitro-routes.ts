@@ -259,6 +259,18 @@ function registerApplicationRoutes(
 ): void {
   for (const route of registry.routes) {
     switch (route.kind) {
+      case "connection-event": {
+        addHostVirtualHandler(nitro, {
+          args: JSON.stringify({ artifactsConfig, connectionName: route.connectionName }),
+          handlerExport: "handleConnectionEventRequest",
+          method: route.method,
+          modulePath: resolvePackageSourceFilePath(
+            "src/internal/nitro/routes/connection-events.ts",
+          ),
+          route: route.path,
+        });
+        break;
+      }
       case "channel":
       case "channel-preflight": {
         registerChannelVirtualHandlers(nitro, {

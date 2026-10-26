@@ -159,26 +159,16 @@ describe("toolResultFrom", () => {
       "tool:Run the shared action.",
     );
 
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'eve could not assign a unique toolResultFrom identity for "tool:Run the shared action."',
-      ),
-    );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Conflicting definitions: tool "first_tool" from "tools/first.ts" and tool "second_tool" from "tools/second.ts".',
-      ),
-    );
     expect(toolResultFrom(toolResult("first_tool", { source: "first" }), first)).toEqual({
       callId: "call_1",
       output: { source: "first" },
       toolName: "first_tool",
     });
     expect(toolResultFrom(toolResult("first_tool", { source: "first" }), second)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  it("does not use a colliding description fallback to narrow the wrong tool", () => {
+  it("does not use a colliding description fallback to narrow the wrong tool, and warns once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const copy = defineTool({
       description: "Run the fallback action.",
@@ -197,8 +187,20 @@ describe("toolResultFrom", () => {
       "tool:Run the fallback action.",
     );
 
-    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).not.toHaveBeenCalled();
     expect(toolResultFrom(toolResult("first_tool", { source: "first" }), copy)).toBeUndefined();
+    expect(toolResultFrom(toolResult("second_tool", { source: "second" }), copy)).toBeUndefined();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'eve could not assign a unique toolResultFrom identity for "tool:Run the fallback action."',
+      ),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Conflicting definitions: tool "first_tool" from "tools/first.ts" and tool "second_tool" from "tools/second.ts".',
+      ),
+    );
   });
 
   it("matches a connection tool result with qualified name", () => {
@@ -244,17 +246,6 @@ describe("toolResultFrom", () => {
       connectionDefinitionKey("https://mcp.example.test", "Shared"),
     );
 
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        `eve could not assign a unique toolResultFrom identity for ${JSON.stringify(connectionDefinitionKey("https://mcp.example.test", "Shared"))}`,
-      ),
-    );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Conflicting definitions: connection "first" from "connections/first.ts" and connection "second" from "connections/second.ts".',
-      ),
-    );
     expect(toolResultFrom(toolResult("first__search", []), first)).toEqual({
       callId: "call_1",
       connectionToolName: "search",
@@ -262,5 +253,40 @@ describe("toolResultFrom", () => {
       toolName: "first__search",
     });
     expect(toolResultFrom(toolResult("first__search", []), second)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // #3085: loaded definitions match by source identity, so a shared fallback
+  // key alone should not warn at registration time.
+  it("does not warn when loaded connections share a fallback identity", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const key = connectionDefinitionKey("https://api.githubcopilot.com/mcp/", "GitHub");
+    const github = defineMcpClientConnection({
+      url: "https://api.githubcopilot.com/mcp/",
+      description: "GitHub",
+    });
+    const githubWrite = defineMcpClientConnection({
+      url: "https://api.githubcopilot.com/mcp/",
+      description: "GitHub",
+    });
+
+    registerDefinitionSource(
+      github,
+      { kind: "connection", logicalPath: "connections/github.ts", name: "github" },
+      key,
+    );
+    registerDefinitionSource(
+      githubWrite,
+      { kind: "connection", logicalPath: "connections/githubwrite.ts", name: "githubwrite" },
+      key,
+    );
+
+    expect(toolResultFrom(toolResult("github__search", []), github)?.connectionToolName).toBe(
+      "search",
+    );
+    expect(
+      toolResultFrom(toolResult("githubwrite__search", []), githubWrite)?.connectionToolName,
+    ).toBe("search");
+    expect(warn).not.toHaveBeenCalled();
   });
 });

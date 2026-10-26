@@ -1,4 +1,4 @@
-import { createAgentDelegationTransport } from "#compiled/@eve/tracing/delegation.js";
+import { createAgentDelegationTransport } from "#compiled/@vercel/agent-runs/delegation.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { SessionParent, SessionTraceContext } from "#channel/types.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";

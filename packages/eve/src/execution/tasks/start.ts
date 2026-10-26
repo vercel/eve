@@ -39,7 +39,7 @@ const log = createLogger("execution.tasks");
 
 type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 
-/** The call's answer, and the task start the dispatch step reports for it. */
+/** The call's answer, and the task start the dispatch reports for it. */
 interface TaskDispatchResult {
   readonly result: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
@@ -51,9 +51,9 @@ type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
 
 /**
  * Starts the run for a task its model step committed, once, and answers the
- * call with its receipt and the `task.started` event the dispatch step
- * publishes. Runs inside that step, where the task's cap is enforced: past
- * it, the record is dropped and the call fails.
+ * call with its receipt and the `task.started` data the next step publishes.
+ * Runs inside the dispatch step, where the task's cap is enforced: past it,
+ * the record is dropped and the call fails.
  */
 export async function startTaskRun(
   input: StartWorkflowTaskInput & { readonly entry: TaskRunEntry },

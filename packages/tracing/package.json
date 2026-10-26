@@ -1,37 +1,53 @@
 {
-  "name": "@eve/tracing",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Framework-neutral tracing for durable AI agents. Vendored into eve; not published.",
+  "name": "@vercel/agent-runs",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Framework-neutral agent run tracing with OpenTelemetry and durable checkpoints.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel/eve.git",
+    "directory": "packages/tracing"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "NOTICE"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
     ".": {
       "eve-source": "./src/index.ts",
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
     },
     "./delegation": {
       "eve-source": "./src/delegation.ts",
-      "types": "./src/delegation.ts",
-      "default": "./src/delegation.ts"
+      "types": "./dist/src/delegation.d.ts",
+      "default": "./dist/src/delegation.js"
     },
     "./otel": {
       "eve-source": "./src/otel.ts",
-      "types": "./src/otel.ts",
-      "default": "./src/otel.ts"
+      "types": "./dist/src/otel.d.ts",
+      "default": "./dist/src/otel.js"
     },
     "./ai-sdk": {
       "eve-source": "./src/ai-sdk.ts",
-      "types": "./src/ai-sdk.ts",
-      "default": "./src/ai-sdk.ts"
+      "types": "./dist/src/ai-sdk.d.ts",
+      "default": "./dist/src/ai-sdk.js"
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

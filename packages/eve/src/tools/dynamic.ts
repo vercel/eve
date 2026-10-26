@@ -29,9 +29,9 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly label?: ToolLabelDefinition<TInput, TOutput>;
   readonly description: string;
   /**
-   * Ends the turn after a successful call, as `endsTurn: true` on
-   * `defineTool`. Dynamic tools accept only `true` or `false`: eve rejects a
-   * function when the resolver returns this entry.
+   * Ends the turn after a successful call, as `endsTurn` on a static
+   * `defineTool`. A function is replayed from its durable descriptor, like
+   * `execute`.
    */
   readonly endsTurn?: boolean | ((output: TOutput) => boolean | Promise<boolean>);
   readonly inputSchema: PublicToolInputSchema<TInput>;

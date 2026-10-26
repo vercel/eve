@@ -13,11 +13,19 @@ import {
   Table,
   Field,
   Image,
+  TextInput,
 } from "#compiled/chat/index.js";
 
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 
 describe("cardToBlocks", () => {
+  it("renders a text input as its label, like the Slack adapter", () => {
+    const blocks = cardToBlocks(
+      Card({ children: [Section([TextInput({ id: "reason", label: "Reason" })])] }),
+    );
+    expect(blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text: "Reason" } }]);
+  });
+
   it("renders title and subtitle as header + context blocks", () => {
     const blocks = cardToBlocks(
       Card({ title: "Order #1234", subtitle: "Ready for pickup", children: [] }),

@@ -17,7 +17,10 @@ describe("compiled agent manifest v50", () => {
     const { manifest } = await compileFromMemory({
       agent: {
         experimental: { workflow: { modelCallsPerStep: 4, retention: 0 } },
-        limits: { maxTokenCostUsdPerSession: 1.5 },
+        limits: {
+          sessionTimeoutMs: 86_400_000,
+          sessionUsage: ({ window }) => window.costUsd !== undefined && window.costUsd >= 1.5,
+        },
         model: "openai/gpt-5.4",
       },
       model: "openai/gpt-5.4",
@@ -29,8 +32,21 @@ describe("compiled agent manifest v50", () => {
     expect(parsed.config.experimental?.workflow?.modelCallsPerStep).toBe(4);
     // `0` is falsy: a truthiness-based copy anywhere on the manifest path drops it.
     expect(parsed.config.experimental?.workflow?.retention).toBe(0);
-    expect(parsed.config.limits?.maxTokenCostUsdPerSession).toBe(1.5);
+    expect(parsed.config.limits?.sessionTimeoutMs).toBe(86_400_000);
+    // The manifest is JSON: a `sessionUsage` function compiles to a marker, and the
+    // runtime loads the function from the agent module.
+    expect(parsed.config.limits?.sessionUsage).toBe(true);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
+  it("marks no session usage limit when the agent authors none", async () => {
+    const { manifest } = await compileFromMemory({
+      agent: { limits: { sessionTimeoutMs: 1_000 }, model: "openai/gpt-5.4" },
+      model: "openai/gpt-5.4",
+    });
+    const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
+
+    expect(parsed.config.limits).toEqual({ sessionTimeoutMs: 1_000 });
   });
 
   it("round-trips agent tool configuration and disabled tool names", async () => {

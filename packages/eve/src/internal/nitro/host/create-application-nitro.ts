@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
+import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -28,6 +30,7 @@ import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-asse
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import {
   createExtensionExternalDependencyPlugin,
   resolveExtensionExternalDependencyPaths,
@@ -37,6 +40,7 @@ import {
   configureProductionNitroRoutes,
 } from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
+import { createExternalDependencyOutputCheckPlugin } from "#internal/nitro/host/external-dependency-output-check-plugin.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
 import {
   createOptionalEngineDependencyPlugin,
@@ -112,19 +116,14 @@ function collectHostedTraceDependencies(
   const extensionExternalDependencies = new Set(
     collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
   );
-  const configuredExternalDependencies = [
-    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
-    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
-      subagent.configResolver === undefined
-        ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
-    ),
-  ];
+  const configuredExternalDependencies = collectConfiguredExternalDependencies(
+    preparedHost.compileResult.manifest,
+  );
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    // Optional engine packages (just-bash, microsandbox) join the
+    // Optional engine packages (just-bash) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
     // createOptionalEngineDependencyPlugin pins them as plain externals
@@ -138,6 +137,17 @@ function collectHostedTraceDependencies(
     (dependencyName) =>
       dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
   );
+}
+
+function collectConfiguredExternalDependencies(manifest: CompiledAgentManifest): string[] {
+  return [
+    ...(manifest.config.build?.externalDependencies ?? []),
+    ...manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
+    ),
+  ];
 }
 
 function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): string[] {
@@ -162,9 +172,8 @@ function collectConfiguredSandboxProviderNames(manifest: CompiledAgentManifest):
 
 /**
  * Hosted Vercel builds can prune local sandbox providers only when the
- * app did not explicitly configure one. Omitted backends resolve through
- * `DefaultSandbox.environment()`, which selects Vercel on hosted Vercel and never
- * needs local runtime code there.
+ * app did not explicitly configure one. `DefaultSandbox.environment()` records
+ * Vercel Sandbox when built on Vercel, so it never needs local runtime code there.
  */
 export function shouldPruneLocalSandboxProviders(input: {
   readonly configuredBackendNames: ReadonlySet<string>;
@@ -605,18 +614,37 @@ function createApplicationNitroBundlerConfiguration(
     preparedHost.compileResult.manifest,
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ].flatMap((node) => node.extensionMounts);
+  // eve's plugins run before Nitro's externals and tracing plugins, so a
+  // pseudo-package never reaches the output as a live import.
   const nitroBundlerPlugins = [
+    createPseudoPackagePlugin(),
     options.development ? null : createDevelopmentRuntimePrunePlugin(),
     compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
+    options.development
+      ? null
+      : createExternalDependencyOutputCheckPlugin({
+          appRoot: preparedHost.appRoot,
+          externalDependencies: collectConfiguredExternalDependencies(
+            preparedHost.compileResult.manifest,
+          ),
+        }),
     createExtensionMountPlugin(
       extensionMounts,
       extensionOverridePaths(preparedHost.compileResult.manifest),
     ),
     extensionScopePlugin,
+    // Workflow step modules reach Nitro as authored source, not prebundled.
+    // A workspace member without its own package.json shares the enclosing package.
+    createAuthoredAssetImportPlugin({
+      authoredSourceOnly: true,
+      packageRoot: findAuthoredPackageRoot(preparedHost.appRoot) ?? preparedHost.appRoot,
+    }),
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
+    // Keep dependency filtering out of Rolldown's JS callback bridge.
+    output: { sourcemapIgnoreList: /node_modules/ },
     tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
   };
   // Nitro inherits rollupConfig in its Rolldown builder, concatenating plugin arrays.
@@ -845,7 +873,11 @@ export async function createProductionApplicationNitro(
     plugins: nitroPlugins,
     publicAssets: [],
     scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
-    rolldownConfig: bundler.nitroRolldownConfig,
+    rolldownConfig: {
+      ...bundler.nitroRolldownConfig,
+      // Region comments contain invocation-random scratch paths, not runtime inputs.
+      experimental: { attachDebugInfo: "none" },
+    },
     rollupConfig: bundler.nitroRollupConfig,
     rootDir: preparedHost.appRoot,
     serverAssets: skillServerAssets,

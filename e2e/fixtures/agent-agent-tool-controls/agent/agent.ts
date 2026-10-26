@@ -18,7 +18,14 @@ export default defineAgent({
       const inspectAgents = request.userMessages.some((message) =>
         message.includes("E2E_INSPECT_WORKFLOW_AGENTS"),
       );
-      const toolName = inspectAgents ? "inspect-agents" : "invoke-self";
+      const modelOverride = request.userMessages.some((message) =>
+        message.includes("E2E_MODEL_OVERRIDE_ROOT_COPY"),
+      );
+      const toolName = inspectAgents
+        ? "inspect-agents"
+        : modelOverride
+          ? "invoke-self-with-model"
+          : "invoke-self";
       const result = request.toolResults.find((entry) => entry.name === toolName);
       return result === undefined
         ? { toolCalls: [{ name: toolName, input: {} }] }

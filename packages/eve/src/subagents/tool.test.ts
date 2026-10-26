@@ -51,17 +51,14 @@ function makeParent(
   };
 }
 
-const NO_LIMITS = { maxInputTokensPerSession: false, maxOutputTokensPerSession: false } as const;
-
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "continuationKey" | "limits" | "selfAgent" | "source"> & {
+  input: Omit<BuildSubagentRunInput, "continuationKey" | "selfAgent" | "source"> & {
     readonly selfAgent?: boolean;
   },
 ): ReturnType<typeof buildSubagentRunInput> {
   return buildSubagentRunInput({
     ...input,
     continuationKey: `${input.session.sessionId}:${input.action.callId}`,
-    limits: NO_LIMITS,
     selfAgent: input.selfAgent ?? false,
     source: { type: "runtime" },
   });
@@ -272,7 +269,6 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       continuationKey: "parent-session:call-1",
       initiatorAuth: null,
-      limits: NO_LIMITS,
       selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },

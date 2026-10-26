@@ -11,6 +11,7 @@ export type DurableDynamicCallbackPhase =
   | "approvalPrompt"
   | "approvalRequest"
   | "approvalResponse"
+  | "endsTurn"
   | "execute"
   | "toModelOutput"
   | "inputSchema"
@@ -30,6 +31,7 @@ export interface DurableDynamicCallbackReference {
 }
 
 export interface DurableDynamicToolCallbacks {
+  readonly endsTurn?: DurableDynamicCallbackReference;
   readonly execute: DurableDynamicCallbackReference;
   readonly inputSchema?: DurableDynamicCallbackReference;
   readonly outputSchema?: DurableDynamicCallbackReference;
@@ -52,6 +54,7 @@ export interface StampedDurableDynamicCallback {
 }
 
 type LiveDurableDynamicToolCallbacks = Partial<{
+  endsTurn: StampedDurableDynamicCallback;
   execute: StampedDurableDynamicCallback;
   inputSchema: StampedDurableDynamicCallback;
   outputSchema: StampedDurableDynamicCallback;
@@ -178,6 +181,7 @@ function durableCallbackPhases(
     DurableDynamicCallbackPhase,
     DurableDynamicCallbackReference | undefined,
   ])[] = [
+    ["endsTurn", callbacks.endsTurn],
     ["execute", callbacks.execute],
     ["inputSchema", callbacks.inputSchema],
     ["outputSchema", callbacks.outputSchema],
@@ -277,6 +281,8 @@ export function collectDurableDynamicToolCallbacks(input: {
   };
   readonly approval?: ToolApproval<never>;
   readonly approvalKey?: (...args: never[]) => unknown;
+  /** A boolean `endsTurn` is durable metadata already; only a function needs a descriptor. */
+  readonly endsTurn?: unknown;
   readonly execute?: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
@@ -298,6 +304,7 @@ export function collectDurableDynamicToolCallbacks(input: {
       ? undefined
       : input.approval.prompt,
   );
+  const endsTurn = readDurableDynamicCallback(input.endsTurn);
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
@@ -305,6 +312,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   const outputSchema = readDurableSchema(input.outputSchema);
   if (inputSchema !== undefined) callbacks.inputSchema = inputSchema;
   if (outputSchema !== undefined) callbacks.outputSchema = outputSchema;
+  if (endsTurn !== undefined) callbacks.endsTurn = endsTurn;
   if (execute !== undefined) callbacks.execute = execute;
   if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
     callbacks.label = {

@@ -42,7 +42,10 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getWorkflowMetadata: () => ({ url: "https://parent.example" }),
 }));
-vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
+vi.mock("#execution/coordination-dispatch-step.js", () => ({
+  dispatchCoordinationStep: vi.fn(),
+  publishTaskStartedStep: vi.fn(),
+}));
 
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
@@ -99,13 +102,43 @@ type TurnStepWorkResult = DurableStepResult extends infer R
     : never
   : never;
 const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
-const dispatchWork = stepWork<
-  Parameters<typeof dispatchCoordinationStep>[0],
-  CoordinationDispatchResult
->;
+/** These dispatches start no task, so their work omits `started`. */
+function dispatchWork(
+  work: (
+    input: Parameters<typeof dispatchCoordinationStep>[0],
+  ) => Promise<Omit<CoordinationDispatchResult, "started">>,
+) {
+  return stepWork(async (input: Parameters<typeof dispatchCoordinationStep>[0]) => ({
+    ...(await work(input)),
+    started: [],
+  }));
+}
 const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedDeliverResult>;
 
 describe("SessionExecution checkpoints", () => {
+  it("carries an applied handover to only the next existing turn step", async () => {
+    const handover = { attemptKey: "source-run:0", payloadCount: 2, appliedAtMs: 123456 };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async (input) => ({
+          action: "park",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+    const execution = createExecution({
+      inbox: { ...idleInbox(), handoverObservation: handover },
+      sessionState: state(""),
+    });
+    await execution.runTurn(undefined);
+    await execution.runTurn(undefined);
+    expect(vi.mocked(turnStep).mock.calls.map(([input]) => input.handover)).toEqual([
+      handover,
+      undefined,
+    ]);
+  });
+
   it("uses prepared cancellation and steering controls for the first step", async () => {
     const control = createTurnControl();
     vi.mocked(turnStep)
@@ -218,6 +251,45 @@ describe("SessionExecution checkpoints", () => {
     await createExecution({ inbox, sessionState: state("") }).runTurn(undefined, { caller });
     expect(callers).toEqual([caller, undefined]);
   });
+  it("does not interrupt generation for an already admitted delivery key", async () => {
+    let deliver: (payload: SessionInboxPayload) => void = () => {};
+    const inbox: SessionInbox = {
+      ...idleInbox(),
+      onDelivery(handler) {
+        deliver = handler;
+        return () => {};
+      },
+    };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          deliver({
+            kind: "send",
+            idempotencyKey: "accepted",
+            payload: { message: "Alice's earlier message." },
+          });
+          expect(input.steeringSignal?.aborted).toBe(false);
+          deliver({
+            kind: "send",
+            idempotencyKey: "new",
+            payload: { message: "Alice corrects the report." },
+          });
+          expect(input.steeringSignal?.aborted).toBe(true);
+          return {
+            action: "park",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+    await createExecution({
+      inbox,
+      queue: new SessionInputQueue(["accepted"]),
+      sessionState: state(""),
+    }).runTurn(undefined);
+  });
+
   it.each(["cancel", "reset"] as const)(
     "gives %s precedence over generation steering",
     async (kind) => {
@@ -563,7 +635,7 @@ describe("SessionExecution checkpoints", () => {
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {
     const sessionState = state("");
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const followUp: DeliverHookPayload = {
       kind: "deliver",
       payloads: [{ message: "Continue after cancellation." }],
@@ -686,7 +758,7 @@ describe("SessionExecution checkpoints", () => {
       kind: "deliver",
       payloads: [{ message: "One more thing." }],
     };
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
       takeLeading: () => [],
@@ -796,7 +868,7 @@ describe("SessionExecution checkpoints", () => {
     };
     const cancel = { kind: "cancel", turnId: "turn_0" } as const;
     let interrupt: (payload: SessionInboxPayload) => void = () => {};
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
       takeLeading: () => [],
@@ -846,7 +918,7 @@ describe("SessionExecution checkpoints", () => {
       payloads: [{ inputResponses: [{ requestId: "child-request", text: "blue" }] }],
     };
     const runtimePayloads = [answer, { kind: "cancel" as const }];
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
       takeLeading: () => [],
@@ -1137,7 +1209,7 @@ describe("SessionExecution checkpoints", () => {
     const execution = new SessionExecution({
       cursor,
       inbox,
-      queue: new SessionInputQueue(),
+      queue: new SessionInputQueue([]),
       sessionId: sessionState.sessionId,
     });
 
@@ -1578,6 +1650,7 @@ const PUBLISHED = "test.published";
 /** Mocks the run-message publishing steps to record what they publish in the session context. */
 function publishIntoContext(): void {
   const append = (context: Record<string, unknown>, entry: string) => ({
+    cancelled: false,
     serializedContext: {
       ...context,
       [PUBLISHED]: [...((context[PUBLISHED] as string[] | undefined) ?? []), entry],
@@ -1698,7 +1771,7 @@ function createExecution(input: {
     capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,
-    queue: input.queue ?? new SessionInputQueue(),
+    queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
   });
 }

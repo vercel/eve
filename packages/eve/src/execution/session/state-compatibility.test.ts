@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import {
   positionState,
@@ -73,6 +73,34 @@ describe("handoff state inspection", () => {
       }),
     ]);
     expect(isSessionStateIdleForHandoff(checkpoint(asked))).toBe(false);
+  });
+
+  it.each([
+    ["eve.runtime.pendingInputBatch", {}],
+    ["eve.runtime.pendingCoordinationBatch", {}],
+    ["eve.runtime.deferredStepInput", {}],
+    ["eve.harness.pendingWorkflowInterrupt", {}],
+    ["eve.runtime.pendingInputBatches", [null]],
+    ["eve.runtime.pendingInputBatches", "corrupt"],
+    ["eve.runtime.hitl.requests", { signIns: false }],
+    ["eve.runtime.hitl.requests", { relays: { request: {} } }],
+    ["eve.runtime.hitl.requests", { relays: null }],
+    ["eve.runtime.hitl.requests", []],
+  ] as const)("refuses retained or malformed work in %s", (key, value) => {
+    expect(isSessionStateIdleForHandoff(checkpoint({ state: { [key]: value } }))).toBe(false);
+  });
+
+  it("rejects corrupt run state before a pending-work shortcut", () => {
+    expect(() =>
+      isSessionStateIdleForHandoff(
+        checkpoint({
+          state: {
+            "eve.workflowTool": { version: 4, runs: [null] },
+            "eve.runtime.pendingInputBatch": {},
+          },
+        }),
+      ),
+    ).toThrow("Corrupt workflow tool run registry");
   });
 
   it("refuses input the session holds until it can run", () => {

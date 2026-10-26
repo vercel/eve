@@ -173,6 +173,28 @@ describe("executeWebFetchTool", () => {
     expect(result.content).not.toContain("evil");
   });
 
+  it("converts HTML served without a Content-Type", async () => {
+    const script = "const ignored = 1;\n".repeat(MAX_OUTPUT_LINES + 500);
+    const html = `\n<!DOCTYPE html><html><head><script>${script}</script></head><body><h1>Visible title</h1></body></html>`;
+    // Bytes, because a string body would get an implicit text/plain header.
+    requestPublicUrlMock.mockResolvedValueOnce(new Response(new TextEncoder().encode(html)));
+
+    const result = await executeWebFetchTool({ url: "https://example.com" });
+
+    expect(result).toMatchObject({ contentType: "", truncated: false });
+    expect(result.content).toContain("# Visible title");
+    expect(result.content).not.toContain("const ignored");
+  });
+
+  it("leaves headerless non-HTML content as-is", async () => {
+    const body = '<?xml version="1.0"?><feed><title>Feed</title></feed>';
+    requestPublicUrlMock.mockResolvedValueOnce(new Response(new TextEncoder().encode(body)));
+
+    const result = await executeWebFetchTool({ url: "https://example.com" });
+
+    expect(result.content).toBe(body);
+  });
+
   it("returns non-HTML content as-is regardless of format", async () => {
     const json = '{"key": "value"}';
 

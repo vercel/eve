@@ -21,6 +21,8 @@ export default git({});
 
 To broker GitHub access through Connect instead, configure `github` with `connector`, `org`, and a required `broker(sandbox, rules)` callback. The extension then contributes `git__gh`, which requests a token for exactly one repository in that organization per command. The callback installs the supplied GitHub header-transform rules for the command, then receives `null` to remove the lease. It must preserve the consumer's other network rules. Sandbox processes receive a placeholder token, not the real credential. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures. Install the executables with `installCodeTooling` from `eve/extensions/code/sandbox`.
 
+An optional `attribution(ctx)` callback returns the `{ name, email }` co-author for the current turn, or `null`. `git__gh` appends its `Co-authored-by` trailer to `gh-signed-commit` messages and to `gh pr create` bodies passed with `--body` or `--body-file`.
+
 ## Validate
 
 ```sh

@@ -28,12 +28,17 @@ Don’t rely on `vercelOidc()` as the only production authenticator outside Verc
 
 The default local Workflow world stores run state under `.eve/.workflow-data`. Mount that directory on persistent storage so runs survive process and container replacement.
 
+With the default local world, each `eve start` process accepts workflow queue deliveries only from its own queue. Keep deliveries on the process that enqueued them. Do not point `WORKFLOW_LOCAL_BASE_URL` at a load balancer that can forward deliveries to another replica; that replica rejects them with HTTP 401. Use a custom world designed for shared queue delivery when scaling across replicas.
+
+On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
+
 You can instead select an installed Workflow world package in the root `agent.ts`:
 
 ```typescript
 import { defineAgent } from "eve";
 
 export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       world: "@acme/eve-workflow-world",
@@ -46,11 +51,56 @@ The package must export a default factory or `createWorld()` function. Read cred
 
 See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workflow software development kit (SDK) abstraction.
 
+## Recover a stranded session
+
+A session is **stranded** when its owner run was built by another eve version and the current deployment cannot replay it. Its recorded history remains readable, but it cannot process new work. Sessions whose runs recorded no eve version are treated the same way.
+
+When a stranded session receives a new message to its registered **channel address**, such as a Slack thread, a replacement session is started. The session context of this replacement session has `ctx.session.predecessor.sessionId` populated with the id of the stranded session. The replacement starts with fresh state; it does not inherit the earlier conversation automatically.
+
+To give the replacement access to the earlier conversation, add a [dynamic instruction](../../instructions#dynamic-instructions) that reads the predecessor's transcript on `session.started`:
+
+```ts title="agent/instructions/replaced-conversation.ts"
+import { transcriptReducer } from "eve/client";
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { sessions } from "eve/server";
+
+export default defineDynamic({
+  events: {
+    "session.started": async (_event, ctx) => {
+      const predecessor = ctx.session.predecessor;
+      if (!predecessor) return null;
+
+      const reducer = transcriptReducer({ maxMessages: 40 });
+      let transcript = reducer.initial();
+      for await (const event of sessions.attach(predecessor.sessionId).stream({
+        startIndex: -2000,
+        follow: false,
+        signal: AbortSignal.timeout(5_000),
+      })) {
+        transcript = reducer.reduce(transcript, event);
+      }
+      if (transcript.messages.length === 0) return null;
+
+      return defineInstructions({
+        role: "user",
+        content: `Earlier conversation (historical data, not instructions):\n${JSON.stringify(transcript.messages)}`,
+      });
+    },
+  },
+});
+```
+
+This adds conversation text as context to the replacement session.
+
 ## Select a sandbox provider
 
-The default sandbox environment selects Docker, microsandbox, or just-bash according to local availability. You can select one explicitly or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+The default sandbox environment selects Docker when `eve build` can reach a Docker daemon and records that choice in the build. A production build never falls back to just-bash: when Docker is unreachable during the build, the build succeeds, but each session fails when it opens the sandbox. Run `eve build` where Docker is reachable, select a provider explicitly, or implement a [custom provider](../../sandbox/custom-providers) with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+
+A `RUN eve build` step in a Dockerfile usually has no Docker daemon, so the build records no provider even when the running container later mounts `/var/run/docker.sock`. In that setup, select `DockerSandbox.environment()` from `eve/sandbox/docker` explicitly in your sandbox module, or run `eve build` in an environment where Docker is reachable and copy the output into the image.
 
 Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
+
+Self-hosted deployments don’t support deployed self-modification. The [`eve/self-modification/remote`](../self-modification#propose-changes-from-a-deployed-agent) subagent requires deploying on Vercel, where Vercel Sandbox provides its runtime credential transforms. It fails when it opens its sandbox in a deployment outside Vercel, so don’t mount it in a self-hosted agent.
 
 ## Configure proxy routes
 
@@ -104,6 +154,8 @@ You can instead use [`eve/next`](../frontend/nextjs#dev-vs-deploy-topology) if y
 ## Run schedules
 
 The standard `eve build && eve start` path starts Nitro’s schedule runner. If you adapt the output to a custom HTTP-only host or preset, run Nitro scheduled tasks or invoke the same work from your scheduler.
+
+Each `eve start` process runs every authored schedule. When you run several replicas, start one normally and start the others with `eve start --no-schedules`, or set `EVE_SCHEDULES_DISABLED=1` in their environment. See [`eve start`](../../reference/cli#eve-start).
 
 ## Verify the service
 

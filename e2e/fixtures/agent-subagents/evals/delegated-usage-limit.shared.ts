@@ -20,12 +20,14 @@ export async function expectSurveyCountedAgainstParent(t: EveEvalContext, messag
     optionIds: ["continue", "stop"],
     toolName: "session_limit_continuation",
   });
-  const parentLimitId = new RegExp(`^${session.sessionId ?? ""}:\\d+:limit:input:(\\d+)$`, "u");
   await t.require(
-    request.requestId,
+    request,
     satisfies(
-      (requestId: string) =>
-        Number(parentLimitId.exec(requestId)?.[1] ?? -1) >= SURVEY_WORKER_INPUT_TOKENS,
+      (prompt: typeof request) =>
+        prompt.requestId.startsWith(`${session.sessionId ?? ""}:`) &&
+        Number(
+          (prompt.action.input.total as { inputTokens?: number } | undefined)?.inputTokens ?? -1,
+        ) >= SURVEY_WORKER_INPUT_TOKENS,
       "the parent's input limit prompt counts the worker's tokens",
     ),
   );

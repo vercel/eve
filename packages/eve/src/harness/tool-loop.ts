@@ -132,6 +132,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (intake.opensTurn) {
       const failed = await openTurn(step, {
+        imported: turn.imported,
         input: [...turn.ephemeral, ...turn.messages],
         message: intake.message,
       });

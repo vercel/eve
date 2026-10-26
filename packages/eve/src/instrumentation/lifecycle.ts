@@ -407,8 +407,10 @@ export type InstrumentationStepAttemptTerminalEvent =
 
 /**
  * Provider metadata for one completed attempt, as reported by the AI SDK
- * (`StepResult.providerMetadata`). Carries Vercel AI Gateway cost data when
- * the request went through the gateway; absent for other providers.
+ * (`StepResult.providerMetadata`). Carries Vercel AI Gateway cost and session
+ * affinity routing data when the request went through the gateway; absent for
+ * other providers. When the trace policy omits outputs, only the gateway's
+ * `cost`, `generationId`, and `routing` fields remain.
  */
 export interface InstrumentationStepAttemptMetadataEvent {
   readonly type: "step.attempt.metadata";

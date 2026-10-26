@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import type { Mock } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -10,6 +11,7 @@ import {
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -105,6 +107,25 @@ function parseSlackRequestBody(init: RequestInit | undefined): Record<string, un
   if (!init?.body) return {};
   const contentType = init.headers ? new Headers(init.headers).get("content-type") : null;
   return decodeSlackApiBody(init.body, contentType) as Record<string, unknown>;
+}
+
+// Wraps a recording `fetch` mock so the final-reply root check
+// (`chat.getPermalink`) finds a live thread root without being recorded.
+// Tests of that check supply their own `lookup` and read the lookups made.
+function withLiveThreadRoot(
+  fetchMock: ReturnType<typeof vi.fn>,
+  lookup: () => Record<string, unknown> = () => ({ ok: true, permalink: "https://slack.test/p1" }),
+  lookups: string[] = [],
+): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input) === "https://slack.com/api/chat.getPermalink") {
+      lookups.push(String(parseSlackRequestBody(init).message_ts));
+      return new Response(JSON.stringify(lookup()), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return (fetchMock as Mock<typeof fetch>)(input, init);
+  }) as typeof fetch;
 }
 
 // Selects the captured calls to one Slack Web API method. The transport
@@ -570,7 +591,7 @@ describe("slackChannel() default event handlers", () => {
         }),
       ),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withLiveThreadRoot(fetchMock));
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -1951,10 +1972,17 @@ describe("slackChannel() default event handlers", () => {
 describe("slackChannel() final reply delivery", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let uploadedBodies: string[];
+  let rootLookup: () => Record<string, unknown>;
+  let rootLookups: string[];
   beforeEach(() => {
     fetchMock = vi.fn();
     uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
-    vi.stubGlobal("fetch", fetchMock);
+    rootLookup = () => ({ ok: true, permalink: "https://slack.test/p1700000000000001" });
+    rootLookups = [];
+    vi.stubGlobal(
+      "fetch",
+      withLiveThreadRoot(fetchMock, () => rootLookup(), rootLookups),
+    );
   });
 
   // Fails the next calls to each named Slack method with the queued error
@@ -2059,6 +2087,135 @@ describe("slackChannel() final reply delivery", () => {
 
   const shortAnswer = `# Findings\n\n${"r".repeat(6_000)}`;
   const longAnswer = `# Findings\n\n${"r".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH)}`;
+
+  describe("deleted thread root", () => {
+    const rootGoneLog = "Slack thread root was deleted; dropping the final reply";
+
+    // Slack posts a reply to a deleted root as a top-level channel message.
+    it("drops the reply when Slack reports the root as message_not_found", async () => {
+      const logs = captureLogRecords();
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual(["1700000000.000001"]);
+      expect(urls()).toEqual([]);
+      expect(logs.records.some((entry) => entry.message === rootGoneLog)).toBe(true);
+    });
+
+    it("drops a reply sent through postCompletedSlackReply", async () => {
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
+      const { adapter, ctx } = adapterWith([helperReplies()]);
+
+      await callCompletionHandler(adapter, finalReply(shortAnswer), ctx);
+
+      expect(urls()).toEqual([]);
+    });
+
+    it("posts the reply when the root is live", async () => {
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual(["1700000000.000001"]);
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+
+    // Once eve has posted, deleting the root leaves a tombstone that keeps the
+    // thread, which chat.getPermalink may report as message_not_found.
+    it("skips the check once eve has posted in the thread", async () => {
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
+      const { adapter, ctx } = adapterWith();
+      ctx.state.postedInThread = true;
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual([]);
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+
+    it("checks the root only until eve's first post in the thread", async () => {
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("first"), ctx);
+      await callCompletionHandler(adapter, finalReply("second"), ctx);
+
+      expect(ctx.state.postedInThread).toBe(true);
+      expect(rootLookups).toEqual(["1700000000.000001"]);
+      expect(urls()).toEqual([
+        "https://slack.com/api/chat.postMessage",
+        "https://slack.com/api/chat.postMessage",
+      ]);
+    });
+
+    it("counts a raw chat.postMessage into the thread as eve's post", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000000.000009" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const { ctx } = adapterWith();
+
+      await ctx.slack.request("chat.postMessage", {
+        channel: "C01",
+        text: "task card",
+        thread_ts: "1700000000.000001",
+      });
+
+      expect(ctx.state.postedInThread).toBe(true);
+    });
+
+    it("does not count a raw chat.postMessage to another thread", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000000.000009" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const { ctx } = adapterWith();
+
+      await ctx.slack.request("chat.postMessage", { channel: "C02", text: "elsewhere" });
+
+      expect(ctx.state.postedInThread).toBeUndefined();
+    });
+
+    // The anchor is the thread's root, not a reply under it.
+    it("does not count a post that anchors a new thread", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000000.000042" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const adapter = withState(
+        getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+        { ...THREAD_STATE, threadTs: null },
+      );
+      const ctx = buildAdapterContext(adapter, stubAccessor());
+
+      await ctx.thread.post("proactive update");
+
+      expect(ctx.state.threadTs).toBe("1700000000.000042");
+      expect(ctx.state.postedInThread).toBeUndefined();
+    });
+
+    it.each([
+      ["a Slack error", () => ({ ok: false, error: "ratelimited" })],
+      ["an unreadable channel", () => ({ ok: false, error: "channel_not_found" })],
+      [
+        "a thrown lookup",
+        () => {
+          throw new Error("network down");
+        },
+      ],
+    ])("posts the reply when the root lookup fails with %s", async (_label, lookup) => {
+      rootLookup = lookup;
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+  });
 
   describe("postCompletedSlackReply", () => {
     it("posts the caller's Markdown once when Slack refuses the blocks", async () => {
@@ -2426,7 +2583,7 @@ describe("rebuildSlackContext", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withLiveThreadRoot(fetchMock));
 
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
@@ -2663,6 +2820,46 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { response } = await firePost(channel, buildSignedRequest({ body }));
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("abc123");
+  });
+
+  // #5012: Slack only shows a threaded ephemeral once the thread has a reply.
+  it("omits thread_ts from postEphemeral for a top-level mention", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.thread.postEphemeral("U01", "text");
+        return null;
+      },
+    });
+    const mention = buildMentionBody();
+
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    const ephemeral = slackCalls(fetchMock, "chat.postEphemeral");
+    expect(ephemeral).toHaveLength(1);
+    const requestBody = parseSlackRequestBody(ephemeral[0]![1]);
+    expect(requestBody).toMatchObject({ channel: "C01", markdown_text: "text", user: "U01" });
+    expect(requestBody.thread_ts).toBeUndefined();
+  });
+
+  it("keeps thread_ts from postEphemeral for a threaded mention", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.thread.postEphemeral("U01", "text");
+        return null;
+      },
+    });
+    const rootTs = "1700000000.100000";
+    const mention = buildMentionBody({ ts: "1700000000.100001", threadTs: rootTs });
+
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    const ephemeral = slackCalls(fetchMock, "chat.postEphemeral");
+    expect(ephemeral).toHaveLength(1);
+    const requestBody = parseSlackRequestBody(ephemeral[0]![1]);
+    expect(requestBody).toMatchObject({ channel: "C01", markdown_text: "text", user: "U01" });
+    expect(requestBody.thread_ts).toBe(rootTs);
   });
 
   it("dispatches when onAppMention returns an auth result", async () => {
@@ -3071,9 +3268,9 @@ describe("slackChannel() inbound mention pipeline", () => {
 
   it.each([
     ["default HITL config", {}, "approve"],
-    ["a custom input response hook", { onInputResponse: () => null }, undefined],
-    ["an approval channel", { approvalChannel: () => "thread" as const }, undefined],
-  ])("carries the typed text for pending input with %s", async (_, config, expected) => {
+    ["a custom input response hook", { onInputResponse: () => null }, ""],
+    ["an approval channel", { approvalChannel: () => "thread" as const }, ""],
+  ])("attaches the text pending input resolves against with %s", async (_, config, expected) => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onAppMention: () => ({ auth: null }),
@@ -3260,6 +3457,71 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(fetchMock.mock.calls.some(([request]) => String(request).includes("users.info"))).toBe(
       false,
     );
+  });
+
+  it("adds prior thread replies as history when a mention starts the thread's session", async () => {
+    const threadTs = "1700000000.000001";
+    const currentTs = "1700000000.000004";
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      if (String(request).includes("conversations.replies")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              { user: "U_ROOT", text: "Daily report?", ts: threadTs, thread_ts: threadTs },
+              {
+                app_id: "A01",
+                bot_id: "B_AGENT",
+                text: "Deploys are green.",
+                ts: "1700000000.000002",
+                thread_ts: threadTs,
+                user: "U_BOT",
+              },
+              { user: "U_OTHER", text: "Thanks!", ts: "1700000000.000003", thread_ts: threadTs },
+              { user: "U_CURRENT", text: "Any flakes?", ts: currentTs, thread_ts: threadTs },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+      threadContext: {},
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: currentTs,
+        text: "Any flakes?",
+        thread_ts: threadTs,
+        ts: currentTs,
+        type: "app_mention",
+        user: "U_CURRENT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }), {
+      resolveSession: async () => undefined,
+    });
+
+    const [, input] = send.mock.calls[0]! as [
+      string,
+      { history?: readonly { id?: string; role: string; text: string }[]; message: string },
+    ];
+    expect(input.message).not.toContain("<slack_thread_context>");
+    expect(input.history?.map(({ id, role }) => ({ id, role }))).toEqual([
+      { id: threadTs, role: "user" },
+      { id: "1700000000.000002", role: "assistant" },
+      { id: "1700000000.000003", role: "user" },
+    ]);
+    expect(input.history?.[0]?.text).toContain("sender_id: U_ROOT");
+    expect(input.history?.[1]?.text).toBe("Deploys are green.");
   });
 
   it("does not dispatch when onAppMention resolves to null", async () => {
@@ -3608,6 +3870,40 @@ describe("slackChannel() onMessage", () => {
     expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
+  // The final reply no longer leaks into the channel when the user deletes the
+  // message that started a turn (see "deleted thread root" under final reply
+  // delivery). eve still drops `message_deleted`, so nothing cancels the
+  // in-flight turn and it runs to completion before its reply is discarded.
+  // Remove `.fails` once eve cancels the turn bound to a deleted thread root.
+  it.fails("cancels the turn bound to a thread root that the user deleted", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const rootTs = "1700000000.000100";
+    const body = buildEventBody(
+      {
+        channel: "C_DELETED",
+        channel_type: "channel",
+        deleted_ts: rootTs,
+        hidden: true,
+        previous_message: {
+          text: "<@U_BOT> a question",
+          ts: rootTs,
+          type: "message",
+          user: "U01",
+        },
+        subtype: "message_deleted",
+        ts: "1700000000.000200",
+        type: "message",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ continuationToken: `C_DELETED:${rootTs}` }),
+    );
+  });
+
   it("gives specialized message hooks precedence", async () => {
     const onAppMention = vi.fn(() => null);
     const onMessage = vi.fn(() => ({ auth: null }));
@@ -3741,13 +4037,14 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
   });
 
-  it("binds Slack state and title on a generic event send", async () => {
+  it("binds Slack state, title, and history on a generic event send", async () => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
         await ctx.send("follow up", {
           auth: null,
+          history: [{ role: "user", text: "Earlier question" }],
           target: { channelId: "C01", threadTs: "1700000000.000001" },
           title: "Reaction follow-up",
         });
@@ -3759,6 +4056,7 @@ describe("slackChannel() generic Events API pipeline", () => {
 
     expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
       auth: null,
+      history: [{ role: "user", text: "Earlier question" }],
       message: "follow up",
       state: {
         channelId: "C01",
@@ -5035,8 +5333,30 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(slackOperations(fetchMock)).toEqual([]);
     expect(logs.records).toContainEqual(
-      expect.objectContaining({ level: "error", message: "HITL interaction delivery failed" }),
+      expect.objectContaining({ level: "error", message: "input response delivery failed" }),
     );
+  });
+
+  it("retires a HITL card and tells the presser when its session is stranded", async () => {
+    const send = vi.fn().mockRejectedValue(new SessionStrandedError({}));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    await firePost(channel, buildHitlButtonRequest(), { send });
+
+    expect(slackOperations(fetchMock)).toEqual(["chat.update", "chat.postEphemeral"]);
+    const update = parseSlackRequestBody(slackCalls(fetchMock, "chat.update")[0]?.[1]);
+    expect(update).toMatchObject({ text: "No longer active", ts: "1700000000.000010" });
+    // Nobody's answer was taken, so the retired card credits nobody.
+    const shown = JSON.stringify(update.blocks);
+    expect(shown).toContain("No longer active");
+    expect(shown).not.toContain("U_APPROVER");
+    expect(
+      parseSlackRequestBody(slackCalls(fetchMock, "chat.postEphemeral")[0]?.[1]),
+    ).toMatchObject({
+      markdown_text: "This request is no longer active. Send a new message to start again.",
+      thread_ts: "1700000000.000001",
+      user: "U_APPROVER",
+    });
   });
 
   it("waits for approval settlement before updating a tool-approval card", async () => {

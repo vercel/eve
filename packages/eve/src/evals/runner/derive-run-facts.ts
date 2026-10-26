@@ -3,6 +3,7 @@ import type {
   MessageStreamEvent,
   TaskSettledStreamEvent,
 } from "#protocol/message.js";
+import { foldSession, initialSessionProjection, openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -41,9 +42,8 @@ export interface DeriveRunFactsOptions {
 }
 
 /**
- * Event types that only park or close out a turn. When the last meaningful
- * event before them is `input.requested`, the run ended parked on unanswered
- * HITL input.
+ * Event types that only park or close out a turn. A run that ends on one while
+ * a request is open ended parked on unanswered HITL input.
  */
 const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
   "turn.waiting",
@@ -76,7 +76,6 @@ export function deriveRunFacts(
   let messageCount = 0;
   let reasoningBlockCount = 0;
   const models = new Set<string>();
-  let usage: TokenUsage | undefined;
   let failureCode: string | undefined;
 
   const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
@@ -107,6 +106,9 @@ export function deriveRunFacts(
         for (const action of event.data.actions) {
           if (action.kind === "tool-call") {
             ensureToolCall(action.callId, action.toolName, action.input);
+          } else if (action.kind === "subagent-call" || action.kind === "remote-agent-call") {
+            // Keyed by the model's tool name, which the call's `tool-result` reports.
+            ensureToolCall(action.callId, action.name, action.input);
           } else if (action.kind === "load-skill") {
             skillLoads.set(action.callId, {
               output: undefined,
@@ -122,8 +124,13 @@ export function deriveRunFacts(
 
       case "action.result": {
         const { result, status } = event.data;
-        if (result.kind === "tool-result") {
-          const call = ensureToolCall(result.callId, result.toolName, {});
+        const call =
+          result.kind === "tool-result"
+            ? ensureToolCall(result.callId, result.toolName, {})
+            : result.kind === "subagent-result"
+              ? toolCallsByCallId.get(result.callId)
+              : undefined;
+        if (call !== undefined) {
           call.output = result.output;
           call.status = status;
         }
@@ -178,19 +185,7 @@ export function deriveRunFacts(
         break;
       }
 
-      case "session.waiting":
-      case "turn.waiting": {
-        usage = event.data.usage;
-        break;
-      }
-
-      case "session.completed": {
-        usage = event.data?.usage;
-        break;
-      }
-
       case "session.failed": {
-        usage = event.data.usage;
         failureCode = event.data.code;
         break;
       }
@@ -214,9 +209,34 @@ export function deriveRunFacts(
     messageCount,
     reasoningBlockCount,
     models: [...models],
-    usage,
+    usage: latestUsage(events)?.usage,
     failureCode,
   };
+}
+
+/**
+ * The last event in `events` (in stream order) that carries the session's
+ * running usage total (`session.waiting`, `turn.waiting`, `session.failed`, or
+ * `session.completed`), with its time, so an eval that captured a session more
+ * than once can keep the latest total by time rather than by capture order.
+ * `usage` is undefined when that event reported none.
+ */
+export function latestUsage(
+  events: readonly MessageStreamEvent[],
+): { readonly usage: TokenUsage | undefined; readonly at: number } | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event === undefined) continue;
+    switch (event.type) {
+      case "session.waiting":
+      case "turn.waiting":
+      case "session.failed":
+        return { usage: event.data.usage, at: Date.parse(event.meta.at) };
+      case "session.completed":
+        return { usage: event.data?.usage, at: Date.parse(event.meta.at) };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -269,16 +289,48 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
 }
 
 /**
- * A run ended parked when the last event before its parking events is
- * `input.requested`: either the turn ended on the request (`turn.completed` →
- * `session.waiting`), or a call the turn runs asked and the open turn parked
- * (`turn.waiting`).
+ * Input requests the last started turn raised, or a child relayed, that nobody
+ * has answered yet. A partial answer settles only the requests it answers; the
+ * rest stay open.
+ *
+ * An eval may watch how a request ends outside the session (for example
+ * through `t.target`), so two kinds of open request don't count: the session's
+ * own requests from earlier turns, and answered ones whose responder still has
+ * to sign in. Relayed requests keep the child's `turnId`, so they never match
+ * the parent's turn and are kept by `callId`/`taskId` instead.
+ */
+export function openInputRequests(events: readonly MessageStreamEvent[]): InputRequest[] {
+  let projection = initialSessionProjection();
+  let lastTurnId: string | undefined;
+  for (const event of events) {
+    projection = foldSession(projection, event);
+    if (event.type === "turn.started") lastTurnId = event.data.turnId;
+  }
+  const awaitingSignIn = new Set(
+    Object.values(projection.candidates)
+      .filter((candidate) => candidate.outcome === "pending")
+      .map((candidate) => candidate.requestId),
+  );
+  return openInputs(projection)
+    .filter(
+      (input) =>
+        lastTurnId === undefined ||
+        input.turnId === lastTurnId ||
+        input.callId !== undefined ||
+        input.taskId !== undefined,
+    )
+    .filter((input) => !awaitingSignIn.has(input.request.requestId))
+    .map((input) => input.request);
+}
+
+/**
+ * A run ended parked when it ends on a parking event while a request is still
+ * open: the turn ended on the request (`turn.completed` → `session.waiting`),
+ * or the open turn parked on it (`turn.waiting`), also after a partial answer.
  */
 function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event === undefined || PARKING_EVENT_TYPES.has(event.type)) continue;
-    return event.type === "input.requested";
-  }
-  return false;
+  const last = events.at(-1);
+  return (
+    last !== undefined && PARKING_EVENT_TYPES.has(last.type) && openInputRequests(events).length > 0
+  );
 }

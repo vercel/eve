@@ -18,6 +18,7 @@ import {
   eveChannel,
   defaultEveAuth,
   type EveChannelInput,
+  type EveMessageContext,
   type ForwardedAssertion,
   type TrustedForwarders,
 } from "#public/channels/eve.js";
@@ -81,6 +82,7 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
     send: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+    prewarm: vi.fn().mockResolvedValue({ status: "ready" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     clear: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     reset: vi.fn().mockResolvedValue({
@@ -626,21 +628,21 @@ describe("eveChannel — stream cursor", () => {
     },
   );
 
-  it("resolves the tail index by default without returning it", async () => {
+  // On the local world the tail lookup opens every chunk file, so a follow
+  // read that does not report the tail must not pay for it.
+  it("follows a session without resolving a tail it does not report", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
-    expect(handler.getStreamTailIndex).toHaveBeenCalledOnce();
+    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown session in follow mode", async () => {
     const handler = createEveStreamHandler({ auth: none() });
-    handler.getStreamTailIndex.mockRejectedValueOnce(
-      new WorkflowRunNotFoundError("test-session-id"),
-    );
+    handler.getEventStream.mockRejectedValueOnce(new WorkflowRunNotFoundError("test-session-id"));
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
@@ -653,7 +655,7 @@ describe("eveChannel — stream cursor", () => {
     ["run", new RunExpiredError("Run expired.", "test-session-id")],
   ])("returns a terminal 410 when the session %s passed retention", async (_, error) => {
     const handler = createEveStreamHandler({ auth: none() });
-    handler.getStreamTailIndex.mockRejectedValueOnce(error);
+    handler.getEventStream.mockRejectedValueOnce(error);
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
@@ -669,7 +671,9 @@ describe("eveChannel — stream cursor", () => {
       new WorkflowRunNotFoundError("test-session-id"),
     );
 
-    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
+    );
 
     expect(response.status).toBe(404);
     await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
@@ -677,7 +681,7 @@ describe("eveChannel — stream cursor", () => {
 
   it("returns 503 when the session lookup fails transiently", async () => {
     const handler = createEveStreamHandler({ auth: none() });
-    handler.getStreamTailIndex.mockRejectedValueOnce(new Error("stream lookup failed"));
+    handler.getEventStream.mockRejectedValueOnce(new Error("stream lookup failed"));
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
@@ -779,6 +783,82 @@ describe("eveChannel — onMessage", () => {
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
     expect(options.title).toBe("HTTP run");
+  });
+
+  it("shows onMessage the client's context and lets it replace that context for the turn", async () => {
+    const onMessage = vi.fn((ctx: EveMessageContext) => {
+      expect(ctx.eve.clientContext).toEqual({ plan: "pro" });
+      return { auth: defaultEveAuth(ctx), clientContext: ["Verified plan: hobby"] };
+    });
+    const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH, onMessage });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ clientContext: { plan: "pro" }, message: "What plan am I on?" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
+    expect(payload).toMatchObject({ message: "What plan am I on?" });
+    expect(payload.context).toBeUndefined();
+    expect(readClientContext(payload)).toEqual(["Verified plan: hobby"]);
+  });
+
+  it("serializes an object returned from onMessage the same way as client objects", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: (ctx) => ({ auth: defaultEveAuth(ctx), clientContext: { plan: "hobby" } }),
+    });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ clientContext: "plan: pro", message: "What plan am I on?" }),
+    );
+
+    expect(response.status).toBe(202);
+    const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
+    expect(readClientContext(payload)).toEqual(['{"plan":"hobby"}']);
+  });
+
+  it("shows onMessage no client context when the request sent none", async () => {
+    const onMessage = vi.fn((ctx: EveMessageContext) => {
+      expect(ctx.eve.clientContext).toBeUndefined();
+      return { auth: defaultEveAuth(ctx) };
+    });
+    const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH, onMessage });
+
+    expect((await handler.fetch(createJsonMessageRequest({ message: "hi" }))).status).toBe(202);
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(readClientContext(handler.send.mock.calls[0]?.[0] as SendPayload)).toBeUndefined();
+  });
+
+  it("replaces the client's context on continue requests", async () => {
+    const handler = createEveContinueHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: (ctx) => ({ auth: defaultEveAuth(ctx), clientContext: ["Verified team: acme"] }),
+    });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ clientContext: "team: other", message: "Hello" }),
+    );
+
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1] as object;
+    expect(readClientContext(options)).toEqual(["Verified team: acme"]);
+  });
+
+  it("drops the client's context when onMessage returns an empty clientContext", async () => {
+    const handler = createEveContinueHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: (ctx) => ({ auth: defaultEveAuth(ctx), clientContext: [] }),
+    });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ clientContext: "team: other", message: "Hello" }),
+    );
+
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1] as object;
+    expect(readClientContext(options)).toBeUndefined();
   });
 
   it("passes first-message auth, context, and title to a prewarmed session", async () => {

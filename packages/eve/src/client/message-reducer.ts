@@ -55,6 +55,7 @@ export type {
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
 type MessageReceivedEvent = Extract<EveAgentReducerEvent, { readonly type: "message.received" }>;
+type HistoryImportedEvent = Extract<EveAgentReducerEvent, { readonly type: "history.imported" }>;
 
 function receivedMessageEventId(event: MessageReceivedEvent): string {
   const eventId: string | undefined = event.meta.id;
@@ -125,6 +126,9 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
         },
         event.data.turnId,
       );
+
+    case "history.imported":
+      return importHistory(data, event);
 
     case "step.started":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
@@ -410,6 +414,38 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
     default:
       return data;
   }
+}
+
+/**
+ * Added history precedes its turn's message: before that turn's response and any message the
+ * client submitted and the stream hasn't confirmed. App ids are unique only within one call, so
+ * message ids derive from the event and the app id rides in metadata for rejoining annotations.
+ */
+function importHistory(data: EveMessageData, event: HistoryImportedEvent): EveMessageData {
+  const eventId = event.meta.id ?? `${event.data.turnId}:${event.data.sequence}`;
+  const imported = event.data.messages.map((message, index): EveMessage => ({
+    id: `${eventId}:imported:${index}`,
+    // No `turnId`: the turn's response must never stream into an imported assistant message.
+    metadata:
+      message.id === undefined
+        ? { imported: true, status: "complete" }
+        : { historyId: message.id, imported: true, status: "complete" },
+    parts: [
+      message.role === "assistant"
+        ? { state: "done", text: message.text, type: "text" }
+        : { text: message.text, type: "text" },
+    ],
+    role: message.role,
+  }));
+  const ids = new Set(imported.map((message) => message.id));
+  const messages = data.messages.filter((message) => !ids.has(message.id));
+  const before = messages.findIndex(
+    (message) =>
+      message.metadata?.optimistic === true ||
+      (message.role === "assistant" && message.metadata?.turnId === event.data.turnId),
+  );
+  const at = before === -1 ? messages.length : before;
+  return { ...data, messages: [...messages.slice(0, at), ...imported, ...messages.slice(at)] };
 }
 
 /** The tool calls whose state the event may have changed. */

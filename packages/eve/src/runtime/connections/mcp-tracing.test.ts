@@ -23,7 +23,7 @@ import {
   withMcpToolCallSpan,
   withMcpToolsListSpan,
 } from "#runtime/connections/mcp-tracing.js";
-import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 
 describe("MCP trace propagation", () => {
   let exporter: InMemorySpanExporter;

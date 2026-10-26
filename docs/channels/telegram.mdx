@@ -49,7 +49,7 @@ The default `message.completed` handler sends plain text via `sendMessage`. It p
 
 ### Human-in-the-loop (HITL)
 
-Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`.
+Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`. A press on a prompt whose session is no longer active replaces the keyboard with `No longer active`, and the acknowledgement tells the person to send a new message.
 
 A text reply to a bot message is sent as a normal message, with the replied-to message id in `state.replyToBotMessageId`. When that id matches a pending `ForceReply` prompt, the channel's `deliver` hook turns the reply into the answer. Otherwise the reply reaches the agent as a message, and starts a new session when none owns the thread.
 

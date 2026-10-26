@@ -65,7 +65,7 @@ export async function endStrandedSession(
   await cancelRuns(world, [ownerRunId, sessionId], "Session ended: its deployment was retired");
   await waitForSessionHooksRelease(
     [sessionCommandHookToken(sessionId), logicalSessionToken(address), ...ownedTokens],
-    ownerRunId,
+    { ownerRunId, sessionId },
   );
   log.warn("Reset stranded session", {
     currentEveVersion: resolveInstalledPackageInfo().version,

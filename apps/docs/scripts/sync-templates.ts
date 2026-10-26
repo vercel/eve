@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { getToken } from "@vercel/connect";
+
 import type { TemplateFile } from "../lib/templates/compose";
 import { templateManifest } from "../lib/templates/manifest";
 import {
@@ -10,7 +12,27 @@ import {
   sortTemplateFiles,
 } from "../lib/templates/sync-core";
 
-const token = process.env.GITHUB_TOKEN;
+// Unauthenticated GitHub API calls share a 60/hour limit per IP, which Vercel
+// builds exhaust quickly. On Vercel, the build's OIDC token gets a GitHub App
+// token through Vercel Connect. GITHUB_TOKEN still wins for local runs.
+const GITHUB_CONNECTOR = "github/vercel-templates-public-read";
+
+const resolveToken = async (): Promise<string | undefined> => {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  if (!process.env.VERCEL_OIDC_TOKEN) return undefined;
+  try {
+    return await getToken(GITHUB_CONNECTOR, { subject: { type: "app" } });
+  } catch (error) {
+    console.warn(
+      `Could not get a GitHub token from Vercel Connect (${GITHUB_CONNECTOR}); ` +
+        "falling back to unauthenticated requests.",
+      error,
+    );
+    return undefined;
+  }
+};
+
+const token = await resolveToken();
 const deployedCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
 const headers: Record<string, string> = {
   Accept: "application/vnd.github+json",
@@ -26,7 +48,9 @@ const githubJson = async <T>(url: string, notFoundMessage: string): Promise<T> =
   if (response.status === 403 || response.status === 429) {
     throw new Error(
       `GitHub API rate limit or access error (${response.status}) for ${url}` +
-        (token ? "" : " — set GITHUB_TOKEN to authenticate"),
+        (token
+          ? ""
+          : `; set GITHUB_TOKEN or link the ${GITHUB_CONNECTOR} connector to this project`),
     );
   }
   if (!response.ok) {

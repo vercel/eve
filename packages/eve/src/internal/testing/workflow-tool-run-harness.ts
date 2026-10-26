@@ -1,3 +1,4 @@
+import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import { type TestRuntime, createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -49,11 +50,14 @@ export async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
+  /** Other authored modules, such as hooks, compiled next to the tool. */
+  readonly modules?: readonly ProgrammaticAgentModule[];
   readonly toolName: string;
 }): Promise<TestRuntime> {
   return await createTestRuntime({
     agent: { name: input.agentName },
     modules: [
+      ...(input.modules ?? []),
       {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({

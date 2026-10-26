@@ -139,11 +139,15 @@ export function takeTelegramResolvedPrompt(
   if (prompt === undefined) return undefined;
   const { [resolution.requestId]: _, ...rest } = state.hitlPrompts ?? {};
   state.hitlPrompts = rest;
-  const label = truncate(
-    resolvedPromptLabel(resolution, prompt.options),
-    TELEGRAM_RESOLVED_LABEL_MAX_LENGTH,
-  );
-  return { messageId: prompt.messageId, text: `${prompt.text}\n\n${label}` };
+  return {
+    messageId: prompt.messageId,
+    text: telegramResolvedPromptText(prompt.text, resolvedPromptLabel(resolution, prompt.options)),
+  };
+}
+
+/** A resolved prompt's text: the prompt it asked, then `label`, how it ended. */
+export function telegramResolvedPromptText(promptText: string, label: string): string {
+  return `${promptText}\n\n${truncate(label, TELEGRAM_RESOLVED_LABEL_MAX_LENGTH)}`;
 }
 
 /**

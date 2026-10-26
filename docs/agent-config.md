@@ -3,7 +3,7 @@ title: "Agent Configuration"
 description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
 ---
 
-An eve app has one root agent assembled from the files under `agent/`. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
+An eve app's root agent uses files under `agent/` by default; a [flat layout](./reference/agent-files#flat-layout) places them directly in the app root instead. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
 
 ## Set the model
 
@@ -67,6 +67,28 @@ Gateway, share that ID so their Gateway generations can be found together.
 Direct-provider calls do not receive the option. An authored `gateway.sessionId`
 takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
+AI Gateway also uses this ID for
+[session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity),
+which tries the provider that served the session's previous call first, among
+the providers your routing settings allow, so that provider can read the prompt
+from its cache. The conversation
+appears as one session in the AI Gateway logs Sessions view. Affinity can move
+the pinned provider ahead of your `order`. To keep `order` exactly, set
+`sessionAffinity: false`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  modelOptions: {
+    providerOptions: {
+      gateway: { order: ["bedrock", "anthropic"], sessionAffinity: false },
+    },
+  },
+});
+```
+
 For direct OpenAI and `chatgpt()` model calls, eve sets
 `providerOptions.openai.promptCacheKey` to a SHA-256 hash of the session ID,
 which helps OpenAI route a session's calls to the cache that holds its prompt
@@ -115,7 +137,7 @@ export default defineAgent({
   starting points on Ollama.
 - **Usage.** `includeUsage: true` lets token usage reach eve's
   [session limits](#runtime-limits). Local models report no cost, so
-  `maxTokenCostUsdPerSession` does not apply.
+  `costUsd` stays unset in a `sessionUsage` check.
 - **Other servers.** Change `baseURL`, for example to
   `http://localhost:1234/v1` for LM Studio. Pass `apiKey` for a remote
   OpenAI-compatible server that requires one.
@@ -240,44 +262,88 @@ See [Default harness](./concepts/default-harness#compaction) for how the loop ap
 
 ## Runtime limits
 
-Use `limits` for framework-owned runtime caps. Session usage limits stop the
-current durable session from starting another model call after accumulated
-provider-reported tokens or model token cost reaches a configured limit:
+Use `limits` for framework-owned runtime caps. `sessionUsage` decides when the
+current durable session must stop starting model calls. It receives the
+session's usage and returns `true` when the limit is reached:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   limits: {
-    maxInputTokensPerSession: 200_000,
-    maxOutputTokensPerSession: 20_000,
-    maxTokenCostUsdPerSession: 1.5,
+    sessionUsage: ({ window }) =>
+      window.inputTokens - window.cacheReadTokens >= 200_000 ||
+      window.outputTokens >= 20_000 ||
+      (window.costUsd ?? 0) >= 1.5,
     sessionTimeoutMs: 7 * 24 * 60 * 60 * 1_000,
   },
 });
 ```
 
-`sessionTimeoutMs` sets the lifetime for every session, including delegated
-sessions. It defaults to 30 days and starts at creation. Each successful
-deployment handoff or legacy-session import restarts the original configured
-duration. Process restarts, ordinary messages, compaction handoffs, and failed
-or skipped handoffs keep the existing deadline. At the deadline, eve lets an active turn settle,
-then emits `session.completed` and releases every continuation address; the next
-qualifying channel message starts fresh. Set it to `false` to disable the
-timeout. Expiration does not delete stored session data.
+`sessionTimeoutMs` sets how long a session may sit idle before eve completes it,
+for every session, including delegated sessions. It defaults to 30 days. The
+idle window starts at creation and restarts each time a turn settles, including
+turns that answer a message, clear or compact the context, or end in
+cancellation. A session never expires while a turn is open, including a turn
+held open while its [tasks](./tools/tasks) work or while it waits for a person
+to answer; the window restarts when that turn settles. Process restarts do not
+change the window. When the window elapses, eve emits `session.completed` and
+releases every continuation address; the next qualifying channel message starts
+fresh. To carry an earlier conversation into the fresh session, pass it as
+[prior history](./channels/eve#start-from-prior-history). Set it to `false` to
+disable the timeout. Session expiration follows
+[run-data retention](#run-data-retention); a zero-retention session loses its
+stored payloads when it ends.
 
-Input tokens, output tokens, and model token cost are checked independently.
-The model call that crosses a limit is allowed to finish because exact usage
-arrives after the call completes. Before the next model call, eve pauses the
-turn (`turn.waiting`) and sends a deterministic continuation prompt with two options:
-**Continue** grants a fresh window of each configured size and resumes the same
-turn, and **Stop**
-cancels the in-flight turn through the standard cancellation path
-(`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
-still over budget after Stop, the next message raises a new prompt. Declining a
+`sessionUsage` gets two usage records with `inputTokens`, `outputTokens`,
+`cacheReadTokens`, `cacheWriteTokens`, and `costUsd`: `total` is everything
+the session has spent, and `window` is what it spent since the last approved
+continuation. `inputTokens` includes cache reads and writes. Subtract
+`cacheReadTokens` to count only new input; cache reads are the history a
+provider replays from its prompt cache on every step. `costUsd` is the model
+token cost in US dollars that AI Gateway reports with each step, not tool or
+infrastructure spend; it is unset when no step reported a cost.
+
+When `sessionUsage` is omitted, the limit is `40_000_000` new input tokens per
+window:
+
+```ts
+({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000;
+```
+
+`sessionUsage` can raise its threshold after each approval. This limit asks
+at 20,000 new input tokens, then at 40,000, 80,000, and so on:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  limits: {
+    sessionUsage: ({ total, window }) => {
+      const used = total.inputTokens - total.cacheReadTokens;
+      // Usage when the last continuation was approved; 0 before the first.
+      const approvedAt = used - (window.inputTokens - window.cacheReadTokens);
+      // Double past it, so each approval allows twice the usage before the next prompt.
+      let next = 20_000;
+      while (next <= approvedAt) next *= 2;
+      return used >= next;
+    },
+  },
+});
+```
+
+Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
+false` is not accepted. eve calls `sessionUsage` before each model call once
+the window has usage. The model call that crosses a limit is allowed to finish
+because exact usage arrives after the call completes. Before the next model
+call, eve pauses the turn (`turn.waiting`) and sends a deterministic
+continuation prompt with two options: **Continue** starts a new window and
+resumes the same turn, and **Stop** cancels the in-flight turn through the
+standard cancellation path (`turn.cancelled` → `session.waiting`). Stop is a
+user decision, not an error. The session stays resumable; because it is still
+over budget after Stop, the next message raises a new prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
-delegation tree — the delegating parent never receives an error result it
-could retry against a fresh quota share. A reply that answers neither option
-is queued while the existing prompt stays pending; eve does not raise another
+delegation tree, so the delegating parent never receives an error result it
+could retry. A reply that answers neither option is queued while the existing
+prompt stays pending; eve does not raise another
 copy or start another turn. The reply is received (`message.received`) and
 processed in the held turn once the budget is granted.
 
@@ -289,44 +355,22 @@ turn or duplicate the prompt.
 
 Sessions that cannot request input from a human, such as markdown schedules and
 delegated runs without input proxying, skip the prompt and fail the next model
-call with `SESSION_TOKEN_LIMIT_REACHED` for token budgets or
-`SESSION_TOKEN_COST_LIMIT_REACHED` for model token cost. A delegated task with
-no inherited quota also fails instead of raising a continuation prompt that
-could only grant another zero-value window.
+call with `SESSION_USAGE_LIMIT_REACHED`. Its details carry the `total` and
+`window` usage the check saw.
 
-When `maxInputTokensPerSession` is omitted, root sessions apply a default
-input budget of `40_000_000` provider-reported input tokens.
-`maxOutputTokensPerSession` and `maxTokenCostUsdPerSession` are unset by
-default. `maxTokenCostUsdPerSession` is a US-dollar limit on model token cost,
-not tool or infrastructure spend. It uses the cost reported with each model
-step; AI Gateway supplies this value, while model steps without reported cost
-do not add to the limit. Set any usage limit to `false` to uncap that axis.
+Each subagent session checks its own usage against its own `sessionUsage`, or
+the root agent's when it authors none. A dynamic subagent can't select
+`sessionUsage` at runtime and always uses the root agent's. Remote agents run
+under their own deployment's limits.
 
-Delegated subagent sessions have no fixed default. Each child receives a share
-of the delegating parent's remaining quota when it starts: the remainder in
-the current budget window split evenly across the agent tasks that one model
-step starts. A session that a workflow tool opens with `ctx.agent` receives
-the share of the model step that called the tool, or the whole remainder when
-that step starts no agent tasks; eve does not divide that share among several
-sessions one call opens. A child keeps its grant for its whole session,
-including turns that later calls with `taskId` start. Remote agent tasks count
-toward the split but receive no grant: they run under their own deployment's
-limits.
-
-A child's usage, including what the child's own subagents spent, counts
-against the parent's quota. An agent task's usage counts with each reply it
+A child's usage, including what the child's own subagents spent, also counts
+in the parent's usage. An agent task's usage counts with each reply it
 sends. A turn it doesn't reply to, such as one a cancel stopped, counts with
 the next reply, or when the turn ends if no call waits for a reply. Sessions
 that any other `serve` workflow tool opens with `ctx.agent` count the same
 way; those of an `execute` or `task` tool count when the tool finishes. Remote
-agents' reported usage counts the same way. Later children draw from what
-remains, and the parent's own limit and continuation prompt include delegated
-spend. Token-cost budgets follow the same rules, including splitting the
-remaining US-dollar budget and adding child cost back to the parent. Approving
-a continuation opens a fresh parent window for later child grants without
-erasing lifetime usage. An authored child limit applies only when it is
-tighter than the parent's grant; an uncapped parent delegates uncapped
-children.
+agents' reported usage counts the same way, cost included. Approving a
+continuation starts a new window without erasing `total`.
 
 Some delegated usage doesn't count against the parent: a `ctx.agent` turn
 still running when its workflow tool finishes or is cancelled; the `ctx.agent`
@@ -409,11 +453,24 @@ for the retry behavior.
 
 ## Run data retention
 
-The runtime keeps each run's data after the run finishes: model and tool
-payloads, streamed output, and the event log eve replays from. How long it keeps
-them is the World's decision, and on Vercel that follows your team's plan. Set
-`experimental.workflow.retention` to `0` to have it deleted as soon as the run
-finishes instead:
+By default, eve derives run-data retention from the session's resolved
+[OpenTelemetry trace policy](./observability/otel#configure-opentelemetry):
+
+- When the policy allows both inputs and outputs, eve uses the World's default
+  retention period.
+- When the policy drops the trace or excludes either content direction, eve
+  requests deletion as soon as the run ends with Workflow's
+  `experimental_retention: 0`. Workflow cannot delete inputs and outputs separately.
+
+Without a custom policy, public conversations and development sessions use the
+World's default. Private and unknown-audience sessions outside development request
+`0`, even when no OpenTelemetry destination is installed. This decision is made
+when the session starts; destination export filters and lifecycle-provider
+policies do not change it.
+
+Set `experimental.workflow.retention` explicitly to override this behavior.
+Use `0` to request deletion regardless of the tracing policy, or `"default"` to
+keep run data for the World's default period regardless of the tracing policy:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -428,18 +485,29 @@ export default defineAgent({
 });
 ```
 
-This applies to every run that owns the session, including successor owners
+The resolved value applies to every run that owns the session, including successor owners
 started after a deployment handoff, and to the run that collects session
 activity. Runs eve starts for other purposes keep the world's default: session
 timeouts and [workflow tools](./tools/workflows).
 
 The value applies per agent. A [subagent](./subagents) that runs its own session
-uses its own value, unlike `experimental.workflow.world`, which is root-only.
+uses its own explicit value or derives retention from its resolved trace decision,
+including any inherited content ceiling. `experimental.workflow.world` is root-only.
 
-Custom Worlds used with eve might not support this feature, in which case
-it falls back to the World's default retention period.
+At `0`, supporting Worlds delete run and step inputs, outputs, and errors;
+event payloads; and stream contents when the run reaches a terminal state. The
+data remains available while the session is active. Run, step, and event records
+remain for the World's default period, including IDs, timestamps, statuses,
+step names, and attributes. Attributes can contain content, including eve's
+session title. This option does not delete local traces, exported telemetry, or
+data stored by tools, channels, or model providers.
 
-> ⚠️ **At `0`, a finished session's output is usually gone before you can read it.** Since data is deleted immediately before it can be read back, results and transcripts become unreadable and a client polling for a finished session's output can see it disappear.
+The Workflow World enforces deletion, not eve or the SDK. A World older than
+spec version 4 rejects `0`; a spec version 4 World without retention support
+keeps the data. Confirm support with your World provider. See
+[Workflow data retention](https://workflow-sdk.dev/docs/observability/retention).
+
+> ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. Depending on the World, reading deleted session history returns either an empty stream or `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or set `retention: "default"` to preserve completed-session reads independently of tracing.
 
 ## Other defineAgent fields
 
@@ -449,7 +517,7 @@ it falls back to the World's default retention period.
 | -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                        |
 | `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                |
-| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                          |
+| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 idle days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                     |
 | `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data.                                                                            |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                             |
 | `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` keeps it out of the model's tool list; the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`. |

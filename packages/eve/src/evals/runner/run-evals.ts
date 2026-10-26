@@ -7,6 +7,7 @@ import type {
   EveEvalTargetHandle,
 } from "#evals/types.js";
 import { resolveArtifactDirectory, writeArtifacts } from "#evals/runner/artifacts.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import { executeEval } from "#evals/runner/execute-eval.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
@@ -35,6 +36,11 @@ export interface RunEvalsOptions {
   readonly maxConcurrency?: number;
   /** Overrides every eval's `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
+  /**
+   * Times to run every eval. Must be a positive integer. Overrides the config
+   * `repeat`; defaults to 1 when neither is set.
+   */
+  readonly repeat?: number;
   /** Receives verbose activity lines as evals run. */
   readonly onEvalLog?: (evalId: string, message: string) => void;
 }
@@ -68,6 +74,13 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
     );
   }
 
+  const repeat = options.repeat ?? config.repeat ?? 1;
+  if (!Number.isInteger(repeat) || repeat < 1) {
+    throw new Error(
+      `Eval repeat must be a positive integer; got ${String(options.repeat ?? config.repeat)}.`,
+    );
+  }
+
   const evaluations = options.evaluations.map((evaluation) =>
     applyConfigDefaults(evaluation, config),
   );
@@ -86,7 +99,14 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
   // Execute evals with bounded concurrency. Reporter callbacks run on a
   // serial queue off the hot path so a slow reporter never throttles the
   // pool; the queue drains before the run completes.
-  const pending = [...evaluations];
+  // Attempts of one eval are queued back to back, so a repeated run still
+  // finishes each eval's attempts close together under bounded concurrency.
+  const pending = evaluations.flatMap((evaluation) =>
+    Array.from({ length: repeat }, (_, index) => ({
+      evaluation,
+      attempt: repeat > 1 ? index + 1 : undefined,
+    })),
+  );
   const executing = new Set<Promise<void>>();
   let reporterQueue: Promise<void> = Promise.resolve();
   const enqueueReporterCallback = (
@@ -104,31 +124,35 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
 
   while (pending.length > 0 || executing.size > 0) {
     while (pending.length > 0 && executing.size < maxConcurrency) {
-      const evaluation = pending.shift();
-      if (evaluation === undefined) break;
+      const next = pending.shift();
+      if (next === undefined) break;
+      const { evaluation, attempt } = next;
+      const logLabel = formatAttemptLabel(evaluation.id, attempt);
       const evalStartedAt = new Date().toISOString();
 
       enqueueReporterCallback(evaluation, async (reporter) => {
         await reporter.onEvalStart?.({
           evaluation,
+          attempt,
           startedAt: evalStartedAt,
           target,
         });
       });
 
       const task = (async () => {
-        const result = await executeEval({
+        const executed = await executeEval({
           client,
           evaluation,
           setupContext: options.setupContext,
           onLog:
             options.onEvalLog === undefined
               ? undefined
-              : (message) => options.onEvalLog?.(evaluation.id, message),
+              : (message) => options.onEvalLog?.(logLabel, message),
           onSessionStart: (event) => {
             enqueueReporterCallback(evaluation, async (reporter) => {
               await reporter.onSessionStart?.({
                 evaluation,
+                attempt,
                 primary: event.primary,
                 sessionId: event.sessionId,
                 startedAt: event.startedAt,
@@ -141,12 +165,13 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
           target,
           timeoutMs: options.timeoutMs,
         });
+        const result = attempt === undefined ? executed : { ...executed, attempt };
         results.push(result);
 
         for (const session of result.result.sessions ?? []) {
           if (session.sessionId === undefined) continue;
           const role = session.primary ? "primary session" : "secondary session";
-          options.onEvalLog?.(evaluation.id, `workflow run id (${role}): ${session.sessionId}`);
+          options.onEvalLog?.(logLabel, `workflow run id (${role}): ${session.sessionId}`);
         }
 
         enqueueReporterCallback(evaluation, async (reporter) => {
@@ -173,7 +198,10 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
 
   // Report results in discovery order regardless of completion order.
   const order = new Map(evaluations.map((evaluation, index) => [evaluation.id, index]));
-  results.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  results.sort(
+    (a, b) =>
+      (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0) || (a.attempt ?? 0) - (b.attempt ?? 0),
+  );
 
   const summary = buildSummary(target, results, startedAt);
 

@@ -23,6 +23,7 @@ import {
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
   type PublicAgentStaticModelDefinition,
+  type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import {
   isDynamicSentinel,
@@ -174,31 +175,12 @@ function expectPositiveIntegerOrFalse(value: unknown, message: string): number |
   return expectPositiveInteger(value, message);
 }
 
-function expectPositiveNumberOrFalse(value: unknown, message: string): number | false {
-  if (value === false) {
-    return false;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(message);
-  }
-  return value;
-}
-
 function normalizeAgentLimitsDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["limits"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(
-    record,
-    [
-      "maxInputTokensPerSession",
-      "maxOutputTokensPerSession",
-      "maxTokenCostUsdPerSession",
-      "sessionTimeoutMs",
-    ],
-    message,
-  );
+  expectOnlyKnownKeys(record, ["sessionTimeoutMs", "sessionUsage"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
   if (record.sessionTimeoutMs !== undefined) {
@@ -207,21 +189,9 @@ function normalizeAgentLimitsDefinition(
       message,
     );
   }
-  if (record.maxInputTokensPerSession !== undefined) {
-    normalizedDefinition.maxInputTokensPerSession = expectPositiveIntegerOrFalse(
-      record.maxInputTokensPerSession,
-      message,
-    );
-  }
-  if (record.maxOutputTokensPerSession !== undefined) {
-    normalizedDefinition.maxOutputTokensPerSession = expectPositiveIntegerOrFalse(
-      record.maxOutputTokensPerSession,
-      message,
-    );
-  }
-  if (record.maxTokenCostUsdPerSession !== undefined) {
-    normalizedDefinition.maxTokenCostUsdPerSession = expectPositiveNumberOrFalse(
-      record.maxTokenCostUsdPerSession,
+  if (record.sessionUsage !== undefined) {
+    normalizedDefinition.sessionUsage = expectFunction<SessionUsageLimit>(
+      record.sessionUsage,
       message,
     );
   }

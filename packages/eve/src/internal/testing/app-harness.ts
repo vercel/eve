@@ -20,7 +20,7 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineSandboxProvider } from "#sandbox/provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -44,12 +44,7 @@ interface TestAppDescriptor {
   readonly agent?: {
     /** Full agent definition; overrides `model` and `limits`. */
     readonly definition?: import("#public/definitions/agent.js").AgentDefinition;
-    readonly limits?: {
-      readonly maxInputTokensPerSession?: number | false;
-      readonly maxOutputTokensPerSession?: number | false;
-      readonly maxTokenCostUsdPerSession?: number | false;
-      readonly sessionTimeoutMs?: number | false;
-    };
+    readonly limits?: import("#shared/agent-definition.js").AgentLimitsDefinition;
     readonly model?: string;
     readonly name?: string;
   };
@@ -60,6 +55,8 @@ interface TestAppDescriptor {
   readonly tools?: readonly ResolvedToolDefinition[];
   /** Additional authored modules compiled into the synthetic application. */
   readonly modules?: readonly ProgrammaticAgentModule[];
+  /** Awaited before the in-memory sandbox provider starts a session's sandbox. */
+  readonly beforeSandboxStart?: (sessionId: string) => Promise<void>;
 }
 
 /**
@@ -120,6 +117,14 @@ export interface TestRuntime {
     tool: string | Pick<ResolvedToolDefinition, "name">,
     input: unknown,
   ): Promise<unknown>;
+  /** Session ids whose sandbox cleanup ran when the session ended, in order. */
+  readonly sandboxCleanups: readonly string[];
+  /**
+   * What happened to the sessions' sandboxes, in order, as `<event>:<session id>`:
+   * `definition` when `sandbox.ts` runs, then `start`, `resume`, `delete`, or
+   * `end` when session-end cleanup runs.
+   */
+  readonly sandboxEvents: readonly string[];
   /**
    * Clears the compiled-artifact snapshot, bundle cache, and sessions' sandboxes.
    * Tests that re-use a runtime across multiple assertions can call this to
@@ -145,48 +150,62 @@ const TEST_SANDBOX_PROVIDER_NAME = "eve-test-memory";
 /**
  * An in-memory sandbox provider that keeps each session's sandbox, so a step
  * that resumes it sees what earlier steps wrote, as with a real provider. A
- * staged attachment, say, is read back on the next model call.
+ * staged attachment, say, is read back on the next model call. `start` is an
+ * upsert on the session id, and session-end cleanup deletes by it.
  */
-function createTestSandboxProvider() {
+function createTestSandboxProvider(beforeStart?: (sessionId: string) => Promise<void>) {
   const sessionSandboxes = new Map<string, MockSandbox>();
+  const endedSessionIds: string[] = [];
+  const events: string[] = [];
 
-  function createHandle(sessionId: string) {
+  function connect(sessionId: string) {
     let sandbox = sessionSandboxes.get(sessionId);
     if (sandbox === undefined) {
       sandbox = mockSandbox({ id: sessionId });
       sessionSandboxes.set(sessionId, sandbox);
     }
-    const opened = sandbox;
-    return {
-      sandbox: opened.session,
-      async onSandboxDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
-        sessionSandboxes.delete(sessionId);
-        await opened.access.delete?.(options);
-      },
-      async onSandboxStop() {},
-      async onRuntimeShutdown() {},
-    };
+    return sandbox.connection;
   }
 
   const provider = defineSandboxProvider({
     name: TEST_SANDBOX_PROVIDER_NAME,
     environment: () => ({
+      async onSessionEnd(context, _state, { reason }) {
+        if (reason === "deleted") events.push(`delete:${context.session.id}`);
+        else {
+          events.push(`end:${context.session.id}`);
+          endedSessionIds.push(context.session.id);
+        }
+        sessionSandboxes.delete(context.session.id);
+      },
       async prepare() {
         return null;
       },
-      async resume(context) {
-        return createHandle(context.session.id);
-      },
       async start(context) {
-        return { handle: createHandle(context.session.id), state: null };
+        await beforeStart?.(context.session.id);
+        events.push(`start:${context.session.id}`);
+        return { connection: connect(context.session.id), state: null };
+      },
+      async resume(context) {
+        events.push(`resume:${context.session.id}`);
+        return connect(context.session.id);
       },
     }),
   });
-  return { clear: () => sessionSandboxes.clear(), provider };
+  return {
+    clear: () => {
+      sessionSandboxes.clear();
+      endedSessionIds.length = 0;
+      events.length = 0;
+    },
+    endedSessionIds,
+    events,
+    provider,
+  };
 }
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
-  const sandboxes = createTestSandboxProvider();
+  const sandboxes = createTestSandboxProvider(descriptor.beforeSandboxStart);
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
@@ -196,7 +215,13 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
       {
         loadNamespace: async () => {
           const environment = sandboxes.provider.environment();
-          return { environment, default: defineSandbox(() => environment.open()) };
+          return {
+            environment,
+            default: defineSandbox(({ session }) => {
+              sandboxes.events.push(`definition:${session.id}`);
+              return environment.open();
+            }),
+          };
         },
         logicalPath: "sandbox.ts",
       },
@@ -289,6 +314,8 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     reset,
     run,
     runAsSession,
+    sandboxCleanups: sandboxes.endedSessionIds,
+    sandboxEvents: sandboxes.events,
     session,
     tools,
   };

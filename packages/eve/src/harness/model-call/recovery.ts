@@ -100,9 +100,8 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
 }
 
 /**
- * True when a step produced no assistant text and no tool calls. A blank
- * response is ambiguous and must be retried instead of silently dropping a
- * HITL reply.
+ * Whether a step produced no assistant text or tool work. The caller decides
+ * whether a successful empty `stop` is usable for the session.
  */
 export function isEmptyModelResponse(step: HarnessStepResult): boolean {
   return (

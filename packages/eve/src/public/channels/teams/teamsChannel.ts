@@ -1,6 +1,12 @@
 import { defaultDeliverResult } from "#channel/adapter.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+  type PromptResponse,
+} from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -51,6 +57,8 @@ import {
   isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
   readTeamsToolApprovalPrompt,
+  readTeamsInputPrompt,
+  renderInactiveInputRequestMessage,
   teamsInvokeResponse,
 } from "#public/channels/teams/hitl.js";
 import {
@@ -157,6 +165,8 @@ export interface TeamsReceiveTarget {
 export type TeamsInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Prior conversation added as user and assistant turns before this message. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
@@ -368,7 +378,10 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           if (activity.type === "message") {
             waitUntil(
               isTeamsInputResponseActivity(activity)
-                ? dispatchInputResponses({ activity, config, from, onInputResponse })
+                ? // The retired card is the notice here: a message has no private reply.
+                  dispatchInputResponses({ activity, config, from, onInputResponse }).then(
+                    (answer) => (answer?.outcome === "inactive" ? answer.retirement : undefined),
+                  )
                 : dispatchMessage({
                     activity,
                     config,
@@ -670,6 +683,7 @@ async function dispatchMessage(input: {
     await input.from(continuationToken).send(turnMessage, {
       auth: result.auth,
       context: [formatTeamsContextBlock(inboundContext), ...channelContext],
+      history: result.history,
       state,
       title: result.title,
     });
@@ -690,15 +704,17 @@ async function handleInvoke(input: {
   if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
 
   if (isTeamsInputResponseActivity(input.activity)) {
-    input.waitUntil(
-      dispatchInputResponses({
-        activity: input.activity,
-        config: input.config,
-        onInputResponse: input.onInputResponse,
-        from: input.from,
-      }),
-    );
-    return Response.json(teamsInvokeResponse());
+    // Answered after delivery, so the presser learns when no session took it.
+    const answer = await dispatchInputResponses({
+      activity: input.activity,
+      config: input.config,
+      onInputResponse: input.onInputResponse,
+      from: input.from,
+    });
+    if (answer?.outcome !== "inactive") return Response.json(teamsInvokeResponse());
+    // The reply doesn't wait for the card's edit, which the request still keeps.
+    input.waitUntil(answer.retirement);
+    return Response.json(teamsInvokeResponse({ message: INACTIVE_REQUEST_NOTICE }));
   }
 
   if (input.config.onInvoke === undefined) return teamsOk();
@@ -739,14 +755,19 @@ async function revealAuthorization(input: {
   });
 }
 
+/**
+ * Delivers a card submission and reports what became of it. When no session
+ * can take it, the card's retirement has started and the caller keeps the
+ * request alive until it settles.
+ */
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-}): Promise<void> {
+}): Promise<PromptResponse | undefined> {
   const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
-  if (inputResponses.length === 0) return;
+  if (inputResponses.length === 0) return undefined;
   const state = stateFromActivity(input.activity);
   const ctx = buildTeamsBinding({ config: input.config, state });
   let result: TeamsInputResponseResult;
@@ -754,25 +775,31 @@ async function dispatchInputResponses(input: {
     result = await input.onInputResponse(ctx, input.activity);
   } catch (error) {
     log.error("Teams input response authorization failed", { error });
-    return;
+    return undefined;
   }
-  if (result === null) return;
-  try {
-    await input
-      .from(
-        cardContinuationToken(
-          input.activity,
-          state,
-          readTeamsInputReplyToActivityId(input.activity),
-        ),
-      )
-      .respond(inputResponses, {
-        auth: result.auth,
-        state: approvalResponseStatePatch(input.activity, result.auth),
-      });
-  } catch (error) {
-    log.error("Teams input response delivery failed", { error });
-  }
+  if (result === null) return undefined;
+  const auth = result.auth;
+  const activity = input.activity;
+  return respondOrRetireInactivePrompt(
+    () =>
+      input
+        .from(cardContinuationToken(activity, state, readTeamsInputReplyToActivityId(activity)))
+        .respond(inputResponses, {
+          auth,
+          state: approvalResponseStatePatch(activity, auth),
+        }),
+    {
+      async retirePrompt(label) {
+        if (activity.replyToId === undefined) return;
+        // A card posted before prompts rode in its data still loses its buttons.
+        await ctx.thread.update(
+          activity.replyToId,
+          renderInactiveInputRequestMessage(readTeamsInputPrompt(activity), label),
+        );
+      },
+    },
+    log,
+  );
 }
 
 function stateFromActivity(

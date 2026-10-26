@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildConnectionInstall,
@@ -7,6 +9,12 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
+import sentConnection from "../../registry/connections/sent";
+
+// Connect's runtime pulls in channel auth; these tests exercise only the authored approval policy.
+vi.mock("@vercel/connect/eve", () => ({
+  connect: () => ({ getToken: async () => ({ token: "" }) }),
+}));
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -28,6 +36,26 @@ describe("Browser Use connection setup", () => {
 
     expect(quickStart).toContain("@vercel/connect/eve");
     expect(buildConnectionInstall(integration)).toContain("eve add connection/linear");
+  });
+});
+
+describe("Firecrawl connection setup", () => {
+  it("renders bearer authentication for cost-sensitive tools", () => {
+    const integration = getIntegration("firecrawl")!;
+
+    expect(integration.quickStart).toContain(
+      "Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY!}`",
+    );
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/firecrawl");
+  });
+
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/firecrawl.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("firecrawl")!.quickStart).toContain(source.trim());
   });
 });
 
@@ -54,6 +82,58 @@ describe("Context connection setup", () => {
     expect(setup.configureVariants["mcp:user"]).toContain(
       "vercel connect create mcp.context.dev --name context",
     );
+  });
+});
+
+describe("FLORA connection setup", () => {
+  it("uses the published MCP URL, Connect connector name, and approval gate", () => {
+    const integration = getIntegration("flora")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.variants["mcp:user"]).toContain('url: "https://agents.flora.ai/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("agents.flora.ai/flora")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create agents.flora.ai/mcp --name flora",
+    );
+    expect(integrationMarkdown(integration)).toContain("approval: always()");
+  });
+
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/flora.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("flora")!.quickStart).toContain(source.trim());
+  });
+});
+
+describe("Sent connection setup", () => {
+  it("preserves the installed tool boundary in the gallery setup", () => {
+    const integration = getIntegration("sent")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = integration.quickStart!;
+
+    expect(setup.authModes).toEqual(["user"]);
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.sent.dm/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("sent")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create mcp.sent.dm --name sent",
+    );
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/sent");
+    expect(quickStart).toContain("approval: ({ toolName }) =>");
+    expect(quickStart).toContain('? "user-approval"');
+    expect(quickStart).toContain(': "not-applicable"');
+
+    const { tools } = sentConnection;
+    if (!tools || !("allow" in tools)) {
+      throw new Error("Sent requires a tool allowlist.");
+    }
+    for (const toolName of tools.allow) {
+      expect(quickStart).toContain(`"${toolName}"`);
+    }
+
+    expect(integrationMarkdown(integration)).toContain(quickStart);
   });
 });
 
@@ -114,6 +194,22 @@ describe("Kernel extension setup", () => {
       "https://vercel.com/kb/guide/build-a-browser-agent",
       "https://vercel.com/kb/guide/software-factory-browser",
     ]);
+  });
+});
+
+describe("Nimble extension setup", () => {
+  it("documents the API-key mount and approval-gated billable-run boundary", () => {
+    const integration = getIntegration("nimble")!;
+
+    expect(integration.type).toBe("extension");
+    expect(integration.install).toContain("eve add extension/nimble");
+    expect(integration.quickStart).toContain("NIMBLE_API_KEY");
+    expect(integration.quickStart).toContain('import nimble from "@nimble-way/eve"');
+    expect(integration.quickStart).toContain("agent/extensions/nimble/extension.ts");
+    expect(integration.quickStart).toContain("require approval for every Agent API run");
+    expect(integration.configure).toContain("untrusted third-party content");
+    expect(integration.configure).toContain("billable, non-idempotent");
+    expect(integration.configure).toContain("requires approval for every call");
   });
 });
 

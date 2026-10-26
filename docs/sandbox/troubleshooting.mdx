@@ -1,0 +1,215 @@
+---
+title: "Sandbox Troubleshooting"
+description: "Causes and fixes for common eve sandbox errors in the sandbox file, after a build, when a session resumes, and during eve dev."
+---
+
+Sections whose heading is in code format start with the beginning of an error message, so you can search this page for the text you see. Most sandbox errors come from one of three mismatches: the sandbox file does not match what eve expects, the build output does not match the runtime, or a session's recorded sandbox does not match the current agent.
+
+## Errors in the sandbox file
+
+### `must export an environment`
+
+```text
+Sandbox "sandbox.ts" must export an environment.
+```
+
+eve compiles the sandbox file during `eve build` and `eve dev`, and it needs the environment as a named `environment` export so it can prepare it before any session exists. Export the environment that the selector opens:
+
+```ts title="agent/sandbox.ts"
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+export const environment = DefaultSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+### `opened an environment other than the one it exports`
+
+```text
+Sandbox "sandbox.ts" opened an environment other than the one it exports as `environment`.
+```
+
+The selector called `open()` on a different environment object than the exported `environment`. This happens when the selector creates an environment inline, such as `DefaultSandbox.environment().open()`, or imports another sandbox file's environment. Create the environment once at module scope, export it, and call `environment.open()` on that export.
+
+### `can open only one sandbox`
+
+```text
+A sandbox definition can open only one sandbox.
+```
+
+The selector called `environment.open()` more than once. Call `environment.open()` once in the `defineSandbox()` selector and return that sandbox.
+
+### `can only open sandboxes inside defineSandbox()`
+
+```text
+Sandbox environments can only open sandboxes inside defineSandbox().
+```
+
+Code outside the `defineSandbox()` selector called `environment.open()`, for example a tool or a module's top level. Only the selector opens the sandbox. From tools and other runtime code, use `ctx.getSandbox()` to reach the session's sandbox, or `ctx.getSandbox(environment)` to keep the provider-specific session type.
+
+### `selects parent.sandbox but agent node ... has no parent`
+
+```text
+Sandbox "sandbox.ts" selects parent.sandbox but agent node "..." has no parent.
+```
+
+The sandbox file uses `defineParentSandbox()`, but the agent is not a declared subagent, so it has no parent sandbox to share. eve reports this when it loads the agent graph. Only a declared subagent can [share its parent's sandbox](/docs/sandbox#share-a-parent-sandbox). Give this agent its own sandbox file with `defineSandbox()` and an exported environment.
+
+## Errors after a build or deploy
+
+Production never prepares sandbox environments. `eve build` prepares them and records one artifact for each agent sandbox, such as a Docker image, a Vercel snapshot, or a just-bash template, and the runtime only uses those recorded artifacts.
+
+### `No prepared ... sandbox environment is recorded`
+
+```text
+No prepared "docker" sandbox environment is recorded for agent node "...".
+```
+
+The deployed build output has no prepared artifact for this agent. This usually means the output came from `eve build --skip-sandbox-prewarm`, which [the CLI reference](/docs/reference/cli) marks as not deployable. Run `eve build` without that flag and deploy its output together with the runtime.
+
+### `The prepared sandbox artifact ... was created with provider`
+
+```text
+The prepared sandbox artifact for agent node "..." was created with provider "vercel", but this process selects provider "docker".
+```
+
+The sandbox file selected one provider when eve prepared the sandbox and a different one in the process that uses it. This happens when the sandbox file chooses a provider by reading the host, for example with `process.env.VERCEL ? VercelSandbox.environment() : DockerSandbox.environment()`, and the build and runtime hosts differ. `DefaultSandbox.environment()` does not cause this, because it [records its choice when it prepares the sandbox](/docs/sandbox/default#the-build-records-the-choice). Select one provider explicitly, or use `DefaultSandbox.environment()`, then rebuild with `eve build`, or restart `eve dev` locally.
+
+### `DefaultSandbox has no sandbox provider for this build`
+
+```text
+DefaultSandbox has no sandbox provider for this build: it did not run on Vercel, no Docker daemon was reachable, and production builds do not fall back to just-bash.
+```
+
+The production `eve build` ran outside Vercel without a reachable Docker daemon, so `DefaultSandbox` recorded no provider, and the first session that opens the sandbox fails. A `RUN eve build` step in a Dockerfile usually has no Docker daemon, even when the running container later mounts `/var/run/docker.sock`. Start Docker and run `eve build` again, deploy to Vercel, or select a provider explicitly in the sandbox file, for example `DockerSandbox.environment()` from `eve/sandbox/docker`. See [How eve selects the provider](/docs/sandbox/default#how-eve-selects-the-provider).
+
+### `Sandbox template ... is not available to this runtime`
+
+```text
+Sandbox template "..." for provider "docker" is not available to this runtime.
+```
+
+The build recorded an artifact, but the provider can no longer use its template. When the provider knows the cause, the message includes it:
+
+| Provider  | Common cause                                                                                                                                    |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker    | The Docker daemon has no image with that name: it was removed, for example by `docker image prune -a`, or the build used another Docker daemon. |
+| Vercel    | The Vercel Sandbox snapshot expired or was deleted.                                                                                             |
+| just-bash | The template directory under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.                                            |
+| Custom    | The image, snapshot, or template that the artifact names no longer exists, so the provider threw `SandboxTemplateNotProvisionedError`.          |
+
+The runtime never recreates a template. Run `eve build` again and deploy its output.
+
+### `Invalid prepared ... artifact`
+
+```text
+Invalid prepared Docker sandbox artifact.
+```
+
+The recorded artifact does not match the format that this eve version expects, usually because the build used a different eve version than the runtime. Run `eve build` with the same eve version that the runtime uses, then redeploy.
+
+## Errors when a session resumes
+
+A session records which provider created its sandbox, and later turns resume that sandbox directly without running the selector again.
+
+### `This session's sandbox was created by provider`
+
+```text
+This session's sandbox was created by provider "just-bash", but the agent now selects provider "docker".
+```
+
+eve logs this warning when a session resumes on a build whose sandbox file selects a different provider than the one that created the session's sandbox, for example after you change providers or `DefaultSandbox` records a different choice in a new build. eve cannot move a sandbox between providers, so the session continues in a fresh sandbox from the current provider, without the old sandbox's files. eve does not delete the old sandbox. Remove it with the old provider's tooling, for example `docker rm` for a Docker container. To keep the session's files instead, restore the previous provider before the session resumes.
+
+### `DefaultSandbox selected just-bash, which always allows network access`
+
+```text
+DefaultSandbox selected just-bash, which always allows network access and accepts only the "allow-all" network policy.
+```
+
+The sandbox passed a `networkPolicy` other than `"allow-all"` to `open()`, or called `setNetworkPolicy()`, while `DefaultSandbox` uses just-bash during `eve dev` or `eve eval` because Docker is not reachable. just-bash cannot restrict network access. Start Docker and restart `eve dev` so `DefaultSandbox` selects Docker, or select `VercelSandbox.environment()` or `DockerSandbox.environment()` explicitly.
+
+### `Invalid ... session state`
+
+```text
+Invalid Docker sandbox session state.
+```
+
+The session's recorded sandbox state does not match the format that this eve version expects, usually because the session started under a different eve version. Start a new session to get a fresh sandbox.
+
+## Errors during eve dev
+
+During `eve dev`, the first sandbox access prepares every sandbox environment in the current build. See [Prepare a reusable environment](/docs/sandbox#prepare-a-reusable-environment).
+
+### `Timed out after 10 minutes waiting for another request or eve dev worker`
+
+```text
+Timed out after 10 minutes waiting for another request or eve dev worker to prepare sandbox environments (this request needs provider "docker").
+```
+
+Another request or `eve dev` worker is still preparing environments. Check the `eve dev` output, or run `eve logs`, to find the slow step, such as an image pull, a Dockerfile build, or a `prepare` callback. Retry after preparation finishes, or restart `eve dev` to cancel it.
+
+## Custom provider errors
+
+These errors come from a provider defined with `defineSandboxProvider()`, or from a keyed tool call on a provider that cannot keep its sandbox. See [Custom sandbox providers](/docs/sandbox/custom-providers).
+
+### `cannot keep a sandbox between invokeTool calls`
+
+```text
+Sandbox provider "acme" cannot keep a sandbox between invokeTool calls, so a call with a key cannot open one.
+```
+
+A keyed `invokeTool` call, such as an MCP tool session, requested the sandbox, and the provider does not keep sandboxes between calls. Call the tool without a key, use Vercel Sandbox or just-bash, or set `toolSessions: true` on a custom provider that bounds how long it keeps those sandboxes. Docker does not support keyed calls. See [Keep sandboxes for keyed tool calls](/docs/sandbox/custom-providers#keep-sandboxes-for-keyed-tool-calls).
+
+### `Sandbox connection extensions cannot replace the session members eve provides`
+
+```text
+Sandbox connection extensions cannot replace the session members eve provides: run. Rename them.
+```
+
+The connection's `extensions` define a member that eve already provides on every sandbox session, such as `run`, `readFile`, `stop`, or `delete`. Rename the extension member.
+
+### `ctx.templateKey() reserves`
+
+```text
+ctx.templateKey() reserves "sourceRevision": eve adds the workspace and skill files and the sandbox source revision itself.
+```
+
+The identity passed to `ctx.templateKey()` in `prepare()` sets `resources` or `sourceRevision`. eve adds both to every template key. Rename that identity field.
+
+### `returned non-serializable session state`
+
+```text
+Sandbox provider "acme" returned non-serializable session state.
+```
+
+`start()` returned state that is not JSON-compatible, such as a class instance, a function, or `undefined`. Return only strings, numbers, booleans, `null`, arrays, and plain objects, and keep live clients in the connection instead.
+
+## Provider setup errors
+
+### Docker is not installed or not running
+
+```text
+The Docker sandbox provider requires Docker, but the `docker` CLI was not found.
+The Docker sandbox provider requires a running Docker daemon, but it is not reachable.
+```
+
+Install and start Docker Desktop, OrbStack, Colima, or another runtime with a Docker-compatible `docker` CLI. To use another compatible CLI, such as Podman, set `EVE_DOCKER_PATH` to its path. If you do not need Docker specifically, use `DefaultSandbox.environment()`, which falls back to just-bash during `eve dev` and `eve eval`.
+
+### The just-bash package is missing
+
+```text
+The just-bash sandbox provider requires the `just-bash` package, which is not bundled with eve.
+```
+
+`eve dev` installs `just-bash` automatically unless the environment sets `autoInstall: false`. Other commands require you to install it. Add it to your application, for example with `pnpm add -D just-bash`, which matches what `eve dev` installs. See [just-bash Sandbox](/docs/sandbox/just-bash#automatic-installation).
+
+### `Cannot build deployable Vercel output because this app requires sandbox templates`
+
+```text
+Cannot build deployable Vercel output because this app requires sandbox templates and VERCEL_OIDC_TOKEN is missing.
+```
+
+eve raises this during a Vercel build, when `VERCEL` is set, if the app needs sandbox templates prepared and `VERCEL_OIDC_TOKEN` is missing. Do not deploy the `.vercel/output` from a build that failed this way. For a local `vercel build`, run `vercel link` and `vercel pull`, then retry. In a build on Vercel, Vercel sets `VERCEL_OIDC_TOKEN` automatically; see [Vercel OIDC federation](https://vercel.com/docs/oidc).
+
+### Vercel Sandbox authentication fails
+
+When `eve build` or the runtime cannot create a Vercel Sandbox because of missing or expired credentials, the Vercel Sandbox SDK reports an authentication or OIDC token error. Locally, run `eve link` to link a project and pull `VERCEL_OIDC_TOKEN` into `.env.local`. Outside Vercel without a linked project, set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`. See [Vercel Sandbox authentication](/docs/sandbox/vercel#authentication) for the full resolution order.
