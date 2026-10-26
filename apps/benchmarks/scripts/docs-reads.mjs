@@ -7,15 +7,17 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 /**
- * Reads the harness-neutral tool calls from agent-eval's parsed `transcript.json`.
- * agent-eval writes it for every harness (Claude Code, Codex, OpenCode), so this
- * does not depend on any one harness's raw event shape.
+ * Reads agent-eval's parsed `transcript.json`. agent-eval writes it for every
+ * harness (Claude Code, Codex, OpenCode), so callers do not depend on any one
+ * harness's raw event shape.
  */
-export function readToolCalls(runPath) {
+export function readTranscript(runPath) {
   const path = join(runPath, "transcript.json");
-  if (!existsSync(path)) return [];
-  const transcript = JSON.parse(readFileSync(path, "utf8"));
-  const events = Array.isArray(transcript.events) ? transcript.events : [];
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+}
+
+export function transcriptToolCalls(transcript) {
+  const events = Array.isArray(transcript?.events) ? transcript.events : [];
   return events
     .filter((event) => event.type === "tool_call" && event.tool !== undefined)
     .map((event) => {

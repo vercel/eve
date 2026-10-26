@@ -16,7 +16,9 @@ const runs = {
     {
       type: "assistant",
       message: {
+        usage: { input_tokens: 10, output_tokens: 3 },
         content: [
+          { type: "text", text: "Reading the docs." },
           { type: "tool_use", name: "Read", input: { file_path: `${docs}/README.md` } },
           { type: "tool_use", name: "Read", input: { file_path: `${docs}/tools/overview.mdx` } },
         ],
@@ -31,6 +33,11 @@ const runs = {
     {
       type: "item.started",
       item: { type: "command_execution", command: `bash -lc 'sed -n 1,80p ${docs}/README.md'` },
+    },
+    { type: "item.completed", item: { type: "agent_message", text: "Done." } },
+    {
+      type: "turn.completed",
+      usage: { input_tokens: 10, cached_input_tokens: 4, output_tokens: 3 },
     },
   ],
   opencode: [
@@ -48,27 +55,69 @@ const runs = {
         state: { status: "completed", input: { command: `ls ${docs}/channels/` }, output: "" },
       },
     },
+    { type: "text", part: { text: "Done." } },
+    { type: "step_finish", part: { tokens: { input: 10, output: 3, cache: { read: 0 } } } },
   ],
 };
+
+function writeRuns(root, transcripts) {
+  for (const [harness, events] of Object.entries(transcripts)) {
+    const runPath = join(root, `author-${harness}`, "run-1");
+    mkdirSync(runPath, { recursive: true });
+    const raw = events.map((event) => JSON.stringify(event)).join("\n");
+    const transcript = parseTranscript(raw, `vercel-ai-gateway/${harness}`);
+    writeFileSync(join(runPath, "transcript.json"), JSON.stringify(transcript));
+    writeFileSync(join(runPath, "transcript-raw.jsonl"), raw);
+    writeFileSync(join(runPath, "result.json"), JSON.stringify({ status: "passed" }));
+  }
+}
+
+function analyze(...args) {
+  return JSON.parse(
+    execFileSync(process.execPath, [script.pathname, ...args, "--json"], { encoding: "utf8" }),
+  );
+}
+
+test("reports turns and token usage for every harness", () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-benchmark-analyze-"));
+  try {
+    writeRuns(root, runs);
+    const records = analyze(root);
+    assert.deepEqual(
+      records.map(({ case: name, turns, toolCalls, usage }) => ({
+        name,
+        turns,
+        toolCalls,
+        input: usage?.input,
+        output: usage?.output,
+      })),
+      [
+        { name: "author-claude-code", turns: 1, toolCalls: 2, input: 10, output: 3 },
+        { name: "author-codex", turns: 1, toolCalls: 2, input: 6, output: 3 },
+        { name: "author-opencode", turns: 1, toolCalls: 2, input: 10, output: 3 },
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reports unreadable usage as null rather than zero", () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-benchmark-analyze-"));
+  try {
+    writeRuns(root, { codex: runs.codex.slice(0, 2) });
+    const [record] = analyze(root);
+    assert.equal(record.usage, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("aggregates docs reads across harnesses and lists unread pages", () => {
   const root = mkdtempSync(join(tmpdir(), "eve-benchmark-analyze-"));
   try {
-    for (const [harness, events] of Object.entries(runs)) {
-      const runPath = join(root, `author-${harness}`, "run-1");
-      mkdirSync(runPath, { recursive: true });
-      const raw = events.map((event) => JSON.stringify(event)).join("\n");
-      const transcript = parseTranscript(raw, `vercel-ai-gateway/${harness}`);
-      writeFileSync(join(runPath, "transcript.json"), JSON.stringify(transcript));
-      writeFileSync(join(runPath, "transcript-raw.jsonl"), raw);
-      writeFileSync(join(runPath, "result.json"), JSON.stringify({ status: "passed" }));
-    }
-
-    const usage = JSON.parse(
-      execFileSync(process.execPath, [script.pathname, root, "--docs", "--json"], {
-        encoding: "utf8",
-      }),
-    );
+    writeRuns(root, runs);
+    const usage = analyze(root, "--docs");
 
     assert.equal(usage.runs, 3);
     assert.equal(usage.runsWithDocs, 3);
