@@ -159,9 +159,9 @@ export async function startRemoteAgentSession(input: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
       token: callbackToken,
-      url: createWorkflowCallbackUrl(
-        input.callbackBaseUrl,
-        createEveCallbackRoutePath(callbackToken),
+      url: callbackUrlForProtocol(
+        createWorkflowCallbackUrl(input.callbackBaseUrl, createEveCallbackRoutePath(callbackToken)),
+        REMOTE_AGENT_PROTOCOL_VERSION,
       ),
     },
     message: formatRemoteAgentCallInputMessage({
@@ -221,7 +221,7 @@ export async function startRemoteAgentSession(input: {
     rejected.version < REMOTE_AGENT_PROTOCOL_VERSION
   ) {
     requestBody.protocolVersion = rejected.version;
-    // The same callback, marked so its route reads that protocol's input callbacks.
+    // The same callback, marked with the protocol it now agrees to.
     requestBody.callback.url = callbackUrlForProtocol(requestBody.callback.url, rejected.version);
     response = await post();
     rejected = response.ok ? undefined : await readProtocolRejection(response);
@@ -307,6 +307,11 @@ export async function respondToRemoteAgentSession(input: {
   readonly remote: RemoteAgentBinding & { readonly sessionId: string };
   readonly headers: Record<string, string>;
   readonly auth: SessionAuthContext | null | undefined;
+  /**
+   * Names this set of answers, so a retried step's repeat is the same delivery to the child.
+   * Only a child on this protocol accepts it.
+   */
+  readonly idempotencyKey?: string;
   readonly responses: readonly Answer[];
 }): Promise<void> {
   const response = await fetch(
@@ -323,6 +328,8 @@ export async function respondToRemoteAgentSession(input: {
               })),
             }
           : { answers: input.responses }),
+        ...(input.remote.earlierProtocol === undefined &&
+          input.idempotencyKey !== undefined && { idempotencyKey: input.idempotencyKey }),
         ...(input.remote.forwardPrincipal === true &&
           input.auth != null && {
             forwardedPrincipal: { current: input.auth },
@@ -350,6 +357,11 @@ export async function continueRemoteAgentSession(input: {
     readonly url: string;
   };
   readonly earlierProtocol?: number;
+  /**
+   * Names this message, so a retried step's repeat is the same delivery and returns the same
+   * receipt. Only a child on this protocol accepts it.
+   */
+  readonly idempotencyKey?: string;
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
@@ -359,19 +371,24 @@ export async function continueRemoteAgentSession(input: {
   const requestBody: {
     callback: typeof input.callback;
     forwardedPrincipal?: ForwardedPrincipal;
+    idempotencyKey?: string;
     message: MessageContent<string | URL>;
     outputSchema?: JsonObject;
   } = {
-    callback:
-      input.earlierProtocol === undefined
-        ? input.callback
-        : {
-            ...input.callback,
-            url: callbackUrlForProtocol(input.callback.url, input.earlierProtocol),
-          },
+    callback: {
+      ...input.callback,
+      url: callbackUrlForProtocol(
+        input.callback.url,
+        input.earlierProtocol ?? REMOTE_AGENT_PROTOCOL_VERSION,
+      ),
+    },
     message: input.message,
     outputSchema: input.outputSchema,
   };
+  // Earlier protocols reject fields they don't know.
+  if (input.earlierProtocol === undefined && input.idempotencyKey !== undefined) {
+    requestBody.idempotencyKey = input.idempotencyKey;
+  }
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }

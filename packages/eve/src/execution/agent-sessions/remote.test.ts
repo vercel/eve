@@ -345,12 +345,13 @@ describe("startRemoteAgentSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string));
     expect(bodies.map((body) => body.protocolVersion)).toEqual([3, 2]);
-    // The same create and callback, its URL marked so the callback route reads protocol 2 input.
+    // The same create and callback, its URL marked with the protocol it now agrees to.
+    expect(new URL(bodies[0].callback.url).searchParams.get("eveRemoteProtocol")).toBe("3");
     expect(bodies[1]).toEqual({
       ...bodies[0],
       callback: {
         ...bodies[0].callback,
-        url: `${bodies[0].callback.url}?eveRemoteProtocol=2`,
+        url: bodies[0].callback.url.replace("eveRemoteProtocol=3", "eveRemoteProtocol=2"),
       },
       protocolVersion: 2,
     });
@@ -520,7 +521,8 @@ describe("startRemoteAgentSession", () => {
         callId: "call-remote",
         subagentName: "research",
         token: "eve:parent-token",
-        url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token",
+        // Every callback URL names the protocol the parent and child agreed.
+        url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token?eveRemoteProtocol=3",
       },
       message: [
         'You are the subagent "research".',
@@ -731,7 +733,7 @@ describe("startRemoteAgentSession", () => {
       callId: "call-remote",
       subagentName: "research",
       token: "turn-inbox",
-      url: "https://caller.example.com/eve/v1/callback/turn-inbox",
+      url: "https://caller.example.com/eve/v1/callback/turn-inbox?eveRemoteProtocol=3",
     });
   });
 
@@ -760,7 +762,7 @@ describe("startRemoteAgentSession", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(
       expect.objectContaining({
         callback: expect.objectContaining({
-          url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token?x-vercel-protection-bypass=remote+callback+secret",
+          url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token?x-vercel-protection-bypass=remote+callback+secret&eveRemoteProtocol=3",
         }),
       }),
     );
@@ -1104,6 +1106,22 @@ describe("respondToRemoteAgentSession", () => {
     ]);
   });
 
+  it("names a current-protocol child's answers, so a retried step repeats the same delivery", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await respondToRemoteAgentSession({
+      auth: null,
+      headers: {},
+      idempotencyKey: "eve-answers:abc",
+      remote: { name: "research", sessionId: "remote-session", url: "https://remote.example.com" },
+      responses: [{ interactionId: "approval-1", optionId: "approve" }],
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      answers: [{ interactionId: "approval-1", optionId: "approve" }],
+      idempotencyKey: "eve-answers:abc",
+    });
+  });
+
   it("answers a protocol 2 child with the v26 responses it takes", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -1116,6 +1134,8 @@ describe("respondToRemoteAgentSession", () => {
     await respondToRemoteAgentSession({
       auth: responder,
       headers: { authorization: "Bearer remote-token" },
+      // Protocol 2 rejects fields it doesn't know, so the key stays off the wire.
+      idempotencyKey: "eve-answers:abc",
       remote: {
         earlierProtocol: 2,
         forwardPrincipal: true,
@@ -1156,6 +1176,8 @@ describe("continueRemoteAgentSession", () => {
       await continueRemoteAgentSession({
         earlierProtocol,
         auth: null,
+        // Earlier protocols reject fields they don't know, so the key stays off the wire.
+        idempotencyKey: "agent-session:run:step:remote-session:send",
         callback: {
           callId: "call-next",
           subagentName: "research",
@@ -1193,7 +1215,7 @@ describe("continueRemoteAgentSession", () => {
     },
   );
 
-  it("returns the accepted delivery for a current-protocol continuation without adding retry fields", async () => {
+  it("returns the accepted delivery for a current-protocol continuation, naming it for retries", async () => {
     const receipt = { deliveryId: "delivery:accepted", ok: true, sessionId: "remote-session" };
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
       Response.json(receipt, { status: 202 }),
@@ -1208,6 +1230,7 @@ describe("continueRemoteAgentSession", () => {
           token: "parent-inbox",
           url: "https://caller.example.com/eve/v1/callback/parent-inbox",
         },
+        idempotencyKey: "agent-session:run:step:remote-session:send",
         message: "follow up",
         remote: createRemoteAgent(),
         sessionId: "remote-session",
@@ -1222,8 +1245,9 @@ describe("continueRemoteAgentSession", () => {
         callId: "call-next",
         subagentName: "research",
         token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
+        url: "https://caller.example.com/eve/v1/callback/parent-inbox?eveRemoteProtocol=3",
       },
+      idempotencyKey: "agent-session:run:step:remote-session:send",
       message: "follow up",
     });
 

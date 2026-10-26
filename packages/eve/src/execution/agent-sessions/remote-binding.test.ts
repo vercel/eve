@@ -13,6 +13,13 @@ vi.mock("#execution/agent-sessions/remote.js", async (importOriginal) => ({
   continueRemoteAgentSession: async (input: unknown) => continueRemoteAgentSession(input),
 }));
 
+// The send step names its delivery by its own run and step.
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
+  getStepMetadata: () => ({ attempt: 1, stepId: "step_0" }),
+  getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
+}));
+
 // The parent's stream, which a restore folds its view from: here, nothing yet.
 vi.mock("#execution/session-event-stream.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-event-stream.js")>()),
@@ -130,6 +137,18 @@ describe("a dynamic remote agent's child", () => {
     await expect(send(contextSelecting("globex"), addressOpenedFor("acme"))).resolves.toEqual({
       authorization: "Bearer acme",
     });
+  });
+
+  it("names each message by its step, so a retried step repeats the same delivery", async () => {
+    await send(contextSelecting("acme"), addressOpenedFor("acme"));
+    await send(contextSelecting("acme"), addressOpenedFor("acme"));
+    const keys = continueRemoteAgentSession.mock.calls.map(
+      ([input]) => (input as { readonly idempotencyKey?: string }).idempotencyKey,
+    );
+    expect(keys).toEqual([
+      "agent-session:run_0:step_0:child-1:send",
+      "agent-session:run_0:step_0:child-1:send",
+    ]);
   });
 
   it("sends no credentials to a destination its binding doesn't lead to", async () => {

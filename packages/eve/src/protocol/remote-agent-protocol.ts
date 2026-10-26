@@ -6,6 +6,13 @@
  */
 export const REMOTE_AGENT_PROTOCOL_VERSION = 3;
 
+/**
+ * Error code a parent's callback route answers when nothing waits on the callback's token: the
+ * parent already took the result, or stopped waiting. Its message is the same in every protocol.
+ */
+export const REMOTE_CALLBACK_NOT_PENDING = "CALLBACK_NOT_PENDING";
+export const REMOTE_CALLBACK_NOT_PENDING_MESSAGE = "Session callback not pending.";
+
 /** Error code a receiver answers when the caller speaks another protocol version. */
 export const REMOTE_AGENT_PROTOCOL_MISMATCH = "REMOTE_AGENT_PROTOCOL_MISMATCH";
 
@@ -19,22 +26,20 @@ export const UNVERSIONED_REMOTE_AGENT_PROTOCOL = 1;
 export const V26_INPUT_REMOTE_AGENT_PROTOCOL = 2;
 
 /**
- * Query parameter of the callback URL a parent gives a remote child on an earlier protocol: the
- * protocol it agreed with that child. A callback route reads an earlier protocol's input callback
- * only for a parent that agreed to it. A parent run from before v27, which a child's callback can
- * reach once the deployment upgrades, never set it, so its children's input still fails visibly.
+ * Query parameter of every callback URL a parent gives a remote child: the protocol they agreed.
+ * The callback route reads a child's callbacks by the protocol its URL names, so it never has to
+ * guess from a body's shape. A URL without it came from a parent run from before v27.
  */
 const CALLBACK_PROTOCOL_QUERY = "eveRemoteProtocol";
 
-/** The callback URL for a child that speaks `version`, marked when it is an earlier one. */
+/** The callback URL for a child that speaks `version`. */
 export function callbackUrlForProtocol(url: string, version: number): string {
-  if (version === REMOTE_AGENT_PROTOCOL_VERSION) return url;
   const marked = new URL(url);
   marked.searchParams.set(CALLBACK_PROTOCOL_QUERY, String(version));
   return marked.toString();
 }
 
-/** The earlier protocol a callback URL says its parent agreed with the child, if any. */
+/** The protocol a callback URL says its parent agreed with the child, if it names one. */
 export function readCallbackProtocol(url: string): number | undefined {
   const value = URL.parse(url)?.searchParams.get(CALLBACK_PROTOCOL_QUERY);
   if (value === null || value === undefined || !/^[1-9]\d*$/.test(value)) return undefined;

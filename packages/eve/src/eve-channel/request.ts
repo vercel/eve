@@ -1,4 +1,5 @@
 import { internalSession } from "#channel/session.js";
+import { MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH } from "#channel/delivery-idempotency.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
 import {
   MAX_MESSAGE_PARTS,
@@ -180,6 +181,8 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
 interface ParsedSessionMessageBody {
   callback?: SessionCallback;
+  /** Names the delivery: a repeat with the same key is the same delivery, with the same receipt. */
+  idempotencyKey?: string;
   message?: MessageContent;
   answers?: readonly ValidatedAnswer[];
   context?: ClientContextValue;
@@ -198,11 +201,14 @@ export function parseSessionMessageBody(
     "turnPolicy",
     "callback",
     "forwardedPrincipal",
+    "idempotencyKey",
   ];
   if (input.callback !== undefined) fields.push("activityObserver");
   const rejection = rejectUnknownFields(input, fields);
   if (rejection !== undefined) return rejection;
   const payload = input;
+  const idempotencyKey = parseIdempotencyKeyField(payload.idempotencyKey);
+  if (idempotencyKey instanceof Response) return idempotencyKey;
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
@@ -241,7 +247,26 @@ export function parseSessionMessageBody(
     context,
     outputSchema,
     turnPolicy,
+    ...(idempotencyKey !== undefined && { idempotencyKey }),
   };
+}
+
+function parseIdempotencyKeyField(value: unknown): string | undefined | Response {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH
+  ) {
+    return Response.json(
+      {
+        error: `Expected 'idempotencyKey' to be a nonempty string of at most ${String(MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH)} characters.`,
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
+  return value;
 }
 
 interface ParsedCancelTurnBody {

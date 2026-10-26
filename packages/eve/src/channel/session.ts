@@ -93,6 +93,8 @@ export type SessionRespondOptions = SessionDeliveryOptions;
 
 interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
   readonly callback?: SessionCallback;
+  /** The delivery's id, when the request names it (`deliveryIdForIdempotencyKey`). */
+  readonly deliveryId?: string;
 }
 
 export function createSession(
@@ -104,7 +106,10 @@ export function createSession(
     id,
     async send(message, options) {
       validateDeliveryIdempotencyKey(options.idempotencyKey);
-      const delivery = createDelivery(metadata);
+      const delivery = createDelivery(
+        metadata,
+        (options as InternalSessionDeliveryOptions).deliveryId,
+      );
       const caller = sessionCallbackToTurnCaller(
         (options as InternalSessionDeliveryOptions).callback,
       );
@@ -143,7 +148,10 @@ export function createSession(
       const caller = sessionCallbackToTurnCaller(
         (options as InternalSessionDeliveryOptions).callback,
       );
-      const delivery = createDelivery(metadata);
+      const delivery = createDelivery(
+        metadata,
+        (options as InternalSessionDeliveryOptions).deliveryId,
+      );
       const payload = attachClientContext<{
         context?: readonly string[];
         answers: readonly Answer[];
@@ -217,8 +225,13 @@ export function createAttachSessionFn(
   return (sessionId) => createSession(sessionId, runtime, metadata);
 }
 
-function createDelivery(metadata: Partial<ChannelDeliverySource>) {
-  return createChannelDeliveryMetadata({ channelKind: "http", channelName: "http", ...metadata });
+function createDelivery(metadata: Partial<ChannelDeliverySource>, deliveryId?: string) {
+  const delivery = createChannelDeliveryMetadata({
+    channelKind: "http",
+    channelName: "http",
+    ...metadata,
+  });
+  return deliveryId === undefined ? delivery : { ...delivery, deliveryId };
 }
 
 /** Live metadata and routing authority stay separate, including when auth changes mid-step. */

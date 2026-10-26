@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createSession } from "#channel/session.js";
+import { deliveryIdForIdempotencyKey } from "#channel/delivery-idempotency.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -82,6 +83,79 @@ describe("delivery idempotency", () => {
         stream.dispose();
         if (!completed && ["pending", "running"].includes(await getRun(session.sessionId).status)) {
           await getRun(session.sessionId).cancel();
+        }
+      }
+    });
+  }, 60_000);
+
+  it("gives a keyed request's repeat the original receipt, as the session route does", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    let turns = 0;
+    const app = await createTestRuntime({
+      agent: { name: "keyed-receipt", limits: { sessionTimeoutMs: false } },
+      modules: [
+        {
+          logicalPath: "hooks/record.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.started"() {
+                  turns += 1;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const started = await createChannelOperations({
+        adapter: { kind: "http" },
+        channelName: "test",
+        runtime,
+      })
+        .from(crypto.randomUUID())
+        .send("Alice opens the session.", { auth: null });
+      const stream = captureTurnEvents(getRun(started.sessionId));
+      let completed = false;
+      try {
+        await stream.nextTurn();
+        await waitForParkedTurnStep(started.sessionId);
+        // A parent's retried continue step: the same key, so the route names the same delivery.
+        const idempotencyKey = "agent-session:run_0:step_3:child:send";
+        const deliveryId = await deliveryIdForIdempotencyKey(idempotencyKey);
+        const fixed = createSession(started.sessionId, runtime);
+        const continueOnce = () =>
+          fixed.send("Bob asks for the next step.", {
+            auth: null,
+            deliveryId,
+            idempotencyKey,
+            turnPolicy: "queue",
+          } as Parameters<typeof fixed.send>[1]);
+        const first = await continueOnce();
+        const repeat = await continueOnce();
+        expect(first.deliveryId).toBe(deliveryId);
+        expect(repeat.deliveryId).toBe(deliveryId);
+        await stream.nextTurn();
+        await waitForParkedTurnStep(started.sessionId, 2);
+        const outcomes = await Promise.all(
+          [first, repeat].map(
+            async (receipt) =>
+              (await receipt.result({ signal: AbortSignal.timeout(5_000) })).outcome,
+          ),
+        );
+        // One delivery, read once: both receipts are it, and neither is a duplicate's.
+        expect(outcomes).toEqual(["handled", "handled"]);
+        await fixed.reset();
+        completed = true;
+        expect(turns).toBe(2);
+      } finally {
+        stream.dispose();
+        if (!completed && ["pending", "running"].includes(await getRun(started.sessionId).status)) {
+          await getRun(started.sessionId).cancel();
         }
       }
     });

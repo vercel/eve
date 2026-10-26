@@ -256,7 +256,7 @@ async function routeProxiedDeliver(
 
   // A workflow run publishes nothing of its own: the session settles its questions as it answers.
   const decided: { answer: Answer; outcome: "accepted" | "declined" }[] = [];
-  for (const child of children.values()) {
+  for (const [childKey, child] of children) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).answers ?? [];
       decided.push(...responses.map((answer) => ({ answer, outcome: "accepted" as const })));
@@ -282,6 +282,8 @@ async function routeProxiedDeliver(
           remote,
           headers,
           auth: sourceDelivery.auth,
+          // This delivery's answers for this child: a retried step repeats the same delivery.
+          idempotencyKey: await answersIdempotencyKey(sourceDelivery, childKey),
           responses,
         });
         // A protocol 2 child relays how its approvals settle, but never its questions or budget
@@ -328,6 +330,22 @@ async function routeProxiedDeliver(
           orderedParentPayloads.map(([index, payload]) => ({ index, payload })),
         );
   return { ...context, kind: "continue", remainder };
+}
+
+/**
+ * Names one delivery's answers to one child, stable across retries and within the key limit. A
+ * delivery that names no delivery ids has nothing stable to name its answers by, so it gets none.
+ */
+export async function answersIdempotencyKey(
+  delivery: DeliverHookPayload,
+  childKey: string,
+): Promise<string | undefined> {
+  const deliveryIds = (delivery.deliveryMetadata ?? []).map((metadata) => metadata.deliveryId);
+  if (deliveryIds.length === 0) return undefined;
+  const named = JSON.stringify([deliveryIds, childKey]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(named));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"));
+  return `eve-answers:${hex.join("")}`;
 }
 
 function joinTurnDeliveryIds(

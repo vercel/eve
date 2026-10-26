@@ -6,7 +6,7 @@ import {
   REMOTE_AGENT_PROTOCOL_VERSION,
 } from "#protocol/remote-agent-protocol.js";
 
-describe("the callback URL a parent gives an earlier-protocol child", () => {
+describe("the callback URL a parent gives a remote child", () => {
   const base = "https://parent.example.com/eve/v1/callback/eve%3Aparent";
 
   it("names the earlier protocol, alongside the query it already has", () => {
@@ -16,8 +16,10 @@ describe("the callback URL a parent gives an earlier-protocol child", () => {
     expect(readCallbackProtocol(marked)).toBe(2);
   });
 
-  it("is unchanged for a child on this protocol", () => {
-    expect(callbackUrlForProtocol(base, REMOTE_AGENT_PROTOCOL_VERSION)).toBe(base);
+  it("names this protocol too, so every callback says what was agreed", () => {
+    const marked = callbackUrlForProtocol(base, REMOTE_AGENT_PROTOCOL_VERSION);
+    expect(readCallbackProtocol(marked)).toBe(REMOTE_AGENT_PROTOCOL_VERSION);
+    // A URL a parent run from before v27 minted names none.
     expect(readCallbackProtocol(base)).toBeUndefined();
   });
 

@@ -8,12 +8,15 @@ import { interactionSchemas } from "#protocol/session-events/families/interactio
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import {
+  parseProtocolTwoInputCallback,
   PROTOCOL_TWO_INPUT_CALLBACK_KINDS,
   readProtocolTwoInputCallback,
 } from "#subagents/protocol-two-callback.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import {
   readCallbackProtocol,
+  REMOTE_CALLBACK_NOT_PENDING,
+  REMOTE_CALLBACK_NOT_PENDING_MESSAGE,
   V26_INPUT_REMOTE_AGENT_PROTOCOL,
 } from "#protocol/remote-agent-protocol.js";
 
@@ -104,7 +107,7 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid session input callback.", ok: false }, { status: 400 });
   }
   // A protocol 2 callback that records nothing to mirror, such as an approval's own settlement.
-  if (forwarded?.events.length === 0) return Response.json({ ok: true }, { status: 202 });
+  if (isEmptyRelay(forwarded)) return Response.json({ ok: true }, { status: 202 });
   const result = forwarded === undefined ? projectSessionCallbackResult(body) : undefined;
   if (result instanceof Response) return result;
 
@@ -114,35 +117,46 @@ export async function handleSessionCallbackRequest(
       forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
   } catch {
-    return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    return Response.json(
+      { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
+      { status: 404 },
+    );
   }
 
   return Response.json({ ok: true }, { status: 202 });
 }
 
 /**
- * A child's input callback as the interaction facts it relays: `undefined` when the body is not
- * one, and `null` when it claims to be but doesn't parse. A child on remote agent protocol 2
- * relays its input in that protocol's own kinds.
+ * A child's input callback as the payload its parent run reads: `undefined` when the body is not
+ * one, or comes from a protocol this parent didn't agree to, and `null` when it claims to be but
+ * doesn't parse. The callback URL names the protocol the parent agreed with the child.
  */
 function readInteractionCallback(
   body: unknown,
   agreedProtocol: number | undefined,
-): SubagentInteractionHookPayload | null | undefined {
+): SubagentInteractionHookPayload | object | null | undefined {
   const kind = callbackKind(body);
   if (kind === "subagent-interaction") {
     const parsed = sessionInteractionCallbackSchema.safeParse(body);
     // The envelope schemas validate each fact's data, though zod infers it as `unknown`.
     return parsed.success ? (parsed.data as SubagentInteractionHookPayload) : null;
   }
-  // Only a parent that agreed to protocol 2 reads its callbacks. A parent run from before v27
-  // would drop the v27 relay, so its child's input fails here instead of waiting unseen.
-  if (
-    PROTOCOL_TWO_INPUT_CALLBACK_KINDS.has(kind) &&
-    agreedProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL
-  )
+  if (!PROTOCOL_TWO_INPUT_CALLBACK_KINDS.has(kind)) return undefined;
+  // A parent that agreed to protocol 2 reads its input as v27 relay facts.
+  if (agreedProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL)
     return readProtocolTwoInputCallback(body) ?? null;
+  // An unmarked URL is a parent run from before v27, which a child's callback reaches once the
+  // deployment upgrades: it reads protocol 2 input as is, as its own deployment's route passed it.
+  if (agreedProtocol === undefined) return parseProtocolTwoInputCallback(body) ?? null;
+  // A child that agreed to another protocol doesn't send these: refused as an unsupported kind.
   return undefined;
+}
+
+function isEmptyRelay(payload: object | null | undefined): boolean {
+  if (payload === null || payload === undefined) return false;
+  if (Reflect.get(payload, "kind") !== "subagent-interaction") return false;
+  const events: unknown = Reflect.get(payload, "events");
+  return Array.isArray(events) && events.length === 0;
 }
 
 function callbackKind(value: unknown): unknown {

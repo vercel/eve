@@ -19,6 +19,10 @@ import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import {
+  REMOTE_CALLBACK_NOT_PENDING,
+  REMOTE_CALLBACK_NOT_PENDING_MESSAGE,
+} from "#protocol/remote-agent-protocol.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -282,18 +286,48 @@ async function postSettledTurnCallback(input: {
   });
 }
 
+/**
+ * How long a result waits on a caller whose callback reports nothing pending, in case the caller
+ * hasn't registered the reply it sent the token for yet.
+ */
+export const NOT_PENDING_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000, 4000];
+
 async function postCallbackPayload(input: {
   readonly payload: unknown;
   readonly url: string;
 }): Promise<void> {
-  const response = await postSessionCallbackRequest({
-    body: input.payload,
-    url: input.url,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Turn callback failed with HTTP ${response.status}.`);
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await postSessionCallbackRequest({
+      body: input.payload,
+      url: input.url,
+    });
+    if (response.ok) return;
+    if (!(await isCallbackNotPending(response))) {
+      throw new Error(`Turn callback failed with HTTP ${response.status}.`);
+    }
+    const delay = NOT_PENDING_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) {
+      // The caller already took this result, say from a delivery whose acknowledgement was lost,
+      // or stopped waiting for it. As for a local caller whose hook is gone, the turn's result
+      // has nowhere to go; the session itself is unaffected, so it doesn't fail.
+      log.warn("turn caller no longer waits for this result", {
+        kind: Reflect.get(input.payload as object, "kind"),
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
+}
+
+/** Whether a callback's 404 is its route saying nothing waits on the token, in any protocol. */
+async function isCallbackNotPending(response: Response): Promise<boolean> {
+  if (response.status !== 404) return false;
+  const body: unknown = await response.json().catch(() => undefined);
+  if (body === null || typeof body !== "object") return false;
+  return (
+    Reflect.get(body, "code") === REMOTE_CALLBACK_NOT_PENDING ||
+    Reflect.get(body, "error") === REMOTE_CALLBACK_NOT_PENDING_MESSAGE
+  );
 }
 
 async function resumeSettledTurnHook(

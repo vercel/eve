@@ -73,6 +73,18 @@ const inputRequestCallbackSchema = z.object({
     .strict()
     .optional(),
   inputSource: z.string().min(1).optional(),
+  // A grandchild's binding, which a protocol 2 child relays with that grandchild's requests. This
+  // session answers through its own binding to the child, so only a passthrough keeps it.
+  remote: z
+    .object({
+      forwardPrincipal: z.boolean().optional(),
+      name: z.string().min(1),
+      resolverId: z.string().min(1).optional(),
+      sessionId: z.string().min(1),
+      url: z.string().url(),
+    })
+    .strict()
+    .optional(),
   kind: z.literal("subagent-input-request"),
   subagentName: z.string().min(1),
   event: z.object({
@@ -178,6 +190,17 @@ export function protocolTwoAnswersSettledOnForward(input: {
     ({ interactionId }) =>
       interactionId !== input.decidedHere && input.kindOf(interactionId) !== "approval",
   );
+}
+
+/**
+ * A protocol 2 input callback as that protocol's own parent reads it, for a parent run from before
+ * v27 (the callback route resumes its hook with it as is), or `undefined` when the body is not one.
+ */
+export function parseProtocolTwoInputCallback(body: unknown): object | undefined {
+  const request = inputRequestCallbackSchema.safeParse(body);
+  if (request.success) return request.data;
+  const authorization = authorizationCallbackSchema.safeParse(body);
+  return authorization.success ? authorization.data : undefined;
 }
 
 /**

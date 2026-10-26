@@ -70,6 +70,7 @@ import {
 } from "#eve-channel/request.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { attachClientContext } from "#internal/client-context.js";
+import { deliveryIdForIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
@@ -485,6 +486,11 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
               title,
+              // A repeat of the same request is the same delivery, with the same receipt.
+              ...(body.idempotencyKey !== undefined && {
+                deliveryId: await deliveryIdForIdempotencyKey(body.idempotencyKey),
+                idempotencyKey: body.idempotencyKey,
+              }),
             },
             clientContext,
           );

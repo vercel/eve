@@ -122,7 +122,14 @@ lists the accepted fields for that route. Field names are case-sensitive: `outpu
 not `outputSchema`. Invalid requests do not create sessions, dispatch messages, or apply controls.
 
 Fields accepted on one route are not automatically valid on another. For example, `operationId`
-is accepted on session creation but rejected on follow-up messages. The compact and clear routes
+is accepted on session creation but rejected on follow-up messages.
+
+Follow-up message and input-response requests accept an `idempotencyKey` of 1 to 256 characters,
+for a retry that can't tell whether the first request was accepted. The key names the delivery:
+repeating the request with the same key returns the same `deliveryId`, and the input doesn't run
+again. Unlike a channel's [retried deliveries](./custom#retried-deliveries), whose duplicates get a
+new receipt settled `ignored`, the repeat's receipt is the original's. The session remembers its
+last 1,024 keys, so use a new key for new input. The compact and clear routes
 accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; reset accepts `reason`.
 
 Open payload objects such as `clientContext` keep their existing contracts. Delegated requests

@@ -1,3 +1,4 @@
+import { deliveryIdForIdempotencyKey } from "#channel/delivery-idempotency.js";
 import { describe, expect, it, vi } from "vitest";
 import { StreamDelivery } from "#client/delivery.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
@@ -693,6 +694,77 @@ describe("eve ID-addressed session routes", () => {
     );
     expect(rejected.status).toBe(400);
     expect(session.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("names a keyed message's delivery by its key, so a repeat is the same delivery", async () => {
+    const session = createFixedSession();
+    const handler = route("POST", "/eve/v1/session/:sessionId");
+    const post = (body: object) =>
+      handler(
+        new Request("https://eve.test/eve/v1/session/wrun_A", {
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+        createArgs(session),
+      );
+    const expected = await deliveryIdForIdempotencyKey("parent-step-1");
+
+    expect((await post({ idempotencyKey: "parent-step-1", message: "follow-up" })).status).toBe(
+      202,
+    );
+    expect((await post({ idempotencyKey: "parent-step-1", message: "follow-up" })).status).toBe(
+      202,
+    );
+    expect(
+      (
+        await post({
+          answers: [{ interactionId: "approval-1", optionId: "approve" }],
+          idempotencyKey: "parent-answers-1",
+        })
+      ).status,
+    ).toBe(202);
+    const keyed = (mock: unknown) =>
+      (mock as { mock: { calls: unknown[][] } }).mock.calls.map(([, options]) => {
+        const { deliveryId, idempotencyKey } = options as {
+          deliveryId?: string;
+          idempotencyKey?: string;
+        };
+        return { deliveryId, idempotencyKey };
+      });
+    expect(keyed(session.send)).toEqual([
+      { deliveryId: expected, idempotencyKey: "parent-step-1" },
+      { deliveryId: expected, idempotencyKey: "parent-step-1" },
+    ]);
+    expect(keyed(session.respond)).toEqual([
+      {
+        deliveryId: await deliveryIdForIdempotencyKey("parent-answers-1"),
+        idempotencyKey: "parent-answers-1",
+      },
+    ]);
+    // An unkeyed message is still a delivery of its own.
+    await post({ message: "another" });
+    expect(keyed(session.send).at(-1)).toEqual({
+      deliveryId: undefined,
+      idempotencyKey: undefined,
+    });
+  });
+
+  it("refuses an idempotency key that isn't a bounded string", async () => {
+    const session = createFixedSession();
+    const handler = route("POST", "/eve/v1/session/:sessionId");
+    for (const idempotencyKey of ["", 42, "k".repeat(257)]) {
+      const response = await handler(
+        new Request("https://eve.test/eve/v1/session/wrun_A", {
+          body: JSON.stringify({ idempotencyKey, message: "follow-up" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+        createArgs(session),
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(session.send).not.toHaveBeenCalled();
   });
 
   it("returns conflict instead of creating when an exact session is inactive", async () => {

@@ -222,6 +222,8 @@ export async function sendAgentSessionMessageStep(
         ),
       },
       earlierProtocol: address.earlierProtocol,
+      // The step's own identity, so its retry repeats the same delivery, as a local child's does.
+      idempotencyKey: agentDeliveryId("send", address.sessionId),
       message: input.message,
       outputSchema: input.outputSchema,
       remote,
