@@ -65,9 +65,12 @@ describe("renderToolSignature", () => {
         type: "object",
         properties: {
           url: { $ref: "#/$defs/Url" },
-          home: { $ref: "#/$defs/Url", description: "Home page." },
+          home: { $ref: "#/$defs/HomeUrl", description: "Home page." },
         },
-        $defs: { Url: { type: "string", format: "uri", description: "A web address." } },
+        $defs: {
+          HomeUrl: { $ref: "#/$defs/Url" },
+          Url: { type: "string", format: "uri", description: "A web address." },
+        },
       },
       expected:
         'f(input: { url?: string /* A web address; format: "uri" */; home?: string /* Home page; format: "uri" */ }): Promise<unknown>',

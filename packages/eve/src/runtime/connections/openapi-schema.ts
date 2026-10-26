@@ -67,6 +67,8 @@ export function deref(document: Record<string, unknown>, node: Record<string, un
 
 /** Keywords whose value maps names to subschemas, where names may shadow keywords. */
 const SCHEMA_MAP_KEYWORDS = new Set(["properties", "patternProperties", "$defs", "definitions"]);
+/** Keywords that set a schema's base URI, which would re-root the `#/$defs` refs inside it. */
+const BASE_URI_KEYWORDS = new Set(["$id", "$anchor", "$dynamicAnchor", "$schema"]);
 
 /** Converts one operation's schemas, collecting what they refer to. */
 export interface SchemaConverter {
@@ -90,6 +92,9 @@ export interface SchemaConverter {
 export function createSchemaConverter(document: Record<string, unknown>): SchemaConverter {
   const defs: Record<string, unknown> = {};
   const keys = new Map<string, string | undefined>();
+  // Targets wait here instead of converting in place, so a long `$ref` chain
+  // cannot overflow the stack.
+  const pending: (readonly [key: string, target: unknown])[] = [];
 
   const define = (ref: string): string | undefined => {
     if (keys.has(ref)) {
@@ -99,16 +104,17 @@ export function createSchemaConverter(document: Record<string, unknown>): Schema
     const key = target === undefined ? undefined : uniqueKey(ref, defs);
     keys.set(ref, key);
     if (key !== undefined) {
-      // Reserved before converting, so a reference back to this target finds it.
       defs[key] = {};
-      defs[key] = convert(target);
+      if (!isAliasCycle(document, ref)) {
+        pending.push([key, target]);
+      }
     }
     return key;
   };
 
-  const convert = (node: unknown): unknown => {
+  const walk = (node: unknown): unknown => {
     if (isArray(node)) {
-      return node.map(convert);
+      return node.map(walk);
     }
     if (!isObject(node)) {
       return node;
@@ -123,10 +129,10 @@ export function createSchemaConverter(document: Record<string, unknown>): Schema
         result[key] = value;
       } else if (SCHEMA_MAP_KEYWORDS.has(key) && isObject(value)) {
         result[key] = Object.fromEntries(
-          Object.entries(value).map(([name, schema]) => [name, convert(schema)]),
+          Object.entries(value).map(([name, schema]) => [name, walk(schema)]),
         );
-      } else {
-        result[key] = convert(value);
+      } else if (!BASE_URI_KEYWORDS.has(key)) {
+        result[key] = walk(value);
       }
     }
     normalizeSchemaType(result);
@@ -135,7 +141,32 @@ export function createSchemaConverter(document: Record<string, unknown>): Schema
     return result;
   };
 
+  const convert = (schema: unknown): unknown => {
+    const result = walk(schema);
+    for (let entry = pending.pop(); entry !== undefined; entry = pending.pop()) {
+      defs[entry[0]] = walk(entry[1]);
+    }
+    return result;
+  };
+
   return { convert, defs };
+}
+
+/**
+ * Whether `ref` leads only through `$ref`s into a loop. Such a schema
+ * constrains nothing, and the validator would follow it forever.
+ */
+function isAliasCycle(document: Record<string, unknown>, ref: string): boolean {
+  const seen = new Set<string>();
+  for (let next: unknown = ref; typeof next === "string";) {
+    if (seen.has(next)) {
+      return true;
+    }
+    seen.add(next);
+    const target = resolveRef(document, next);
+    next = isObject(target) ? target.$ref : undefined;
+  }
+  return false;
 }
 
 /**
@@ -145,7 +176,8 @@ export function createSchemaConverter(document: Record<string, unknown>): Schema
 function uniqueKey(ref: string, defs: Readonly<Record<string, unknown>>): string {
   const name = (ref.slice(ref.lastIndexOf("/") + 1) || "schema").replace(/[^\w.-]/g, "_");
   let key = name;
-  for (let suffix = 2; Object.hasOwn(defs, key); suffix += 1) {
+  // Assigning `__proto__` would replace the prototype instead of adding a key.
+  for (let suffix = 2; Object.hasOwn(defs, key) || key === "__proto__"; suffix += 1) {
     key = `${name}_${suffix}`;
   }
   return key;

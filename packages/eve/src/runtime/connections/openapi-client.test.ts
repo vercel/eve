@@ -690,6 +690,147 @@ describe("OpenApiConnectionClient", () => {
     expect(await issues(page(123))).toBeDefined();
   });
 
+  it.each([
+    {
+      name: "a $ref alias cycle",
+      body: {
+        type: "object",
+        properties: { a: { $ref: "#/components/schemas/A" }, n: { type: "number" } },
+      },
+      document: {
+        components: {
+          schemas: { A: { $ref: "#/components/schemas/B" }, B: { $ref: "#/components/schemas/A" } },
+        },
+      },
+      valid: { a: "anything", n: 1 },
+      invalid: { a: "anything", n: "x" },
+    },
+    {
+      name: "a component with its own $id",
+      body: { $ref: "#/components/schemas/Pet" },
+      document: {
+        components: {
+          schemas: {
+            Pet: {
+              $id: "https://example.com/schemas/pet.json",
+              type: "object",
+              properties: { tag: { $ref: "#/components/schemas/Tag" } },
+            },
+            Tag: { type: "string" },
+          },
+        },
+      },
+      valid: { tag: "a" },
+      invalid: { tag: 1 },
+    },
+    {
+      name: "a component named __proto__",
+      body: { $ref: "#/components/schemas/__proto__" },
+      document: { components: { schemas: JSON.parse('{ "__proto__": { "type": "string" } }') } },
+      valid: "a",
+      invalid: 1,
+    },
+    {
+      name: "same-named schemas in different places",
+      body: {
+        type: "object",
+        properties: {
+          a: { $ref: "#/components/schemas/Name" },
+          b: { $ref: "#/x-shared/Name" },
+        },
+      },
+      document: {
+        components: { schemas: { Name: { type: "string" } } },
+        "x-shared": { Name: { type: "number" } },
+      },
+      valid: { a: "x", b: 1 },
+      invalid: { a: "x", b: "y" },
+    },
+  ])("validates a body that refers to $name", async ({ body, document, valid, invalid }) => {
+    const { issues } = await inputContract(
+      {
+        openapi: "3.1.0",
+        info: { title: "T", version: "1" },
+        paths: {
+          "/things": {
+            post: {
+              operationId: "createThing",
+              requestBody: { content: { "application/json": { schema: body } } },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+        ...document,
+      },
+      "createThing",
+    );
+
+    expect(await issues({ body: valid })).toBeUndefined();
+    expect(await issues({ body: invalid })).toBeDefined();
+  });
+
+  it("converts a long $ref chain without overflowing the stack", async () => {
+    const length = 5_000;
+    const schemas = Object.fromEntries(
+      Array.from({ length }, (_, index) => [
+        `S${index}`,
+        {
+          type: "object",
+          properties: {
+            next: index + 1 < length ? { $ref: `#/components/schemas/S${index + 1}` } : {},
+          },
+        },
+      ]),
+    );
+    const { issues } = await inputContract(
+      {
+        openapi: "3.1.0",
+        info: { title: "T", version: "1" },
+        paths: {
+          "/chains": {
+            post: {
+              operationId: "createChain",
+              requestBody: {
+                content: { "application/json": { schema: { $ref: "#/components/schemas/S0" } } },
+              },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+        components: { schemas },
+      },
+      "createChain",
+    );
+
+    expect(await issues({ body: { next: { next: {} } } })).toBeUndefined();
+    expect(await issues({ body: { next: { next: 1 } } })).toBeDefined();
+  });
+
+  it("omits only the operation whose schema nests too deeply to convert", async () => {
+    let deep: Record<string, unknown> = { type: "string" };
+    for (let level = 0; level < 50_000; level += 1) {
+      deep = { type: "object", properties: { a: deep } };
+    }
+    const operation = (operationId: string, schema: unknown) => ({
+      post: {
+        operationId,
+        requestBody: { content: { "application/json": { schema } } },
+        responses: { "200": { description: "ok" } },
+      },
+    });
+    const spec: Record<string, unknown> = {
+      openapi: "3.1.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/deep": operation("createDeep", deep),
+        "/flat": operation("createFlat", { type: "string" }),
+      },
+    };
+    const client = new OpenApiConnectionClient(makeConnection({ spec }));
+
+    expect((await client.getToolMetadata()).map((tool) => tool.name)).toEqual(["createFlat"]);
+  });
+
   it("keeps the input schema linear in the size of shared, non-cyclic $refs", async () => {
     const levels = 8;
     const fanOut = 10;

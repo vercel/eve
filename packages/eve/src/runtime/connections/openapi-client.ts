@@ -161,11 +161,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
           omitProvidedArgumentsFromSchema(operation.inputSchema, providedArgumentNames),
         );
       } catch (error) {
-        log.warn("omitting OpenAPI operation with an invalid input schema", {
-          connectionName: this.#connection.connectionName,
-          error,
-          toolName: operation.toolName,
-        });
+        this.#warnInvalidInputSchema(operation.toolName, error);
         continue;
       }
 
@@ -178,6 +174,14 @@ export class OpenApiConnectionClient implements ConnectionClient {
     }
 
     return { metadata, operations: operationMap, baseUrl };
+  }
+
+  #warnInvalidInputSchema(toolName: string, error: unknown): void {
+    log.warn("omitting OpenAPI operation with an invalid input schema", {
+      connectionName: this.#connection.connectionName,
+      error,
+      toolName,
+    });
   }
 
   /**
@@ -280,13 +284,21 @@ export class OpenApiConnectionClient implements ConnectionClient {
         const opParams = isArray(operationValue.parameters) ? operationValue.parameters : [];
         const rawParameters = [...sharedParams, ...opParams];
         const { convert, defs } = createSchemaConverter(document);
-        const parameters = this.#resolveParameters(document, rawParameters, convert);
-        const requestBody = this.#resolveRequestBody(
-          document,
-          operationValue.requestBody,
-          rawParameters,
-          convert,
-        );
+        let parameters: OpenApiParameter[];
+        let requestBody: OpenApiRequestBody | undefined;
+        try {
+          parameters = this.#resolveParameters(document, rawParameters, convert);
+          requestBody = this.#resolveRequestBody(
+            document,
+            operationValue.requestBody,
+            rawParameters,
+            convert,
+          );
+        } catch (error) {
+          // A schema nested deeply enough to overflow the stack costs only its own operation.
+          this.#warnInvalidInputSchema(toolName, error);
+          continue;
+        }
 
         operations.push({
           toolName,

@@ -158,9 +158,7 @@ function renderObject(schema: Schema, context: RenderContext): string {
 }
 
 function propertyComment(property: Schema, context: RenderContext): string {
-  // A referenced property is described by its target; keywords beside the `$ref` win.
-  const target = typeof property.$ref === "string" ? resolveRef(property.$ref, context) : undefined;
-  const schema = isObject(target) ? { ...target, ...property } : property;
+  const schema = describedSchema(property, context);
   const parts: string[] = [];
   const description =
     context.descriptions && typeof schema.description === "string"
@@ -175,6 +173,24 @@ function propertyComment(property: Schema, context: RenderContext): string {
   }
   if (parts.length === 0) return "";
   return ` /* ${parts.join("; ").replaceAll("*/", "* /")} */`;
+}
+
+/**
+ * A property merged with the `$ref` targets it chains through, since a
+ * referenced property is described by its target. Keywords nearer the
+ * property win.
+ */
+function describedSchema(property: Schema, context: RenderContext): Schema {
+  let schema = property;
+  const refs = new Set(context.refs);
+  for (let ref = schema.$ref; typeof ref === "string" && !refs.has(ref); ref = schema.$ref) {
+    refs.add(ref);
+    const target = resolveRef(ref, context);
+    if (!isObject(target)) break;
+    const { $ref: _, ...outer } = schema;
+    schema = { ...target, ...outer };
+  }
+  return schema;
 }
 
 function resolveRef(ref: string, context: RenderContext): unknown {
