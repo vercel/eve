@@ -1,0 +1,668 @@
+import type { ChannelFrom } from "#channel/channel-operations.js";
+import type { PromptQueueState } from "#channel/prompt-queue.js";
+import type { RouteHandler } from "#channel/routes.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
+import { type ContextAccessor, ContextKey } from "#context/key.js";
+import { attachInputText } from "#internal/input-text.js";
+import { createLogger } from "#internal/logging.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
+import {
+  type Channel,
+  type ChannelContinuationOps,
+  defineChannel,
+  POST,
+} from "#public/definitions/channel.js";
+import {
+  callRecallApi,
+  createRecallBot,
+  DEFAULT_RECALL_ROUTE,
+  getRecallBot,
+  leaveRecallCall,
+  outputRecallAudio,
+  recallBotConfig,
+  recallSupportsDirectMessages,
+  resolveRecallWebhookUrl,
+  sendRecallChatMessage,
+  startRecallOutputMedia,
+  stopRecallOutputMedia,
+  type RecallApiOptions,
+} from "#public/channels/recall/api.js";
+import {
+  defaultEvents,
+  defaultOnMeetingEvent,
+  defaultShouldRespond,
+  isAddressedTo,
+  matchSpokenOption,
+} from "#public/channels/recall/defaults.js";
+import { parseRecallEvent, type RecallMeetingEvent } from "#public/channels/recall/inbound.js";
+import {
+  resolveRecallVerificationSecret,
+  verifyRecallWebhook,
+} from "#public/channels/recall/verify.js";
+
+const log = createLogger("recall.channel");
+
+/** Real-time payloads are one utterance or chat message; anything near this is not Recall. */
+const MAX_WEBHOOK_BYTES = 256 * 1024;
+
+/**
+ * How many held chat messages were already posted. It lives outside channel
+ * state because eve restores that state when a held turn ignores a delivery,
+ * which would otherwise bring the posted messages back.
+ */
+const PostedOutboxKey = new ContextKey<number>("recall.posted-outbox");
+
+/** How many of the bot's own chat messages are remembered, to drop them when they echo back. */
+const MAX_SENT_CHAT = 10;
+
+/** How many lines the agent didn't answer stay in state for the next turn it takes. */
+const MAX_TRANSCRIPT_LINES = 60;
+
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+
+/** JSON-serializable state for one bot's meeting session. */
+export interface RecallChannelState extends PromptQueueState {
+  botId: string | null;
+  /** Meeting platform, such as `zoom`, from the bot. `null` until it's known. */
+  platform: string | null;
+  /** The bot's display name, from Recall. Its chat messages echo back under this name. */
+  botName?: string;
+  /** The bot's recent chat messages, newest last, to drop when they echo back under another name. */
+  sentChat?: string[];
+  /** Lines the agent heard but didn't answer since its last turn, oldest first. */
+  transcript?: string[];
+  /**
+   * Who the current turn answers privately: a participant id once a private
+   * chat joins the turn, or `null` when private chats from several people
+   * did. Cleared when the turn ends.
+   */
+  replyTo?: string | null;
+  /** The options of the prompt last shown, so a spoken or loosely typed reply can pick one. */
+  shownOptions?: { requestId: string; options: { id: string; label: string }[] };
+  /** Set while a bot `receive` sent is still joining; chat waits in `outbox` until it hears the meeting. */
+  awaitingCall?: boolean;
+  outbox?: { message: string; to?: string }[];
+}
+
+/** Per-delivery state: the event a line came from, which `deliver` reads and doesn't keep. */
+interface RecallDeliveryState extends RecallChannelState {
+  event?: RecallMeetingEvent;
+}
+
+/** Input to {@link RecallChannelConfig.shouldRespond}. */
+export interface RecallRespondInput {
+  readonly event: RecallMeetingEvent;
+  /** The line the model will see for this event, such as `Alice: can you file that?`. */
+  readonly line: string;
+  /** Lines the agent heard but didn't answer since its last turn, oldest first. */
+  readonly transcript: readonly string[];
+  readonly botName: string;
+}
+
+/** Credentials for the Recall API and webhook verification. */
+export interface RecallChannelCredentials {
+  /** Defaults to `RECALL_API_KEY`. */
+  readonly apiKey?: string;
+  /** Workspace verification secret (`whsec_…`). Defaults to `RECALL_WORKSPACE_VERIFICATION_SECRET`. */
+  readonly verificationSecret?: string;
+}
+
+/** Low-level handle on the meeting's bot, exposed to hooks and event handlers. */
+export interface RecallHandle {
+  readonly botId: string;
+  /** Meeting platform, such as `zoom`, from the bot. Unknown in `onMeetingEvent`. */
+  readonly platform: string | undefined;
+  /** Whether {@link sendChatMessage} can reach one participant. Only Zoom supports it. */
+  readonly supportsDirectMessages: boolean;
+  /**
+   * Posts to the meeting chat, split to fit the platform's limit. Returns
+   * `false` instead of throwing when Recall rejects it, such as after the bot
+   * left the call. While a bot `receive` sent is still joining, the message
+   * waits and posts once the bot hears its first meeting event. Without `to`,
+   * a turn that answers a private chat replies privately; pass
+   * `{ to: "everyone" }` to post publicly anyway.
+   */
+  sendChatMessage(message: string, options?: { readonly to?: string }): Promise<boolean>;
+  /** Plays an MP3 clip through the bot. The bot must be created with `automatic_audio_output`. */
+  outputAudio(mp3: Uint8Array): Promise<void>;
+  /** Streams a web page into the meeting as the bot's camera and microphone (Recall Output Media). */
+  startOutputMedia(url: string): Promise<void>;
+  stopOutputMedia(): Promise<void>;
+  /** Removes the bot from the meeting. */
+  leaveCall(): Promise<void>;
+  /** Raw Recall REST escape hatch. `path` is relative to `/api/v1`. */
+  request<T = unknown>(
+    path: string,
+    init?: { readonly method?: "GET" | "POST" | "DELETE" | "PATCH"; readonly body?: unknown },
+  ): Promise<T>;
+}
+
+/** Context passed to {@link RecallChannelConfig.onMeetingEvent}. */
+export interface RecallContext {
+  readonly recall: RecallHandle;
+  /** The configured bot name, for addressing checks. */
+  readonly botName: string;
+}
+
+/** Channel context for event handlers. */
+interface RecallChannelContext {
+  readonly recall: RecallHandle;
+  state: RecallChannelState;
+}
+
+/** Event-handler Recall context, including continuation routing. */
+export interface RecallEventContext extends RecallChannelContext, ChannelContinuationOps {}
+
+/**
+ * Result of {@link RecallChannelConfig.onMeetingEvent}. Return `null` to drop
+ * the event; otherwise supply the session `auth`, and optionally the message
+ * the model sees in place of the default speaker-prefixed line.
+ */
+export type RecallInboundResult = {
+  readonly auth: SessionAuthContext | null;
+  readonly message?: string;
+  readonly title?: string;
+} | null;
+
+/** Sync or async {@link RecallInboundResult}. */
+export type RecallInboundResultOrPromise =
+  | RecallInboundResult
+  | undefined
+  | Promise<RecallInboundResult | undefined>;
+
+type RecallEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
+  data: EventData<T>,
+  channel: RecallEventContext,
+  ctx: SessionContext,
+) => void | Promise<void>;
+
+/** Event handlers supported by `recallChannel({ events })`. */
+export interface RecallChannelEvents {
+  readonly "turn.started"?: RecallEventHandler<"turn.started">;
+  readonly "actions.requested"?: RecallEventHandler<"actions.requested">;
+  readonly "action.result"?: RecallEventHandler<"action.result">;
+  readonly "message.completed"?: RecallEventHandler<"message.completed">;
+  readonly "input.requested"?: RecallEventHandler<"input.requested">;
+  readonly "input.resolved"?: RecallEventHandler<"input.resolved">;
+  readonly "approval.settled"?: RecallEventHandler<"approval.settled">;
+  readonly "turn.failed"?: RecallEventHandler<"turn.failed">;
+  readonly "turn.completed"?: RecallEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: RecallEventHandler<"turn.cancelled">;
+  readonly "session.failed"?: (
+    data: EventData<"session.failed">,
+    channel: RecallEventContext,
+  ) => void | Promise<void>;
+  readonly "session.completed"?: RecallEventHandler<"session.completed">;
+  readonly "authorization.required"?: RecallEventHandler<"authorization.required">;
+  readonly "authorization.completed"?: RecallEventHandler<"authorization.completed">;
+}
+
+/** Target accepted by `receive(recall, { target })`: sends a new bot to a meeting. */
+export interface RecallReceiveTarget {
+  readonly meetingUrl: string;
+  /** Metadata Recall echoes on every webhook for the bot. */
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+/** Configuration for {@link recallChannel}. */
+export interface RecallChannelConfig {
+  readonly credentials?: RecallChannelCredentials;
+  /** Recall workspace region. Defaults to `RECALL_REGION`, then `us-east-1`. */
+  readonly region?: string;
+  /** Webhook route for real-time and bot status events. Defaults to `/eve/v1/recall`. */
+  readonly route?: string;
+  /**
+   * The bot's display name. Default speech handling answers utterances that
+   * name it, and chat from a participant with this name is the bot's own.
+   * Defaults to `eve`.
+   */
+  readonly botName?: string;
+  /**
+   * Public URL of the webhook route, for bots `receive` creates. Defaults to
+   * `RECALL_WEBHOOK_URL`, then the route on the current Vercel deployment.
+   * See `resolveRecallWebhookUrl`.
+   */
+  readonly webhookUrl?: string;
+  /**
+   * Policy for messages that arrive while a turn is active. Defaults to
+   * `"queue"`: people keep talking while the agent works, and steering would
+   * restart it on every utterance.
+   */
+  readonly turnPolicy?: TurnPolicy;
+  readonly api?: Pick<RecallApiOptions, "apiBaseUrl" | "fetch">;
+  /**
+   * Decides which meeting events reach the session and as whom. Runs in the
+   * webhook route, before the session. Defaults to speech, chat, joins, and
+   * leaves, each as its participant. See `recallParticipantAuth` and
+   * `recallMeetingAuth`. Use `shouldRespond` to decide which of them get an
+   * answer.
+   */
+  onMeetingEvent?(ctx: RecallContext, event: RecallMeetingEvent): RecallInboundResultOrPromise;
+  /**
+   * Decides whether a line the session heard starts a turn. Lines it declines
+   * cost no model call: they're kept and given to the next turn as recent
+   * transcript, and they don't withdraw a pending approval or question.
+   * Runs inside the session, so it sees the recent transcript; call a fast
+   * decision model such as `decide` from `eve/ai` here. Defaults to every chat
+   * message and speech that names the bot. A throw falls back to the default.
+   */
+  shouldRespond?(input: RecallRespondInput): boolean | Promise<boolean>;
+  readonly events?: RecallChannelEvents;
+}
+
+/** Concrete return type of {@link recallChannel}. */
+export interface RecallChannel extends Channel<RecallChannelState, RecallReceiveTarget> {}
+
+/**
+ * Recall.ai meeting bot channel: each bot's meeting is one session. Speech and
+ * chat arrive through Recall's real-time webhooks, and replies go to the
+ * meeting chat.
+ */
+export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
+  const route = config.route ?? DEFAULT_RECALL_ROUTE;
+  const botName = config.botName ?? "eve";
+  const onMeetingEvent = config.onMeetingEvent ?? defaultOnMeetingEvent;
+  const shouldRespond = async (input: RecallRespondInput): Promise<boolean> => {
+    if (config.shouldRespond === undefined) return defaultShouldRespond(input);
+    try {
+      return await config.shouldRespond(input);
+    } catch (error) {
+      log.warn("shouldRespond failed; falling back to name matching", { error });
+      return defaultShouldRespond(input);
+    }
+  };
+  const api: RecallApiOptions = {
+    ...config.api,
+    apiKey: config.credentials?.apiKey,
+    region: config.region,
+  };
+
+  return defineChannel<RecallChannelState, RecallChannelContext, RecallReceiveTarget>({
+    kindHint: "recall",
+    turnPolicy: config.turnPolicy ?? "queue",
+    state: { botId: null, platform: null },
+    audience: () => "unknown",
+    metadata: (state) => ({ botId: state.botId, platform: state.platform }),
+
+    context(state) {
+      return { recall: buildRecallHandle(api, state), state };
+    },
+
+    async deliver(payload, channel) {
+      const delivered = payload.state as Partial<RecallDeliveryState> | undefined;
+      // A session's first send seeds state with the whole delivery.
+      delete (channel.state as RecallDeliveryState).event;
+      const event = delivered?.event;
+      if (event === undefined || typeof payload.message !== "string") {
+        return defaultDeliverResult(payload);
+      }
+      if (!channel.state.platform) await identifyBot(api, channel.state);
+
+      if (channel.state.awaitingCall && isInCall(event)) {
+        await flushOutbox(
+          channel,
+          (channel as RecallChannelContext & { readonly ctx: ContextAccessor }).ctx,
+        );
+      }
+
+      // The route drops chat under the configured name; the session also knows
+      // the name Recall shows and what the bot just sent.
+      if (isOwnChat(event, channel.state)) return undefined;
+
+      const transcript = channel.state.transcript ?? [];
+      const line = payload.message;
+      if (!(await shouldRespond({ botName, event, line, transcript }))) {
+        // Between turns the session parks without a model call; during a held
+        // turn eve ignores the delivery, so a pending prompt stays open.
+        channel.state.transcript = [...transcript, line].slice(-MAX_TRANSCRIPT_LINES);
+        return undefined;
+      }
+      channel.state.transcript = [];
+      // A private chat keeps the rest of the turn private, even if public lines join it.
+      if (event.type === "chat" && event.to === "only_bot") {
+        const { replyTo } = channel.state;
+        channel.state.replyTo =
+          replyTo === undefined || replyTo === event.participant.id ? event.participant.id : null;
+      }
+      const input = defaultDeliverResult(payload);
+      const option =
+        "text" in event ? shownOptionIn(channel.state, event.text, botName) : undefined;
+      if (input !== undefined && option !== undefined) attachInputText(input, option.id);
+      if (input === undefined || transcript.length === 0) return input;
+      return { ...input, context: [...(input.context ?? []), formatTranscript(transcript)] };
+    },
+
+    routes: [
+      POST<RecallChannelState>(route, handleWebhook({ api, botName, config, onMeetingEvent })),
+    ],
+
+    async receive(input, { from }) {
+      const webhookUrl = resolveRecallWebhookUrl(config.webhookUrl, route);
+      const bot = await createRecallBot({
+        ...api,
+        body: recallBotConfig({
+          botName,
+          meetingUrl: input.target.meetingUrl,
+          metadata: input.target.metadata,
+          webhookUrl,
+        }),
+      });
+      return await from(bot.id).send(input.message, {
+        auth: input.auth,
+        // Recall rejects chat until the bot is admitted, which can take minutes.
+        state: { awaitingCall: true, botId: bot.id, botName, platform: bot.platform ?? null },
+      });
+    },
+
+    events: clearReplyToAfterTurn({ ...defaultEvents, ...config.events }),
+  });
+}
+
+function handleWebhook(input: {
+  readonly api: RecallApiOptions;
+  readonly botName: string;
+  readonly config: RecallChannelConfig;
+  readonly onMeetingEvent: NonNullable<RecallChannelConfig["onMeetingEvent"]>;
+}): RouteHandler<RecallChannelState> {
+  return async (request, { from, waitUntil }) => {
+    let secret: string;
+    try {
+      secret = resolveRecallVerificationSecret(input.config.credentials?.verificationSecret);
+    } catch (error) {
+      log.error("webhook verification is not configured", { error });
+      return new Response("Recall webhook verification is not configured.", { status: 503 });
+    }
+    const payload = await readBoundedText(request, MAX_WEBHOOK_BYTES);
+    if (payload === undefined) return new Response("payload too large", { status: 413 });
+    if (!verifyRecallWebhook({ headers: request.headers, payload, secret })) {
+      return new Response("unauthorized", { status: 401 });
+    }
+
+    let event: RecallMeetingEvent | null;
+    try {
+      event = parseRecallEvent(JSON.parse(payload));
+    } catch {
+      // Recall retries non-2xx every second, so a body we can't read is acknowledged and dropped.
+      log.warn("dropping unparseable Recall webhook");
+      return new Response(null, { status: 204 });
+    }
+    if (event === null || isOwnMessage(event, input.botName)) {
+      return new Response(null, { status: 204 });
+    }
+
+    // Acknowledge first: Recall retries anything slower than its timeout.
+    // Retries reuse the webhook id, which the session deduplicates.
+    const deliveryId = request.headers.get("webhook-id") ?? request.headers.get("svix-id");
+    waitUntil(dispatch({ ...input, deliveryId, event, from }));
+    return new Response(null, { status: 204 });
+  };
+}
+
+async function dispatch(input: {
+  readonly api: RecallApiOptions;
+  readonly botName: string;
+  readonly deliveryId: string | null;
+  readonly event: RecallMeetingEvent;
+  readonly from: ChannelFrom<RecallDeliveryState>;
+  readonly onMeetingEvent: NonNullable<RecallChannelConfig["onMeetingEvent"]>;
+}): Promise<void> {
+  const { event } = input;
+  // The route doesn't know the platform; the session looks it up once.
+  const ctx: RecallContext = {
+    botName: input.botName,
+    recall: buildRecallHandle(input.api, { botId: event.botId, platform: null }),
+  };
+
+  let result: RecallInboundResult | undefined;
+  try {
+    result = await input.onMeetingEvent(ctx, event);
+  } catch (error) {
+    log.error("onMeetingEvent failed", { error });
+    return;
+  }
+  if (result === null || result === undefined) return;
+
+  try {
+    await input.from(event.botId).send(
+      result.message ?? formatMeetingEvent(event),
+      attachInputText(
+        {
+          auth: result.auth,
+          idempotencyKey: input.deliveryId ?? undefined,
+          context: [formatRecallContextBlock(event)],
+          state: { botId: event.botId, event, platform: null },
+          title: result.title,
+        },
+        // The speaker prefix stays model-visible; a pending prompt matches what they said.
+        answerTextOf(event, input.botName),
+      ),
+    );
+  } catch (error) {
+    log.error("Recall delivery failed", { error });
+  }
+}
+
+/** The line the model sees for one meeting event. */
+export function formatMeetingEvent(event: RecallMeetingEvent): string {
+  switch (event.type) {
+    case "speech":
+      return `${event.participant.name}: ${event.text}`;
+    case "chat":
+      // Chat can span lines, so the attribution gets its own.
+      return `${event.participant.name} (${event.to === "only_bot" ? "privately " : ""}in chat):\n${event.text}`;
+    case "join":
+      return `${event.participant.name} joined the meeting.`;
+    case "leave":
+      return `${event.participant.name} left the meeting.`;
+    case "status":
+      return event.status === "call_ended" || event.status === "done"
+        ? "The meeting ended. You can no longer post to its chat."
+        : `The meeting bot's status changed to ${event.status}.`;
+  }
+}
+
+/**
+ * The words a pending prompt resolves against. Speech drops the bot's name
+ * and the punctuation transcription adds, so "Eve, approve." answers as
+ * "approve".
+ */
+function answerTextOf(event: RecallMeetingEvent, botName: string): string | undefined {
+  if (event.type === "chat") return event.text;
+  if (event.type !== "speech") return undefined;
+  let text = event.text;
+  if (isAddressedTo(text, botName)) {
+    text = text.replace(new RegExp(`^\\W*${escapeRegExp(botName)}\\W*`, "iu"), "");
+  }
+  return text.replace(/[.!?,;:]+$/u, "").trim();
+}
+
+function formatTranscript(lines: readonly string[]): string {
+  return [
+    "<meeting_transcript>",
+    "What was said since your last turn, which you heard but didn't answer:",
+    ...lines,
+    "</meeting_transcript>",
+  ].join("\n");
+}
+
+function formatRecallContextBlock(event: RecallMeetingEvent): string {
+  const lines = [
+    "<recall_context>",
+    "channel: meeting",
+    `bot_id: ${event.botId}`,
+    "response_medium: meeting chat",
+    "response_instructions: Your replies are posted to the meeting chat as plain text. Keep them short and skip markdown. Lines are transcribed speech or chat, prefixed with the participant's display name, which is not verified.",
+    ...("participant" in event
+      ? [
+          `participant_id: ${event.participant.id}`,
+          `participant_name: ${event.participant.name}`,
+          ...(event.participant.isHost ? ["participant_is_host: true"] : []),
+        ]
+      : []),
+    "</recall_context>",
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * Reads the meeting platform and display name of a bot eve didn't create.
+ * A failed lookup leaves the platform unknown, so the next delivery retries.
+ */
+async function identifyBot(api: RecallApiOptions, state: RecallChannelState): Promise<void> {
+  if (!state.botId) return;
+  try {
+    const bot = await getRecallBot({ ...api, botId: state.botId });
+    state.platform = bot.platform ?? null;
+    if (bot.name !== undefined) state.botName = bot.name;
+  } catch (error) {
+    log.warn("Recall bot lookup failed; private chat and chat limits fall back", { error });
+  }
+}
+
+/** Real-time events only flow once the bot is in the call; joining statuses don't count. */
+function isInCall(event: RecallMeetingEvent): boolean {
+  return event.type !== "status" || event.status.startsWith("in_call");
+}
+
+async function flushOutbox(channel: RecallChannelContext, ctx: ContextAccessor): Promise<void> {
+  delete channel.state.awaitingCall;
+  const outbox = channel.state.outbox ?? [];
+  delete channel.state.outbox;
+  const posted = ctx.get(PostedOutboxKey) ?? 0;
+  for (const { message, to } of outbox.slice(posted)) {
+    await channel.recall.sendChatMessage(message, { to: to ?? "everyone" });
+  }
+  ctx.set(PostedOutboxKey, outbox.length);
+}
+
+/** The option of the prompt still on screen that `text` picks, such as "okay eve, approve it". */
+function shownOptionIn(state: RecallChannelState, text: string, botName: string) {
+  const shown = state.shownOptions;
+  if (shown === undefined || shown.requestId !== state.shownPromptId) return undefined;
+  return matchSpokenOption(text, botName, shown.options);
+}
+
+/** Wraps the turn-ending handlers so the turn's private reply target ends with it. */
+function clearReplyToAfterTurn(events: RecallChannelEvents): RecallChannelEvents {
+  const {
+    "turn.cancelled": cancelled,
+    "turn.completed": completed,
+    "turn.failed": failed,
+  } = events;
+  return {
+    ...events,
+    async "turn.cancelled"(data, channel, ctx) {
+      await cancelled?.(data, channel, ctx);
+      delete channel.state.replyTo;
+    },
+    async "turn.completed"(data, channel, ctx) {
+      await completed?.(data, channel, ctx);
+      delete channel.state.replyTo;
+    },
+    async "turn.failed"(data, channel, ctx) {
+      await failed?.(data, channel, ctx);
+      delete channel.state.replyTo;
+    },
+  };
+}
+
+function isOwnMessage(event: RecallMeetingEvent, botName: string): boolean {
+  return event.type === "chat" && event.participant.name === botName;
+}
+
+/**
+ * Whether a chat line is the bot's own. Matching what it sent also catches
+ * bots shown under another name, such as signed-in Google Meet bots, which
+ * use the Google account's name.
+ */
+function isOwnChat(event: RecallMeetingEvent, state: RecallChannelState): boolean {
+  if (event.type !== "chat") return false;
+  if (state.botName !== undefined && event.participant.name === state.botName) return true;
+  return state.sentChat?.includes(event.text.trim()) === true;
+}
+
+function buildRecallHandle(
+  api: RecallApiOptions,
+  state: Pick<
+    RecallChannelState,
+    "awaitingCall" | "botId" | "outbox" | "platform" | "replyTo" | "sentChat"
+  >,
+): RecallHandle {
+  const botId = (): string => {
+    if (!state.botId) throw new Error("recallChannel: this session has no Recall bot.");
+    return state.botId;
+  };
+  return {
+    get botId() {
+      return botId();
+    },
+    get platform() {
+      return state.platform ?? undefined;
+    },
+    get supportsDirectMessages() {
+      return recallSupportsDirectMessages(state.platform ?? undefined);
+    },
+    async sendChatMessage(message, options) {
+      let to = options?.to;
+      if (to === undefined && state.replyTo !== undefined) {
+        if (state.replyTo !== null && recallSupportsDirectMessages(state.platform ?? undefined)) {
+          to = state.replyTo;
+        } else {
+          message = PRIVATE_REPLY_UNAVAILABLE;
+        }
+      }
+      if (state.awaitingCall) {
+        (state.outbox ??= []).push(to === undefined ? { message } : { message, to });
+        return true;
+      }
+      try {
+        await sendRecallChatMessage({
+          ...api,
+          botId: botId(),
+          message,
+          platform: state.platform ?? undefined,
+          to: to === "everyone" ? undefined : to,
+        });
+        state.sentChat = [...(state.sentChat ?? []), message.trim()].slice(-MAX_SENT_CHAT);
+        return true;
+      } catch (error) {
+        log.error("Recall chat message failed", { error });
+        return false;
+      }
+    },
+    outputAudio: (mp3) => outputRecallAudio({ ...api, botId: botId(), mp3 }),
+    startOutputMedia: (url) => startRecallOutputMedia({ ...api, botId: botId(), url }),
+    stopOutputMedia: () => stopRecallOutputMedia({ ...api, botId: botId() }),
+    leaveCall: () => leaveRecallCall({ ...api, botId: botId() }),
+    request: (path, init) => callRecallApi({ ...api, ...init, path }),
+  };
+}
+
+const PRIVATE_REPLY_UNAVAILABLE =
+  "I got a private message, but I can't answer it privately here. Ask me again in the meeting chat, or one person at a time.";
+
+async function readBoundedText(request: Request, maxBytes: number): Promise<string | undefined> {
+  if (Number(request.headers.get("content-length") ?? 0) > maxBytes) return undefined;
+  if (request.body === null) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}

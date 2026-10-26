@@ -2838,6 +2838,29 @@
       }
     },
     {
+      "name": "channel/recall",
+      "type": "registry:item",
+      "title": "Recall.ai",
+      "description": "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+      "envVars": {
+        "RECALL_API_KEY": "",
+        "RECALL_WORKSPACE_VERIFICATION_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/recall.ts",
+          "type": "registry:file",
+          "target": "agent/channels/recall.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/recall",
+          "implementation": "native"
+        }
+      }
+    },
+    {
       "name": "channel/blooio",
       "type": "registry:item",
       "title": "Blooio",

@@ -128,6 +128,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "recall",
+    name: "Recall.ai",
+    kind: "channel",
+    tagline: "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+    surfaces: { scaffoldable: false, registry: true, gallery: false },
+  },
+  {
     slug: "blooio",
     name: "Blooio",
     kind: "channel",
