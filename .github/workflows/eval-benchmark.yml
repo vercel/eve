@@ -184,6 +184,11 @@ jobs:
           cache: "pnpm"
 
       - name: Resolve eve sandbox image
+        # A backfilled release runs the sandbox image it shipped with: from
+        # 0.49.1, eve's default is its own version's image (published for every
+        # release since 0.49.0); older releases read no image tag. The release's
+        # checkout also predates this action.
+        if: inputs.release == ''
         uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
@@ -302,6 +307,11 @@ jobs:
           cache: "pnpm"
 
       - name: Resolve eve sandbox image
+        # A backfilled release runs the sandbox image it shipped with: from
+        # 0.49.1, eve's default is its own version's image (published for every
+        # release since 0.49.0); older releases read no image tag. The release's
+        # checkout also predates this action.
+        if: inputs.release == ''
         uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
