@@ -1,3 +1,4 @@
+import { issueInboxHandle } from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -25,7 +26,7 @@ import {
   resumeRunnableHook,
 } from "#execution/session-inbox/owner.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
-import { getHookByToken, parseHookResumeHandle, type Hook } from "#internal/workflow/runtime.js";
+import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 /** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
@@ -78,10 +79,7 @@ export async function resumeSessionInbox(
     let identity: Promise<string> | undefined;
     return {
       ownerRunId: hook.runId,
-      inbox:
-        hook.resumeContext?.encryptionPublicKey === undefined
-          ? undefined
-          : JSON.stringify(parseHookResumeHandle(hook)),
+      inbox: issueInboxHandle(hook),
       get sessionId() {
         return (identity ??= (async () => {
           try {

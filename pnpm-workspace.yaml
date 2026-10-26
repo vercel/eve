@@ -65,7 +65,7 @@ catalog:
 overrides:
   "@workflow/core": "file:packages/eve/vendor/workflow-core-5.2.3-resolved-v2.tgz"
   "@workflow/world": "file:packages/eve/vendor/workflow-world-5.0.5.tgz"
-  "@workflow/world-vercel": "file:packages/eve/vendor/workflow-world-vercel-5.2.3.tgz"
+  "@workflow/world-vercel": "file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz"
   # eve ships one vendored Zod (packages/eve/scripts/vendor-compiled/zod.mjs).
   # @vercel/cli-config, which @vercel/oidc uses, pins its own Zod 4 release,
   # and the vendor build fails on a second copy.

@@ -647,7 +647,7 @@
     "@workflow/serde": "5.0.0",
     "@workflow/world": "file:vendor/workflow-world-5.0.5.tgz",
     "@workflow/world-local": "5.1.2",
-    "@workflow/world-vercel": "file:vendor/workflow-world-vercel-5.2.3.tgz",
+    "@workflow/world-vercel": "file:vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz",
     "ai": "catalog:",
     "chat": "4.42.0",
     "chokidar": "5.0.0",

@@ -1,4 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { readInboxHandle } from "#execution/session-inbox/handle.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -7,13 +8,7 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
-import {
-  getHookByToken,
-  getWorld,
-  parseHookResumeHandle,
-  resumeHook,
-  type Hook,
-} from "#internal/workflow/runtime.js";
+import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
 /**
  * The session's owner was built by another eve version, so this build cannot
@@ -54,15 +49,8 @@ export async function resumeRunnableHook(
   inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
   if (inbox !== undefined && inbox.length <= 8_192 && routesToOwnerDeployment(await getWorld())) {
-    let cached: ReturnType<typeof parseHookResumeHandle> | undefined;
-    try {
-      const parsed = parseHookResumeHandle(JSON.parse(inbox));
-      if (parsed.token === token && parsed.resumeContext?.encryptionPublicKey !== undefined) {
-        cached = parsed;
-      }
-    } catch {
-      // A stale or malformed hint must not prevent ordinary token resolution.
-    }
+    const parsed = readInboxHandle(inbox);
+    const cached = parsed?.token === token ? parsed : undefined;
     if (cached !== undefined) {
       try {
         return await resumeHook(cached, payload);

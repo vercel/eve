@@ -480,7 +480,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           const options = attachClientContext(
             {
               auth: dispatchAuth,
-              inbox: req.headers.get("x-eve-inbox") ?? undefined,
+              inbox: body.inbox,
               callback: body.callback,
               context,
               history,

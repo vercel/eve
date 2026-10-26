@@ -119,6 +119,11 @@ Keep the complete `session.state` when saving and restoring a conversation. It c
 opaque `inbox` handle returned by the server. The client sends this handle with later messages
 to avoid another hook lookup. Treat it as transport state: do not inspect or edit it.
 
+Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret (at least 32 characters)
+on the deployments that share sessions. Without this key, handles are neither issued nor used.
+The signature authenticates all routing and encryption fields before use. Rotation falls back
+to ordinary token resolution.
+
 The server checks that the handle addresses the requested inbox. Workflow still validates the
 hook, persists the message, and wakes the workflow. A definite stale-owner rejection resolves
 the current inbox again. An uncertain write is surfaced without submitting a second delivery.

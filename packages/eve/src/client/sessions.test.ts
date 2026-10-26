@@ -16,7 +16,8 @@ describe("Client.sessions", () => {
   it("carries the refreshed inbox handle across sends and restored session state", async () => {
     const hints: Array<string | null> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
-      hints.push(new Headers(init?.headers).get("x-eve-inbox"));
+      hints.push(JSON.parse(String(init?.body)).inbox ?? null);
+      expect(new Headers(init?.headers).has("x-eve-inbox")).toBe(false);
       return Response.json({
         sessionId: "session_1",
         deliveryId: `delivery_${hints.length}`,

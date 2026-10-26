@@ -148,14 +148,9 @@ export class ClientSession {
     const { response, timing } = await postSessionSend(
       this.#context,
       path,
-      {
-        ...input,
-        headers: {
-          ...input.headers,
-          ...(this.#state.inbox === undefined ? {} : { "x-eve-inbox": this.#state.inbox }),
-        },
-      },
+      input,
       retrySessionNotReady,
+      this.#state.inbox,
     );
     const {
       sessionId: responseSessionId,
@@ -357,6 +352,7 @@ async function postSessionSend(
   path: string,
   input: SendTurnPayload,
   retrySessionNotReady: boolean,
+  inbox?: string,
 ): Promise<{
   readonly response: Response;
   readonly timing: Omit<ClientSendReceipt, "deliveryId">;
@@ -367,7 +363,7 @@ async function postSessionSend(
   for (;;) {
     const attemptAt = Date.now();
     try {
-      const response = await postTurn(context, path, input, false);
+      const response = await postTurn(context, path, input, false, undefined, inbox);
       const timing = { startedAt, notReadyMs: attemptAt - startedAt, acceptedAt: Date.now() };
       return { response, timing };
     } catch (error) {
@@ -413,6 +409,7 @@ async function postTurn(
   input: SendTurnPayload,
   requireMessage: boolean,
   stubs?: CreateSessionOptions["stubs"],
+  inbox?: string,
 ): Promise<Response> {
   const body = createMessageBody(input, requireMessage);
   if (body === null) {
@@ -423,6 +420,7 @@ async function postTurn(
     );
   }
   if (stubs !== undefined) body.stubs = stubs;
+  if (inbox !== undefined) body.inbox = inbox;
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");

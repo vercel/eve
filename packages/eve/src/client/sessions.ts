@@ -43,7 +43,7 @@ export class ClientSessions {
     if (sessionId.length === 0) throw new Error("sessionId must be a non-empty string.");
     return new ClientSession(this.#context, {
       sessionId,
-      ...(options?.inbox === undefined ? {} : { inbox: options.inbox }),
+      inbox: options?.inbox,
       streamIndex: options?.streamIndex ?? 0,
     });
   }
