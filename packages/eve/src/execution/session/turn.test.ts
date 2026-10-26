@@ -25,7 +25,9 @@ import {
   readTaskTable,
   recordTaskRun,
   settleTaskCalls,
+  tasksWithResults,
   writeTaskTable,
+  type TaskTable,
 } from "#execution/tasks/table.js";
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
@@ -80,6 +82,7 @@ vi.mock("#execution/tools/workflow/apply-run-messages-step.js", async (importOri
 beforeEach(() => {
   // Tests that record publishing replace the real step; the rest apply messages for real.
   vi.mocked(applyRunMessagesStep).mockReset();
+  vi.mocked(cancelTasksStep).mockReset();
   vi.mocked(traceTaskToolCallStep).mockClear();
   vi.mocked(routeDeliverToChildren)
     .mockReset()
@@ -1491,31 +1494,15 @@ describe("SessionExecution checkpoints", () => {
       principalType: "user" as const,
     };
     const bob = { ...alice, principalId: "BOB" };
-    const base = state("");
-    const created = createTask(readTaskTable(undefined), {
-      callId: "research-call",
-      kind: "tool",
-      name: "research",
-      resumable: false,
-      turnId: "turn_0",
-    });
-    const running = recordTaskRun(created.table, created.taskId, {
-      hookToken: "research-control",
-      runId: "research-run",
-    });
-    const sessionState: DurableSessionState = {
-      ...base,
-      snapshot: { session: writeTaskTable(base.snapshot.session, running) },
-    };
-    const reported = settleTaskCalls(running, {
-      callIds: ["research-call"],
-      outcome: { output: "Research is done.", status: "completed" },
-      taskId: created.taskId,
-    }).table;
-    const reportedState: DurableSessionState = {
-      ...base,
-      snapshot: { session: writeTaskTable(base.snapshot.session, reported) },
-    };
+    const created = workingResearchTask();
+    const sessionState = stateWithTasks(created.table);
+    const reportedState = stateWithTasks(
+      settleTaskCalls(created.table, {
+        callIds: ["research-call"],
+        outcome: { output: "Research is done.", status: "completed" },
+        taskId: created.taskId,
+      }).table,
+    );
     const bobsMessage: DeliverHookPayload = {
       auth: bob,
       kind: "deliver",
@@ -1538,19 +1525,7 @@ describe("SessionExecution checkpoints", () => {
         result: { output: "Research is done.", status: "completed" },
       },
     ];
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      takeLeading: () => [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
-      whenPending: () => new Promise<void>(() => {}),
-      next: vi.fn(async () => payloads.shift()),
-      onDelivery: vi.fn(() => () => {}),
-      onInterrupt: vi.fn(() => () => {}),
-      restore: vi.fn(),
-    };
+    const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(async () => payloads.shift()) };
     // The outcome records the task's result, as the real step does before publishing `task.settled`.
     vi.mocked(applyRunMessagesStep).mockImplementation(
       stepWork(async (input: Parameters<typeof applyRunMessagesStep>[0]) => ({
@@ -1560,7 +1535,7 @@ describe("SessionExecution checkpoints", () => {
       })),
     );
     const queue = new SessionInputQueue([]);
-    const resumedWith: (TurnStepInput["input"] | undefined)[] = [];
+    const resumed: { input?: TurnStepInput["input"]; reportedTaskIds?: readonly string[] }[] = [];
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(
@@ -1574,7 +1549,12 @@ describe("SessionExecution checkpoints", () => {
       )
       .mockImplementationOnce(
         turnStepWork(async (input) => {
-          resumedWith.push(input.input);
+          resumed.push({
+            input: input.input,
+            reportedTaskIds: tasksWithResults(
+              readTaskTable(input.sessionState.snapshot.session.state),
+            ).map((record) => record.id),
+          });
           return {
             action: "park",
             serializedContext: input.serializedContext,
@@ -1594,42 +1574,16 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "park", settled: { output: "Here is the research." } });
 
-    // Alice's turn resumes on her task's result with no new delivery, so it keeps her auth.
-    expect(resumedWith).toEqual([undefined]);
+    // Alice's turn resumes only once her task reported, with no new delivery, so it keeps her auth.
+    expect(resumed).toEqual([{ input: undefined, reportedTaskIds: [created.taskId] }]);
     // Bob's message waits for a turn of its own, which carries his auth.
     expect(queue.takeNext()).toMatchObject({ delivery: bobsMessage, kind: "turn" });
   });
 
   it("cancels the tasks still working when a turn ends anyway, so none outlives it", async () => {
-    const base = state("");
-    const created = createTask(readTaskTable(undefined), {
-      callId: "research-call",
-      kind: "tool",
-      name: "research",
-      resumable: false,
-      turnId: "turn_0",
-    });
-    const running = recordTaskRun(created.table, created.taskId, {
-      hookToken: "research-control",
-      runId: "research-run",
-    });
-    const sessionState: DurableSessionState = {
-      ...base,
-      snapshot: { session: writeTaskTable(base.snapshot.session, running) },
-    };
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      takeLeading: () => [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
-      whenPending: () => new Promise<void>(() => {}),
-      next: vi.fn(() => new Promise<never>(() => {})),
-      onDelivery: vi.fn(() => () => {}),
-      onInterrupt: vi.fn(() => () => {}),
-      restore: vi.fn(),
-    };
+    const created = workingResearchTask();
+    const sessionState = stateWithTasks(created.table);
+    const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(() => new Promise<never>(() => {})) };
     // A turn that fails settles even though the turn rule would have held it for its task.
     vi.mocked(turnStep)
       .mockReset()
@@ -1642,14 +1596,12 @@ describe("SessionExecution checkpoints", () => {
         })),
       );
     // The real step tells the run to stop and publishes `task.settled`; this test reads the request.
-    vi.mocked(cancelTasksStep)
-      .mockClear()
-      .mockImplementationOnce(
-        stepWork(async (input: Parameters<typeof cancelTasksStep>[0]) => ({
-          serializedContext: input.serializedContext,
-          sessionState: input.sessionState,
-        })),
-      );
+    vi.mocked(cancelTasksStep).mockImplementationOnce(
+      stepWork(async (input: Parameters<typeof cancelTasksStep>[0]) => ({
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      })),
+    );
 
     await expect(
       createExecution({ inbox, sessionState }).runTurn({
@@ -1959,6 +1911,27 @@ function createExecution(input: {
     queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
   });
+}
+
+/** A `research` task the turn's call started, whose run is still working. */
+function workingResearchTask(): { readonly table: TaskTable; readonly taskId: string } {
+  const created = createTask(readTaskTable(undefined), {
+    callId: "research-call",
+    kind: "tool",
+    name: "research",
+    resumable: false,
+    turnId: "turn_0",
+  });
+  const table = recordTaskRun(created.table, created.taskId, {
+    hookToken: "research-control",
+    runId: "research-run",
+  });
+  return { table, taskId: created.taskId };
+}
+
+function stateWithTasks(table: TaskTable): DurableSessionState {
+  const base = state("");
+  return { ...base, snapshot: { session: writeTaskTable(base.snapshot.session, table) } };
 }
 
 /** A session whose turn waits on a workflow tool run, so cancelling it has a run to cancel. */

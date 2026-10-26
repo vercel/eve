@@ -84,9 +84,10 @@ describe("SessionInputQueue", () => {
     const bob = { ...alice, principalId: "BOB" };
     const queue = new SessionInputQueue([]);
     const turn = { callerCallId: undefined, principal: principalOf(alice) };
-    const send = (message: string, auth?: typeof alice) =>
+    const send = (message: string, auth?: typeof alice, turnPolicy?: "queue") =>
       queue.enqueueDelivery({
         ...(auth !== undefined && { auth }),
+        ...(turnPolicy !== undefined && { turnPolicy }),
         kind: "deliver",
         payloads: [{ message }],
       })!.sequence;
@@ -94,12 +95,17 @@ describe("SessionInputQueue", () => {
     const fromBob = send("Add a meeting to my calendar.", bob);
     const fromAlice = send("Also cover the launch date.", alice);
     const unauthenticated = send("Include the press notes.");
-    const admitted = new Set([fromBob, fromAlice, unauthenticated]);
+    const queuedByBob = send("Invite the design team too.", bob, "queue");
+    const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
 
     // A delivery without auth acts as the session's current identity, which is the turn's.
     expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromAlice, unauthenticated]);
+    // A turn held on Alice lets her queued messages steer it, but never Bob's.
     expect(queue.takeSteering(admitted, turn, { heldSince: 0 })).toBeUndefined();
-    expect(queue.takeNext()).toMatchObject({ delivery: { auth: bob }, sequences: [fromBob] });
+    expect(queue.takeNext()).toMatchObject({
+      delivery: { auth: bob },
+      sequences: [fromBob, queuedByBob],
+    });
   });
 
   it("lets a queued message steer a held turn only when it arrived after the hold", () => {
