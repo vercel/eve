@@ -365,21 +365,20 @@ describe("localDev", () => {
       { origin: "https://example.com" },
     ],
     ["an opaque origin", "http://127.0.0.1:3000/eve/v1/session", { origin: "null" }],
-    [
-      "a cross-site fetch",
-      "http://127.0.0.1:3000/eve/v1/session",
-      { "sec-fetch-site": "cross-site" },
-    ],
     ["a DNS-rebound host name", "http://attacker.example:3000/eve/v1/session/s/stream", {}],
   ])("refuses %s on an `eve dev` server", (_case, url, headers) => {
     vi.stubEnv("EVE_DEV", "1");
     expect(localDev()(new Request(url, { headers, method: "POST" }))).toBeNull();
   });
 
-  it("accepts a browser page served from another local port", () => {
+  it.each([
+    ["the same loopback host", "http://localhost:3000", "same-site"],
+    ["another loopback host", "http://localhost:3000", "cross-site"],
+  ])("accepts a page on another port of %s", (_case, origin, fetchSite) => {
     vi.stubEnv("EVE_DEV", "1");
-    const request = new Request("http://127.0.0.1:3001/eve/v1/session", {
-      headers: { origin: "http://localhost:3000", "sec-fetch-site": "same-site" },
+    const url = fetchSite === "same-site" ? "http://localhost:3001/" : "http://127.0.0.1:3001/";
+    const request = new Request(url, {
+      headers: { origin, "sec-fetch-site": fetchSite },
       method: "POST",
     });
     expect(localDev()(request)).toMatchObject({ principalType: "local-dev" });

@@ -834,11 +834,12 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * authenticator on those hosts.
  *
  * On a development server, `localDev()` also refuses requests a browser sent
- * on behalf of another site: a request addressed to a non-loopback host, an
- * `Origin` that is not a loopback host, or `Sec-Fetch-Site: cross-site`.
- * Browsers set these headers themselves, so a web page cannot use the
- * developer's browser to reach the local agent, including through DNS
- * rebinding.
+ * on behalf of another site: a request addressed to a non-loopback host, or
+ * one whose `Origin` is not a loopback host. Browsers set both themselves and
+ * send `Origin` on every cross-origin request that can change state, so a web
+ * page cannot use the developer's browser to reach the local agent, including
+ * through DNS rebinding. Frontends on any loopback host and port still
+ * authenticate.
  */
 export function localDev(): AuthFn<Request> {
   return (request) =>
@@ -850,7 +851,6 @@ export function localDev(): AuthFn<Request> {
 function isCrossSiteBrowserRequest(request: Request): boolean {
   // Under DNS rebinding the browser addresses the attacker's own host name.
   if (!isLoopbackHostname(new URL(request.url).hostname)) return true;
-  if (request.headers.get("sec-fetch-site") === "cross-site") return true;
   const origin = request.headers.get("origin");
   if (origin === null) return false;
   const hostname = URL.parse(origin)?.hostname;
