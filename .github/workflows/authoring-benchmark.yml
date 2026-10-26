@@ -11,6 +11,10 @@ name: Authoring Benchmark
 #   label to run again after a push or a body edit.
 # - Or dispatch this workflow from the Actions tab on any branch with the same
 #   options as inputs.
+#
+# Dispatches on main also publish their results to the private benchmark Blob
+# store, the same way the nightly Eval Benchmark does. PR runs execute branch
+# code, so their results stay in workflow artifacts only.
 on:
   pull_request:
     types: [labeled]
@@ -40,6 +44,7 @@ permissions:
 
 env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  TREATMENT: guided
 
 jobs:
   request:
@@ -98,8 +103,16 @@ jobs:
               --jq '[.[] | select(.context == "Vercel – eve-pkg")][0] | "\(.state) \(.description)"')
             case "$status" in
               "success Skipped"*)
-                echo "This change does not affect the eve package; benchmarking main's package."
-                echo "ref=main" >> "$GITHUB_OUTPUT"
+                # Pin main's moving alias once so every model runs, and
+                # publishes, the same package.
+                main_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://pkg.eve.dev/main/eve.tgz")
+                ref=$(sed -nE 's#^https://pkg\.eve\.dev/([0-9a-f]{40})/eve\.tgz$#\1#p' <<<"$main_url")
+                if [ -z "$ref" ]; then
+                  echo "::error::main's eve package did not resolve to an immutable revision: $main_url"
+                  exit 1
+                fi
+                echo "This change does not affect the eve package; benchmarking main's package at ${ref}."
+                echo "ref=${ref}" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
               failure* | error*)
@@ -157,7 +170,9 @@ jobs:
       - name: Run benchmark
         working-directory: apps/benchmarks
         # An empty CASES selects the published cases.
-        run: pnpm benchmark ${CASES:+"$CASES"} --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS"
+        run: |
+          pnpm benchmark ${CASES:+"$CASES"} --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
+            --treatment "$TREATMENT"
 
       - name: Summarize results
         if: ${{ !cancelled() }}
@@ -182,6 +197,19 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # scripts/publish-results.mjs reads this to match the artifact to the plan.
+      - name: Stage run metadata
+        if: ${{ !cancelled() }}
+        working-directory: apps/benchmarks
+        env:
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: |
+          mkdir -p results
+          jq -n --arg model_id "$MODEL" --arg sha "$HEAD_SHA" --arg eve_revision "$CANARY_REF" \
+            --arg treatment "$TREATMENT" --arg runner_os "$RUNNER_OS_NAME" \
+            '{model_id: $model_id, sha: $sha, eve_revision: $eve_revision, treatment: $treatment, runner_os: $runner_os}' \
+            > results/meta.json
+
       - name: Upload results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -190,3 +218,56 @@ jobs:
           path: apps/benchmarks/results/
           if-no-files-found: ignore
           retention-days: 14
+
+  # Mirrors eval-benchmark.yml's publish job: only this job holds the Blob
+  # token, and models whose job uploaded nothing become `missing` records.
+  publish:
+    name: Publish results
+    needs: [request, benchmark]
+    if: >-
+      always() && needs.request.result == 'success' && needs.request.outputs.run == 'true' &&
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      # The publisher needs only the root workspace's @vercel/blob.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter eve-monorepo
+
+      - name: Prepare artifact directory
+        run: mkdir -p "$RUNNER_TEMP/artifacts"
+
+      - name: Download results
+        # No match is valid (every model failed to upload); records mark those models missing.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: authoring-benchmark-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Publish to Blob
+        working-directory: apps/benchmarks
+        env:
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+          BENCHMARK_SHA: ${{ env.HEAD_SHA }}
+          BENCHMARK_EVE_REVISION: ${{ needs.request.outputs.canary }}
+          BENCHMARK_TREATMENT: ${{ env.TREATMENT }}
+          BENCHMARK_MODELS: ${{ needs.request.outputs.models }}
+          BENCHMARK_CASES: ${{ needs.request.outputs.cases }}
+          BENCHMARK_RUNS: ${{ needs.request.outputs.runs }}
+        run: node scripts/publish-results.mjs "$RUNNER_TEMP/artifacts"

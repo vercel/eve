@@ -162,20 +162,20 @@ export async function putImmutable(store, pathname, body, contentType) {
   }
 }
 
-function listFiles(dir) {
+export function listFiles(dir) {
   return readdirSync(dir, { withFileTypes: true, recursive: true })
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name))
     .sort();
 }
 
-function contentTypeOf(path) {
+export function contentTypeOf(path) {
   if (path.endsWith(".json")) return "application/json";
   if (path.endsWith(".ndjson") || path.endsWith(".jsonl")) return "application/x-ndjson";
   return "application/octet-stream";
 }
 
-async function mapLimit(items, limit, task) {
+export async function mapLimit(items, limit, task) {
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (next < items.length) await task(items[next++]);
