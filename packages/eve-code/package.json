@@ -2,7 +2,7 @@
   "name": "@eve/code",
   "version": "0.0.0",
   "private": true,
-  "description": "Source of the eve/extensions/code extension: CLI-based coding work with credential brokering, safe patches, coding skills, and a read-only worker subagent.",
+  "description": "Source of the eve/extensions/code extension: CLI-based coding work with credential brokering, safe patches, and coding skills.",
   "type": "module",
   "exports": {
     "./package.json": "./package.json"

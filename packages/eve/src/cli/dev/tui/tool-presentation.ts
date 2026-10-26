@@ -306,8 +306,8 @@ export function agentTaskLabel(name: string): string {
 }
 
 /**
- * A person's name for the agent a tool dispatches: `code__worker` →
- * `worker`. An extension's own subagent compiles to `<extension>__agent`, so
+ * A person's name for the agent a tool dispatches: `code__reviewer` →
+ * `reviewer`. An extension's own subagent compiles to `<extension>__agent`, so
  * the extension names it.
  */
 export function agentDisplayName(toolName: string): string {

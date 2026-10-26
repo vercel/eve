@@ -16,8 +16,6 @@ export type GitHubAttribution = NonNullable<GitHubConfig["attribution"]>;
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 const delivery = z.enum(["firewall", "command"]).default("firewall");
-const reasoning = z.enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]);
-const openaiReasoningEffort = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export default defineExtension({
   config: z.object({
@@ -41,12 +39,5 @@ export default defineExtension({
       })
       .optional(),
     broker: fn<CredentialPolicyBroker>().optional(),
-    worker: z
-      .object({
-        model: z.string().min(1),
-        reasoning,
-        openaiReasoningEffort: openaiReasoningEffort.optional(),
-      })
-      .optional(),
   }),
 });

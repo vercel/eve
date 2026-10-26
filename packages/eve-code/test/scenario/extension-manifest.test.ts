@@ -15,8 +15,8 @@ import {
 
 const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-test("built worker keeps explicit read tools without shell or write capabilities", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-worker-manifest-"));
+test("built extension contributes its tools and skills and no subagent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-code-extension-manifest-"));
   try {
     const extensionRoot = join(root, "extension-package");
     await mkdir(extensionRoot);
@@ -41,13 +41,13 @@ test("built worker keeps explicit read tools without shell or write capabilities
     await symlink(extensionRoot, join(appRoot, "node_modules", "eve-code"), "dir");
     await writeFile(
       join(appRoot, "package.json"),
-      JSON.stringify({ name: "worker-manifest-consumer", type: "module" }),
+      JSON.stringify({ name: "extension-manifest-consumer", type: "module" }),
     );
     await writeFile(
       join(appRoot, "agent", "extensions", "code.ts"),
       'import code from "eve-code";\nexport default code({});\n',
     );
-    await writeFile(join(appRoot, "agent", "instructions.md"), "Delegate repository research.\n");
+    await writeFile(join(appRoot, "agent", "instructions.md"), "Work in the repository.\n");
     const discovered = await discoverAgent({ appRoot, agentRoot: join(appRoot, "agent") });
     assert.deepEqual(
       discovered.diagnostics.filter((item) => item.severity === "error"),
@@ -59,20 +59,22 @@ test("built worker keeps explicit read tools without shell or write capabilities
       diagnostics.filter((item) => item.severity === "error"),
       [],
     );
+    const skillNames = manifest.skills.map((skill) => skill.name);
+    for (const name of ["code__investigate", "code__lookup-agent-run", "code__review"]) {
+      assert.ok(skillNames.includes(name), name);
+    }
+    // The deprecated `github` slots are always declared and resolve to nothing without that config.
     assert.ok(manifest.dynamicSkills.some((entry) => entry.slug === "code__pr"));
     assert.ok(manifest.dynamicInstructions.some((entry) => entry.slug === "code__github"));
-    const worker = manifest.subagents.find((item) => item.name === "code__worker");
-    assert.ok(worker);
-    assert.equal(worker.configResolver, undefined);
-    assert.ok("config" in worker.agent);
-    const toolNames = worker.agent.tools.map((tool) => tool.name).sort();
-    assert.ok(!toolNames.includes("bash"), "a read-only worker must not receive default bash");
-    assert.ok(!toolNames.includes("write_file"));
-    assert.ok(!toolNames.includes("apply_patch"));
-    assert.equal(worker.agent.config.defaultTools, false);
-    assert.deepEqual(toolNames, ["glob", "grep", "read_file"]);
-    for (const tool of worker.agent.tools) assert.equal(tool.hasExecute, true);
-    assert.deepEqual(worker.agent.connections, []);
+    const toolNames = manifest.tools.map((tool) => tool.name);
+    assert.ok(toolNames.includes("code__apply_patch"));
+    assert.ok(toolNames.includes("code__grep"));
+    assert.ok(manifest.dynamicTools.some((entry) => entry.slug === "code__gh"));
+    // Delegation uses eve's own `agent` tool; the extension adds no subagent of its own.
+    assert.deepEqual(
+      manifest.subagents.filter((item) => item.name.startsWith("code__")),
+      [],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

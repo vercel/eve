@@ -1,6 +1,6 @@
 # @eve/code Extension Package
 
-This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes one patch editing primitive, sandbox `grep`, shared PR-watch primitives, investigation and review skills, instruction fragments, a read-only worker subagent, Connect-backed authentication hooks, and consumer sandbox helpers. Durable `prwatch` / `prwatch_delete` wrappers currently live beside e0's consumer mount because eve workflow directives are application-only.
+This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes one patch editing primitive, sandbox `grep`, shared PR-watch primitives, investigation and review skills, instruction fragments, Connect-backed authentication hooks, and consumer sandbox helpers. Durable `prwatch` / `prwatch_delete` wrappers currently live beside e0's consumer mount because eve workflow directives are application-only.
 
 Before writing code, read the installed eve package docs for extensions, hooks, tools, skills, subagents, and sandboxes as applicable.
 
