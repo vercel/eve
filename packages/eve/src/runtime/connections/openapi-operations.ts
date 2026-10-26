@@ -8,6 +8,8 @@ export type HttpMethod = (typeof HTTP_METHODS)[number];
 /** Internal descriptor for one resolved OpenAPI operation. */
 export interface OpenApiOperation {
   readonly toolName: string;
+  /** The document's `operationId`, when the operation declares one. */
+  readonly operationId: string | undefined;
   readonly method: HttpMethod;
   readonly pathTemplate: string;
   readonly description: string;

@@ -171,6 +171,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
         description: operation.description,
         inputSchema,
         name: operation.toolName,
+        ...(operation.operationId !== undefined && { operationId: operation.operationId }),
       });
     }
 
@@ -285,6 +286,10 @@ export class OpenApiConnectionClient implements ConnectionClient {
 
         operations.push({
           toolName,
+          operationId:
+            typeof operationValue.operationId === "string" && operationValue.operationId.length > 0
+              ? operationValue.operationId
+              : undefined,
           method,
           pathTemplate,
           description: operationDescription(operationValue),

@@ -447,6 +447,11 @@ export interface ConnectionToolMetadata {
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
   readonly name: string;
+  /**
+   * The OpenAPI `operationId` the tool was generated from. The tool name is a
+   * sanitized form of it, so connection filters match both.
+   */
+  readonly operationId?: string;
   readonly outputSchema?: Record<string, unknown>;
 }
 
