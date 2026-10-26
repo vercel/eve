@@ -832,9 +832,29 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * deployment (`eve start`, a Vercel deployment, or any container host) sets
  * neither flag, so `localDev()` authenticates nothing there. Layer a real
  * authenticator on those hosts.
+ *
+ * On a development server, `localDev()` also refuses requests a browser sent
+ * on behalf of another site: a request addressed to a non-loopback host, an
+ * `Origin` that is not a loopback host, or `Sec-Fetch-Site: cross-site`.
+ * Browsers set these headers themselves, so a web page cannot use the
+ * developer's browser to reach the local agent, including through DNS
+ * rebinding.
  */
 export function localDev(): AuthFn<Request> {
-  return () => (isLocalDevelopmentServer() ? LOCAL_DEV_SESSION_AUTH_CONTEXT : null);
+  return (request) =>
+    isLocalDevelopmentServer() && !isCrossSiteBrowserRequest(request)
+      ? LOCAL_DEV_SESSION_AUTH_CONTEXT
+      : null;
+}
+
+function isCrossSiteBrowserRequest(request: Request): boolean {
+  // Under DNS rebinding the browser addresses the attacker's own host name.
+  if (!isLoopbackHostname(new URL(request.url).hostname)) return true;
+  if (request.headers.get("sec-fetch-site") === "cross-site") return true;
+  const origin = request.headers.get("origin");
+  if (origin === null) return false;
+  const hostname = URL.parse(origin)?.hostname;
+  return hostname === undefined || !isLoopbackHostname(hostname);
 }
 
 function isLocalDevelopmentServer(): boolean {
