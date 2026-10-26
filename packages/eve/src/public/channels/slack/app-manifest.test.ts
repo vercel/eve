@@ -47,6 +47,8 @@ describe("Slack app manifests", () => {
             "code_channels:manage",
             "groups:history",
             "groups:read",
+            "im:read",
+            "mpim:read",
           ],
         },
       },

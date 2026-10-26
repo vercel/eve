@@ -12,8 +12,13 @@ last_updated: "2026-10-26"
 > replies, session status, stop, and `codeChannels: true` for un-mentioned messages and the manifest.
 > Every member can start turns; the `participants` policy (`"owner"`, `"confirm"`) is deferred,
 > since eve can't read a forked channel's owner before dispatch. Replies follow the thread the user
-> wrote in. Not yet: the membership check, and phases 2 and 3. Phase 2 ships as a helper apps
-> wrap in their own tool, without `ctx.startInChannel()`.
+> wrote in. Not yet: the membership check, and phase 3.
+>
+> Phase 2 is in, without `ctx.startInChannel()`: `openCodeChannel(ctx, slack, { message, name })`
+> from `eve/channels/slack`, which apps wrap in a tool, over a public `codeChannel` target on the
+> Slack channel's `receive()`. Inbound handlers get `ctx.openCodeChannel()`. No signed binding yet.
+> Creation sends `origin_channel_id` and `origin_message_ts` and leaves origin eligibility to
+> Slack, then confirms a private origin produced a private channel before copying history.
 
 ## Summary
 

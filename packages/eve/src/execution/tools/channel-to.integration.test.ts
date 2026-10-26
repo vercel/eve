@@ -9,7 +9,11 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import { captureTurnEvents, readFirstTurnReply } from "#internal/testing/events.js";
+import {
+  captureTurnEvents,
+  filterEventsByType,
+  readFirstTurnReply,
+} from "#internal/testing/events.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import {
   sendFromStepWorkflow,
@@ -23,13 +27,14 @@ import {
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import { defineChannel, isChannel, POST } from "#public/channels/index.js";
-import { callSlackApi } from "#public/channels/slack/index.js";
+import { callSlackApi, openCodeChannel } from "#public/channels/slack/index.js";
 import { type SlackChannel, slackChannel } from "#public/channels/slack/slackChannel.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineTool } from "#public/tools/index.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -183,6 +188,171 @@ describe("ctx.to() in tools", () => {
     });
   }, 90_000);
 
+  it("opens a Slack code channel from a thread and continues the work there", async () => {
+    const signingSecret = "code-channel-signing-secret";
+    let createError: string | undefined;
+    const slackCalls: { readonly body: Record<string, string>; readonly method: string }[] = [];
+    let nextTs = 1;
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.hostname !== "slack.com") return realFetch(input, init);
+      const method = url.pathname.split("/").at(-1)!;
+      const body = Object.fromEntries(new URLSearchParams(String(init?.body)));
+      slackCalls.push({ body, method });
+      if (method === "conversations.info") {
+        return Response.json({
+          ok: true,
+          channel:
+            body.channel === "C_CODE"
+              ? { id: "C_CODE", properties: { record_channel: { record_type: "agent_channel" } } }
+              : { id: body.channel, is_private: false },
+        });
+      }
+      // Alice's message is a reply in the origin thread, which its permalink names.
+      if (method === "chat.getPermalink") {
+        return Response.json({
+          ok: true,
+          permalink: `https://acme.slack.com/archives/${body.channel}/p${body.message_ts!.replace(".", "")}?thread_ts=1700000000.000001&cid=${body.channel}`,
+        });
+      }
+      // Slack returns the same channel for a repeated session_id.
+      if (method === "agents.conversations.create") {
+        return Response.json(
+          createError === undefined
+            ? { ok: true, channel_id: "C_CODE" }
+            : { ok: false, error: createError },
+        );
+      }
+      const ts = `1700000100.${String(nextTs++).padStart(6, "0")}`;
+      return Response.json({ ok: true, channel: body.channel, message: { ts }, ts });
+    });
+    const slack = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret },
+    });
+    const { modelInputs, recordModelInputs } = modelInputRecorder();
+    // The tool an app writes around openCodeChannel(), as docs/channels/slack.mdx shows.
+    const runtime = await createToolRuntime<{ message: string; name: string }>({
+      agentName: "tool-slack-code-channel",
+      execute: async ({ message, name }, ctx) =>
+        await openCodeChannel(ctx, slack, message, { name }),
+      inputSchema: {
+        additionalProperties: false,
+        properties: { message: { type: "string" }, name: { type: "string" } },
+        required: ["message", "name"],
+        type: "object",
+      },
+      modules: [
+        { logicalPath: "channels/slack.ts", loadNamespace: async () => ({ default: slack }) },
+        recordModelInputs,
+      ],
+      toolName: "open_code_channel",
+    });
+    const request =
+      'Run open_code_channel with name "Fix the login test" and message "Start by reproducing it."';
+
+    await runtime.run(async () => {
+      const source = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: request },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "slack:C_ORIGIN:1700000000.000001",
+            }),
+            // A thread session started by Alice's message, as the Slack channel records it.
+            "eve.channel": {
+              kind: "channel:slack",
+              state: {
+                channelId: "C_ORIGIN",
+                installationTeamId: "T01",
+                teamId: "T01",
+                threadTs: "1700000000.000001",
+                triggeringMessageTs: "1700000000.000002",
+                triggeringUserId: "U_ALICE",
+              },
+            },
+            // The message hook returned its own auth; the tool still finds the conversation.
+            "eve.auth": {
+              attributes: { email: "alice@example.com" },
+              authenticator: "acme-sso",
+              principalId: "acme:alice",
+              principalType: "user",
+            },
+          },
+        },
+      ]);
+      const sourceTurns = captureTurnEvents(source);
+      try {
+        const codeSession = forkedSessionId(await sourceTurns.nextTurn());
+        await waitForCompletedTurns(codeSession, 1);
+        // The code channel session starts from the thread and the tool's first message.
+        expect(lastModelInput(modelInputs, codeSession)).toContain("Run open_code_channel");
+        expect(lastModelInput(modelInputs, codeSession)).toContain("Start by reproducing it.");
+
+        const create = slackCalls.find(({ method }) => method === "agents.conversations.create");
+        expect(create?.body).toMatchObject({
+          name: "Fix the login test",
+          origin_channel_id: "C_ORIGIN",
+          origin_message_ts: "1700000000.000002",
+        });
+        expect(create?.body.session_id).toMatch(/^[0-9a-f]{32}$/u);
+        // The code channel's reply posts top-level.
+        const codeReplies = slackCalls.filter(
+          ({ body, method }) => method === "chat.postMessage" && body.channel === "C_CODE",
+        );
+        expect(codeReplies.length).toBeGreaterThan(0);
+        expect(codeReplies.every(({ body }) => body.thread_ts === undefined)).toBe(true);
+
+        // Alice writes in the code channel without a mention; only its session hears it.
+        await deliverSlackChannelMessage(slack, signingSecret, {
+          channel: "C_CODE",
+          text: "Alice prefers Friday.",
+        });
+        await waitForCompletedTurns(codeSession, 2);
+        expect(lastModelInput(modelInputs, codeSession)).toContain("Alice prefers Friday.");
+        expect(lastModelInput(modelInputs, source.runId)).not.toContain("Alice prefers Friday.");
+        // A reply in a thread inside the code channel reaches the same session and is
+        // answered in that thread.
+        const postsBefore = slackCalls.length;
+        await deliverSlackChannelMessage(slack, signingSecret, {
+          channel: "C_CODE",
+          text: "Alice adds detail in a thread.",
+          threadTs: "1700000100.000099",
+        });
+        await waitForCompletedTurns(codeSession, 3);
+        expect(lastModelInput(modelInputs, codeSession)).toContain(
+          "Alice adds detail in a thread.",
+        );
+        expect(
+          slackCalls
+            .slice(postsBefore)
+            .filter(
+              ({ body, method }) => method === "chat.postMessage" && body.channel === "C_CODE",
+            )
+            .map(({ body }) => body.thread_ts),
+        ).toEqual(["1700000100.000099"]);
+
+        // Another call for the same message reaches the same code channel and session.
+        await sendToSession(source.runId, request);
+        expect(forkedSessionId(await sourceTurns.nextTurn())).toBe(codeSession);
+
+        // A permanent Slack refusal fails the call with Slack's error for the model to relay.
+        createError = "feature_disabled";
+        await sendToSession(source.runId, request);
+        const settled = filterEventsByType(await sourceTurns.nextTurn(), "call.settled");
+        expect(settled.map(({ data }) => data.error?.message ?? data.output)).toContain(
+          "Slack agents.conversations.create failed: feature_disabled",
+        );
+      } finally {
+        sourceTurns.dispose();
+        await source.cancel();
+      }
+    });
+  }, 90_000);
+
   it("gives two sessions whose fork calls share a call id separate forks in one Slack channel", async () => {
     let nextTs = 1;
     const realFetch = globalThis.fetch;
@@ -309,9 +479,10 @@ function slackSourceContext(name: string, userId: string): Record<string, unknow
 }
 
 /** A runtime whose agent has one ordinary tool, which the test model calls on "Run <toolName>". */
-async function createToolRuntime(input: {
+async function createToolRuntime<TInput = Record<string, never>>(input: {
   readonly agentName: string;
-  readonly execute: (input: Record<string, never>, ctx: ToolContext) => Promise<unknown>;
+  readonly execute: (input: TInput, ctx: ToolContext) => Promise<unknown>;
+  readonly inputSchema?: JsonObject;
   readonly modules: readonly ProgrammaticAgentModule[];
   readonly toolName: string;
 }) {
@@ -324,8 +495,12 @@ async function createToolRuntime(input: {
         loadNamespace: async () => ({
           default: defineTool({
             description: `Forks the conversation (${input.toolName}).`,
-            inputSchema: { additionalProperties: false, properties: {}, type: "object" },
-            execute: input.execute,
+            inputSchema: input.inputSchema ?? {
+              additionalProperties: false,
+              properties: {},
+              type: "object",
+            },
+            execute: input.execute as (input: unknown, ctx: ToolContext) => Promise<unknown>,
           }),
         }),
       },
@@ -520,4 +695,46 @@ async function openDirectMessage(userId: string) {
   });
   if (!response.ok) throw new Error(`conversations.open failed: ${String(response.error)}`);
   return (response.channel as { id: string }).id;
+}
+
+/** Sends Alice's signed, un-mentioned channel message through the Slack events route. */
+async function deliverSlackChannelMessage(
+  slack: ReturnType<typeof slackChannel>,
+  signingSecret: string,
+  message: { readonly channel: string; readonly text: string; readonly threadTs?: string },
+): Promise<void> {
+  const ts = message.threadTs === undefined ? "1700000999.000200" : "1700000999.000300";
+  const body = JSON.stringify({
+    authorizations: [{ is_bot: true, team_id: "T01", user_id: "U_EVE" }],
+    event: {
+      channel: message.channel,
+      channel_type: "channel",
+      event_ts: ts,
+      text: message.text,
+      ...(message.threadTs !== undefined && { thread_ts: message.threadTs }),
+      ts,
+      type: "message",
+      user: "U_ALICE",
+    },
+    event_id: `Ev_code_channel_message_${ts}`,
+    team_id: "T01",
+    type: "event_callback",
+  });
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = `v0=${createHmac("sha256", signingSecret)
+    .update(`v0:${timestamp}:${body}`)
+    .digest("hex")}`;
+  await postToChannelRoute(
+    slack,
+    "slack",
+    new Request("https://agent.example.com/eve/v1/slack", {
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": String(timestamp),
+        "x-slack-signature": signature,
+      },
+      method: "POST",
+    }),
+  );
 }
