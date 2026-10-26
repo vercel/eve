@@ -10,7 +10,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_VERSION=24.22.1
 ARG NODE_SHA256_X64=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
 ARG NODE_SHA256_ARM64=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
-ARG PNPM_VERSION=11.5.2
+ARG PNPM_VERSION=12.15.0
 
 LABEL org.opencontainers.image.description="Sandbox base image for eve agents."
 LABEL org.opencontainers.image.source="https://github.com/vercel/eve"
