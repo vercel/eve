@@ -165,7 +165,7 @@ export class ScheduleDispatcher {
         occurrence,
         auth,
         to: (channel, target) => ({
-          send: (message) => args.to(channel, target).send(message, { auth }),
+          send: (message, options) => args.to(channel, target).send(message, { ...options, auth }),
         }),
         waitUntil: args.waitUntil,
       });

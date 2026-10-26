@@ -1,3 +1,4 @@
+import type { MessageSendOptions } from "#channel/session.js";
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { SessionSchedule } from "#context/session-schedule.js";
@@ -196,7 +197,17 @@ export interface ScheduleClient<TPayload> {
 export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
-) => { send(message: MessageContent): Promise<Delivery> };
+) => {
+  /**
+   * Accepts the `to().send()` options that apply to a fresh session. `auth` is
+   * the schedule's creator. Each send starts its own session at a new address,
+   * so `idempotencyKey` and `turnPolicy` have nothing to act on.
+   */
+  send(
+    message: MessageContent,
+    options?: Omit<MessageSendOptions, "auth" | "idempotencyKey" | "turnPolicy">,
+  ): Promise<Delivery>;
+};
 
 type SchedulePayloadApproval<TPrepared> =
   | ((

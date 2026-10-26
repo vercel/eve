@@ -79,14 +79,58 @@ interface SessionDeliveryOptions {
   readonly outputSchema?: JsonObject;
 }
 
-/** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions & {
+/**
+ * Options every server-side message send accepts: `Session.send()`,
+ * `from(address).send()`, `to(channel, target).send()`, and the input a
+ * channel's `receive()` hook gets.
+ */
+export interface MessageSendOptions {
+  /** Who the session runs as. */
+  readonly auth: SessionAuthContext | null;
+  /** Strings added as user messages before the message, kept in session history. */
+  readonly context?: readonly string[];
   /** Prior conversation added as user and assistant turns before this message and its `context`. */
   readonly history?: readonly SessionHistoryMessage[];
-  /** Initial workflow title for a prewarmed session. */
+  /** Stable delivery identity, deduplicated within the receiving session's recent-key window. */
+  readonly idempotencyKey?: string;
+  /** JSON Schema for a structured final answer. */
+  readonly outputSchema?: JsonObject;
+  /** Workflow run title for a session this send starts. Defaults to one derived from the message. */
   readonly title?: string;
+  /** How the message treats a running turn. */
   readonly turnPolicy?: TurnPolicy;
+}
+
+// A record, so adding a field to MessageSendOptions fails to compile until it's listed here.
+const MESSAGE_SEND_OPTION_FIELDS: Record<keyof MessageSendOptions, true> = {
+  auth: true,
+  context: true,
+  history: true,
+  idempotencyKey: true,
+  outputSchema: true,
+  title: true,
+  turnPolicy: true,
 };
+
+const MESSAGE_SEND_OPTION_KEYS = Object.keys(
+  MESSAGE_SEND_OPTION_FIELDS,
+) as readonly (keyof MessageSendOptions)[];
+
+/**
+ * Copies only the {@link MessageSendOptions} fields and validates the key. Callers can pass wider
+ * objects, which must not carry internal send fields such as `callback` across a channel boundary.
+ */
+export function toMessageSendOptions(options: MessageSendOptions): MessageSendOptions {
+  validateDeliveryIdempotencyKey(options.idempotencyKey);
+  const picked: Partial<Record<keyof MessageSendOptions, unknown>> = {};
+  for (const key of MESSAGE_SEND_OPTION_KEYS) {
+    if (options[key] !== undefined) picked[key] = options[key];
+  }
+  return picked as MessageSendOptions;
+}
+
+/** Options for sending a message through a fixed session handle. */
+export type SessionSendOptions = MessageSendOptions;
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;

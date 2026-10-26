@@ -6,6 +6,7 @@ import {
   type CrossChannelTarget,
   type CrossChannelToFn,
 } from "#channel/cross-channel-receive.js";
+import type { MessageSendOptions } from "#channel/session.js";
 import { StreamDelivery } from "#client/delivery.js";
 import type { Runtime } from "#channel/types.js";
 import type { SlackChannel, SlackReceiveTarget } from "#public/channels/slack/slackChannel.js";
@@ -164,6 +165,43 @@ describe("createCrossChannelToFn", () => {
     const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);
 
     await expect(fn(slack.definition, {}).send("x", { auth: null })).rejects.toThrow(/no adapter/);
+  });
+
+  it("passes every send option, and only those, to the target receive", async () => {
+    const slack = makeChannel("slack");
+    const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);
+    const options = {
+      auth: null,
+      context: ["Alice is on call this week."],
+      history: [{ role: "user" as const, text: "Alice asked for the rollout plan." }],
+      idempotencyKey: "github:delivery-42",
+      outputSchema: { type: "object" },
+      title: "Rollout plan",
+      turnPolicy: "queue" as const,
+    } satisfies Required<MessageSendOptions>;
+
+    const internal = { callback: { url: "https://example.com/hook" }, initiatorAuth: null };
+
+    await fn(slack.definition, { channelId: "C1" }).send("Continue.", { ...options, ...internal });
+
+    expect(slack.receive.mock.calls[0]![0]).toEqual({
+      ...options,
+      message: "Continue.",
+      target: { channelId: "C1" },
+    });
+  });
+
+  it("rejects an invalid idempotency key before calling receive()", async () => {
+    const slack = makeChannel("slack");
+    const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);
+
+    await expect(
+      fn(slack.definition, { channelId: "C1" }).send("Continue.", {
+        auth: null,
+        idempotencyKey: "",
+      }),
+    ).rejects.toThrow("idempotencyKey must be a nonempty string");
+    expect(slack.receive).not.toHaveBeenCalled();
   });
 
   it("forwards auth to the target receive verbatim", async () => {

@@ -9,21 +9,19 @@ import {
 } from "#channel/compiled-channel.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
+import { toMessageSendOptions, type MessageSendOptions } from "#channel/session.js";
+import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { Runtime, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-
-/**
- * Options for sending a message to a channel selected with `ctx.to(...)`.
- */
-interface CrossChannelSendOptions {
-  readonly auth: SessionAuthContext | null;
-  readonly turnPolicy?: TurnPolicy;
-}
 
 /** Message delivery bound to one channel-specific proactive target. */
 export interface CrossChannelTargetHandle {
-  send(message: MessageContent, options: CrossChannelSendOptions): Promise<Delivery>;
+  /**
+   * Starts a session at the target, or continues the one that owns it. The
+   * channel's `receive()` hook gets `options` with the message and target.
+   */
+  send(message: MessageContent, options: MessageSendOptions): Promise<Delivery>;
 }
 
 /** Selects another authored channel and one of its proactive targets. */
@@ -90,9 +88,9 @@ export function createCrossChannelToFn(
           source,
           target: targetChannel,
           input: {
+            ...toMessageSendOptions(options),
             message,
             target: target as Readonly<Record<string, unknown>>,
-            auth: options.auth,
           },
           turnPolicy: options.turnPolicy,
           describeMissingReceive: () =>
@@ -110,11 +108,7 @@ interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
   readonly source: CrossChannelDeliverySource;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
-  readonly input: {
-    readonly message: MessageContent;
-    readonly target: Readonly<Record<string, unknown>>;
-    readonly auth: SessionAuthContext | null;
-  };
+  readonly input: GenericReceiveInput;
   readonly turnPolicy?: TurnPolicy;
   readonly describeMissingReceive: () => string;
   readonly describeMissingAdapter: () => string;

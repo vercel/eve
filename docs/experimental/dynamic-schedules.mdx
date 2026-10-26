@@ -158,7 +158,7 @@ Updates, enable, disable, and delete affect future scheduling, not emitted callb
 
 ## Handle occurrences and retries
 
-`run` receives `payload`, `occurrence`, `auth`, `to`, and `waitUntil`. It may start zero or several sessions or perform application work directly. `to(channel, target).send(message)` is bound to the resolved creator; no auth argument is needed or accepted. It starts fresh, unattended sessions through an authored channel, even when the target names an existing thread. It does not steer an existing conversation.
+`run` receives `payload`, `occurrence`, `auth`, `to`, and `waitUntil`. It may start zero or several sessions or perform application work directly. `to(channel, target).send(message, options)` is bound to the resolved creator; no auth argument is needed or accepted. It starts fresh, unattended sessions through an authored channel, even when the target names an existing thread. It does not steer an existing conversation. `options` takes `context`, `history`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off). Each send starts its own session, so it takes no `idempotencyKey` or `turnPolicy`.
 
 eve awaits the callback and its registered `waitUntil` promises before reporting `occurrence.dispatched`. That event includes `sessionIds`; it means dispatch succeeded, not that the agent completed its task or delivered a successful result. Channels own output delivery and session-level failure reporting. Unattended sessions cannot wait for approvals or questions; configure tools accordingly.
 

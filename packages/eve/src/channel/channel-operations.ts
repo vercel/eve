@@ -6,7 +6,7 @@ import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import { type ChannelCreateResult, createChannelAddressFn } from "#channel/channel-address.js";
 
 export type { ChannelCreateResult } from "#channel/channel-address.js";
-import type { Session } from "#channel/session.js";
+import type { MessageSendOptions, Session } from "#channel/session.js";
 import type {
   Runtime,
   SessionAuthContext,
@@ -18,22 +18,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 
-interface BaseChannelSendOptions {
-  /** Stable delivery identity, deduplicated within this session's recent-key window. */
-  readonly idempotencyKey?: string;
-  /**
-   * Prior conversation added as user and assistant turns before this
-   * message and its `context`. Seeds a session this send creates, or
-   * extends the history of the session that owns the address.
-   */
-  readonly history?: readonly SessionHistoryMessage[];
-  readonly auth: SessionAuthContext | null;
-  readonly context?: readonly string[];
-  /** JSON Schema for a structured final answer, as on `Session.send()`. */
-  readonly outputSchema?: JsonObject;
-  readonly title?: string;
-  readonly turnPolicy?: TurnPolicy;
-}
+type BaseChannelSendOptions = MessageSendOptions;
 
 /** Options for sending a message from a channel-local continuation address. */
 export type ChannelSendOptions<TState = undefined> = BaseChannelSendOptions & {

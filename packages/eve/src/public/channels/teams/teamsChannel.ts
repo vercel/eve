@@ -388,8 +388,8 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       ),
     ],
 
-    async receive(input, { from }) {
-      const receiveTarget = input.target as Partial<TeamsReceiveTarget>;
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Partial<TeamsReceiveTarget>;
       const serviceUrl = readNonEmptyString(receiveTarget.serviceUrl);
       const conversationId = readNonEmptyString(receiveTarget.conversationId);
       if (!serviceUrl || !conversationId) {
@@ -433,7 +433,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           replyToActivityId,
           tenantId: state.tenantId,
         }),
-      ).send(input.message, { auth: input.auth, state });
+      ).send(message, { ...send, state });
     },
 
     events: mergedEvents,

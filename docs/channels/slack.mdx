@@ -306,7 +306,7 @@ Reset returns a `Delivery` for the retiring session; `await delivery.result()` w
 
 ### Other Events API callbacks
 
-Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, title, history })` zero, one, or many times to start turns. `title` sets the run title without changing the message sent to the model, and `history` adds prior conversation before the message (see [Start from prior history](./eve#start-from-prior-history)). Each call returns a delivery receipt; use its `sessionId` to attach a session handle.
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, ...options })` zero, one, or many times to start turns. It takes the same options as [`to().send()`](./custom#cross-channel-hand-off), such as `title`, which sets the run title without changing the message sent to the model, `history`, which adds prior conversation before the message (see [Start from prior history](./eve#start-from-prior-history)), and `idempotencyKey`. Each call returns a delivery receipt; use its `sessionId` to attach a session handle.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -748,6 +748,8 @@ Pass `{ channelId }` as the target to start a new thread. The agent's first post
 | `initialMessage`     | Post a card as the thread root before the agent runs. Cannot be combined with `threadTs`. |
 | `installationTeamId` | Select the app installation workspace when using a function-form bot token.               |
 | `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                 |
+
+A send with an `idempotencyKey` and no `threadTs` or `initialMessage` derives the new thread's session from the key, so a retry with the same key reaches the same session instead of starting a second thread.
 
 The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
 

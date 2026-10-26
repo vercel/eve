@@ -258,7 +258,7 @@ as does the Chat SDK bridge. Keys must contain 1–256 characters and identify o
 delivery. Prefix IDs with the provider or event type if they can overlap.
 Reusing a retained key ignores the new input, even if the message changed.
 
-Each session retains its last 1,024 distinct keys; reuse after eviction or in another session can run again. Replicas must share the same durable Workflow World. A known duplicate returns a new receipt settled `ignored`, without repeating the original reply. Use `result()` to read a send's settlement.
+Each session retains its last 1,024 distinct keys; reuse after eviction, after the session ends, or in another session can run again. Replicas must share the same durable Workflow World. A known duplicate returns a new receipt settled `ignored`, without repeating the original reply. Use `result()` to read a send's settlement.
 
 Await `send()` before acknowledging a webhook when the provider allows it.
 Acknowledging sooner can lose work. This does not make tool calls, outbound
@@ -421,6 +421,7 @@ export default defineChannel({
               principalId: event.source,
               attributes: {},
             },
+            idempotencyKey: `intake:${event.id}`,
           }),
       );
       return new Response("ok");
@@ -433,11 +434,23 @@ Before sending:
 
 - Verify the provider's signature and validate the payload, including size limits. Derive `event.source` from the verified sender, not an untrusted payload field.
 - Filter out events that should not reach the agent.
-- Deduplicate retries in your application unless the destination's `receive` hook passes a [delivery key](#retried-deliveries) to `from(address).send()`.
+- Pass the provider's stable event ID as `idempotencyKey`, so a redelivered webhook doesn't deliver the message twice. See [Retried deliveries](#retried-deliveries) for the limits.
 
 The supplied `auth` identifies who started the session, available to tools and event handlers as `session.auth.initiator`.
 
 The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+
+`send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, and `turnPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them to the session. A Slack target with only a `channelId` derives its address from `idempotencyKey`, so a retry reaches the same session. The key still only dedupes within that session's retained keys: a retry after the key is evicted runs another turn, and a retry after the session ends starts a new one, which on Slack is a new thread. Anything a `receive` hook does before sending also repeats on retry, such as posting an `initialMessage` (Slack, Teams, Discord, GitHub, and Telegram) or creating a Linear Agent Session for an `issueId` or `commentId` target.
+
+### Write a receive hook
+
+A custom channel's `receive` hook maps the target to an address. Pass the remaining input to `from(address).send()`, so the session gets every option the sender set:
+
+```ts
+async receive({ message, target, ...send }, { from }) {
+  return await from(`inbox:${target.inboxId}`).send(message, { ...send, state: { inboxId: target.inboxId } });
+},
+```
 
 `ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`.
 

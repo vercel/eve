@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   ChannelEventContext,
   ChannelEventOf,
@@ -7,6 +9,8 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { MessageContent } from "#shared/message-content.js";
+import { toMessageSendOptions, type MessageSendOptions } from "#channel/session.js";
+import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type {
   ChannelFrom,
   ChannelResolveSession,
@@ -353,14 +357,9 @@ export interface SlackInitialMessage {
 /**
  * Options for one turn requested by a generic Slack event handler.
  */
-export interface SlackEventSendOptions {
-  readonly auth: SessionAuthContext | null;
-  /** Prior conversation added as user and assistant turns before the message. */
-  readonly history?: readonly SessionHistoryMessage[];
+export type SlackEventSendOptions = MessageSendOptions & {
   readonly target: SlackReceiveTarget;
-  /** Overrides the workflow run title without changing the message sent to the model. */
-  readonly title?: string;
-}
+};
 
 /** Options for answering pending input requests from a generic Slack event handler. */
 export interface SlackEventRespondOptions {
@@ -980,13 +979,7 @@ function defaultOnAnswers(ctx: SlackAnswerContext): SlackAnswerResult {
  * `receive` hook and the pre-bound `send` function exposed to `onEvent`.
  */
 async function receiveOnSlack(
-  input: {
-    readonly auth: SessionAuthContext | null;
-    readonly message: MessageContent;
-    readonly history?: readonly SessionHistoryMessage[];
-    readonly target: SlackReceiveTarget;
-    readonly title?: string;
-  },
+  { message, target, ...send }: GenericReceiveInput<SlackReceiveTarget>,
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
     readonly api: SlackTransportOptions | undefined;
@@ -999,7 +992,7 @@ async function receiveOnSlack(
     readonly triggeringUserId?: string;
   },
 ): Promise<Delivery> {
-  const receiveTarget = input.target as Partial<SlackReceiveTarget>;
+  const receiveTarget = target as Partial<SlackReceiveTarget>;
   const channelId = receiveTarget.channelId;
   if (!channelId || typeof channelId !== "string") {
     throw new Error("slackChannel().receive requires target.channelId.");
@@ -1039,7 +1032,12 @@ async function receiveOnSlack(
 
   // Threadless proactive runs need distinct identities until their first
   // Slack post supplies the real thread timestamp and aliases the session.
-  const continuationThreadTs = threadTs || crypto.randomUUID();
+  // A keyed send derives its identity from the key, so a retry finds its session.
+  const continuationThreadTs =
+    threadTs ||
+    (send.idempotencyKey === undefined
+      ? crypto.randomUUID()
+      : threadlessIdentityFromKey(send.idempotencyKey));
   const audience =
     receiveTarget.audience === undefined
       ? undefined
@@ -1064,7 +1062,11 @@ async function receiveOnSlack(
 
   return deps
     .from(slackContinuationToken({ channelId: channelId, threadTs: continuationThreadTs }))
-    .send(input.message, { auth: input.auth, history: input.history, state, title: input.title });
+    .send(message, { ...send, state });
+}
+
+function threadlessIdentityFromKey(idempotencyKey: string): string {
+  return `key-${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32)}`;
 }
 
 function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
@@ -1394,9 +1396,9 @@ async function dispatchSlackEvent(input: {
           typeof input.envelope.event.user === "string" ? input.envelope.event.user : undefined,
         ),
       }),
-    send: (message, { auth, history, target, title }) =>
-      receiveOnSlack(
-        { auth, history, message, target, title },
+    send: async (message, options) =>
+      await receiveOnSlack(
+        { ...toMessageSendOptions(options), target: options.target, message },
         {
           from: input.from,
           api: input.api,

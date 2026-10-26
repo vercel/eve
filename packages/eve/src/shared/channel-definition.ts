@@ -2,9 +2,10 @@ import { type ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
+import type { MessageSendOptions } from "#channel/session.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { TurnPolicy } from "#channel/types.js";
 import type { ChannelDelivery, ChannelDeliveryReplacement } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
@@ -41,11 +42,10 @@ export type FetchFileFunction = (
  * Input passed to a channel's `receive` callback when another channel or
  * schedule proactively routes a message to it.
  */
-export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
+export type GenericReceiveInput<TReceiveTarget = Record<string, unknown>> = MessageSendOptions & {
   readonly message: MessageContent;
   readonly target: Readonly<TReceiveTarget>;
-  readonly auth: SessionAuthContext | null;
-}
+};
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
