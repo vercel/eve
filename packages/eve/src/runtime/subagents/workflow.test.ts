@@ -12,18 +12,30 @@ import type { TokenUsage } from "#shared/token-usage.js";
 /** The agent's side of the task: the messages it read and the turns it owes a reply. */
 const agent = vi.hoisted(() => ({
   delivered: [] as WorkflowToolRunMessage[],
+  models: [] as Array<string | undefined>,
   read: [] as string[],
   turns: [] as Array<(payload: RuntimeActionResultHookPayload) => void>,
 }));
 
 vi.mock("#execution/workflow-registry.js", async () => {
-  const { agentToolServeWorkflow } = await import("#runtime/subagents/workflow.js");
-  return { readRegisteredWorkflow: () => agentToolServeWorkflow };
+  const { agentToolServeWorkflow, agentWithModelServeWorkflow } =
+    await import("#runtime/subagents/workflow.js");
+  return {
+    readRegisteredWorkflow: (workflowId: string) =>
+      workflowId.includes("agentWithModel") ? agentWithModelServeWorkflow : agentToolServeWorkflow,
+  };
 });
 vi.mock("#execution/agent-sessions/steps.js", () => ({
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
-  openAgentSessionStep: async ({ message }: { readonly message: string }) => {
+  openAgentSessionStep: async ({
+    message,
+    model,
+  }: {
+    readonly message: string;
+    readonly model?: string;
+  }) => {
+    agent.models.push(model);
     agent.read.push(message);
     return { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId: "reviewer-session" };
   },
@@ -123,11 +135,24 @@ function replies(): Array<{ readonly callId: string; readonly output: unknown }>
 /** Alice asks the reviewer for a review; the reviewer has read her message. */
 async function startReview(): Promise<ReturnType<typeof startServeBody>> {
   agent.delivered.length = 0;
+  agent.models.length = 0;
   agent.read.length = 0;
   agent.turns.length = 0;
   const started = startServeBody(input);
   await settle();
   return started;
+}
+
+async function startModelReview(model: string): Promise<ReturnType<typeof startServeBody>> {
+  agent.delivered.length = 0;
+  agent.models.length = 0;
+  agent.read.length = 0;
+  agent.turns.length = 0;
+  return startServeBody({
+    ...input,
+    input: { message: "Review the release plan.", model },
+    workflowId: "workflow//eve//agentWithModelServeWorkflow",
+  });
 }
 
 /** Alice's next message: check the plan against the Friday freeze. */
@@ -175,6 +200,39 @@ async function sendAsTheTurnEnds(offset: number, { cancelled }: { readonly cance
   await started.outcome;
   return { read: [...agent.read], repliedFirst, replies: replies() };
 }
+
+it("opens the custom agent tool's root copy with its model input", async () => {
+  const started = await startModelReview("anthropic/claude-opus-5.5");
+  await settle();
+
+  expect(agent.models).toEqual(["anthropic/claude-opus-5.5"]);
+
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+});
+
+it("rejects a different model when continuing the custom agent task", async () => {
+  const started = await startModelReview("anthropic/claude-opus-5.5");
+  await settle();
+  started.control.apply({
+    ...fridayCheck,
+    call: {
+      ...fridayCheck.call,
+      input: {
+        message: fridayCheck.call.input.message,
+        model: "anthropic/claude-sonnet-5",
+      },
+    },
+  });
+
+  await expect(started.outcome).resolves.toMatchObject({
+    error: {
+      message:
+        "An agent task keeps the model it started with. This task has ended; start a new task to use another model.",
+    },
+    status: "failed",
+  });
+});
 
 it("forwards a message that reaches the task at any point as the agent's turn ends", async () => {
   // From joining the running turn to arriving after its reply, every arrival

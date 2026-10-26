@@ -1,4 +1,5 @@
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
@@ -6,6 +7,7 @@ import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
+import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep } from "#context/run-step.js";
 import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
 import {
@@ -32,6 +34,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { readPendingHistory, withoutPendingHistory } from "#execution/session/pending-history.js";
 import * as agentTraceState from "#tracing/eve/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -75,7 +78,11 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
+import {
+  resolveEffectiveAgentRuntime,
+  resolveSessionUsageLimit,
+} from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
@@ -105,6 +112,18 @@ interface PendingStepAttributes {
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
+  if (input.handover !== undefined) {
+    traceSessionHandover(
+      "inbox_unblocked",
+      input.sessionState.sessionId,
+      input.handover.attemptKey,
+      {
+        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
+        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
+        "eve.handoff.applied_at_clock": "workflow",
+      },
+    );
+  }
   return await withSessionStateDelta(input, (state) =>
     runSessionStep({
       ...state,
@@ -205,14 +224,21 @@ async function runSessionStepBody(
           .requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
-  const initialSession: HarnessSession = {
-    ...hydrateDurableSession({
-      compactionOverrides: {
-        thresholdPercent: effectiveAgent.thresholdPercent,
-      },
-      durable: durableSession,
-      turnAgent: effectiveAgent.turnAgent,
-    }),
+  // History left by `create()` joins the first message's turn. It leaves state only once a
+  // deliver result carries it, so a dropped first message does not lose it.
+  const pendingHistory =
+    delivery?.payloads.some((payload) => payload.message !== undefined) === true
+      ? readPendingHistory(durableSession.state)
+      : [];
+  const hydrated = hydrateDurableSession({
+    compactionOverrides: {
+      thresholdPercent: effectiveAgent.thresholdPercent,
+    },
+    durable: durableSession,
+    turnAgent: effectiveAgent.turnAgent,
+  });
+  let initialSession: HarnessSession = {
+    ...hydrated,
     history: validateHarnessModelMessages(input.history),
   };
   const history = createExecutionHistoryView(initialSession);
@@ -288,6 +314,7 @@ async function runSessionStepBody(
   try {
     const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
+    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
@@ -321,12 +348,20 @@ async function runSessionStepBody(
             : defaultDeliverResult(payload);
 
           if (result !== undefined && result !== null) {
-            results.push(result);
+            // `history` is framework-owned, so a channel's deliver hook cannot drop or rewrite it.
+            const history = [
+              ...(results.length === 0 ? pendingHistory : []),
+              ...(payload.history ?? []),
+            ];
+            results.push(history.length === 0 ? result : { ...result, history });
           }
         }
       } catch (error) {
         await failChannelDeliveries(error);
         throw error;
+      }
+      if (results.length > 0 && pendingHistory.length > 0) {
+        initialSession = { ...initialSession, state: withoutPendingHistory(initialSession.state) };
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
     }
@@ -493,6 +528,7 @@ async function runSessionStepBody(
         handleEvent,
         prepareApprovalTurn: (event) => dynamicConnections.dispatch(turnStartedForResolvers(event)),
         signInCompletions,
+        typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
@@ -501,6 +537,7 @@ async function runSessionStepBody(
           nodeId: bundle.nodeId,
         },
         node: effectiveNode,
+        sessionUsageLimit,
         titleAttributeWrite: pendingAttributes.title,
       });
       return step(modelSession, stepInput);
@@ -520,6 +557,10 @@ async function runSessionStepBody(
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
           const result = await runStep(ctx, session, async (enrichedSession) => {
+            // Races session resources against the model call; their users wait for what remains.
+            if (firstCall && input.input?.control === undefined) {
+              startSessionPrewarmers(ctx, "turn");
+            }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
             let schemaSession =

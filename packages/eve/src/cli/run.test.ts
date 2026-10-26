@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCliProgram, resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
 import { cliTelemetryCommandPaths, internalCliCommandPaths } from "#cli/telemetry/index.js";
@@ -662,6 +662,41 @@ describe("eve dev --input", () => {
       }),
     ).rejects.toThrow("--input requires the interactive UI");
   });
+});
+
+describe("eve start schedules", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    { argv: ["start", "--no-schedules"], inherited: undefined, schedules: false, reported: true },
+    { argv: ["start"], inherited: "1", schedules: true, reported: true },
+    { argv: ["start"], inherited: undefined, schedules: true, reported: false },
+  ])(
+    "passes schedules=$schedules and reports disabled=$reported for $argv with $inherited",
+    async ({ argv, inherited, schedules, reported }) => {
+      vi.stubEnv("EVE_SCHEDULES_DISABLED", inherited);
+      const lines: string[] = [];
+      const startProductionHost = vi.fn(async () => ({
+        close: async () => {},
+        url: "http://127.0.0.1:4321/",
+        wait: async () => {},
+      }));
+
+      await runCli(
+        argv,
+        { error: () => {}, log: (line) => lines.push(line) },
+        {
+          startProductionHost,
+        },
+      );
+
+      expect(startProductionHost).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ schedules }),
+      );
+      expect(lines.some((line) => line.includes("schedules disabled"))).toBe(reported);
+    },
+  );
 });
 
 describe("eve remote invoke", () => {

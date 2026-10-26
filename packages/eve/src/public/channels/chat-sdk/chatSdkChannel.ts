@@ -98,6 +98,8 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
   usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
+  /** Id of the latest message someone other than the bot sent in the thread. */
+  latestMessageId?: string;
   streamStepIndex?: number | null;
 }
 
@@ -172,10 +174,22 @@ interface ChatSdkThreadOptions {
  */
 export interface ChatSdkSendOptions extends ChatSdkThreadOptions, Omit<ChannelSendOptions, "auth"> {
   /**
+   * Answers the input request on the card eve posted as `messageId` with
+   * `optionId`, when that card is still waiting on it. Otherwise eve delivers
+   * the message as usual.
+   */
+  readonly inputAnswer?: ChatSdkInputAnswer;
+  /**
    * Controls how this input interacts with an active eve turn on the same
    * thread. Defaults to the channel's `turnPolicy`, then `"steer"`.
    */
   readonly turnPolicy?: TurnPolicy;
+}
+
+/** An option chosen for the input request card posted as `messageId`. */
+export interface ChatSdkInputAnswer {
+  readonly messageId: string;
+  readonly optionId: string;
 }
 
 /** Options for `bridge.respond`: channel respond options plus the thread. */
@@ -383,6 +397,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      recordLatestMessage(channel.state, payload);
+      const answer = resolveInputAnswer(channel.state, payload);
+      if (answer !== undefined) {
+        return { context: payload.context, inputResponses: parseInputResponses([answer]) };
+      }
       return defaultDeliverResult(payload);
     },
     events: mergedEvents,
@@ -410,7 +429,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   async function showPrompt(channel: EventChannel, request: InputRequest) {
     if (!channel.thread) return false;
     const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
-    if (!posted.id || channel.state.editSupported === false) return;
+    if (!posted.id) return;
+    // Tracked even without edit support, so an answer can name the card it is on.
     channel.state.pendingInputCards = {
       ...channel.state.pendingInputCards,
       [posted.id]: { requests: [request], resolved: {} },
@@ -438,6 +458,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       )
         ? rest
         : { ...rest, [messageId]: { requests: card.requests, resolved } };
+      if (channel.state.editSupported === false) continue;
       try {
         await thread.adapter.editMessage(
           thread.id,
@@ -450,8 +471,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
           continue;
         }
         channel.state.editSupported = false;
-        channel.state.pendingInputCards = {};
-        return;
       }
     }
   }
@@ -676,12 +695,14 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   options: ChatSdkSendOptions,
 ): Promise<Session> {
   const from = activeFrom("send");
-  const { adapterName, auth, thread: threadInput, ...sendOptions } = options;
+  const { adapterName, auth, inputAnswer, thread: threadInput, ...sendOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
+  const state: ChatSdkDeliveryState = { thread };
+  if (inputAnswer !== undefined) state.inputAnswer = inputAnswer;
   return from(thread.id).send(message, {
     ...sendOptions,
     auth: auth ?? null,
-    state: { thread },
+    state,
   });
 }
 
@@ -719,6 +740,44 @@ function recordPrincipalUser(
     ...state.usersByPrincipal,
     [caller.principalId]: recorded === undefined ? author.userId : null,
   };
+}
+
+/**
+ * Records the delivery's message as the thread's latest. Session state keeps
+ * the thread from the first delivery, so its `currentMessage` goes stale.
+ */
+function recordLatestMessage(state: ChatSdkChannelState, payload: DeliverPayload): void {
+  const message = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread
+    ?.currentMessage;
+  if (message === undefined || message.author.isMe) return;
+  state.latestMessageId = message.id;
+}
+
+/** Channel state a delivery carries. `inputAnswer` lives only on the delivery. */
+interface ChatSdkDeliveryState extends ChatSdkChannelState {
+  inputAnswer?: ChatSdkInputAnswer;
+}
+
+/**
+ * The response for a delivery's `inputAnswer`, when its card still waits on a
+ * request that offers the option. Matching the card keeps an answer meant for
+ * one prompt from settling a different request.
+ */
+function resolveInputAnswer(
+  state: ChatSdkChannelState,
+  payload: DeliverPayload,
+): InputResponse | undefined {
+  const answer = (payload.state as Partial<ChatSdkDeliveryState> | undefined)?.inputAnswer;
+  if (answer === undefined) return undefined;
+  const card = state.pendingInputCards?.[answer.messageId];
+  const request = card?.requests.find(
+    (candidate) =>
+      card.resolved[candidate.requestId] === undefined &&
+      candidate.options?.some((option) => option.id === answer.optionId) === true,
+  );
+  return request === undefined
+    ? undefined
+    : { optionId: answer.optionId, requestId: request.requestId };
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {

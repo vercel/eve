@@ -24,12 +24,7 @@ export interface CompileFromMemoryInput {
   readonly appRoot?: string;
   readonly agentRoot?: string;
   readonly model: string;
-  readonly limits?: {
-    readonly maxInputTokensPerSession?: number | false;
-    readonly maxOutputTokensPerSession?: number | false;
-    readonly maxTokenCostUsdPerSession?: number | false;
-    readonly sessionTimeoutMs?: number | false;
-  };
+  readonly limits?: import("#shared/agent-definition.js").AgentLimitsDefinition;
   readonly revision?: string;
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly tools?: readonly CompileFromMemoryToolInput[];

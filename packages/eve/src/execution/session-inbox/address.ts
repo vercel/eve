@@ -53,7 +53,10 @@ export function logicalSessionInboxToken(token: string): string | undefined {
     : undefined;
 }
 
-/** Marker a releasing owner leaves so ingress can tell "handoff in progress" from "no session". */
+/**
+ * Marker an owner older than handoff version 3 leaves while it releases its
+ * hooks, so ingress can tell "handoff in progress" from "no session".
+ */
 export function sessionHandoffMarkerToken(token: string): string {
   return `eve:inbox:handoff:${token}`;
 }

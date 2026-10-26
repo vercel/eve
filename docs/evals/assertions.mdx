@@ -187,6 +187,27 @@ t.eventsSatisfy("assistant reply includes the marker", (events) =>
 );
 ```
 
+### Assert and score reasoning
+
+When the provider exposes reasoning, eve captures each completed block as a `reasoning.completed` event. Assert on its text with `turn.event(...)`, or join the blocks and pass them to a judge:
+
+```ts
+turn.event("reasoning.completed", {
+  data: { reasoning: /checks? the units/i },
+});
+
+const reasoning = turn.events
+  .filter((event) => event.type === "reasoning.completed")
+  .map((event) => event.data.reasoning)
+  .join("\n\n");
+
+t.judge("The reasoning checks its assumptions before concluding.", {
+  on: reasoning,
+}).atLeast(0.8);
+```
+
+A provider that does not expose reasoning emits no `reasoning.completed` event, so the `turn.event` gate fails and the judge grades an empty string. Reasoning the provider keeps hidden cannot be graded. The default judge input and `session.transcript` exclude reasoning, which is why the example passes it with `on`.
+
 ## Required preconditions
 
 Recorded assertions never throw and are not awaitable. When later control flow depends on a value, use `await t.require(value, assertion)`. It records a gate, returns the original value when it passes, and stops the test body without adding a duplicate execution error when it fails:

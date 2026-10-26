@@ -640,6 +640,65 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     expect(parkedSteps(result.session)).toEqual([]);
   });
 
+  it.each([
+    { label: "direct", responseAuthorization: false },
+    { label: "response-authorized", responseAuthorization: true },
+  ])("tells the model the note sent with a $label Cancel", async ({ responseAuthorization }) => {
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const ctx = createApprovalContext();
+    ctx.set(AuthKey, responder);
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "generate-approval-resume-session",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    const execute = vi.fn(async () => "/workspace");
+    const runStep = createToolLoopHarness(
+      createConfig(createModel(), execute, {
+        request: () => "user-approval",
+        ...(responseAuthorization ? { response: () => ({ status: "allowed" as const }) } : {}),
+      }),
+    );
+
+    let result = await contextStorage.run(ctx, () =>
+      runStep(createPendingApprovalSession(undefined, responseAuthorization), {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            response: {
+              optionId: "cancel",
+              requestId: approvalRequest.approvalId,
+              text: "use 900 instead of 1250",
+            },
+          },
+        ],
+      }),
+    );
+    if (responseAuthorization) {
+      const next = result.next;
+      if (typeof next !== "function") {
+        throw new TypeError("Expected response authorization to schedule a continuation.");
+      }
+      result = await contextStorage.run(ctx, () => next(result.session));
+    }
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(findPart(result.session.history, "tool-result")).toMatchObject({
+      output: {
+        reason:
+          'Tool execution was denied. The person who denied it wrote: "use 900 instead of 1250"',
+        type: "execution-denied",
+      },
+      toolCallId: toolCall.toolCallId,
+    });
+  });
+
   it("executes approved siblings concurrently and exactly once each", async () => {
     const bothStarted = Promise.withResolvers<void>();
     let started = 0;
@@ -899,6 +958,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       ...createConfig(model, execute),
       capabilities: { requestInput: true },
       handleEvent: async () => {},
+      sessionUsageLimit: ({ window }) => window.inputTokens >= 12,
     } satisfies ToolLoopHarnessConfig;
     const usageState = {
       cacheReadTokens: 0,
@@ -908,13 +968,11 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       outputTokens: 3,
       sawCost: false,
     };
-    const session = setTurnUsageState(
-      {
-        ...createPendingApprovalSession(),
-        limits: { maxInputTokensPerSession: 12 },
-      },
-      { ...usageState, session: usageState, turnId: "turn_previous" },
-    );
+    const session = setTurnUsageState(createPendingApprovalSession(), {
+      ...usageState,
+      session: usageState,
+      turnId: "turn_previous",
+    });
     const runStep = createToolLoopHarness(config);
 
     const limited = await runStep(session, {

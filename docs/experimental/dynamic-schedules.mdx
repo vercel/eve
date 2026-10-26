@@ -1,0 +1,186 @@
+---
+title: "Dynamic Schedules"
+description: "Create and manage creator-owned recurring or one-time schedules at runtime."
+---
+
+<Callout type="info" title="Feature flag required">
+  Dynamic schedules on Vercel are gated by an organization-level feature flag. Contact your Vercel
+  representative to have the feature enabled for your organization.
+</Callout>
+
+Use `defineDynamicSchedules` when users or agents need to create recurring or one-time schedules at runtime. Export the definition from `agent/schedules/`; eve derives its identity from the file path. The definition configures management tools and an occurrence callback. It does not create a schedule or set its timing.
+
+This API is experimental and may change. Import it from `eve/experimental/schedules`. For fixed, code-authored cron jobs, use [`defineSchedule`](../schedules) instead. For a self-hosted alternative with application-owned storage, see [Dynamic scheduling](../patterns/dynamic-scheduling).
+
+## Define scheduled work
+
+The model supplies schema-defined payload. eve captures the authenticated creator separately and resolves current execution auth whenever an occurrence fires.
+
+```ts title="agent/schedules/requests.ts"
+import { byPrincipal, defineDynamicSchedules } from "eve/experimental/schedules";
+import { z } from "zod";
+import slack from "../channels/slack";
+import { resolveCurrentUser } from "../lib/identity";
+import { resolveCreatorDm, resolveAuthorizedTeamChannel } from "../lib/schedule-policy";
+
+export default defineDynamicSchedules({
+  description: "Schedule Slack tasks for the creator's DM or authorized team channel.",
+  inputSchema: z
+    .object({
+      task: z.string().min(1).max(2000),
+      destination: z.enum(["my-dm", "team-channel"]),
+    })
+    .strict(),
+  scope: byPrincipal,
+  auth: ({ principal }) => resolveCurrentUser(principal),
+  async run({ payload, occurrence, to, auth }) {
+    const target =
+      payload.destination === "my-dm"
+        ? await resolveCreatorDm(auth)
+        : await resolveAuthorizedTeamChannel(auth);
+    await to(slack, target).send(
+      `Perform this task now.\nSchedule: ${occurrence.displayName}\nScheduled for: ${occurrence.scheduledAt}\nTask: ${payload.task}`,
+    );
+  },
+});
+```
+
+The identity and destination helpers are application code. `inputSchema`, `auth`, and `run` are required. `provider` is optional and defaults to `vercelScheduleProvider()`. Pass a provider explicitly to use another backend or configure the Vercel endpoint.
+
+`scope` defaults to `byPrincipal`, isolating management by authenticated principal type, authenticator, issuer, and ID, plus application and path-derived definition identity. A custom scope resolver must authorize each operation before returning a namespace; return `null` to deny.
+
+## Revalidate creator identity
+
+`auth({ principal, payload, occurrence })` resolves the stored creator reference to current execution auth. Look up current account status and permissions rather than replaying credentials or roles captured at creation. Return `null` to deny; thrown errors remain eligible for provider retries.
+
+The returned principal type, authenticator, issuer, ID, and subject must match the creator reference. eve does not fall back to app identity. Manual invocation does not replace the creator with the invoker. Tool and connection authorization still applies during execution.
+
+## Prepare payloads and destinations
+
+The generated creation and update tools validate their `payload` field with your `inputSchema`. Without `preparePayload`, eve validates payloads before persistence and again before dispatch. The complete provider envelope is limited to 64 KB; store JSON data and stable references, not credentials or sensitive recipient details.
+
+Optional `preparePayload(input, context)` validates application policy, resolves caller context, and returns the stored shape. It runs on creation and payload replacement, after input validation and scope authorization, before persistence. For model calls, eve prepares before asking for approval and provides the prepared payload to `approval.create` or `approval.update`. It prepares again before writing and rejects the call if the prepared result differs from the approved snapshot. Preparation errors reach the model before a person is asked. Authenticated code calling the client prepares once before writing, without model approval.
+
+`auth`, `run`, and occurrence events infer the prepared return type. Declare `preparePayload` before these callbacks or give it an explicit return type for TypeScript contextual inference. Without preparation, payload type comes from the schema.
+
+The input schema does not describe prepared output. eve bounds and JSON-validates the persisted envelope but does not structurally revalidate prepared application data against the input schema at execution. Authored code owns that persisted contract; validate it explicitly if needed. Preparation may repeat on write retries, so avoid irreversible effects. Reads, timing-only updates, state changes, and occurrences never rerun it.
+
+```ts
+preparePayload(input, context) {
+  const target = resolveDestination(input.destination, context);
+  return { task: input.task, target };
+},
+```
+
+`resolveDestination` is application code. For channel delivery, it can validate trusted caller context and capture channel/workspace references without exposing those fields in the model-facing schema. Reject callers that lack the required channel context, including delegated work when appropriate. Payload replacement recaptures the destination and creator from the updating caller.
+
+Destination IDs are optional. Conditional logic in `run` can derive a DM from creator identity, select an authorized configured channel, or look up a destination using another payload value. A schema may expose explicit IDs when the model can obtain them, but valid IDs do not prove access. Management scope does not authorize sending to every destination. Validate model-selected destinations against the creator's current permissions.
+
+The original creation conversation is not captured automatically. To support “reply in the exact thread where I created this,” persist an authorized thread reference through `preparePayload` or application code. Creator identity alone cannot recover that thread. Runtime lookups can follow changed configuration; persist a destination reference when the destination must stay fixed.
+
+## Expose management tools
+
+Each definition contributes tools for `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`. Each has its own object-rooted schema, approval policy, and readable action label. For example, `agent/schedules/billing/requests.ts` generates `schedule__billing-requests__create`, `schedule__billing-requests__update`, and the other operation names. There is no combined manage tool or operation field.
+
+Creation takes `{ name, expression, payload }`. Updates take `{ name, expression?, payload? }` and require at least an expression or a complete replacement payload. Listing takes optional `{ cursor, limit }`, with limits from 1 through 100. The remaining tools take `{ name }` using the unique identifier from receipts or reads.
+
+Set `tool: true` (the default) for direct tools, `tool: "deferred"` for catalog-discovered tools, or `tool: false` for code-only scheduling. Deferred operations keep the same names, schemas, approval policies, and authorization checks; the model finds them with `eve__search` and calls them with `eve__tool`. See [Dynamic capabilities](../guides/dynamic-capabilities#dynamic-tools).
+
+Reads need no approval by default; mutations require user approval. Configure top-level `approval`, keyed by operation, with ordinary request/response policies. Separate tool identities keep `once()` grants independent. Create and payload-replacement update policies receive a typed `payload` containing prepared data; `toolInput.payload` also contains prepared rather than raw data. Timing-only update policies receive `payload: undefined`.
+
+```ts
+approval: {
+  create: ({ payload }) => payload.target.audience === "private" ? "not-applicable" : "user-approval",
+  update: ({ payload }) => payload?.target.audience === "private" ? "not-applicable" : "user-approval",
+  delete: always(),
+},
+```
+
+Import `always` from `eve/tools/approval`; `target.audience` above is an application-owned prepared field. Combining `tool: false` with `approval` is rejected by TypeScript and runtime validation: these policies apply only to model calls, not code using `schedules(definition)`. Approvals do not bypass scope authorization or configure tools a future agent session uses.
+
+## Use the authenticated client
+
+```ts title="agent/tools/list-requests.ts"
+import { schedules } from "eve/experimental/schedules";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import requests from "../schedules/requests";
+
+export default defineTool({
+  description: "List the caller's scheduled requests.",
+  inputSchema: z.object({}),
+  async execute() {
+    return await (await schedules(requests)).list({ limit: 20 });
+  },
+});
+```
+
+Call the client inside an active eve context, not at module scope. Client creation accepts `{ name, expression, payload }`. The supplied `name` is a display label and may repeat; it must start with an ASCII letter or digit and contain only letters, digits, `.`, `_`, or `-`, up to 256 characters. eve truncates labels longer than 218 characters and appends `--` plus a UUID to allocate a unique management name.
+
+Receipts and reads include `name` (use this exact value for management) and `displayName`. Callbacks and events keep the unique identifier in `occurrence.name` and expose the readable label as `occurrence.displayName`. Approval applies to the supplied label, timing, and payload before the unique identifier is allocated.
+
+Both generated tools and authored clients check scope authorization on every operation, including during scheduled turns and local delegated work. Scheduled sessions remain unattended: mutation tools that require human approval cannot wait for it. Authorize unattended operations explicitly with `approval` policies, or use an authenticated client in authored code; neither bypasses scope checks.
+
+Authored tools, hooks, and channel events can read `ctx.session.schedule`: `undefined` for ordinary work, or `{ definition, instance?, occurrenceId? }` for scheduled work. Static schedules that run as a user are included; this is framework provenance, not an auth attribute. Custom scope policies can inspect `context.session.schedule` to deny or restrict scheduled callers. A new ordinary inbound message clears scheduled-turn context; approval/input responses preserve it.
+
+## Set timing
+
+For “in one minute,” use `expression: { type: "delay", minutes: 1 }`. eve resolves the time when the approved write executes and rounds up to minute precision, adding up to 59 seconds before provider/execution latency. Delays accept whole minutes from 1 through 525,600. Approval time is not part of the delay. A separate client retry resolves a new time; this is not a mutation-idempotency guarantee.
+
+Use `single` with a `YYYY-MM-DDTHH:mm` local datetime and IANA timezone for absolute times, or `cron` with a five-field expression and timezone for recurring work. Omitted timezones mean UTC. Relative delays do not need a timezone.
+
+```ts
+const client = await schedules(requests);
+const created = await client.create({
+  name: "daily-summary",
+  expression: { type: "cron", cron: "0 9 * * 1-5", timezone: "America/New_York" },
+  payload: { task: "Summarize open issues.", destination: "my-dm" },
+});
+
+await client.update(created.name, {
+  expression: { type: "cron", cron: "0 10 * * 1-5", timezone: "America/New_York" },
+});
+```
+
+Import `schedules` from `eve/experimental/schedules` and `requests` from your definition module. Run this code in an active eve context.
+
+## Update and control schedules
+
+`get` and `list` return identity, timing, state, and timestamps, not payload or creator data. New schedules are active; creation has no state option. Use `disable` to pause future scheduling.
+
+`client.update(name, patch)` changes timing, replaces the complete payload, or does both. Timing-only updates preserve the stored payload and creator and do not call `preparePayload`. Payload replacement validates the complete new input, reruns preparation, and captures the updating caller as the new creator. It is not a partial merge. In a shared scope, authorizing payload replacement therefore also authorizes a change of execution identity.
+
+Updates preserve the management name, schedule ID, state, and dispatch target. They cannot rename a schedule or change its state; use `enable` or `disable` for state changes. Updating an inactive or completed schedule does not activate it.
+
+Updates, enable, disable, and delete affect future scheduling, not emitted callbacks or running sessions. Use delete-and-create only when you need a separate schedule identity; replacement is not atomic.
+
+`invoke(name)` requests an additional occurrence as the stored creator. Inactive schedules may be invoked; completed schedules cannot. Manual invocation does not consume a pending one-time fire. Enqueue acceptance does not prove callback or agent success.
+
+## Handle occurrences and retries
+
+`run` receives `payload`, `occurrence`, `auth`, `to`, and `waitUntil`. It may start zero or several sessions or perform application work directly. `to(channel, target).send(message)` is bound to the resolved creator; no auth argument is needed or accepted. It starts fresh, unattended sessions through an authored channel, even when the target names an existing thread. It does not steer an existing conversation.
+
+eve awaits the callback and its registered `waitUntil` promises before reporting `occurrence.dispatched`. That event includes `sessionIds`; it means dispatch succeeded, not that the agent completed its task or delivered a successful result. Channels own output delivery and session-level failure reporting. Unattended sessions cannot wait for approvals or questions; configure tools accordingly.
+
+Provider retries may repeat the callback and start new sessions. This is an at-least-once callback contract, not exactly-once side effects. Use `occurrence.executionId` together with the schedule/resource identity to deduplicate application effects where the destination supports it. An observer failure can also cause callback retry. `occurrence.failed` reports permanent provider failures or exhaustion of the provider retry budget.
+
+## Choose a provider and test locally
+
+The default `vercelScheduleProvider()` supports these environments:
+
+| Environment                                      | Storage and delivery                                                                                                                               |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel production                                | Requires feature-flag enablement for your organization. Hosted Vercel Schedules delivers occurrences through Vercel Queues.                        |
+| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.                                       |
+| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve polls local Queues to deliver due occurrences automatically.                                         |
+| Vercel preview or self-hosted production         | The default provider rejects operations. Use a different provider or the [application-managed scheduling pattern](../patterns/dynamic-scheduling). |
+
+For automatic local delivery, start eve through `vc dev` with a Vercel CLI that supports local Schedules and Queues. Plain `eve dev` still uses the in-memory fallback. Local queue-delivery errors appear in the dev server logs and retry after five seconds.
+
+Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to configure the Vercel endpoint explicitly. The in-memory provider is also available from `eve/experimental/schedules/testing` for code-driven tests.
+
+## What to read next
+
+- [Schedules](../schedules): author fixed cron jobs with `defineSchedule`.
+- [Channels](../channels/overview): deliver schedule output to users.
+- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): inspect a scheduled run.

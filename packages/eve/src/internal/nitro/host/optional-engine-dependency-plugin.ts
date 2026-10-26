@@ -9,7 +9,6 @@
  */
 export const OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME: Readonly<Record<string, string>> = {
   "just-bash": "just-bash",
-  microsandbox: "microsandbox",
 };
 
 interface BundlerPluginShape {

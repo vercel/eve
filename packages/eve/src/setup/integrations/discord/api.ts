@@ -108,3 +108,39 @@ export async function configureDiscordInteractionsEndpoint(
     throw new Error(`Discord rejected the interactions endpoint (HTTP ${response.status}).`);
   }
 }
+
+// Application flags: Message Content approved for a verified app, or self-served below 100 servers.
+const GATEWAY_MESSAGE_CONTENT = 1 << 18;
+const GATEWAY_MESSAGE_CONTENT_LIMITED = 1 << 19;
+// The only flags an app may set itself: the limited presence, members, and message content intents.
+const EDITABLE_INTENT_FLAGS = (1 << 13) | (1 << 15) | GATEWAY_MESSAGE_CONTENT_LIMITED;
+
+const DiscordApplicationFlagsSchema = z.object({ flags: z.number().optional() });
+
+/**
+ * Turns on the Message Content intent, so messages that don't mention the bot,
+ * such as thread follow-ups, arrive with their text. Returns `false` when
+ * Discord refuses, as it does for a verified app in 100 or more servers, which
+ * needs Discord's approval instead.
+ */
+export async function enableDiscordMessageContentIntent(
+  botToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  const current = await discordRequest(botToken, "/applications/@me", { method: "GET" }, fetchImpl);
+  if (!current.ok) return false;
+  const flags = DiscordApplicationFlagsSchema.safeParse(await current.json()).data?.flags ?? 0;
+  if ((flags & (GATEWAY_MESSAGE_CONTENT | GATEWAY_MESSAGE_CONTENT_LIMITED)) !== 0) return true;
+  const response = await discordRequest(
+    botToken,
+    "/applications/@me",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        flags: (flags & EDITABLE_INTENT_FLAGS) | GATEWAY_MESSAGE_CONTENT_LIMITED,
+      }),
+    },
+    fetchImpl,
+  );
+  return response.ok;
+}

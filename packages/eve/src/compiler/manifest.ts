@@ -578,6 +578,7 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
+    sourceField: z.literal("compaction.model").optional(),
     promptCache: z
       .object({
         anthropic: z
@@ -615,16 +616,12 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
-const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
-const sessionTokenCostLimitSchema = z.union([z.number().finite().positive(), z.literal(false)]);
 const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(false)]);
 
 const compiledAgentLimitsDefinitionSchema = z
   .object({
-    maxInputTokensPerSession: sessionTokenLimitSchema.optional(),
-    maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
-    maxTokenCostUsdPerSession: sessionTokenCostLimitSchema.optional(),
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
+    sessionUsage: z.literal(true).optional(),
   })
   .strict();
 
@@ -1255,10 +1252,8 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
       config.limits === undefined
         ? undefined
         : {
-            maxInputTokensPerSession: config.limits.maxInputTokensPerSession,
-            maxOutputTokensPerSession: config.limits.maxOutputTokensPerSession,
-            maxTokenCostUsdPerSession: config.limits.maxTokenCostUsdPerSession,
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
+            sessionUsage: config.limits.sessionUsage,
           },
     source: { ...config.source },
     tool: config.tool,
@@ -1373,6 +1368,9 @@ function cloneCompiledRuntimeModelReference(
   }
   if (model.source !== undefined) {
     clone.source = { ...model.source };
+  }
+  if (model.sourceField !== undefined) {
+    clone.sourceField = model.sourceField;
   }
   return clone;
 }

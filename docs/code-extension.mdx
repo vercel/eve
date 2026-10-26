@@ -92,12 +92,13 @@ export default git({});
 
 Configure `github` to broker GitHub access through Connect instead. The extension then adds the authenticated `git__gh` tool, tells the agent to use it for every authenticated GitHub operation, and switches `git__pr` to `gh-signed-commit` for repositories that require verified signatures.
 
-| Option             | Required      | Effect                                                                                     |
-| ------------------ | ------------- | ------------------------------------------------------------------------------------------ |
-| `github.connector` | With `github` | Connector that mints a GitHub token                                                        |
-| `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                   |
-| `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
-| `github.authorize` | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
+| Option               | Required      | Effect                                                                                            |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
+| `github.connector`   | With `github` | Connector that mints a GitHub token                                                               |
+| `github.org`         | With `github` | Organization whose repositories the `gh` tool can access                                          |
+| `github.broker`      | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules        |
+| `github.authorize`   | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
+| `github.attribution` | No            | `attribution(ctx)` callback that returns the `{ name, email }` co-author for this turn            |
 
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
@@ -124,6 +125,19 @@ export default git({
       );
       return response.status === 204;
     },
+  },
+});
+```
+
+Commits made by the `gh` tool are authored by the GitHub App. To credit the person a turn works for, return them from `github.attribution`. The callback receives the tool's context, so it can read the verified caller from `ctx.session.auth.current` or resolve their linked accounts with `ctx.getToken`. The `gh` tool then ends every `gh-signed-commit` message, and every `gh pr create` body passed with `--body` or `--body-file`, with `Co-authored-by: <name> <email>`. Return `null` to publish without a co-author. `Co-authored-by` lines the agent writes itself are kept, and the trailer joins their block so they still count. Pull requests created without a body flag, such as with `--fill` or `--template`, and other paths, such as `gh api`, are not attributed.
+
+```ts
+git({
+  github: {
+    connector: "github",
+    org: "acme",
+    broker,
+    attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
   },
 });
 ```

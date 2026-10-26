@@ -27,6 +27,7 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
+import type { ClientContextValue } from "#eve-channel/types.js";
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
@@ -142,7 +143,7 @@ interface ParsedSessionMessageBody {
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
-  context?: readonly string[];
+  context?: ClientContextValue;
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
 }
@@ -220,19 +221,6 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   return typeof turnId === "string" ? { turnId } : {};
 }
 
-export async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
-  let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
-  }
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
-  }
-  return payload as Record<string, unknown>;
-}
-
 export async function parseResetBody(
   req: Request,
 ): Promise<{ readonly reason?: string } | Response> {
@@ -305,18 +293,22 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // Resolve the tail before committing a response; otherwise an unknown or
-    // unreachable session would answer 200 and fail mid-body. Open the event
-    // stream alongside the tail lookup to avoid an extra round trip.
+    // Fail before committing a response; otherwise an unknown or unreachable
+    // session would answer 200 and fail mid-body. A following read checks the
+    // session as it opens, and a historical read always reports the tail, so
+    // only a response that reports it pays for the tail lookup. Open the event
+    // stream alongside that lookup to avoid an extra round trip.
     const eventsPromise = session.getEventStream({ follow, startIndex });
     // Handled below; this keeps an early rejection from being reported as unhandled.
     eventsPromise.catch(() => {});
-    let tailIndex: number;
-    try {
-      tailIndex = await session.getStreamTailIndex();
-    } catch (error) {
-      void eventsPromise.then((events) => events.cancel()).catch(() => {});
-      throw error;
+    let tailIndex: number | undefined;
+    if (includeTailIndex) {
+      try {
+        tailIndex = await session.getStreamTailIndex();
+      } catch (error) {
+        void eventsPromise.then((events) => events.cancel()).catch(() => {});
+        throw error;
+      }
     }
     const events = await eventsPromise;
     const controlVersion =
@@ -332,14 +324,14 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (includeTailIndex) {
+    if (tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
       serializeAsNdjson(
         events,
         request.signal,
-        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
+        tailIndex === undefined ? undefined : streamEventLimit(startIndex, tailIndex),
         controlVersion !== undefined,
       ),
       { headers },
@@ -572,13 +564,11 @@ function parseInputResponses(
   return inputResponses;
 }
 
-const CLIENT_CONTEXT_PREFIX = "Client context:\n";
-
-function parseClientContextField(value: unknown): string[] | Response | undefined {
+function parseClientContextField(value: unknown): ClientContextValue | Response | undefined {
   if (value === undefined) return undefined;
 
   if (typeof value === "string") {
-    return value.length > 0 ? [toClientContextMessage(value)] : undefined;
+    return value.length > 0 ? value : undefined;
   }
 
   if (Array.isArray(value)) {
@@ -591,7 +581,7 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
       );
     }
 
-    return value.map((entry) => toClientContextMessage(entry));
+    return value;
   }
 
   if (value === null || typeof value !== "object") {
@@ -606,17 +596,13 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
 
   try {
     const json = parseJsonObject(value);
-    return [toClientContextMessage(JSON.stringify(json))];
+    return json;
   } catch {
     return Response.json(
       { error: "Expected 'clientContext' to be a JSON-serializable object.", ok: false },
       { status: 400 },
     );
   }
-}
-
-function toClientContextMessage(content: string): string {
-  return `${CLIENT_CONTEXT_PREFIX}${content}`;
 }
 
 export function parseIncludeTailIndex(request: Request): boolean {

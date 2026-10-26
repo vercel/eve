@@ -12,6 +12,7 @@ export type CredentialPolicyBroker = (
 export type { GitHubLeaseRule } from "eve/extensions/git/sandbox";
 
 export type GitHubLeaseBroker = GitHubConfig["broker"];
+export type GitHubAttribution = NonNullable<GitHubConfig["attribution"]>;
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 const delivery = z.enum(["firewall", "command"]).default("firewall");
@@ -30,6 +31,7 @@ export default defineExtension({
         connector: z.string().min(1),
         org: z.string().min(1),
         broker: fn<GitHubLeaseBroker>(),
+        attribution: fn<GitHubAttribution>().optional(),
       })
       .optional(),
     vercel: z

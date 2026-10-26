@@ -93,52 +93,6 @@ export async function buildSandboxDockerfile(input: {
   );
 }
 
-const LOCAL_REGISTRY_CONTAINER = "eve-sandbox-registry";
-const LOCAL_REGISTRY_HOST = "127.0.0.1:51921";
-
-export async function publishDockerImageForMicrosandbox(input: {
-  readonly cli: DockerCli;
-  readonly imageReference: string;
-}): Promise<string> {
-  const inspect = await input.cli.run([
-    "container",
-    "inspect",
-    "--format",
-    "{{.State.Running}}",
-    LOCAL_REGISTRY_CONTAINER,
-  ]);
-  if (inspect.exitCode !== 0) {
-    expectDockerSuccess(
-      await input.cli.run([
-        "run",
-        "--detach",
-        "--name",
-        LOCAL_REGISTRY_CONTAINER,
-        "--publish",
-        `${LOCAL_REGISTRY_HOST}:5000`,
-        "registry:2",
-      ]),
-      "start the local microsandbox image registry",
-    );
-  } else if (inspect.stdout.trim() !== "true") {
-    expectDockerSuccess(
-      await input.cli.run(["start", LOCAL_REGISTRY_CONTAINER]),
-      "restart the local microsandbox image registry",
-    );
-  }
-
-  const target = `${LOCAL_REGISTRY_HOST}/eve/${input.imageReference.replace(":", "-")}`;
-  expectDockerSuccess(
-    await input.cli.run(["tag", input.imageReference, target]),
-    `tag microsandbox image "${target}"`,
-  );
-  expectDockerSuccess(
-    await input.cli.run(["push", target]),
-    `publish microsandbox image "${target}"`,
-  );
-  return target;
-}
-
 function isFileNotFoundError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

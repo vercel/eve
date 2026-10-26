@@ -1,19 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, newMessage, send } = vi.hoisted(() => ({
+const {
+  createiMessageAdapter,
+  directMessage,
+  fetchMessage,
+  newMessage,
+  reaction,
+  send,
+  vercelOidc,
+} = vi.hoisted(() => ({
+  createiMessageAdapter: vi.fn(
+    (_config: { webhookVerifier?: (request: Request) => unknown }) => ({}),
+  ),
   directMessage: vi.fn(),
+  fetchMessage: vi.fn(),
   newMessage: vi.fn(),
+  reaction: vi.fn(),
   send: vi.fn(),
+  vercelOidc: vi.fn(),
 }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
   chatSdkChannel: () => ({
     bot: {
-      getAdapter: () => ({ markRead: vi.fn() }),
+      getAdapter: () => ({ fetchMessage, markRead: vi.fn() }),
+      initialize: vi.fn(),
       onDirectMessage: directMessage,
       onNewMessage: newMessage,
+      onReaction: reaction,
     },
-    channel: { routes: [] },
+    channel: { __kind: "eve:channel", adapter: { kind: "channel:photon" }, routes: [] },
     send,
   }),
   messageToUserContent: (message: Message) => message.text,
@@ -22,16 +38,68 @@ vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),
 }));
 vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
-  createiMessageAdapter: vi.fn(() => ({})),
+  createiMessageAdapter,
 }));
-vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
+vi.mock("#public/channels/auth.js", () => ({ vercelOidc }));
 
-import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
+import {
+  defaultPhotonAuth,
+  photonIMessageChannel,
+} from "#public/channels/photon/photonIMessageChannel.js";
 import { Message } from "#compiled/chat/index.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 describe("photonIMessageChannel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("verifies webhooks by default only with Vercel OIDC from the current environment", async () => {
+    const runtime = { principalType: "runtime", subject: "production" };
+    const verify = vi.fn();
+    vercelOidc.mockReturnValue(verify);
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+    const webhookVerifier = createiMessageAdapter.mock.calls[0]?.[0].webhookVerifier;
+    if (webhookVerifier === undefined) throw new Error("Expected a default webhook verifier.");
+    const request = new Request("https://agent.example/webhook", { method: "POST" });
+
+    verify.mockResolvedValueOnce({ principalType: "service", subject: "preview" });
+    await expect(webhookVerifier(request)).resolves.toBeNull();
+    verify.mockResolvedValueOnce(runtime);
+    await expect(webhookVerifier(request)).resolves.toBe(runtime);
+  });
+
+  it("sends emoji tapbacks through the fetched spectrum message", async () => {
+    const react = vi.fn();
+    fetchMessage.mockResolvedValue({ raw: { react } });
+    const tool = photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    }).tapbackTool();
+    const ctx = new ContextContainer();
+    ctx.set(ChannelKey, {
+      kind: "channel:photon",
+      state: { latestMessageId: "latest-id", thread: { id: "imessage:chat" } },
+    } as never);
+
+    await contextStorage.run(ctx, () => tool.execute({ tapback: "🎉" }, {} as never));
+
+    expect(fetchMessage).toHaveBeenCalledWith("imessage:chat", "latest-id");
+    expect(react).toHaveBeenCalledWith("🎉");
+  });
+
+  it("ignores tapbacks unless onTapback accepts them", () => {
+    const credentials = async () => ({ projectId: "project-id", projectSecret: "project-secret" });
+    photonIMessageChannel({ credentials });
+    expect(reaction).not.toHaveBeenCalled();
+
+    photonIMessageChannel({
+      credentials,
+      onTapback: (_ctx, tapback) => ({ auth: defaultPhotonAuth(tapback) }),
+    });
+    expect(reaction).toHaveBeenCalledTimes(1);
   });
 
   it("inherits the shared steering default for a direct message", async () => {
@@ -56,6 +124,7 @@ describe("photonIMessageChannel", () => {
     await handler(thread, message);
 
     expect(send).toHaveBeenCalledWith("Steer this response", {
+      idempotencyKey: "message-id",
       auth: null,
       context: [],
       thread,
@@ -84,6 +153,7 @@ describe("photonIMessageChannel", () => {
     await handler(thread, message);
 
     expect(send).toHaveBeenCalledWith("Hello Photon", {
+      idempotencyKey: "message-id",
       auth: {
         attributes: { user_name: "user" },
         authenticator: "photon-imessage",
@@ -145,6 +215,7 @@ describe("photonIMessageChannel", () => {
     await handler(thread, message);
 
     expect(send).toHaveBeenCalledWith("Hello group", {
+      idempotencyKey: "message-id",
       auth: {
         attributes: { user_name: "user" },
         authenticator: "photon-imessage",

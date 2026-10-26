@@ -30,6 +30,7 @@ describe("workflow", () => {
     expect(definition.description).toContain(
       'return await ctx.agent("researcher", { message: "Describe the task" })',
     );
+    expect(definition.description).toContain("Await every ctx.agent call before returning.");
     expect(definition.description).not.toContain("Available agents");
     expect(definition.description).toContain("at most 7 agents");
     expect(definition.task).toBe(runWorkflowProgramTask);

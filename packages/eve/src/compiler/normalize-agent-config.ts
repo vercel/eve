@@ -144,10 +144,8 @@ export async function compileAgentConfig(
 
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
-      maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
-      maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
-      maxTokenCostUsdPerSession: definition.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
+      sessionUsage: definition.limits.sessionUsage === undefined ? undefined : true,
     };
   }
 
@@ -158,6 +156,7 @@ export async function compileAgentConfig(
       contextWindowTokens: definition.compaction.modelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
       source: configModule,
+      sourceField: "compaction.model",
       sourcePath: configModulePath,
       value: definition.compaction.model,
     });
@@ -205,6 +204,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly promptCache?: AgentPromptCacheDefinition;
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
+  readonly sourceField?: CompiledRuntimeModelReference["sourceField"];
   readonly sourcePath?: string;
   readonly value: PublicAgentStaticModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
@@ -267,6 +267,7 @@ async function normalizeAuthoredModelReference(input: {
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
     routing,
   };
+  if (input.sourceField !== undefined) sourceBackedModel.sourceField = input.sourceField;
   if (input.promptCache !== undefined) sourceBackedModel.promptCache = input.promptCache;
 
   if (input.contextWindowTokens === undefined) {

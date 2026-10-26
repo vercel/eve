@@ -361,10 +361,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
         (pending) => pending.attemptId !== challenge!.attemptId,
       ),
     });
-    reply(
-      calls(call("items-after-sign-in", CALL_TOOL_NAME, { name: "private__list_items" })),
-      text("The private catalog has Alice's lamp."),
-    );
+    // The callback arrives in a later step, whose virtual context starts empty, and the call the
+    // sign-in stopped runs by itself: the model is only asked to read its result.
+    ctx.clearVirtualContext();
+    reply(text("The private catalog has Alice's lamp."));
     await drive();
     expect(privateCatalog.calls).toEqual([{ input: {}, tool: "list_items" }]);
 
@@ -479,11 +479,17 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const historyBeforeCompaction = driver.session.history;
 
     // Compaction replaces history; the next request starts a fresh baseline.
-    // Any real history exceeds a threshold of 1, so the next step compacts.
+    // Compaction refuses a result that stays over the threshold, so the
+    // threshold must leave room for the summary. Old filler, appended after
+    // the last provider-measured prompt, pushes the history over it.
     const compactionStep = mark();
     driver.session = {
       ...driver.session,
-      compaction: { ...driver.session.compaction, threshold: 1 },
+      compaction: { ...driver.session.compaction, threshold: 2_000 },
+      history: [
+        ...driver.session.history,
+        { content: "Earlier context. ".repeat(1_000), kind: "user", role: "user" },
+      ],
     };
     reply(text("Ready for the next request."));
     await drive({ message: "Alice asks what is next." });
@@ -616,8 +622,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "deploy_service",
       "research",
       "billing_specialist",
-      // The call that parked for sign-in, then the model's call after it.
-      "private__list_items",
+      // The call that parked for sign-in runs once, without the model asking again.
       "private__list_items",
       "products__get_status",
       SEARCH_TOOL_NAME,

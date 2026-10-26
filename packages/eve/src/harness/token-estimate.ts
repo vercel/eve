@@ -1,6 +1,6 @@
 import {
   estimateMediaTokens,
-  readMediaMetadata,
+  readImageDimensions,
   type MediaMetadata,
 } from "#internal/attachments/media-metadata.js";
 import {
@@ -129,5 +129,5 @@ function base64Header(base64: string): Uint8Array {
 // payload, so inline PDFs fall back to their size.
 function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number): MediaMetadata {
   if (!mediaType.startsWith("image/")) return { mediaType, size };
-  return { ...readMediaMetadata(header, mediaType), size };
+  return { ...readImageDimensions(header), mediaType, size };
 }

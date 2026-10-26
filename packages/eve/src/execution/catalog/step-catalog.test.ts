@@ -558,6 +558,63 @@ describe("buildStepCatalog", () => {
       }
     });
 
+    // #4977: a server that lists its tools but never answers a call held the turn.
+    it.each([
+      {
+        case: "fails and cancels a call the connection doesn't answer within 5 minutes",
+        cancelTurn: false,
+        error:
+          '"linear" did not answer list_issues within 5 minutes. It may still have run, so check before you retry.',
+      },
+      {
+        case: "keeps the turn's own error when the turn is cancelled before the deadline",
+        cancelTurn: true,
+        error: "Request was aborted",
+      },
+    ])("$case", async ({ cancelTurn, error }) => {
+      vi.useFakeTimers();
+      try {
+        const { catalog, linear, run } = linearCatalog();
+        let request: AbortSignal | undefined;
+        // Like an MCP client: the request settles only when its signal aborts.
+        vi.spyOn(linear.client, "executeTool").mockImplementationOnce(
+          async (_tool, _args, { abortSignal }) =>
+            await new Promise((_, reject) => {
+              request = abortSignal;
+              abortSignal?.addEventListener("abort", () =>
+                reject(new Error("Request was aborted")),
+              );
+            }),
+        );
+        const call = { input: { team: "core" }, name: "linear__list_issues" };
+        const { value } = (await validateTool(catalog, call)) as { value: unknown };
+        const resolved = catalog.resolve({ input: value, toolName: CALL_TOOL_NAME });
+        const turn = new AbortController();
+        const calling = run(() =>
+          resolved?.definition.execute?.(resolved.call.input, {
+            abortSignal: turn.signal,
+            messages: [],
+            toolCallId: "call-1",
+          }),
+        );
+
+        // Observe the outcome before advancing: the call rejects while the timers run.
+        const outcome = Promise.resolve(calling).then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+        await vi.advanceTimersByTimeAsync(60_000);
+        // A cancelled turn settles the call at once, without waiting out the deadline.
+        if (cancelTurn) turn.abort();
+        await vi.advanceTimersByTimeAsync(cancelTurn ? 0 : 4 * 60_000);
+        // Racing a settled value reports a call that is still pending instead of hanging the test.
+        expect(await Promise.race([outcome, "still waiting"])).toBe(error);
+        expect(request?.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("validates input against the connection's schema before the call can run", async () => {
       const { catalog, linear } = linearCatalog();
 

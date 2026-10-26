@@ -9,9 +9,6 @@ import type {
   EveAgentStoreSnapshot,
   EveMessageData,
   MessageStreamEvent,
-  RespondTurnOptions,
-  SendTurnInput,
-  SendTurnOptions,
 } from "eve/client";
 import type { EveMessage } from "eve/react";
 import { conversationReducer, useEveAgent } from "eve/react";
@@ -47,8 +44,7 @@ import {
   saveClientChatSnapshot,
   skipClientChatAuthorization,
 } from "@/lib/chat/persistence-client";
-import type { ActiveChat, SetupStatus, Viewer } from "@/lib/chat/types";
-import { cn } from "@/lib/utils";
+import type { ActiveChat, SetupStatus } from "@/lib/chat/types";
 
 type AgentSnapshot = EveAgentStoreSnapshot<ConversationState>;
 
@@ -197,49 +193,6 @@ function isSnapshotForCurrentSession(
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
-}
-
-function isStreamDisconnectError(error: unknown) {
-  if (isAbortError(error)) {
-    return true;
-  }
-
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
-
-  return (
-    error.name === "AbortError" ||
-    error.message === "terminated" ||
-    code === "UND_ERR_SOCKET" ||
-    /abort|cancel|disconnect|premature close|socket|terminated/i.test(error.message)
-  );
-}
-
-async function readResponseError(response: Response) {
-  return formatResponseError(response.status, await response.text());
-}
-
-function formatResponseError(status: number, body: string) {
-  if (body.length > 0) {
-    try {
-      const parsed = JSON.parse(body) as { readonly error?: unknown };
-
-      if (typeof parsed.error === "string") {
-        return parsed.error;
-      }
-    } catch {}
-
-    return body;
-  }
-
-  return `Server returned ${status}.`;
-}
-
-async function sleep(ms: number) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function AgentChatSession({

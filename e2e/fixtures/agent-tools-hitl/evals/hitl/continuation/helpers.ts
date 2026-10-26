@@ -5,7 +5,7 @@ import type {
   EveEvalTurn,
   InputRequest,
 } from "eve/evals";
-import { equals, satisfies } from "eve/evals/expect";
+import { satisfies } from "eve/evals/expect";
 
 export const scriptedSession = { headers: { "x-eve-fixture-model": "continuation" } };
 

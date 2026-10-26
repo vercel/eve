@@ -35,6 +35,7 @@ import {
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
+import { traceSessionIdFromContext } from "#tracing/eve/conversation-context.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
@@ -3007,10 +3008,11 @@ describe("createAgentOtelInstrumentation", () => {
     const active = withSpy.mock.calls[0]?.[0];
     expect(active).toBeDefined();
     expect(activeTraceOperation(active!)?.type).toBe("model");
+    expect(traceSessionIdFromContext(active)).toBe("session-1");
     withSpy.mockRestore();
   });
 
-  it("writes gateway cost attributes on the step span when the gateway reports them", async () => {
+  it("writes gateway cost and session affinity attributes on the step span when the gateway reports them", async () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
@@ -3021,6 +3023,15 @@ describe("createAgentOtelInstrumentation", () => {
           generationId: "gen_01KYR80F7ZV4RM3PJ635KMXB5V",
           inputInferenceCost: "0.000042",
           outputInferenceCost: "0.00004",
+          routing: {
+            affinity: {
+              displacedProvider: "bedrock",
+              outcome: "promoted",
+              pinnedProvider: "anthropic",
+            },
+            clientSessionId: "conversation-1",
+            clientSessionIdSource: "explicit",
+          },
         },
       },
       runInContext: runtime.runInContext,
@@ -3037,14 +3048,25 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.usage.gateway_cost": 0.000182,
       "gen_ai.usage.input_cost": 0.000042,
       "gen_ai.usage.output_cost": 0.00004,
+      "vercel.ai_gateway.affinity.displaced_provider": "bedrock",
+      "vercel.ai_gateway.affinity.outcome": "promoted",
+      "vercel.ai_gateway.affinity.pinned_provider": "anthropic",
+      "vercel.ai_gateway.client_session_id": "conversation-1",
+      "vercel.ai_gateway.client_session_id_source": "explicit",
     });
   });
 
-  it("emits no cost attributes when the provider is not the gateway", async () => {
+  it("emits no gateway attributes when the provider is not the gateway", async () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
-      providerMetadata: { anthropic: { cacheCreationInputTokens: 0 } },
+      providerMetadata: {
+        anthropic: {
+          cacheCreationInputTokens: 0,
+          cost: "0.01",
+          routing: { affinity: { outcome: "confirmed" }, clientSessionId: "conversation-1" },
+        },
+      },
       runInContext: runtime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
@@ -3056,6 +3078,7 @@ describe("createAgentOtelInstrumentation", () => {
     const keys = Object.keys(step.attributes);
     for (const key of keys) {
       expect(key).not.toContain("cost");
+      expect(key).not.toContain("ai_gateway");
     }
   });
 

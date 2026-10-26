@@ -2,10 +2,19 @@ import { posix } from "node:path";
 import { getToken, type ConnectTokenParams } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
+import type { ToolContext } from "eve/tools";
 
+import {
+  attributeCommand,
+  coAuthorTrailer,
+  isAttributable,
+  type GitHubCoAuthor,
+} from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
+
+export type { GitHubCoAuthor } from "./attribution.ts";
 
 export interface GitHubPermission {
   readonly access: "write";
@@ -28,6 +37,16 @@ export interface GitHubShellOutput {
 }
 
 export interface GitHubConfig {
+  /**
+   * Resolves who the current turn publishes for. When it returns a person,
+   * `gh-signed-commit` messages and `gh pr create` bodies end with their
+   * `Co-authored-by` trailer. Return `null` to publish without one. It
+   * receives the `gh` tool's context, so `ctx.getToken` can resolve the
+   * requester's linked accounts.
+   */
+  readonly attribution?: (
+    ctx: ToolContext,
+  ) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
   readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
@@ -61,6 +80,8 @@ export interface GitHubLeaseRule {
 }
 
 interface GitHubShellDependencies {
+  /** The calling tool's context, passed to `attribution`. */
+  readonly context?: ToolContext;
   readonly auth?: SessionAuthContext | null;
   readonly getConnectToken?: typeof getToken;
   readonly getSandbox: () => Promise<SandboxSession>;
@@ -104,6 +125,8 @@ export async function executeGitHubShell(
     workingDirectory,
     sandbox,
   );
+  const invocationId = crypto.randomUUID();
+  const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const repositories = repositoryNames(declaredRepositories, config.org);
   const tokenParams: ConnectTokenParams = {
     authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
@@ -119,24 +142,30 @@ export async function executeGitHubShell(
   ) {
     throw new Error(`The current caller is not authorized to access ${repository}.`);
   }
+  const coAuthor =
+    config.attribution && dependencies.context && isAttributable(argv)
+      ? await config.attribution(dependencies.context)
+      : null;
+  const commandArgv = coAuthor
+    ? await attributeCommand(argv, coAuthorTrailer(coAuthor), sandbox, workingDirectory, bodyFile)
+    : argv;
 
-  const executable = executablePath(argv[0]!);
+  const executable = executablePath(commandArgv[0]!);
   const executionArguments = remoteRepository
     ? [
         "-c",
         "protocol.allow=never",
         "-c",
         "protocol.https.allow=always",
-        argv[1]!,
+        commandArgv[1]!,
         `https://github.com/${remoteRepository}.git`,
-        ...argv.slice(3),
+        ...commandArgv.slice(3),
       ]
-    : argv.slice(1);
+    : commandArgv.slice(1);
   const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${executionArguments
     .map(shellQuote)
     .join(" ")}`;
   const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-  const invocationId = crypto.randomUUID();
   const placeholder = `eve-github-${invocationId}`;
   const githubConfig = `/tmp/eve-code-gh-${invocationId}`;
   const placeholderAuthorization = `Basic ${Buffer.from(`x-access-token:${placeholder}`).toString("base64")}`;
@@ -165,6 +194,7 @@ export async function executeGitHubShell(
     );
   } finally {
     await sandbox.removePath({ path: githubConfig, recursive: true, force: true });
+    await sandbox.removePath({ path: bodyFile, force: true });
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);

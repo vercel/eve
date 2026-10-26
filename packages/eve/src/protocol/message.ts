@@ -199,6 +199,28 @@ export interface SessionStartedStreamEvent {
   type: "session.started";
 }
 
+/** One message a delivery added with `history`, as `history.imported` publishes it. */
+export interface HistoryImportedMessage {
+  /** App-owned id the history entry carried, when one was supplied. */
+  readonly id?: string;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
+
+/**
+ * Stream event emitted when a delivery adds prior conversation with `history`.
+ * It precedes that delivery's `message.received` in the same turn; the
+ * messages sit in model history just before that turn's input.
+ */
+export interface HistoryImportedStreamEvent {
+  data: {
+    messages: readonly HistoryImportedMessage[];
+    sequence: number;
+    turnId: string;
+  };
+  type: "history.imported";
+}
+
 /**
  * Stream event emitted when one runtime turn starts.
  */
@@ -741,6 +763,14 @@ export interface CompactionCompletedStreamEvent {
 }
 
 /**
+ * Who a sign-in is for: the connection principal's identity. Its `attributes` stay out of
+ * events, which reach every client of the stream.
+ */
+export type AuthorizationPrincipal =
+  | { readonly type: "app" }
+  | { readonly type: "user"; readonly id: string; readonly issuer?: string };
+
+/**
  * Stream event emitted when a connection or tool needs user authorization
  * before it can continue.
  */
@@ -751,7 +781,11 @@ export interface AuthorizationRequiredStreamEvent {
     authorization?: ConnectionAuthorizationChallenge;
     candidateId?: string;
     description: string;
+    /** The credential the sign-in grants, shared by every scope that uses it. */
+    grant?: string;
     name: string;
+    /** The connection principal the sign-in is for. */
+    principal?: AuthorizationPrincipal;
     /**
      * Session principal that started this sign-in, matching `responderPrincipalId`
      * on approval events. Channels use it to deliver the challenge privately.
@@ -797,11 +831,21 @@ export interface AuthorizationCompletedStreamEvent {
      * challenge's `displayName` in completion status text.
      */
     authorization?: ConnectionAuthorizationChallenge;
+    /** The credential the sign-in grants, as on the matching `authorization.required`. */
+    grant?: string;
     name: string;
     outcome: AuthorizationOutcome;
+    /** The connection principal the sign-in is for, as on the matching `authorization.required`. */
+    principal?: AuthorizationPrincipal;
     /** Session principal that started the matching sign-in. */
     principalId?: string;
     reason?: string;
+    /**
+     * Whether a `failed` sign-in may be started again in the turn. `false` is terminal: the
+     * session reports the failure instead. Absent means retryable, as on events from eve
+     * versions before it.
+     */
+    retryable?: boolean;
     sequence: number;
     stepIndex: number;
     /** The task that needed the sign-in, when it comes from a task's run. */
@@ -877,6 +921,7 @@ export type UnstampedMessageStreamEvent =
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
+  | HistoryImportedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
   | AuthorizationRequiredStreamEvent
@@ -954,6 +999,18 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
   return (
     event.type === "session.failed" || event.type === "step.failed" || event.type === "turn.failed"
   );
+}
+
+/** Creates the `history.imported` event for the messages one delivery added. */
+export function createHistoryImportedEvent(input: {
+  readonly messages: readonly HistoryImportedMessage[];
+  readonly sequence: number;
+  readonly turnId: string;
+}): HistoryImportedStreamEvent {
+  return {
+    data: { messages: input.messages, sequence: input.sequence, turnId: input.turnId },
+    type: "history.imported",
+  };
 }
 
 /**
@@ -1286,7 +1343,9 @@ export function createAuthorizationRequiredEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly description: string;
+  readonly grant?: string;
   readonly name: string;
+  readonly principal?: AuthorizationPrincipal;
   readonly principalId?: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1309,6 +1368,12 @@ export function createAuthorizationRequiredEvent(input: {
   }
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
+  }
+  if (input.grant !== undefined) {
+    data.grant = input.grant;
+  }
+  if (input.principal !== undefined) {
+    data.principal = input.principal;
   }
   if (input.principalId !== undefined) {
     data.principalId = input.principalId;
@@ -1334,10 +1399,13 @@ export function createAuthorizationCompletedEvent(input: {
   readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
+  readonly grant?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
+  readonly principal?: AuthorizationPrincipal;
   readonly principalId?: string;
   readonly reason?: string;
+  readonly retryable?: boolean;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly taskId?: string;
@@ -1359,11 +1427,20 @@ export function createAuthorizationCompletedEvent(input: {
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
   }
+  if (input.grant !== undefined) {
+    data.grant = input.grant;
+  }
+  if (input.principal !== undefined) {
+    data.principal = input.principal;
+  }
   if (input.principalId !== undefined) {
     data.principalId = input.principalId;
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
+  }
+  if (input.retryable !== undefined) {
+    data.retryable = input.retryable;
   }
   if (input.taskId !== undefined) {
     data.taskId = input.taskId;

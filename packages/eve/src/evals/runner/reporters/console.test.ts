@@ -123,6 +123,35 @@ describe("Console", () => {
     expect(lines).toContain("  judge.boolean: 40% (1 evals)");
   });
 
+  it("summarizes repeated attempts as a gate pass rate per eval", () => {
+    const lines: string[] = [];
+    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const verdicts = [
+      ["flaky", "passed"],
+      ["flaky", "failed"],
+      ["flaky", "skipped"],
+      ["stable", "passed"],
+      ["stable", "passed"],
+      ["judged", "scored"],
+    ] as const;
+    const results = verdicts.map(([id, verdict], index): EveEvalResult => ({
+      ...skippedResult(),
+      id,
+      attempt: index + 1,
+      verdict,
+    }));
+
+    reporter.onRunComplete({ ...summary(results[0] ?? skippedResult()), results });
+
+    const start = lines.indexOf("Repeatability:");
+    expect(lines.slice(start, start + 3)).toEqual([
+      "Repeatability:",
+      "  1/2 passed  flaky",
+      "  2/2 passed  stable",
+    ]);
+    expect(lines.join("\n")).not.toContain("judged");
+  });
+
   it("does not print diagnostics for passing assertions", () => {
     const lines: string[] = [];
     const reporter = Console({ color: false, log: (line) => lines.push(line) });

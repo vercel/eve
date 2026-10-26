@@ -155,12 +155,12 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...noSignInRenderer(
-    "a sign-in names the service and shows its sign-in link",
-    "a sign-in shows its confirmation code",
-    "a sign-in without a link shows its instructions",
-    "completing a sign-in tells the person it succeeded",
-  ),
+};
+
+/** Gateway messages are plain text, so they reach rules interactions can't. */
+const DISCORD_GATEWAY_BROKEN = {
+  ...DISCORD_BROKEN,
+  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionText"]),
 };
 
 const SIGN_IN_PRESS_RULE = "someone else pressing a sign-in isn't shown its link or code";
@@ -172,7 +172,6 @@ const SIGN_IN_SENT_PRIVATELY = {
 } satisfies Partial<Record<ContractRuleName, string>>;
 
 const DISCORD_UNSUPPORTED = {
-  [SIGN_IN_PRESS_RULE]: "the channel shows no sign-in, so there's nothing to press",
   "a file sent earlier in the conversation is still there on a later message":
     "each slash command starts its own session, so no later message shares one with the file",
 } satisfies Partial<Record<ContractRuleName, string>>;
@@ -228,13 +227,28 @@ const channelConformance = {
     { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
-  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
+  discord: [
+    { driver: () => discordDriver(), broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED },
+    {
+      driver: () => discordDriver("shared", "gateway"),
+      broken: DISCORD_GATEWAY_BROKEN,
+    },
+    {
+      driver: () => discordDriver("shared", "gateway-threads"),
+      broken: DISCORD_GATEWAY_BROKEN,
+    },
+  ],
   "discord-dm": [
     {
       dm: true,
       driver: () => discordDriver("private"),
       broken: DISCORD_BROKEN,
       unsupported: DISCORD_UNSUPPORTED,
+    },
+    {
+      dm: true,
+      driver: () => discordDriver("private", "gateway"),
+      broken: DISCORD_GATEWAY_BROKEN,
     },
   ],
   github: [

@@ -5,6 +5,8 @@ export const WORKSPACE_LOOKUP_MESSAGE = [
 ].join(" ");
 export const WORKSPACE_FORWARDING_MARKER = "Shared workspace membership check.";
 
+export const MODEL_AGENT_SELECTED_MODEL = "openai/gpt-6.1-sol";
+
 /** The directive words of the notebook scripts, one per parent turn. */
 export const NOTEBOOK_DIRECTIVES = [
   "NOTEBOOK-REMEMBER",

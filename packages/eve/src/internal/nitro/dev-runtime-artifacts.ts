@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { resolveDevelopmentStateDirectory } from "#internal/application/dev-environment.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
@@ -66,7 +67,11 @@ export interface DevelopmentRuntimeArtifactsActivation {
  * snapshot for new sessions.
  */
 export function resolveDevelopmentRuntimeArtifactsPointerPath(appRoot: string): string {
-  return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "current.json");
+  return join(
+    resolveDevelopmentStateDirectory(appRoot),
+    DEV_RUNTIME_ARTIFACTS_DIRECTORY,
+    "current.json",
+  );
 }
 
 function isDevelopmentRuntimeArtifactsSnapshotRoot(appRoot: string, snapshotRoot: string): boolean {

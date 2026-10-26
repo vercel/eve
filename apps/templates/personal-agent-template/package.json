@@ -24,9 +24,10 @@
     "dev:all": "vercel dev --local",
     "dev:web": "nuxt dev --cwd apps/web",
     "start": "nuxt preview --cwd apps/web",
+    "test:smoke": "node scripts/smoke.mjs",
     "typecheck": "nuxt typecheck --cwd apps/web",
-    "db:generate": "nuxt db generate --cwd apps/web",
-    "db:migrate": "nuxt db migrate --cwd apps/web"
+    "db:generate": "cd apps/web && nuxt db generate",
+    "db:migrate": "cd apps/web && nuxt db migrate"
   },
   "dependencies": {
     "@comark/nuxt": "^0.6.2",
@@ -38,7 +39,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/connect": "^2.4.0",
     "ai": "7.0.128",
-    "better-auth": "^1.7.1",
+    "better-auth": "^1.7.10",
     "chat": "^4.38.1",
     "chat-adapter-sendblue": "^0.2.0",
     "drizzle-kit": "^0.31.10",
@@ -55,7 +56,6 @@
     "@iconify-json/lucide": "^1.2.124",
     "@iconify-json/simple-icons": "^1.2.93",
     "@types/node": "26.2.0",
-    "microsandbox": "^0.6.12",
     "rolldown": "~1.2.5",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.10"

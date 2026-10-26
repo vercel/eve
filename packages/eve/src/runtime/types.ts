@@ -33,7 +33,11 @@ import type {
   MarkdownSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type { InternalAgentDefinition, AgentToolExposure } from "#shared/agent-definition.js";
+import type {
+  AgentLimitsDefinition,
+  InternalAgentDefinition,
+  AgentToolExposure,
+} from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
@@ -337,7 +341,11 @@ export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSource
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
-type ResolvedAgentDefinitionBase = Omit<InternalAgentDefinition, "build" | "model" | "source"> & {
+type ResolvedAgentDefinitionBase = Omit<
+  InternalAgentDefinition,
+  "build" | "limits" | "model" | "source"
+> & {
+  limits?: AgentLimitsDefinition;
   source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
 };
 

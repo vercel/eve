@@ -99,7 +99,7 @@ export default defineAgent({
   experimental: base.experimental,
   reasoning: "high",
   // Budget evals exhaust this with synthetic usage; ordinary HITL sessions do not.
-  limits: { maxOutputTokensPerSession: 1_000_000 },
+  limits: { sessionUsage: ({ window }) => window.outputTokens >= 1_000_000 },
   model: defineDynamic({
     events: {
       "session.started": () => ({

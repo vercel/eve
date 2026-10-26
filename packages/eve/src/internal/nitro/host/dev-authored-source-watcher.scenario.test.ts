@@ -298,7 +298,7 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
-  it("watches workspace extension build inputs and ignores its managed output", async () => {
+  it("watches workspace extension build inputs and ignores its build output", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-extension-"));
     const packageRoot = join(appRoot, "packages", "crm");
     const sourceRoot = join(packageRoot, "extension");
@@ -339,6 +339,9 @@ describe("startAuthoredSourceWatcher", () => {
       expect(paths).toContain(tsconfigPath);
       const ignored = getIgnoredPredicate();
       expect(ignored(join(outDir, "extension", "tools", "search.mjs"))).toBe(true);
+      expect(
+        ignored(join(packageRoot, ".eve-extension-build-a1B2c3", "barrels", "index.mjs")),
+      ).toBe(true);
       expect(ignored(join(sourceRoot, "tools", "search.ts"))).toBe(false);
     } finally {
       await watcher.close();

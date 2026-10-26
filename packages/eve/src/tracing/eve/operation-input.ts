@@ -1,5 +1,3 @@
-import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
-
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import {
@@ -8,14 +6,6 @@ import {
   type AgentRun,
   type TraceCheckpointer,
 } from "#compiled/@vercel/agent-runs/index.js";
-
-export function traceSessionIdOf(scope: {
-  readonly traceSessionId?: string;
-  readonly rootSessionId?: string;
-  readonly sessionId: string;
-}): string {
-  return scope.traceSessionId ?? scope.rootSessionId ?? scope.sessionId;
-}
 
 export function checkpointContent(value: string | undefined): unknown {
   if (value === undefined) return undefined;
@@ -37,15 +27,6 @@ export function eveTurnIdentity(input: {
     conversationId: resolveConversationId(input.rootSessionId ?? input.sessionId),
     runId: input.sessionId,
     turnId: input.turnId,
-  };
-}
-
-/** Content flags are recorded by eve's content processor, not withheld by the library. */
-export function eveCapture(reference: SpanContext | undefined) {
-  return {
-    emit: ((reference?.traceFlags ?? 1) & 1) !== 0,
-    recordInputs: true,
-    recordOutputs: true,
   };
 }
 

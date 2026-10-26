@@ -226,7 +226,9 @@ export async function FileTree() {
               data-line-numbers="true"
               className={cn(
                 props.className,
-                "rounded-none border-0 bg-transparent px-0 py-4",
+                // Sit flush in the panel: drop the CodeBlock's own margin, padding,
+                // and the border on its inner content section.
+                "my-0 rounded-none border-0 bg-transparent p-0 [&>[data-section=content]]:rounded-none [&>[data-section=content]]:border-0",
                 "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
                 // Wrap long lines instead of scrolling horizontally (keep the
                 // line-number grid, just constrain its column so lines wrap).
@@ -258,8 +260,11 @@ export async function FileTree() {
           <div className="mx-auto max-w-5xl">
             <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40">
               Your{" "}
-              <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
-                <IconFolderOpen aria-hidden className="size-[0.58em] text-gray-900" />
+              <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.24em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
+                <IconFolderOpen
+                  aria-hidden
+                  className="size-[0.58em] translate-y-[0.06em] text-gray-900"
+                />
                 agent/
               </span>{" "}
               is a directory

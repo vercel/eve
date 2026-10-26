@@ -16,7 +16,6 @@ import {
 import { gitHubGitBrokerNetworkPolicy, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
-const DEFAULT_CHECKOUT_PATH = "/workspace";
 const DEFAULT_CHECKOUT_DEPTH = 1;
 const GITHUB_CHECKOUT_NETWORK_HINT =
   "Verify the GitHub App installation has access to this repository.";
@@ -73,7 +72,7 @@ export async function checkoutGitHubRepository(
   input: GitHubCheckoutInput,
 ): Promise<GitHubCheckout> {
   const descriptor = await resolveCheckoutDescriptor(input);
-  const checkoutPath = sandbox.resolvePath(input.path ?? DEFAULT_CHECKOUT_PATH);
+  const checkoutPath = sandbox.resolvePath(input.path ?? ".");
   const checkoutRef = resolveCheckoutRef(input.ref, descriptor);
 
   if (isFullGitSha(checkoutRef)) {

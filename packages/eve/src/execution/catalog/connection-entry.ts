@@ -30,7 +30,7 @@ import {
   toConnectionToolResult,
 } from "#runtime/connections/tool-result.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { ConnectionToolMetadata } from "#shared/connection-types.js";
+import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
 import { displayProperName, displayTitle } from "#shared/display-name.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -163,10 +163,7 @@ async function callConnectionTool(
         abortSignal: options.abortSignal,
         callId: options.toolCallId,
       });
-    raw = await client.executeTool(tool.name, input, {
-      abortSignal: options.abortSignal,
-      callId: options.toolCallId,
-    });
+    raw = await executeWithDeadline(connection.connectionName, client, tool.name, input, options);
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
     throw error;
@@ -175,6 +172,40 @@ async function callConnectionTool(
   const result = toConnectionToolResult(connection.protocol, tool, raw);
   if (!result.ok) throw new Error(result.error);
   return result.value;
+}
+
+/** How long a connection may take to answer a tool call before the call fails. */
+const CALL_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Runs a connection tool call under the turn's signal and a
+ * {@link CALL_TIMEOUT_MS} deadline, so a server that never answers can't hold
+ * the turn. The deadline aborts the client's request, which then rejects.
+ */
+async function executeWithDeadline(
+  connectionName: string,
+  client: ConnectionClient,
+  toolName: string,
+  input: unknown,
+  options: ToolExecuteOptions,
+): Promise<unknown> {
+  const turn = options.abortSignal;
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), CALL_TIMEOUT_MS);
+  try {
+    return await client.executeTool(toolName, input, {
+      abortSignal: turn === undefined ? deadline.signal : AbortSignal.any([turn, deadline.signal]),
+      callId: options.toolCallId,
+    });
+  } catch (error) {
+    if (!deadline.signal.aborted || turn?.aborted === true) throw error;
+    throw new Error(
+      `"${connectionName}" did not answer ${toolName} within ${CALL_TIMEOUT_MS / 60_000} minutes. It may still have run, so check before you retry.`,
+      { cause: error },
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function checkInput(

@@ -64,7 +64,6 @@ import {
   parseCancelTurnBody,
   parseCreateBody,
   parseIncludeTailIndex,
-  parseJsonRequest,
   parseOptionalJsonRequest,
   parseResetBody,
   parseSessionControlBody,
@@ -74,6 +73,7 @@ import {
   requireSessionId,
 } from "#eve-channel/request.js";
 import { attachClientContext } from "#internal/client-context.js";
+import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import type { ParsedCreateBody } from "#eve-channel/create-request.js";
 import {
   findRemoteAgentBinding,
@@ -81,6 +81,7 @@ import {
   type RemoteAgentBinding,
   normalizeEveCors,
   resolveOnMessage,
+  resolveTurnClientContext,
   strandedSessionResponse,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
@@ -309,9 +310,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const messageResult =
           body.message === undefined
-            ? { auth: forwarded.auth }
+            ? {
+                auth: forwarded.auth,
+                clientContext: resolveTurnClientContext(undefined, body.context),
+              }
             : await resolveOnMessage({
                 auth: forwarded.auth,
+                clientContext: body.context,
                 config: input,
                 invocation:
                   parent === undefined || body.operationId === undefined
@@ -360,9 +365,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                   {
                     message: body.message,
                     context: messageResult.context,
+                    history: validateSessionHistory(
+                      "history" in messageResult ? messageResult.history : undefined,
+                    ),
                     outputSchema: body.outputSchema,
                   },
-                  body.context,
+                  messageResult.clientContext,
                 ),
                 conversationId,
                 parent,
@@ -400,8 +408,26 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
-        const payload = await parseJsonRequest(req);
+        const payload = await parseOptionalJsonRequest(req);
         if (payload instanceof Response) return payload;
+        if (Object.keys(payload).length === 0) {
+          try {
+            const result = await attachSession(sessionId).prewarm();
+            return Response.json(
+              { ok: true, ...result },
+              {
+                headers: { "cache-control": "no-store" },
+                status: result.status === "accepted" ? 202 : 200,
+              },
+            );
+          } catch (error) {
+            const errorId = logError(log, "session-prewarm request failed", error, { sessionId });
+            return Response.json(
+              { ok: false, error: "Failed to prewarm the session.", errorId },
+              { status: 500 },
+            );
+          }
+        }
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
           forwarder: sessionAuthFromResult(authResult),
@@ -414,19 +440,24 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
+        let clientContext = resolveTurnClientContext(undefined, body.context);
         let context: readonly string[] | undefined;
+        let history: readonly SessionHistoryMessage[] | undefined;
         let title: string | undefined;
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
             auth: forwarded.auth,
+            clientContext: body.context,
             config: input,
             message: body.message,
             request: req,
             sessionId,
           });
           if (messageResult instanceof Response) return messageResult;
+          clientContext = messageResult.clientContext;
           context = messageResult.context;
+          history = messageResult.history;
           title = messageResult.title;
           dispatchAuth = messageResult.auth;
         }
@@ -439,11 +470,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               auth: dispatchAuth,
               callback: body.callback,
               context,
+              history,
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
               title,
             },
-            body.context,
+            clientContext,
           );
           result =
             body.inputResponses === undefined

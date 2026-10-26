@@ -30,4 +30,5 @@ export interface DevelopmentCliOptions {
 export interface ProductionCliOptions {
   host?: string;
   port?: number;
+  schedules?: boolean;
 }

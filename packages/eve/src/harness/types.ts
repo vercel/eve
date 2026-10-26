@@ -15,11 +15,12 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -79,7 +80,6 @@ export interface HarnessSessionBase {
   readonly agent: SessionAgent;
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
-  readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
    * Stable identifier of the top user-facing session in the dispatch
@@ -114,30 +114,6 @@ export function requireSessionModelReference(session: HarnessSession): RuntimeMo
 }
 
 /**
- * Token limits stored on one durable session.
- */
-export interface SessionLimits {
-  /**
-   * Maximum provider-reported input tokens this durable session may spend
-   * before eve refuses to start another model call. Absent when the session
-   * is uncapped. Root sessions default to 40M unless authored otherwise;
-   * delegated subagent sessions receive the parent's remaining quota at
-   * dispatch time.
-   */
-  readonly maxInputTokensPerSession?: number;
-  /**
-   * Maximum provider-reported output tokens this durable session may spend before
-   * eve refuses to start another model call.
-   */
-  readonly maxOutputTokensPerSession?: number;
-  /**
-   * Maximum provider-reported model token cost this durable session may spend,
-   * in US dollars, before eve refuses to start another model call.
-   */
-  readonly maxTokenCostUsdPerSession?: number;
-}
-
-/**
  * Input payload for a harness turn.
  *
  * Carries an optional message and/or structured input responses from the
@@ -165,6 +141,12 @@ export interface StepInput {
    * delivery message. Populated by channels via `SendPayload.context`.
    */
   readonly context?: readonly string[];
+  /**
+   * Prior conversation from the channel delivery, added as user and assistant
+   * turns before this turn's context and message. Populated by channels via
+   * `SendPayload.history`.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /**
    * Run-scoped schema that replaces the session's current output schema when
    * present. Omitted continuations keep the existing schema.
@@ -329,6 +311,12 @@ export interface ToolLoopHarnessConfig {
    * a connection's sign-in resumes the turn that asked for it.
    */
   readonly signInCompletions?: readonly AuthorizationChallenge[];
+  /**
+   * False when the session's messages come from the agent that delegated it, not a person: none
+   * of them answers a pending request by text. A person answers through the root session, which
+   * routes structured answers down.
+   */
+  readonly typedAnswers?: boolean;
   /** Restores runtime resources for the originating turn before approval work. */
   readonly prepareApprovalTurn?: (event: {
     readonly sequence: number;
@@ -354,6 +342,8 @@ export interface ToolLoopHarnessConfig {
    * authoritative server-side metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
+  /** The agent's `limits.sessionUsage`; the default limit applies when absent. */
+  readonly sessionUsageLimit?: SessionUsageLimit;
   /**
    * Unified tool definitions for this harness step.
    *
