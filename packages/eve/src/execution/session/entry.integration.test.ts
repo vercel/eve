@@ -1149,6 +1149,86 @@ describe("workflowEntry integration", () => {
     );
   }, 60_000);
 
+  it.each(["steer", "queue"] as const)(
+    "queues another person's typed answer behind a held approval (turn policy %s)",
+    async (turnPolicy) => {
+      const runs: { auth: unknown; tool: string; turnId: string }[] = [];
+      const recordingTool = (name: string, approval?: Approval) => ({
+        loadNamespace: async () => ({
+          default: defineTool({
+            approval,
+            description: `Run ${name}.`,
+            execute: (_input, ctx) => {
+              runs.push({
+                auth: ctx.session.auth.current,
+                tool: name,
+                turnId: ctx.session.turn.id,
+              });
+              return { ran: name };
+            },
+            inputSchema: {},
+          }),
+        }),
+        logicalPath: `tools/${name}.ts`,
+      });
+      const bobMessage = "approve, then use the record_auth tool.";
+      await withHeldApprovalRun(
+        {
+          agent: { name: `workflow-entry-held-other-${turnPolicy}` },
+          auth: ALICE,
+          modules: [recordingTool("approve_change", always()), recordingTool("record_auth")],
+        },
+        async ({ commandInbox, run, sessionInbox, stream }) => {
+          const held = await withTimeout(stream.nextTurn(), "approval hold");
+          const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
+          expect(held.at(-1)?.type).toBe("turn.waiting");
+
+          await resumeHook(sessionInbox, {
+            auth: BOB,
+            kind: "send",
+            payload: { message: bobMessage },
+            turnPolicy,
+          });
+          // The session reads deliveries in run-log order, so Bob's message is
+          // admitted to the held turn before Alice's approval.
+          await waitForReceivedMessage(run.runId, bobMessage);
+          await resumeHook(commandInbox, {
+            auth: ALICE,
+            kind: "send",
+            payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+          });
+
+          const resumed = await withTimeout(stream.nextTurn(), "resumed turn");
+          expect(filterEventsByType(resumed, "turn.started")).toHaveLength(0);
+          expect(filterEventsByType(resumed, "approval.settled")).toMatchObject([
+            {
+              data: {
+                outcome: "approved",
+                requestId: request!.requestId,
+                responderPrincipalId: expect.stringContaining("alice"),
+              },
+            },
+          ]);
+          expect(filterEventsByType(resumed, "message.received")).toHaveLength(0);
+          expect(runs).toEqual([{ auth: ALICE, tool: "approve_change", turnId: "turn_0" }]);
+
+          const queued = await withTimeout(stream.nextTurn(), "Bob's turn");
+          expect(
+            filterEventsByType(queued, "message.received").map((event) => [
+              event.data.turnId,
+              event.data.message,
+            ]),
+          ).toEqual([["turn_1", bobMessage]]);
+          expect(runs).toEqual([
+            { auth: ALICE, tool: "approve_change", turnId: "turn_0" },
+            { auth: BOB, tool: "record_auth", turnId: "turn_1" },
+          ]);
+        },
+      );
+    },
+    60_000,
+  );
+
   it("lets a queued message sent after the approval appeared steer before the step returns", async () => {
     const executions: string[] = [];
     const approvalShown = Promise.withResolvers<void>();
@@ -1635,6 +1715,32 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+/** Waits until the run's log holds a received `send` delivery carrying `message`. */
+async function waitForReceivedMessage(runId: string, message: string): Promise<void> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    for (const event of events.data) {
+      if (event.eventType !== "hook_received") continue;
+      const delivery = (await hydrateWorkflowArguments(
+        event.eventData.payload,
+        runId,
+        undefined,
+      )) as {
+        readonly payload?: { readonly message?: unknown };
+      };
+      if (delivery?.payload?.message === message) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for the run to receive "${message}".`);
+}
 
 async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {
   const world = await getWorld();
