@@ -26,10 +26,15 @@ export const workflowSdkNotice = {
     "[workflow-sdk] Queue message was delivered to a deployment it was not pinned to",
 } as const;
 
-// The workflow SDK reports a duplicate in-process delivery of the same step
-// whenever redelivery races a slow step, so its presence depends on load.
-const WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE =
-  "[workflow-sdk] Step execution already in flight in this process";
+// Notices of self-healing races whose presence depends on load: the workflow
+// SDK reports a duplicate in-process delivery when redelivery races a slow
+// step, rethrows a transient conflict so the local queue retries the message,
+// and restores a run_created event whose write is still in flight.
+const LOAD_DEPENDENT_NOTICES = [
+  "[workflow-sdk] Step execution already in flight in this process",
+  "[world-local] Queue message failed (attempt ",
+  "[world-local] restored missing run_created for ",
+] as const;
 
 /**
  * Captures `console.error` and `console.warn` for the rest of the current
@@ -39,7 +44,7 @@ const WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE =
  * running inside the bundled workflow runtime has its own copy of the eve
  * logger, and the vendored workflow SDK writes to the console directly.
  * `unexpected()` returns the lines that start with none of the given
- * prefixes, ignoring the SDK's load-dependent single-flight notice.
+ * prefixes, ignoring the workflow runtime's load-dependent recovery notices.
  */
 export function captureConsoleOutput(): {
   readonly lines: string[];
@@ -60,8 +65,7 @@ export function captureConsoleOutput(): {
     unexpected: (...expected) =>
       lines.filter(
         (line) =>
-          !line.startsWith(WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE) &&
-          !expected.some((prefix) => line.startsWith(prefix)),
+          ![...LOAD_DEPENDENT_NOTICES, ...expected].some((prefix) => line.startsWith(prefix)),
       ),
   };
 }

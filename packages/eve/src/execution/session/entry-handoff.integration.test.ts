@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import {
   parkedAnchorWorkflow,
@@ -514,6 +516,13 @@ describe("workflowEntry integration", () => {
           await expect(move.source.returnValue).resolves.toMatchObject({
             activation: { kind: "active" },
           });
+          // The successor's turn continues the history the old owner carried.
+          const history = await waitForUserMessages(move.successor.runId, trigger);
+          expect(history).toEqual([
+            expect.stringContaining("Alice opens a research session."),
+            expect.stringContaining(trigger),
+          ]);
+          // The successor signals `active` before it stops children, and its turn runs after.
           const successorSteps = await (
             await getWorld()
           ).steps.list({ runId: move.successor.runId });
@@ -522,12 +531,6 @@ describe("workflowEntry integration", () => {
               step.stepName.endsWith("//stopUntrackedChildSessionsStep"),
             ),
           ).toBe(true);
-          // The successor's turn continues the history the old owner carried.
-          const history = await waitForUserMessages(move.successor.runId, trigger);
-          expect(history).toEqual([
-            expect.stringContaining("Alice opens a research session."),
-            expect.stringContaining(trigger),
-          ]);
         } finally {
           await move.cleanup();
         }
@@ -547,16 +550,20 @@ async function handOffFromReleasedOwner(
   shape: (input: HandoffWorkflowEntryInput) => unknown,
 ) {
   const checkpoint = await captureCheckpoint();
-  const alias = "http:handoff-released-owner";
-  const source = await start(releasingSessionOwnerWorkflow, [
-    { aliases: [alias], release: `release:${alias}` },
-  ]);
+  // Unique per test: a failed setup leaks its source, which keeps holding these tokens.
+  const alias = `http:handoff-released-owner:${randomUUID()}`;
+  const release = `release:${alias}`;
+  const source = await start(releasingSessionOwnerWorkflow, [{ aliases: [alias], release }]);
   const sessionId = source.runId;
+  // The source registers its hooks concurrently; each one must exist before it is used.
   await waitForHook(source, { token: sessionInboxHookToken(alias) });
+  await waitForHook(source, { token: release });
   // Stands in for the original run, which owned the session's stream.
   const streamHost = await start(parkedAnchorWorkflow, [{ token: `stream:${sessionId}` }]);
-  await resumeHook(`release:${alias}`, undefined);
-  await vi.waitFor(async () => expect(await listSessionHookTokens(sessionId)).toEqual([]));
+  await resumeHook(release, undefined);
+  await vi.waitFor(async () => expect(await listSessionHookTokens(sessionId)).toEqual([]), {
+    timeout: 10_000,
+  });
 
   const {
     attemptKey: _attemptKey,

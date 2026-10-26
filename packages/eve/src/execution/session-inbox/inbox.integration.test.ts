@@ -107,7 +107,9 @@ describe("session command inbox integration", () => {
       return await createEvent(...args);
     });
     try {
+      // The owner registers its hooks concurrently; each one must exist before it is used.
       await waitForHook(owner, { token: aliasToken });
+      await waitForHook(owner, { token: "session-inbox:release" });
       await resumeHook("session-inbox:release", undefined);
       await vi.waitFor(() => expect(sent).toBe(true));
       await resumeHook(`${owner.runId}:handoff`, { kind: "active" });
