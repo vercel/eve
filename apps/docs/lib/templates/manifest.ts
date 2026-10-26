@@ -422,9 +422,9 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "bell-stack",
-    title: "BELL Personal Assistant",
+    title: "BELL Stack Template",
     setupPrompt:
-      "Set up the BELL personal assistant in my current workspace using https://github.com/browserbase/bell-stack as the source. Follow its README and integration guides, and preserve the existing project if the workspace is not empty. Configure local browsing with OpenAI and Browserbase first. Explain the optional Linq messaging, Stripe Link payments, 1Password, and Baselayer setup separately. Keep personal 1Password Agentic Autofill disabled as documented upstream. Before deployment, explain the authentication and durable storage requirements for this single-operator sample app. Do not request secrets in chat or commit credentials.",
+      "Set up the BELL stack template in my current workspace using https://github.com/browserbase/bell-stack as the source. Follow its README and integration guides, and preserve the existing project if the workspace is not empty. Configure local browsing with OpenAI and Browserbase first. Explain the optional Linq messaging, Stripe Link payments, 1Password, and Baselayer setup separately. Keep personal 1Password Agentic Autofill disabled as documented upstream. Before deployment, explain the authentication and durable storage requirements for this single-operator sample app. Do not request secrets in chat or commit credentials.",
     description:
       "A single-operator personal assistant built with eve and Browserbase, with browser automation, human handoff, optional Linq messaging, Stripe Link payments, and Baselayer merchant access.",
     sourceHref: "https://github.com/browserbase/bell-stack",
