@@ -25,7 +25,7 @@ import {
   resumeRunnableHook,
 } from "#execution/session-inbox/owner.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
-import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
+import { getHookByToken, parseHookResumeHandle, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 /** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
@@ -34,6 +34,7 @@ const HANDOFF_RETRY_INTERVAL_MS = 20;
 
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
+  readonly inbox?: string;
   /** Lazy identity resolution; delivery never needs to decrypt hook metadata. */
   readonly sessionId: Promise<string>;
 }
@@ -63,7 +64,11 @@ export async function resumeSessionInbox(
   while (true) {
     let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
     try {
-      hook = await resumeRunnableHook(sessionInboxHookToken(token), command);
+      hook = await resumeRunnableHook(
+        sessionInboxHookToken(token),
+        command,
+        typeof address === "string" ? undefined : address.inbox,
+      );
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
@@ -73,6 +78,10 @@ export async function resumeSessionInbox(
     let identity: Promise<string> | undefined;
     return {
       ownerRunId: hook.runId,
+      inbox:
+        hook.resumeContext?.encryptionPublicKey === undefined
+          ? undefined
+          : JSON.stringify(parseHookResumeHandle(hook)),
       get sessionId() {
         return (identity ??= (async () => {
           try {

@@ -113,6 +113,16 @@ await response.result();
 
 Per-request headers override client-level values with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` continues to send the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
 
+## Reusing a session inbox
+
+Keep the complete `session.state` when saving and restoring a conversation. It can include an
+opaque `inbox` handle returned by the server. The client sends this handle with later messages
+to avoid another hook lookup. Treat it as transport state: do not inspect or edit it.
+
+The server checks that the handle addresses the requested inbox. Workflow still validates the
+hook, persists the message, and wakes the workflow. A definite stale-owner rejection resolves
+the current inbox again. An uncertain write is surfaced without submitting a second delivery.
+
 ## Sessions
 
 Create and park an ID-addressed conversation before its first turn when you can start session work

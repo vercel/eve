@@ -148,16 +148,24 @@ export class ClientSession {
     const { response, timing } = await postSessionSend(
       this.#context,
       path,
-      input,
+      {
+        ...input,
+        headers: {
+          ...input.headers,
+          ...(this.#state.inbox === undefined ? {} : { "x-eve-inbox": this.#state.inbox }),
+        },
+      },
       retrySessionNotReady,
     );
-    const { sessionId: responseSessionId, deliveryId } = await readAcceptedMessage(
-      response,
-      this.#state.sessionId,
-    );
+    const {
+      sessionId: responseSessionId,
+      deliveryId,
+      inbox,
+    } = await readAcceptedMessage(response, this.#state.sessionId);
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
+    this.#state = { ...this.#state, inbox };
     if (deliveryId === undefined) {
       throw new Error(
         "Message route did not return a delivery id. Update the server before sending with this client.",
@@ -306,7 +314,7 @@ export class ClientSession {
 
   #advanceStreamIndex(streamIndex: number): void {
     this.#state = {
-      sessionId: this.#state.sessionId,
+      ...this.#state,
       streamIndex: Math.max(this.#state.streamIndex, streamIndex),
     };
   }
@@ -438,6 +446,7 @@ async function readAcceptedMessage(
 ): Promise<{
   readonly sessionId: string;
   readonly deliveryId?: string;
+  readonly inbox?: string;
 }> {
   const payload = (await response.json()) as Record<string, unknown>;
   const sessionId =
@@ -447,6 +456,7 @@ async function readAcceptedMessage(
   if (!sessionId) throw new Error("Message route did not return a session id.");
   return {
     sessionId,
+    inbox: typeof payload.inbox === "string" ? payload.inbox : undefined,
     deliveryId:
       typeof payload.deliveryId === "string" && payload.deliveryId.length > 0
         ? payload.deliveryId

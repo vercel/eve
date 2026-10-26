@@ -7,7 +7,13 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
-import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
+import {
+  getHookByToken,
+  getWorld,
+  parseHookResumeHandle,
+  resumeHook,
+  type Hook,
+} from "#internal/workflow/runtime.js";
 
 /**
  * The session's owner was built by another eve version, so this build cannot
@@ -38,14 +44,34 @@ export class StrandedSessionOwnerError extends Error {
 
 /**
  * The single ingress path into a hook: refuses a session inbox whose owner
- * cannot execute before anything is committed, then resumes by token. Any
- * other hook resumes unchecked. Resuming by token rather than by the looked-up
- * hook keeps Workflow's delivery dedup, which a caller-supplied hook disables.
+ * cannot execute before anything is committed. Vercel can reuse a validated
+ * inbox handle: Workflow requires its guarded, deduplicated write endpoint.
+ * Only a definite refusal falls back to resolving the current token owner.
  */
 export async function resumeRunnableHook(
   token: string,
   payload: unknown,
+  inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
+  if (inbox !== undefined && inbox.length <= 8_192 && routesToOwnerDeployment(await getWorld())) {
+    let cached: ReturnType<typeof parseHookResumeHandle> | undefined;
+    try {
+      const parsed = parseHookResumeHandle(JSON.parse(inbox));
+      if (parsed.token === token && parsed.resumeContext?.encryptionPublicKey !== undefined) {
+        cached = parsed;
+      }
+    } catch {
+      // A stale or malformed hint must not prevent ordinary token resolution.
+    }
+    if (cached !== undefined) {
+      try {
+        return await resumeHook(cached, payload);
+      } catch (error) {
+        // Only a definite refusal may be retried against a freshly resolved owner.
+        if (!HookNotFoundError.is(error)) throw error;
+      }
+    }
+  }
   if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
 }
