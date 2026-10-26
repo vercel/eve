@@ -1,1 +1,4 @@
-["LocalDevCapability", "getLocalDevCapability"]
+[
+  "LocalDevCapability",
+  "getLocalDevCapability"
+]

@@ -1,1 +1,7 @@
-["equals", "includes", "matches", "satisfies", "similarity"]
+[
+  "equals",
+  "includes",
+  "matches",
+  "satisfies",
+  "similarity"
+]

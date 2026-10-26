@@ -1,1 +1,6 @@
-["BashToolInput", "BashToolOutput", "bash", "default"]
+[
+  "BashToolInput",
+  "BashToolOutput",
+  "bash",
+  "default"
+]

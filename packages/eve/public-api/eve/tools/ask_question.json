@@ -1,1 +1,5 @@
-["AskQuestionInput", "AskQuestionOutput", "askQuestion"]
+[
+  "AskQuestionInput",
+  "AskQuestionOutput",
+  "askQuestion"
+]

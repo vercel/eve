@@ -1,1 +1,6 @@
-["WebFetchToolInput", "WebFetchToolOutput", "default", "webFetch"]
+[
+  "WebFetchToolInput",
+  "WebFetchToolOutput",
+  "default",
+  "webFetch"
+]

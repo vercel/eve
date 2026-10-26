@@ -1,1 +1,6 @@
-["WriteFileToolInput", "WriteFileToolOutput", "default", "writeFile"]
+[
+  "WriteFileToolInput",
+  "WriteFileToolOutput",
+  "default",
+  "writeFile"
+]

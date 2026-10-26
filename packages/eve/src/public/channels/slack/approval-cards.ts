@@ -9,6 +9,7 @@ import type {
   RequestSettlement,
 } from "#channel/interaction-prompts.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { slackSessionTargetOf } from "#public/channels/slack/api.js";
 import {
   slackUserIdForPrincipal,
   slackUserIdFromAuthContext,
@@ -17,6 +18,7 @@ import {
   buildAnsweredBlocks,
   decodeHitlActionId,
   renderInteractionPostParts,
+  type SlackHitlRoute,
   type SlackInteractionPostPart,
 } from "#public/channels/slack/hitl.js";
 import {
@@ -105,7 +107,9 @@ async function postPublicInteractions(
   channel: SlackEventContext,
 ): Promise<void> {
   const detailsByRequest = new Map<string, string>();
-  for (const post of buildInteractionPosts(requests)) {
+  // A card in a code channel sits outside any thread, so its clicks carry the session's address.
+  const route = channel.slack.codeChannel ? slackSessionTargetOf(channel.slack) : undefined;
+  for (const post of buildInteractionPosts(requests, route)) {
     const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
     if (post.kind === "details") {
       if (message.id) {
@@ -224,7 +228,10 @@ async function settleRequest(
  * Slack's block-count cap. Tool input details are posted before interactive
  * approval controls so Slack's callback body cannot grow with the input.
  */
-function buildInteractionPosts(requests: readonly Interaction[]): Array<{
+function buildInteractionPosts(
+  requests: readonly Interaction[],
+  route: SlackHitlRoute | undefined,
+): Array<{
   blocks: unknown[];
   kind: "controls" | "details";
   requests: Interaction[];
@@ -233,7 +240,7 @@ function buildInteractionPosts(requests: readonly Interaction[]): Array<{
   const details: Array<SlackInteractionPostPart & { readonly request: Interaction }> = [];
   const controls: Array<SlackInteractionPostPart & { readonly request: Interaction }> = [];
   for (const request of requests) {
-    const parts = renderInteractionPostParts(request);
+    const parts = renderInteractionPostParts(request, route);
     if (parts.details) details.push({ ...parts.details, request });
     controls.push({ ...parts.controls, request });
   }

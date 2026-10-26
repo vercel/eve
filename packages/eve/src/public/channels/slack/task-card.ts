@@ -21,6 +21,7 @@ import { ScheduleIdKey } from "#context/keys.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import { slackThreadTsParam } from "#public/channels/slack/code-channel.js";
 import { truncateMessageText } from "#public/channels/slack/limits.js";
 import type { SlackTaskCard } from "#public/channels/slack/renderers.js";
 import { restoreStatus } from "#public/channels/slack/thread-status.js";
@@ -391,9 +392,11 @@ async function writeChangedCard(
   view: TaskCard,
   taskCard: (card: TaskCard) => SlackTaskCard | null,
 ): Promise<void> {
-  const { channelId, threadTs } = channel.state;
+  const { channelId, codeChannel } = channel.state;
+  // A code channel's card posts in the thread its turn answers, else top-level.
+  const threadTs = (codeChannel ? channel.state.replyThreadTs : channel.state.threadTs) ?? "";
   const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
-  if (!channelId || !threadTs || scheduled) return;
+  if (!channelId || !(threadTs || codeChannel) || scheduled) return;
   const card = renderCard(taskCard, view);
   if (card === null) return;
   const current = channel.state.taskCards?.[turnId] ?? {};
@@ -471,7 +474,7 @@ async function writeCard(slack: SlackHandle, write: CardWrite): Promise<string> 
   }
   const posted = await slack.request("chat.postMessage", {
     ...message,
-    thread_ts: write.threadTs,
+    thread_ts: slackThreadTsParam(write.threadTs),
     unfurl_links: false,
     unfurl_media: false,
   });

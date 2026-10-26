@@ -291,6 +291,13 @@ const channelConformance = {
   photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
+  "slack-code-channel": [
+    {
+      driver: () => slackDriver("code-channel"),
+      broken: SLACK_BROKEN,
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
+  ],
   teams: [
     {
       driver: teamsDriver,

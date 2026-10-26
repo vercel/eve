@@ -53,6 +53,7 @@ export type {
 export {
   callSlackApi,
   resolveSlackBotToken,
+  slackCodeChannelContinuationToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,

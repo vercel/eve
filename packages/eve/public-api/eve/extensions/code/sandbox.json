@@ -1,1 +1,6 @@
-["BrokeredCredentialOptions", "authenticateGitHub", "authenticateVercel", "installCodeTooling"]
+[
+  "BrokeredCredentialOptions",
+  "authenticateGitHub",
+  "authenticateVercel",
+  "installCodeTooling"
+]

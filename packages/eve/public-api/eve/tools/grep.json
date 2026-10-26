@@ -1,1 +1,6 @@
-["GrepToolInput", "GrepToolOutput", "default", "grep"]
+[
+  "GrepToolInput",
+  "GrepToolOutput",
+  "default",
+  "grep"
+]

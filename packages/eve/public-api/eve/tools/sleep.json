@@ -1,1 +1,5 @@
-["SleepToolInput", "SleepToolOutput", "sleep"]
+[
+  "SleepToolInput",
+  "SleepToolOutput",
+  "sleep"
+]

@@ -1,1 +1,4 @@
-["apply_patch", "grep"]
+[
+  "apply_patch",
+  "grep"
+]

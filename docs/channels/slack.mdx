@@ -106,12 +106,13 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, `{ auth, context }`
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
-| Incoming event         | Handler order                                                       |
-| ---------------------- | ------------------------------------------------------------------- |
-| App mention            | `onAppMention` → `onMessage` → `onEvent` → built-in mention default |
-| Direct message         | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default   |
-| Other Slack message    | `onMessage` → `onEvent` → ignore                                    |
-| Other Events API event | `onEvent` → ignore                                                  |
+| Incoming event                    | Handler order                                                       |
+| --------------------------------- | ------------------------------------------------------------------- |
+| App mention                       | `onAppMention` → `onMessage` → `onEvent` → built-in mention default |
+| Direct message                    | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default   |
+| Un-mentioned code channel message | `onMessage` → `onAppMention` → `onEvent` → built-in default         |
+| Other Slack message               | `onMessage` → `onEvent` → ignore                                    |
+| Other Events API event            | `onEvent` → ignore                                                  |
 
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
@@ -304,6 +305,30 @@ export default slackChannel({
 
 Reset returns a `Delivery` for the retiring session; `await delivery.result()` waits for retirement and address release. An already unowned thread throws `SessionNotActiveError`. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same flat operations, which is useful for a New conversation button.
 
+#### Serve Slack code channels
+
+A [Slack code channel](https://docs.slack.dev/ai/slack-code) is a channel dedicated to one agent task. eve serves the whole code channel as one session: every message in it, top-level or threaded, reaches the same session. Replies post top-level, or in the thread when someone writes in one. The session status stays on the channel either way. While a turn runs, eve sets the Slack session status to `processing` in place of the thread status line, `suspended` while the turn waits on a person, and `active` when the turn ends or is cancelled. When someone stops the session in Slack, eve cancels the active turn, or sets the status back to `active` when no turn is running.
+
+Set `codeChannels` to answer messages in a code channel without a mention:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  codeChannels: true,
+});
+```
+
+Every member of a code channel can start turns, with auth derived from each message's author, the same as in an ordinary thread. Messages that don't mention the bot go to `onMessage` when you define it, else to `onAppMention`, else the default handler, so a mention handler that filters who can reach the agent also filters code channel messages. `ctx.isBotMentioned()` still returns `true` only for messages that mention the bot; use `ctx.slack.codeChannel` to tell code channel messages apart. Without `codeChannels`, eve never looks a channel up and treats a code channel like any other channel.
+
+A code channel session has no single thread, so `ctx.slack.threadTs` is empty, `SlackChannelState.threadTs` is `null`, and its Slack auth has no `thread_ts`. `ctx.slack.codeChannel`, `codeChannel: true` in state, and `codeChannel: true` in the channel metadata that tools and dynamic resolvers read as `ctx.channel.metadata` say it's a code channel. To address its session yourself, target `{ channelId, codeChannel: true }` in `onEvent` operations, or build its continuation token with `slackCodeChannelContinuationToken(channelId)`.
+
+The session starts without the origin conversation. When Slack opens a code channel from a message, it posts a quote of that message into the channel. eve skips the quote, so it never starts a turn, and doesn't add it to the session either. The agent sees only messages posted in the code channel.
+
+eve detects a code channel with Slack's `conversations.info` API, so the app needs `channels:read` (and `groups:read` for private code channels). If the lookup fails, eve logs an error, serves the channel per thread, and retries the lookup a minute later. With `codeChannels` set, the generated app manifest enables the code channels feature, adds the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, and `groups:read` bot scopes, and subscribes to the `message.session` and `agent_session_stopped` events. For Vercel Connect, add the same scopes and events under **Advanced** when you create the connector.
+
 ### Other Events API callbacks
 
 Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, ...options })` zero, one, or many times to start turns. It takes the same options as [`to().send()`](./custom#cross-channel-hand-off), such as `title`, which sets the run title without changing the message sent to the model, `history`, which adds prior conversation before the message (see [Start from prior history](./eve#start-from-prior-history)), and `idempotencyKey`. Each call returns a delivery receipt; use its `sessionId` to attach a session handle.
@@ -349,6 +374,8 @@ await ctx.clear({ target });
 await ctx.reset({ reason: "Start over", target });
 const session = await ctx.resolveSession({ target });
 ```
+
+For a [code channel](#serve-slack-code-channels)'s session, which spans all of its threads, target `{ channelId, codeChannel: true }` in every operation except `send`.
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 

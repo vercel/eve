@@ -1,1 +1,5 @@
-["DiscordGatewayFatalError", "DiscordGatewayRelayOptions", "experimental_runDiscordGatewayRelay"]
+[
+  "DiscordGatewayFatalError",
+  "DiscordGatewayRelayOptions",
+  "experimental_runDiscordGatewayRelay"
+]
