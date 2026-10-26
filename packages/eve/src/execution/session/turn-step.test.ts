@@ -29,6 +29,7 @@ import {
   TraceRootKey,
   TurnDynamicToolMetadataKey,
   TurnDeliveryIdsKey,
+  HandleEventKey,
   HistoryStateKey,
   OfferedCatalogToolsKey,
 } from "#context/keys.js";
@@ -2084,6 +2085,64 @@ describe("turnStep", () => {
       }),
     ).rejects.toThrow("deliver failed");
     expect(sessionWritable.locked).toBe(false);
+  });
+
+  it("waits for queued session writes and fails the step when one rejects", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle(1));
+    installSessionStoreMocks([createStubSession()]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        // Publish a non-boundary event the way the harness does, then return a
+        // continuation. The step must not commit until the queued write settles.
+        await loadContext().get(HandleEventKey)?.(
+          createStepStartedEvent({
+            modelId: "test-model",
+            sequence: 1,
+            stepIndex: 0,
+            turnId: "turn_0",
+          }),
+        );
+        return {
+          next: async (current: HarnessSession) => ({ next: null, session: current }),
+          session,
+        };
+      };
+    });
+
+    let held = false;
+    let rejectWrite!: (error: Error) => void;
+    let startedWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      startedWrite = resolve;
+    });
+    const sessionWritable = new WritableStream<Uint8Array>({
+      write(chunk) {
+        if (held) return;
+        const event = JSON.parse(new TextDecoder().decode(chunk)) as { type: string };
+        if (event.type !== "step.started") return;
+        held = true;
+        startedWrite();
+        return new Promise<void>((_resolve, reject) => {
+          rejectWrite = reject;
+        });
+      },
+    });
+
+    let settled = false;
+    const step = turnStep({
+      input: { kind: "deliver", payloads: [{ message: "hold" }] },
+      sessionWritable,
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    }).finally(() => {
+      settled = true;
+    });
+
+    await writeStarted;
+    expect(settled).toBe(false);
+
+    rejectWrite(new Error("stream write failed"));
+    await expect(step).rejects.toThrow("stream write failed");
   });
 
   it.each([

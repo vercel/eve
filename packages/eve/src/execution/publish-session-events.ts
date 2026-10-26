@@ -262,7 +262,7 @@ async function publishInSessionScope<T>(
     sessionWritable: step.sessionWritable,
   });
   try {
-    return await withContextScope(ctx, session, async (enrichedSession) => {
+    const outcome = await withContextScope(ctx, session, async (enrichedSession) => {
       const emit =
         instrumentation?.createHandleEvent({
           handleEvent: publisher.publish,
@@ -270,9 +270,11 @@ async function publishInSessionScope<T>(
         }) ?? publisher.publish;
       return { result: await publication.publish(emit, enrichedSession), session: enrichedSession };
     });
+    await publisher.writer.drain();
+    return outcome;
   } finally {
     await instrumentation?.flush();
-    publisher.writer.release();
+    await publisher.writer.release();
   }
 }
 
@@ -281,14 +283,16 @@ async function publishInSessionScope<T>(
  * releases it. Events reach the stream through `SessionEventPublisher.emit`.
  */
 export interface SessionEventWriter {
+  /** Waits for queued writes to settle; throws the first write failure. */
+  drain(): Promise<void>;
   /** Closes the session stream; only a terminal event (`done`, completion, or failure) does this. */
   close(): Promise<void>;
-  /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
-  release(): void;
+  /** Waits for queued writes, then releases the writer lock so the next step can acquire it. */
+  release(): Promise<void>;
 }
 
 interface StreamWriter extends SessionEventWriter {
-  /** Stamps the event, then writes it; returns the event as written. */
+  /** Stamps the event and queues its write; returns the event as queued. */
   write(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
 }
 
@@ -325,6 +329,25 @@ export interface SessionEventPublisher {
   publish(event: UnstampedMessageStreamEvent): Promise<void>;
 }
 
+/**
+ * Events whose write must settle before their hooks and instrumentation run.
+ * Their consumers report a delivery outcome or park the turn, so a failed write
+ * has to surface as a delivery failure, not after telemetry already reported
+ * completion. Pre-model and streaming events keep the fire-and-forget path; the
+ * step drain catches their failures.
+ */
+const AWAITED_SESSION_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
+  "authorization.required",
+  "input.requested",
+  "session.completed",
+  "session.failed",
+  "session.waiting",
+  "turn.cancelled",
+  "turn.completed",
+  "turn.failed",
+  "turn.waiting",
+]);
+
 export function openSessionEventPublisher(input: {
   readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
@@ -343,6 +366,9 @@ export function openSessionEventPublisher(input: {
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
     const stamped = await writer.write(await dispatcher.deliver(event));
     recordPublishedEvent(ctx, stamped);
+    // Boundary events keep the old "written before its hooks run" contract; the
+    // rest leave their write queued for the step's drain.
+    if (AWAITED_SESSION_EVENT_TYPES.has(stamped.type)) await writer.drain();
     return stamped;
   };
   return {
@@ -394,7 +420,19 @@ function createSessionEventDispatcher(input: {
   };
 }
 
-function openSessionEventWriter(input: {
+// Bound the queued writes so a slow stream applies backpressure instead of
+// letting a long model stream grow the queue without limit.
+const MAX_PENDING_SESSION_EVENT_WRITES = 64;
+
+/**
+ * Writes session events to the stream in order without making each publisher wait
+ * for its round trip. The step's pre-model lifecycle events otherwise serialize
+ * one stream write between prompt preparation and the model call.
+ *
+ * The writer locks the stream until `release()`, so every queued write has to
+ * settle before the next step can own it.
+ */
+export function openSessionEventWriter(input: {
   /**
    * The delivery ids stamped on each event. Read at each write because a turn
    * step records its delivery ids after it opens the stream.
@@ -403,23 +441,88 @@ function openSessionEventWriter(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
 }): StreamWriter {
   const streamWriter = input.sessionWritable.getWriter();
-
+  const pending = new Set<Promise<void>>();
+  let capacityWaiter: (() => void) | undefined;
+  let failure: unknown;
   let released = false;
-  const release = (): void => {
-    if (released) return;
-    released = true;
-    streamWriter.releaseLock();
+  // A full queue makes a writer wait. The lock keeps later writers behind it, so
+  // waiting never lets a later event overtake one that arrived first.
+  let enqueueLock: Promise<void> = Promise.resolve();
+
+  const withEnqueueLock = async <T>(run: () => Promise<T>): Promise<T> => {
+    const previous = enqueueLock;
+    let releaseLock!: () => void;
+    enqueueLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    await previous;
+    try {
+      return await run();
+    } finally {
+      releaseLock();
+    }
   };
+
+  const settleWrites = async (): Promise<void> => {
+    while (pending.size > 0) await Promise.allSettled(pending);
+  };
+
+  const drain = (): Promise<void> =>
+    withEnqueueLock(async () => {
+      await settleWrites();
+      if (failure !== undefined) throw failure;
+    });
+
+  /** Cleanup only: waits for queued writes, then unlocks. It never reports a write failure. */
+  const release = (): Promise<void> =>
+    withEnqueueLock(async () => {
+      await settleWrites();
+      if (released) return;
+      released = true;
+      streamWriter.releaseLock();
+    });
+
   return {
-    async write(event) {
-      const stamped = stampMessageStreamEvent(event, input.deliveryIds());
-      await streamWriter.write(encodeMessageStreamEvent(stamped));
-      return stamped;
-    },
-    close: async () => {
-      await streamWriter.close();
-      release();
-    },
+    write: (event) =>
+      withEnqueueLock(async () => {
+        if (failure !== undefined) throw failure;
+        // Re-check after every wake: a settled write frees a slot, but another
+        // writer may take it before this one re-checks.
+        while (pending.size >= MAX_PENDING_SESSION_EVENT_WRITES) {
+          await new Promise<void>((resolve) => {
+            capacityWaiter = resolve;
+          });
+          if (failure !== undefined) throw failure;
+        }
+
+        const stamped = stampMessageStreamEvent(event, input.deliveryIds());
+        // Start the write now. The stream keeps chunk order, and the caller
+        // drains the queue before the step commits.
+        const write = streamWriter.write(encodeMessageStreamEvent(stamped));
+        pending.add(write);
+        const settle = (): void => {
+          pending.delete(write);
+          const wake = capacityWaiter;
+          capacityWaiter = undefined;
+          wake?.();
+        };
+        write.then(settle, (error: unknown) => {
+          failure ??= error;
+          settle();
+        });
+        return stamped;
+      }),
+    drain,
+    close: () =>
+      withEnqueueLock(async () => {
+        await settleWrites();
+        if (failure !== undefined) throw failure;
+        await streamWriter.close();
+        if (!released) {
+          released = true;
+          streamWriter.releaseLock();
+        }
+      }),
     release,
   };
 }
@@ -511,7 +614,7 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
-    publisher.writer.release();
+    await publisher.writer.release();
     try {
       await instrumentation?.flush();
     } catch (error) {
@@ -532,7 +635,7 @@ async function writeUnroutedSessionEvent(
     await writer.write(event);
     await writer.close();
   } finally {
-    writer.release();
+    await writer.release();
   }
 }
 

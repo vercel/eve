@@ -279,7 +279,7 @@ describe("proxied stream hooks", () => {
       expect(f.order).not.toContain("channel:input.requested");
       expect(f.events.map((event) => event.type)).toEqual(["input.requested"]);
     } finally {
-      publisher.writer.release();
+      await publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });
@@ -326,7 +326,7 @@ describe("proxied stream hooks", () => {
       ]);
       expect(f.order).not.toContain("channel:input.requested");
     } finally {
-      publisher.writer.release();
+      await publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });
@@ -352,7 +352,7 @@ describe("proxied stream hooks", () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(f.order).toContain("channel:input.requested");
     } finally {
-      publisher.writer.release();
+      await publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });
@@ -386,7 +386,7 @@ describe("proxied stream hooks", () => {
       });
       expect(f.order).not.toContain("channel:input.requested");
     } finally {
-      publisher.writer.release();
+      await publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });

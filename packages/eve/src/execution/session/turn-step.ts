@@ -610,6 +610,7 @@ async function runSessionStepBody(
         await failChannelDeliveries(error);
         throw error;
       }
+      await publisher.writer.drain();
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
@@ -631,10 +632,13 @@ async function runSessionStepBody(
     const nextSerializedContext = serializeContext(ctx);
     stepResult = { ...stepResult, session: aliased };
 
+    // The queued events must be durable before the step commits; publishing only
+    // waited for each write to be queued.
+    await publisher.writer.drain();
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
-    publisher.writer.release();
+    await publisher.writer.release();
   }
 }
