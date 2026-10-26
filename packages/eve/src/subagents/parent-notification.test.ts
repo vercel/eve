@@ -7,6 +7,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   bindTurnCallerContext,
+  NOT_PENDING_RETRY_DELAYS_MS,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
@@ -308,6 +309,77 @@ describe("turn caller notification", () => {
       },
       sessionId: "remote-session",
       subagentName: "remote",
+    });
+  });
+
+  describe("a remote caller that reports nothing pending", () => {
+    const remoteCaller = () =>
+      resolveInitialTurnCallerStep({
+        serializedContext: {
+          "eve.sessionCallback": {
+            callId: "call-remote",
+            subagentName: "remote",
+            token: "parent-turn",
+            url: "https://caller.example/eve/v1/callback/parent-turn",
+          },
+          "eve.sessionId": "remote-session",
+        },
+      });
+    const notPending = () =>
+      Response.json(
+        { code: "CALLBACK_NOT_PENDING", error: "Session callback not pending.", ok: false },
+        { status: 404 },
+      );
+    const notify = async () =>
+      notifyTurnCallerStep({
+        caller: await remoteCaller(),
+        lifecycle: "parked",
+        sessionId: "remote-session",
+        settled: { output: "remote answer" },
+      });
+
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("delivers the result once the caller registers the reply it sent", async () => {
+      fetchMock
+        .mockResolvedValueOnce(notPending())
+        .mockResolvedValueOnce(notPending())
+        .mockResolvedValueOnce(new Response(null, { status: 202 }));
+      const notified = notify();
+      await vi.runAllTimersAsync();
+      await expect(notified).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("leaves the session alive when the caller already took the result or stopped waiting", async () => {
+      // A delivery whose 202 was lost: the caller applied it, so its repeat finds nothing pending.
+      fetchMock.mockImplementation(async () => notPending());
+      const notified = notify();
+      await vi.runAllTimersAsync();
+      await expect(notified).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(NOT_PENDING_RETRY_DELAYS_MS.length + 1);
+    });
+
+    it("also reads an earlier protocol's not-pending answer, which names no code", async () => {
+      fetchMock.mockImplementation(async () =>
+        Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 }),
+      );
+      const notified = notify();
+      await vi.runAllTimersAsync();
+      await expect(notified).resolves.toBeUndefined();
+    });
+
+    it("still fails a callback that can't be delivered, so its step retries", async () => {
+      for (const response of [
+        new Response("Not Found", { status: 404 }),
+        new Response(null, { status: 503 }),
+      ]) {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValue(response);
+        await expect(notify()).rejects.toThrow(/Turn callback failed with HTTP (404|503)/);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      }
     });
   });
 

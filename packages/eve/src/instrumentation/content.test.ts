@@ -1,19 +1,22 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { describe, expect, it } from "vitest";
 
 import { withInstrumentationDecision } from "#instrumentation/content.js";
 import type {
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
+  InstrumentationInteractionOpenedEvent,
+  InstrumentationInteractionSettledEvent,
   InstrumentationSessionStartedEvent,
 } from "#instrumentation/lifecycle.js";
 
-const scope = {
-  attemptId: "attempt-1",
-  attemptIndex: 0,
-  sessionId: "session-1",
-  stepIndex: 0,
-  turnId: "turn-1",
-};
+const scope = instrumentationScope(
+  {
+    runId: "attempt-1",
+    attempt: 0,
+    sessionId: "session-1",
+    turnId: "turn-1",
+  },
+  0,
+);
 
 describe("withInstrumentationDecision", () => {
   it("treats the session title as input content", () => {
@@ -40,67 +43,68 @@ describe("withInstrumentationDecision", () => {
   it("treats input requests as outputs and user responses as inputs", () => {
     const requested = withInstrumentationDecision(
       {
-        action: { callId: "call-1", name: "approve" },
+        call: { callId: "call-1", name: "approve" },
         idempotencyKey: "request-1",
-        kind: "tool-approval",
+        kind: "approval",
         request: { prompt: "Approve?" },
-        requestId: "request-1",
+        interactionId: "request-1",
         scope,
-        type: "input.requested",
-      } satisfies InstrumentationInputRequestedEvent,
+        type: "interaction.opened",
+      } satisfies InstrumentationInteractionOpenedEvent,
       { action: "record", recordInputs: true, recordOutputs: false },
     );
     const resolved = withInstrumentationDecision(
       {
         error: new Error("failed"),
         idempotencyKey: "request-1",
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
-        response: { text: "yes" },
+        kind: "approval",
+        outcome: "accepted",
+        interactionId: "request-1",
+        answer: { text: "yes" },
         scope,
-        type: "input.resolved",
-      } satisfies InstrumentationInputResolvedEvent,
+        type: "interaction.settled",
+      } satisfies InstrumentationInteractionSettledEvent,
       { action: "record", recordInputs: true, recordOutputs: false },
     );
 
     expect(requested).toEqual(expect.objectContaining({ request: undefined }));
     expect(resolved).toEqual(
-      expect.objectContaining({ error: undefined, response: { text: "yes" } }),
+      expect.objectContaining({ error: undefined, answer: { text: "yes" } }),
     );
   });
 
   it("keeps output-side requests and errors while removing user responses", () => {
     const requested = {
-      action: { callId: "call-1", name: "approve" },
+      call: { callId: "call-1", name: "approve" },
       idempotencyKey: "request-1",
-      kind: "tool-approval",
+      kind: "approval",
       request: { prompt: "Approve?" },
-      requestId: "request-1",
+      interactionId: "request-1",
       scope,
-      type: "input.requested",
-    } satisfies InstrumentationInputRequestedEvent;
+      type: "interaction.opened",
+    } satisfies InstrumentationInteractionOpenedEvent;
     const error = new Error("failed");
     const resolved = {
       error,
       idempotencyKey: "request-1",
-      kind: "tool-approval",
+      kind: "approval",
       outcome: "failed",
-      requestId: "request-1",
-      response: { text: "no" },
+      interactionId: "request-1",
+      answer: { text: "no" },
       scope,
-      type: "input.resolved",
-    } satisfies InstrumentationInputResolvedEvent;
+      type: "interaction.settled",
+    } satisfies InstrumentationInteractionSettledEvent;
     const decision = { action: "record", recordInputs: false, recordOutputs: true } as const;
 
     expect(withInstrumentationDecision(requested, decision)).toBe(requested);
     expect(withInstrumentationDecision(resolved, decision)).toEqual(
-      expect.objectContaining({ error, response: undefined }),
+      expect.objectContaining({ error, answer: undefined }),
     );
   });
 
   it("treats recalled memory records as inputs", () => {
     const completed = {
+      outcome: "completed",
       idempotencyKey: "memory-1",
       operationName: "search_memory",
       outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
@@ -111,7 +115,7 @@ describe("withInstrumentationDecision", () => {
       slot: "profile",
       storeId: "memscope1_scope",
       turnId: "turn-1",
-      type: "memory.operation.completed",
+      type: "memory.operation.settled",
     } as const;
 
     expect(
@@ -148,7 +152,10 @@ describe("withInstrumentationDecision", () => {
           secret: "hidden",
         },
         scope,
-        type: "step.attempt.metadata",
+        type: "model.call.settled",
+        outcome: "completed",
+        finishReason: "stop",
+        usage: {},
       },
       { action: "record", recordInputs: true, recordOutputs: false },
     );

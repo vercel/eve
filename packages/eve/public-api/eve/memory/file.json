@@ -1,0 +1,10 @@
+[
+  "FileMemoryOptions",
+  "MemoryDocument",
+  "MemoryDocumentBackend",
+  "MemoryDocumentConflictError",
+  "MemoryDocumentReadInput",
+  "MemoryDocumentWriteInput",
+  "fileMemory",
+  "inMemory"
+]

@@ -150,53 +150,40 @@ provider model when you deploy.
 To select a model from the incoming prompt with an AI SDK decision model, use
 [`auto` from `eve/models`](./guides/decide).
 
-`model` also accepts `defineDynamic({ events })`. Each matching handler must
-return the concrete model for its scope; a dynamic model has no compiled
-default.
+`model` also accepts `defineDynamic(fn)` from `eve/models` or `eve`. The function returns the
+model; a dynamic model has no compiled default.
 
 ```ts title="agent/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 
 export default defineAgent({
-  model: defineDynamic({
-    events: {
-      "session.started": (_event, ctx) => {
-        if (ctx.session.auth.initiator?.attributes.plan === "enterprise") {
-          return "anthropic/claude-opus-5.5";
-        }
-
-        return "anthropic/claude-sonnet-5";
-      },
-    },
-  }),
+  model: defineDynamic((ctx) =>
+    ctx.session.auth.initiator?.attributes.plan === "enterprise"
+      ? "anthropic/claude-opus-5.5"
+      : "anthropic/claude-sonnet-5",
+  ),
 });
 ```
 
-Handlers receive the shared [dynamic resolver
-context](./guides/dynamic-capabilities) and return a gateway model id, an AI
-SDK `LanguageModel`, or a selection object. Returning `null` or `undefined`
-fails the turn.
+The function returns a Gateway model ID, an AI SDK `LanguageModel`, or a selection object. See
+[Dynamic capabilities](./guides/dynamic-capabilities) for the context and memo rules.
 
-- **Scopes.** `session.started` (once per session), `turn.started` (once per
-  turn), `step.started` (every model step). Precedence: step > turn >
-  session. Prefer `session.started`: prompt caches are per model, so every
-  switch re-ingests the conversation at uncached prices. If no active
-  selection exists before model-dependent work begins, the turn fails.
-- **Failures stop the turn.** A resolver that throws, returns no model, or
-  returns an invalid selection fails before the provider call. A selected
-  model without valid credentials fails at request time.
-- **Serialization.** Session/turn selections must be model id strings; return
-  live `LanguageModel` objects only from `step.started`.
+- **When it changes.** eve evaluates before each ordinary model call. A memo keyed by
+  `ctx.turn?.id ?? null` keeps a choice for the turn; `ctx.session.id` keeps it until a deployment
+  change. Switching models can reduce prompt-cache reuse.
+- **Failures stop the turn.** A thrown error or invalid selection fails the turn before the
+  provider call. `null` is not a model. Missing credentials fail at request time.
+- **Serialization.** Only memo results must be JSON. The function can return a live provider
+  instance built from those results. `ctx.model` is unavailable during model selection.
 - **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
-  When `modelContextWindowTokens` is omitted, eve resolves it from the AI
-  Gateway catalog and caches successful metadata in durable session state for
-  24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
-  cannot set sibling `modelContextWindowTokens` or `modelOptions` fields;
-  return per-model values from the handler.
+  When `modelContextWindowTokens` is omitted, eve resolves it from the AI Gateway catalog and caches
+  successful metadata in durable session state for 24 hours. Set it explicitly for an unlisted or
+  custom model. Dynamic agents cannot set sibling `modelContextWindowTokens` or `modelOptions`
+  fields; return per-model values from the function.
 
-The `session.started` runtime identity does not include a model id for a
-dynamic agent. Each public `step.started` event reports the concrete `modelId`
-selected for that model call.
+The `session.started` runtime identity does not include a model ID for a dynamic agent. Each public
+`model.started` event reports the concrete model selected for that model call.
 
 ## Reasoning effort
 
@@ -286,7 +273,7 @@ turns that answer a message, clear or compact the context, or end in
 cancellation. A session never expires while a turn is open, including a turn
 held open while its [tasks](./tools/tasks) work or while it waits for a person
 to answer; the window restarts when that turn settles. Process restarts do not
-change the window. When the window elapses, eve emits `session.completed` and
+change the window. When the window elapses, eve emits `session.ended` with `outcome: "completed"` and
 releases every continuation address; the next qualifying channel message starts
 fresh. To carry an earlier conversation into the fresh session, pass it as
 [prior history](./channels/eve#start-from-prior-history). Set it to `false` to
@@ -302,6 +289,13 @@ continuation. `inputTokens` includes cache reads and writes. Subtract
 provider replays from its prompt cache on every step. `costUsd` is the model
 token cost in US dollars that AI Gateway reports with each step, not tool or
 infrastructure spend; it is unset when no step reported a cost.
+
+A window starts when the session's own budget prompt is accepted: `window` is
+`total` minus the session's
+[total](./concepts/sessions-runs-and-streaming#replies-and-narration) at that point. Before
+the first approval, `window` equals `total`. Accepting a budget prompt that a
+subagent relayed starts the subagent's window, not the parent's. The window
+stays the same across deployment handoffs and replays.
 
 When `sessionUsage` is omitted, the limit is `40_000_000` new input tokens per
 window:
@@ -334,18 +328,18 @@ Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
 false` is not accepted. eve calls `sessionUsage` before each model call once
 the window has usage. The model call that crosses a limit is allowed to finish
 because exact usage arrives after the call completes. Before the next model
-call, eve pauses the turn (`turn.waiting`) and sends a deterministic
+call, eve pauses the turn (`turn.paused`) and sends a deterministic
 continuation prompt with two options: **Continue** starts a new window and
 resumes the same turn, and **Stop** cancels the in-flight turn through the
-standard cancellation path (`turn.cancelled` → `session.waiting`). Stop is a
+standard cancellation path (`turn.settled` with `outcome: "cancelled"`). Stop is a
 user decision, not an error. The session stays resumable; because it is still
 over budget after Stop, the next message raises a new prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree, so the delegating parent never receives an error result it
 could retry. A reply that answers neither option is queued while the existing
 prompt stays pending; eve does not raise another
-copy or start another turn. The reply is received (`message.received`) and
-processed in the held turn once the budget is granted.
+copy or start another turn. The reply waits unconsumed, and the held turn consumes it
+(`delivery.consumed`) once the budget is granted.
 
 For sessions already waiting on a continuation prompt from an older deployment,
 the previous turn has completed. A non-answer message still queues behind the
@@ -376,7 +370,9 @@ Some delegated usage doesn't count against the parent: a `ctx.agent` turn
 still running when its workflow tool finishes or is cancelled; the `ctx.agent`
 usage of an `execute` tool whose parent turn is cancelled while it waits; and
 what a cancelled agent task's own subagents spend after the task reports its
-cancelled turn, until the task's next reply.
+cancelled turn. A cancelled agent task ends and sends no further reply. Usage
+reported by the cancelled run up to that point still counts against the parent
+when its usage report or final outcome arrives.
 
 ## Workflow world
 

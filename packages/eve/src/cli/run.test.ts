@@ -7,6 +7,9 @@ import { cliTelemetryCommandPaths, internalCliCommandPaths } from "#cli/telemetr
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import { encodeTestLine, testTurnFacts } from "#internal/testing/events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 function resolvedProject(appRoot: string) {
   return { agentRoot: `${appRoot}/agent`, appRoot, layout: "nested" as const };
@@ -699,87 +702,158 @@ describe("eve start schedules", () => {
   );
 });
 
-describe("eve remote invoke", () => {
-  it("runs a fresh remote task without starting the TUI", async () => {
-    const runInvoke = vi.fn(async () => ({
-      status: "ready" as const,
-      outcome: { status: "completed" as const, message: "done" },
-      resume: {
-        session: { sessionId: "ses_1", streamIndex: 1 },
-        target: { kind: "remote" as const, serverUrl: "https://example.com/" },
-      },
-    }));
+describe("eve remote connect --print", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function respondWith(events: readonly SessionEvent[]) {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(events.map(encodeTestLine).join(""), {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
+      );
+    return fetch;
+  }
+
+  const argv = [
+    "remote",
+    "connect",
+    "--url",
+    "https://example.com",
+    "-H",
+    "Authorization: Bearer test",
+    "--print",
+    "do foo",
+  ];
+
+  it("prints only the final assistant text without starting the TUI", async () => {
+    const fetch = respondWith(testTurnFacts(0, "done", ["delivery_1"]));
     const output: string[] = [];
+    const runDevelopmentTui = vi.fn(async () => {});
 
     await runCli(
-      ["remote", "invoke", "--url", "https://example.com", "--scope", "target-team", "do foo"],
-      { error: () => {}, log: (message) => output.push(message) },
-      { runInvoke },
+      argv,
+      { error: () => {}, log: (line) => output.push(line) },
+      { runDevelopmentTui },
     );
 
-    expect(runInvoke).toHaveBeenCalledWith({
-      operation: { kind: "send", payload: { message: "do foo" } },
-      signal: expect.any(AbortSignal),
-      target: {
-        kind: "remote",
-        serverUrl: "https://example.com/",
-        workspaceRoot: process.cwd(),
-      },
-      vercelScope: "target-team",
-    });
-    expect(JSON.parse(output.at(-1)!)).toMatchObject({
-      status: "ready",
-      outcome: { status: "completed", message: "done" },
-    });
+    expect(output).toEqual(["done"]);
+    expect(runDevelopmentTui).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetch.mock.calls[0]![1]?.headers).get("authorization")).toBe("Bearer test");
   });
 
-  it("accepts an explicitly supplied URL equivalent to the stored resume target", async () => {
-    const runInvoke = vi.fn(async () => ({
-      status: "running" as const,
-      resume: {
-        session: { sessionId: "ses_1", streamIndex: 0 },
-        target: { kind: "remote" as const, serverUrl: "https://example.com/" },
+  it("fails without printing a partial answer when the agent needs input", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, 6),
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "approval_1",
+          request: { kind: "approval", prompt: "Approve?", options: [{ id: "yes", label: "Yes" }] },
+          subject: { turnId: "turn_0" },
+        },
       },
-    }));
-    const resumeResult = JSON.stringify({
-      status: "ready",
-      outcome: { status: "completed", message: "done" },
-      resume: {
-        session: { sessionId: "ses_1", streamIndex: 0 },
-        target: { kind: "remote", serverUrl: "https://example.com/" },
+      {
+        type: "turn.paused",
+        data: { turnId: "turn_0", awaiting: [{ interactionId: "approval_1" }] },
       },
-    });
-    const stdin = vi
-      .spyOn(process.stdin, Symbol.asyncIterator)
-      .mockImplementation(async function* () {
-        yield resumeResult;
-        return undefined;
-      });
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "awaiting-input" },
+      },
+    ]);
+    const output: string[] = [];
 
-    try {
-      await runCli(
-        ["remote", "invoke", "--url", "https://example.com", "--resume", "follow up"],
-        { error: () => {}, log: () => {} },
-        { runInvoke },
-      );
-    } finally {
-      stdin.mockRestore();
-    }
-
-    expect(runInvoke).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: expect.objectContaining({ serverUrl: "https://example.com/" }),
-      }),
-    );
-  });
-
-  it("requires a prompt for a fresh invocation", async () => {
     await expect(
-      runCli(["remote", "invoke", "--url", "https://example.com"], {
-        error: () => {},
-        log: () => {},
-      }),
-    ).rejects.toThrow("requires a prompt");
+      runCli(argv, { error: () => {}, log: (line) => output.push(line) }),
+    ).rejects.toThrow(/Session session_1 is waiting for input/);
+    expect(output).toEqual([]);
+  });
+
+  it("fails without printing a partial answer when the agent needs authorization", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, 6),
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "sign-in_1",
+          request: { kind: "sign-in", prompt: "Sign in to Linear", signIn: { name: "linear" } },
+          subject: { turnId: "turn_0" },
+        },
+      },
+      {
+        type: "turn.paused",
+        data: { turnId: "turn_0", awaiting: [{ interactionId: "sign-in_1" }] },
+      },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "awaiting-input" },
+      },
+    ]);
+
+    await expect(runCli(argv, { error: () => {}, log: () => {} })).rejects.toThrow(
+      /Session session_1 is waiting for authorization/,
+    );
+  });
+
+  it("reports a failed turn without printing its partial answer", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, -2),
+      {
+        type: "turn.settled",
+        data: {
+          turnId: "turn_0",
+          outcome: "failed",
+          error: { code: "provider_error", message: "Model unavailable" },
+        },
+      },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "handled" },
+      },
+    ]);
+    const output: string[] = [];
+
+    await expect(
+      runCli(argv, { error: () => {}, log: (line) => output.push(line) }),
+    ).rejects.toThrow(/Session session_1 failed: Model unavailable/);
+    expect(output).toEqual([]);
+  });
+
+  it("reports a cancelled turn without printing its partial answer", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, -2),
+      { type: "turn.settled", data: { turnId: "turn_0", outcome: "cancelled", reply: ["part_0"] } },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "handled" },
+      },
+    ]);
+    const output: string[] = [];
+
+    await expect(
+      runCli(argv, { error: () => {}, log: (line) => output.push(line) }),
+    ).rejects.toThrow(/Turn in session session_1 was cancelled/);
+    expect(output).toEqual([]);
+  });
+
+  it("rejects prompts without --print and --input with --print", async () => {
+    const logger = { error: () => {}, log: () => {} };
+    await expect(
+      runCli(
+        argv.filter((argument) => argument !== "--print"),
+        logger,
+      ),
+    ).rejects.toThrow(/A prompt requires --print/);
+    await expect(runCli([...argv, "--input", "draft"], logger)).rejects.toThrow(
+      /--input pre-fills the terminal UI/,
+    );
+    await expect(runCli(argv.slice(0, -1), logger)).rejects.toThrow(/--print requires a prompt/);
   });
 });
 
@@ -1001,7 +1075,7 @@ describe("eve acp", () => {
       options: {
         auth: { vercelOidc: { token: "oidc-token" } } as const,
         headers: { "x-vercel-protection-bypass": "bypass" },
-        host: "https://agent.example.com/",
+        baseUrl: "https://agent.example.com/",
       },
       lastOidcTokenFailure: () => undefined,
     }));

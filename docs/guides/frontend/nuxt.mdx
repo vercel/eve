@@ -53,13 +53,13 @@ export default defineNuxtConfig({
 
 ## Call the composable
 
-`useEveAgent` (`eve/vue`) is auto-imported, so a component calls it without an explicit import and without naming a host:
+`useEveAgent` (`eve/vue`) is auto-imported, so a component calls it without an explicit import and without passing `baseUrl`:
 
 ```vue
 <script setup lang="ts">
 const { status, send } = useEveAgent();
 
-const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isBusy = computed(() => status.value === "busy");
 const isInputDisabled = computed(() => isBusy.value || status.value === "resuming");
 
 const message = ref("");

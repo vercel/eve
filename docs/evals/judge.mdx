@@ -51,7 +51,7 @@ Pass `on` to replace the output. JSON values stay structured rather than being c
 
 ```ts
 const draft = await t.send("Draft the welcome email.");
-t.judge("The response has a professional tone.", { on: draft.message }).atLeast(0.6);
+t.judge("The response has a professional tone.", { on: draft.reply }).atLeast(0.6);
 ```
 
 For a multi-turn eval, pass `session.transcript`:
@@ -72,7 +72,7 @@ A batch makes one decision request against one shared state. Pass `state` to rep
 
 ```ts
 const judgments = t.judge({
-  state: { response: turn.message ?? "", reference },
+  state: { response: turn.reply ?? "", reference },
   questions: {
     accurate: {
       type: "boolean",

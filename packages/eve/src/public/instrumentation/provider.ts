@@ -1,1 +1,21 @@
-export * from "#instrumentation/provider.js";
+export {
+  defineInstrumentation,
+  disableInstrumentation,
+  isInstrumentationDisabled,
+  type InstrumentationProvider,
+  type InstrumentationDisabled,
+  type InstrumentationSetupContext,
+  type InstrumentationState,
+  type InstrumentationContext,
+  type InstrumentationHandler,
+  type InstrumentationEvents,
+  type InstrumentationDefinition,
+  type InstrumentationScope,
+  type InstrumentationEvent,
+  type InstrumentationModelInput,
+  type InstrumentationParentLineage,
+  type InstrumentationUsage,
+  type TraceCaptureContext,
+  type TraceCapturePolicy,
+  type TracePolicyDecision,
+} from "#instrumentation/provider.js";

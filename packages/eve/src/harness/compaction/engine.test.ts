@@ -201,10 +201,8 @@ describe("getInputTokenCount", () => {
       lastKnownInputTokens: 42,
       lastKnownPromptMessageCount: 1,
     });
-    // No appended messages — tail is empty. The rough estimate adds a tiny
-    // constant for the "[]" serialization; the exact prior count dominates.
-    expect(result).toBeGreaterThanOrEqual(42);
-    expect(result).toBeLessThan(43);
+    // No appended messages: the exact prior count is the whole count.
+    expect(result).toBe(42);
   });
 
   it("adds appended-message estimates on top of the last exact prompt count", () => {
@@ -231,7 +229,7 @@ describe("getInputTokenCount", () => {
       lastKnownPromptMessageCount: 1,
     };
     const stable = getInputTokenCount(messages, measured, 3_000, 3_000);
-    expect(stable).toBe(8_000 + estimateTokens([]));
+    expect(stable).toBe(8_000);
     expect(getInputTokenCount(messages, measured, 5_000, 3_000)).toBe(stable + 2_000);
     expect(getInputTokenCount(messages, measured, 1_000, 3_000)).toBe(stable);
   });

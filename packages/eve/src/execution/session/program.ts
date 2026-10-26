@@ -1,3 +1,7 @@
+import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
+import type { ControlSettlement } from "#harness/facts.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import type { ControlDelivery } from "#harness/types.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { withStubPlayback } from "#execution/tool-stubs/playback.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -8,9 +12,11 @@ import {
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { turnCoordinates } from "#protocol/session-projection.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
-import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { SessionInputQueue, type ControlOrigin } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -88,7 +94,7 @@ type SessionActionResult =
 interface SessionProgress {
   /** Delegated caller whose awaited reply is still unsettled. */
   caller: TurnCaller | undefined;
-  /** Last dispatched turn; a crash between turns is attributed to it. */
+  /** The turn a running turn step runs; a crash outside one is attributed to the latest turn. */
   turnId?: string;
 }
 
@@ -235,6 +241,29 @@ async function runSessionLoop(
   let prewarmSettled = true;
   // What it prepared is kept only while the owner still waits for its first input.
   let awaitingFirstInput = false;
+  // Controls to a prewarmed session change nothing, and settle once it has started: nothing
+  // precedes `session.started`.
+  const unstarted: ControlSettlement[] = [];
+  const started = () =>
+    storedProjection(cursor.sessionState.snapshot.session.state).view.session.status !== "new";
+  const ignore = async (settlement: ControlSettlement): Promise<void> => {
+    if (!started()) {
+      unstarted.push(settlement);
+      return;
+    }
+    await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+  };
+  const settleUnstarted = async (): Promise<void> => {
+    if (!started()) return;
+    for (const settlement of unstarted.splice(0))
+      await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+  };
+  // A session that ends before it started settles them in its end's commit.
+  const expired = (control?: ControlDelivery): SessionTerminalOutcome => ({
+    kind: "expired",
+    ...(control && { control }),
+    ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
+  });
 
   const nextParkedActivity = async (): Promise<
     | Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "prewarm" }>
@@ -244,6 +273,7 @@ async function runSessionLoop(
       const next = await nextTurnDelivery({
         cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
+        ignore,
         inbox,
         queue,
       });
@@ -272,7 +302,16 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks(cursor, "turn_cancelled");
+        await cancelWorkingTasks(cursor, "turn-cancelled");
+        if (next.origin !== undefined) {
+          const control = controlDeliveryOf(next.origin);
+          await cursor.advance((state) =>
+            settleControlDeliveryStep({
+              ...state,
+              settlement: { control, outcome: "applied", source: "cancel" },
+            }),
+          );
+        }
         continue;
       }
       if (next.kind === "expired" && sessionTimeout !== undefined) {
@@ -286,7 +325,6 @@ async function runSessionLoop(
 
   let turnControl =
     boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
-  let turnIndex = 0;
   // Set when a turn compacts and kept until the session moves to a fresh run,
   // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
@@ -294,8 +332,14 @@ async function runSessionLoop(
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
-    progress.turnId = `turn_${String(turnIndex++)}`;
+    // A step that fails can leave the turn it opened out of the cursor, so the turn is read
+    // before the step runs. Controls run between turns.
+    progress.turnId =
+      payload?.control === undefined
+        ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
+        : undefined;
     const outcome = await execution.runTurn(payload, { caller, control });
+    progress.turnId = undefined;
     sessionTimeout?.recordActivity();
     if (outcome.caller !== undefined) progress.caller = outcome.caller;
     if (outcome.compacted === true) compactionHandoffDue = true;
@@ -330,9 +374,9 @@ async function runSessionLoop(
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async (reportUsage: boolean) => {
+  const settleCancelledTurn = async (reportUsage: boolean, control?: ControlDelivery) => {
     const settled = await cursor.advanceWithHistory((state) =>
-      settleCancelledTurnStep({ ...state, reportUsage }),
+      settleCancelledTurnStep({ ...state, control, reportUsage }),
     );
     progress.caller = undefined;
     return settled;
@@ -343,17 +387,27 @@ async function runSessionLoop(
       // A transfer or turn may start next, and neither must see the session change under it.
       awaitingFirstInput = false;
       switch (next.kind) {
+        case "reset":
+          return {
+            kind: "terminal",
+            outcome: expired(next.origin && controlDeliveryOf(next.origin)),
+          };
         case "closed":
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
-          return { kind: "terminal", outcome: { kind: "expired" } };
+          return { kind: "terminal", outcome: expired() };
         case "transferred":
           return next;
         case "expired":
-        case "reset":
-          return { kind: "terminal", outcome: { kind: "expired" } };
+          return { kind: "terminal", outcome: expired() };
         case "clear":
         case "compact":
+          if (next.origin !== undefined)
+            await ignore({
+              control: controlDeliveryOf(next.origin),
+              outcome: "ignored",
+              source: next.kind,
+            });
           continue;
         case "turn":
           return await runDeliveredTurn(next);
@@ -406,13 +460,15 @@ async function runSessionLoop(
     let action = initial.action;
 
     while (true) {
+      // A first turn that ended the session left no commit after its start for them.
       if (action.kind === "done") {
         return { kind: "terminal", outcome: { action, kind: "done" } };
       }
+      await settleUnstarted();
 
       if (action.cancelled === true) {
         const { caller } = progress;
-        const settled = await settleCancelledTurn(caller !== undefined);
+        const settled = await settleCancelledTurn(caller !== undefined, action.cancelledBy);
         if (caller !== undefined) {
           const notification = { caller, sessionId: boot.sessionId };
           await notifyCancelledTaskCallerStep(
@@ -440,6 +496,8 @@ async function runSessionLoop(
       const next = await nextParkedActivity();
 
       switch (next.kind) {
+        case "reset":
+          return { kind: "terminal", outcome: resetOutcome(next.origin) };
         case "closed":
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
@@ -447,15 +505,21 @@ async function runSessionLoop(
         case "transferred":
           return next;
         case "expired":
-        case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
-          action = await runTurn({ control: next.kind });
+          action = await runTurn(
+            next.origin === undefined
+              ? { control: next.kind }
+              : { control: next.kind, controlDelivery: controlDeliveryOf(next.origin) },
+          );
           continue;
         case "cancel-turn":
           await execution.cancelTurnWork();
-          await settleCancelledTurn(false);
+          await settleCancelledTurn(
+            false,
+            next.origin === undefined ? undefined : controlDeliveryOf(next.origin),
+          );
           sessionTimeout?.recordActivity();
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
@@ -474,4 +538,11 @@ async function runSessionLoop(
     await prewarming;
     await sessionTimeout?.dispose();
   }
+}
+
+/** A reset ends the session; the delivery it arrived as is the end's cause. */
+function resetOutcome(origin: ControlOrigin | undefined): SessionTerminalOutcome {
+  return origin === undefined
+    ? { kind: "expired" }
+    : { control: controlDeliveryOf(origin), kind: "expired" };
 }

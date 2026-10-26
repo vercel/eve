@@ -321,11 +321,12 @@ describe("multi-agent callback routing", () => {
       const callbackToken = `${agent.name}-session:callback-token`;
 
       expect(remoteSessionId).toBe("remote-session-1");
+      // Every callback URL names the protocol the parent and child agreed.
       expect(callback.url).toBe(
         `${deploymentOrigin}${joinEveRoutePath(
           agent.publicRoutePrefix,
           createEveCallbackRoutePath(callbackToken),
-        )}`,
+        )}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
 
       // Remote-side create-session validation (public/channels/eve.ts):
@@ -414,7 +415,7 @@ describe("multi-agent callback routing", () => {
       // Without the prefix the minted URL targets the bare /eve/v1 path that
       // nothing serves in multi-agent mode — the exact production failure.
       expect(callback.url).toBe(
-        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}`,
+        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
       const sessionCallback = {
         callId: "call-support",

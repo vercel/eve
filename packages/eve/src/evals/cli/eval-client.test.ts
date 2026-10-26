@@ -35,7 +35,7 @@ describe("resolveEvalClientOptions", () => {
 
   it("uses a bare client for local targets", () => {
     const options = resolveEvalClientOptions({ kind: "local", url: "http://127.0.0.1:3000" });
-    expect(options).toEqual({ host: "http://127.0.0.1:3000" });
+    expect(options).toEqual({ baseUrl: "http://127.0.0.1:3000" });
   });
 
   it("keeps the synchronous remote options anonymous", () => {
@@ -43,7 +43,7 @@ describe("resolveEvalClientOptions", () => {
       kind: "remote",
       url: "https://example.vercel.app",
     });
-    expect(options.host).toBe("https://example.vercel.app");
+    expect(options.baseUrl).toBe("https://example.vercel.app");
     expect(options.headers).toBeUndefined();
     expect(options.auth).toBeUndefined();
   });

@@ -8,7 +8,6 @@ import { after, before, test } from "node:test";
 import type { CompilerDiagnostic } from "../../../eve/dist/src/compiler/diagnostics.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "../../../eve/dist/src/compiler/manifest.js";
 import { compileAgentManifest } from "../../../eve/dist/src/compiler/normalize-manifest.js";
-import { validateDurableDynamicToolCallbacks } from "../../../eve/dist/src/context/dynamic-tool-lifecycle.js";
 import { discoverAgent } from "../../../eve/dist/src/discover/discover-agent.js";
 import { bundleAuthoredModuleMapForGeneration } from "../../../eve/dist/src/internal/authored-module-loader.js";
 import {
@@ -77,7 +76,7 @@ test("built extension mounts as git with only session-resolved GitHub contributi
   assert.ok(!manifest.tools.some((tool) => tool.name.startsWith("git__")));
 });
 
-test("git__gh resolves with replayable callbacks when github is configured", async () => {
+test("git__gh resolves an executable tool when GitHub is configured", async () => {
   const { appRoot, manifest } = await compileConsumer(
     "git-gh-consumer",
     '{ github: { connector: "github/acme-bot", org: "acme", async broker() {} } }',
@@ -85,7 +84,7 @@ test("git__gh resolves with replayable callbacks when github is configured", asy
   const resolver = manifest.dynamicTools.find((entry) => entry.slug === "git__gh");
   assert.ok(resolver);
 
-  // The app bundle stamps callbacks the same way a deployed agent does.
+  // Evaluate the packaged resolver through the app bundle, not its source export.
   const moduleMapPath = join(appRoot, ".eve", "compile", "module-map.mjs");
   const { code } = await bundleAuthoredModuleMapForGeneration({ appRoot, manifest, moduleMapPath });
   await mkdir(join(appRoot, ".eve", "compile"), { recursive: true });
@@ -93,15 +92,13 @@ test("git__gh resolves with replayable callbacks when github is configured", asy
   const { moduleMap } = await import(pathToFileURL(moduleMapPath).href);
   const definition =
     moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID].modules[resolver.sourceId].default;
-  const tool = await definition.events["session.started"]();
+  const tool = await definition.evaluate();
   assert.ok(tool, "gh resolved to null with github configured");
-
-  // #4986: session start drops a tool that fails this check.
-  validateDurableDynamicToolCallbacks("git__gh", tool, {
-    entryKey: "_single",
-    name: "git__gh",
-    resolverSlug: resolver.slug,
-    scope: "session",
-    sessionId: "session",
+  const input = tool.inputSchema.parse({
+    command: "gh repo view acme/project",
+    description: "Read the project metadata.",
+    permissions: [{ provider: "github", repositories: ["acme/project"], access: "write" }],
   });
+  assert.equal(tool.approval({ toolInput: input }), "not-applicable");
+  assert.equal(typeof tool.execute, "function");
 });

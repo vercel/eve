@@ -98,7 +98,7 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | `github.org`         | With `github` | Organization whose repositories the `gh` tool can access                                          |
 | `github.broker`      | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules        |
 | `github.authorize`   | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
-| `github.attribution` | No            | `attribution(ctx)` callback that returns the `{ name, email }` co-author for this turn            |
+| `github.attribution` | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`              |
 
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
@@ -129,14 +129,26 @@ export default git({
 });
 ```
 
-Commits made by the `gh` tool are authored by the GitHub App. To credit the person a turn works for, return them from `github.attribution`. The callback receives the tool's context, so it can read the verified caller from `ctx.session.auth.current` or resolve their linked accounts with `ctx.getToken`. The `gh` tool then ends every `gh-signed-commit` message, and every `gh pr create` body passed with `--body` or `--body-file`, with `Co-authored-by: <name> <email>`. Return `null` to publish without a co-author. `Co-authored-by` lines the agent writes itself are kept, and the trailer joins their block so they still count. Pull requests created without a body flag, such as with `--fill` or `--template`, and other paths, such as `gh api`, are not attributed.
+### Credit the person behind a turn
 
-```ts
-git({
+Commits made by the `gh` tool are authored by the GitHub App. Return a verified user mapping from
+`github.attribution` to add that person's `Co-authored-by` trailer to `gh-signed-commit` messages
+and `gh pr create` bodies passed through `--body` or `--body-file`. The callback receives the tool
+context, including `ctx.session.auth.current` and `ctx.getToken`. Return `null` to omit attribution.
+Existing co-author trailers are preserved; commands without a body flag and direct `gh api` calls
+are not attributed.
+
+For example, resolve the author through your application's authenticated user mapping:
+
+```ts title="agent/extensions/git.ts"
+import git from "eve/extensions/git";
+import { brokerGitHubLease, coAuthorFor } from "../lib/github";
+
+export default git({
   github: {
-    connector: "github",
+    connector: "github/my-agent",
     org: "acme",
-    broker,
+    broker: brokerGitHubLease,
     attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
   },
 });
@@ -144,7 +156,7 @@ git({
 
 ### Migrate from `code({ github })`
 
-`code({ github })` is deprecated. While it is set, the code extension still contributes `code__gh`, its GitHub instructions, and the signed-commit `code__pr` skill. Without it, the code extension contributes no GitHub tool, instructions, or pull request skill. Move the `github` option to `git({ github })`, and import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`.
+`code({ github })` is rejected. Move the `github` option to `git({ github })`, and import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`.
 
 ## Prepare the sandbox
 

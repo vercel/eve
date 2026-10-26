@@ -89,7 +89,7 @@ it("mounts only opted-in connection receivers from the compiled manifest", async
                 },
               },
             },
-            experimental_events: { onEvent() {} },
+            experimental: { events: { onEvent() {} } },
           },
         }),
       },

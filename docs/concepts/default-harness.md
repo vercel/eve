@@ -24,17 +24,16 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
-First-class [memory](../memory) participates in a separate lifecycle. eve asks
-providers to capture before compaction, excludes attributed recalled records
-from the summarizer, keeps their canonical latest values, and recalls again
-after the checkpoint.
+First-class [memory](../memory) stays outside history, so the summarizer never
+sees it. eve asks providers to capture before compaction rewrites history, and
+what earlier turns recalled follows the checkpoint.
 
 Clients and channels can also request compaction between turns. Call
 `ClientSession.compact()`, a channel route's `compact(address)`, or
 `attachSession(sessionId).compact()`. The request does not append a user message;
-if a turn is running, eve queues it until that turn settles. A successful manual
-compaction emits the same `compaction.requested` and `compaction.completed`
-events as automatic compaction, followed by `session.waiting`.
+if a turn is running, eve queues it until that turn settles. A manual compaction is
+the same context change as automatic compaction: `context.started` and
+`context.settled` with `kind: "compaction"`.
 
 After either kind of compaction, eve moves the idle session to a fresh workflow
 run on the same deployment, so a long session's run history does not keep
@@ -45,7 +44,7 @@ To discard model-message history instead of summarizing it, call the correspondi
 system prompt, configured tools and skills, durable state, limits, and sandbox.
 It removes recalled memory records and framework memory bookkeeping, but it
 does not delete data from a memory provider's external store.
-Its stream boundary is `context.cleared` followed by `session.waiting`.
+On the stream it is a context change with `kind: "clear"`: `context.started`, then `context.settled`.
 
 ## What to read next
 

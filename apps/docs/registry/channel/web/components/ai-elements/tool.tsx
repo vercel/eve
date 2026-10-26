@@ -1,9 +1,6 @@
 "use client";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import { ChevronRightIcon, TerminalIcon, WrenchIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 
@@ -12,90 +9,10 @@ import { CodeBlock } from "./code-block";
 const compactCodeBlockClassName =
   "rounded-none border-0 bg-transparent [&_pre]:!bg-transparent [&_pre]:px-3 [&_pre]:pt-2 [&_pre]:pb-3 [&_pre]:text-xs [&_code]:text-xs";
 
-export type ToolProps = ComponentProps<typeof Collapsible>;
-
-export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn("group not-prose w-full", className)} {...props} />
-);
-
-export type ToolPart = ToolUIPart | DynamicToolUIPart;
-
-export type ToolHeaderProps = {
-  title?: string;
-  className?: string;
-} & (
-  | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
-  | {
-      type: DynamicToolUIPart["type"];
-      state: DynamicToolUIPart["state"];
-      toolName: string;
-    }
-);
-
-const statusLabels: Record<ToolPart["state"], string> = {
-  "approval-requested": "Awaiting Approval",
-  "approval-responded": "Responded",
-  "input-available": "Running",
-  "input-streaming": "Pending",
-  "output-available": "Completed",
-  "output-denied": "Denied",
-  "output-error": "Error",
-};
-
-export const getStatusIndicator = (status: ToolPart["state"]) =>
-  status === "output-available" ? null : (
-    <span className={cn("text-sm", status === "output-error" && "text-destructive")}>
-      {statusLabels[status]}
-    </span>
-  );
-
-export const ToolHeader = ({
-  className,
-  title,
-  type,
-  state,
-  toolName,
-  ...props
-}: ToolHeaderProps) => {
-  const derivedName = type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
-  const displayName = title ?? derivedName;
-
-  return (
-    <CollapsibleTrigger
-      className={cn(
-        "flex w-full items-center gap-2 py-0.5 text-left text-muted-foreground transition-colors hover:text-foreground",
-        className,
-      )}
-      {...props}
-    >
-      {displayName === "bash" ? (
-        <TerminalIcon className="size-4 shrink-0" />
-      ) : (
-        <WrenchIcon className="size-4 shrink-0" />
-      )}
-      <span className="text-sm">{displayName}</span>
-      {getStatusIndicator(state)}
-      <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
-    </CollapsibleTrigger>
-  );
-};
-
-export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
-
-export const ToolContent = ({ className, ...props }: ToolContentProps) => (
-  <CollapsibleContent
-    className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 py-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className,
-    )}
-    {...props}
-  />
-);
-
 export type BashToolContentProps = ComponentProps<"div"> & {
-  input: ToolPart["input"];
-  output: ToolPart["output"];
-  errorText: ToolPart["errorText"];
+  input: unknown;
+  output: unknown;
+  errorText: string | undefined;
 };
 
 export const BashToolContent = ({
@@ -149,7 +66,7 @@ const getRecordValue = (value: unknown, key: string): string | number | undefine
 };
 
 export type ToolInputProps = ComponentProps<"div"> & {
-  input: ToolPart["input"];
+  input: unknown;
 };
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
@@ -168,8 +85,8 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
 );
 
 export type ToolOutputProps = ComponentProps<"div"> & {
-  output: ToolPart["output"];
-  errorText: ToolPart["errorText"];
+  output: unknown;
+  errorText: string | undefined;
 };
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {

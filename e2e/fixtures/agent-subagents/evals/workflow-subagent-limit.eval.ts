@@ -67,11 +67,11 @@ export default defineEval({
     t.succeeded();
     t.calledTool("workflow", { count: 1, input: isFourCallProgram });
     // The workflow tool runs as a task: its result settles the task, not the call.
-    t.event("task.settled", {
+    t.event("call.settled", {
       count: 1,
-      data: { output: isFourElementLimitResult, status: "completed" },
+      data: { output: isFourElementLimitResult, outcome: "completed" },
     });
-    t.event("agent.started", { count: 3, data: { name: "echo-marker" } });
+    t.event("child.opened", { count: 3, data: { name: "echo-marker" } });
     t.messageIncludes("WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED");
   },
 });

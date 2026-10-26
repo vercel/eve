@@ -1,4 +1,4 @@
-import type { DeliverPayload } from "#channel/types.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { logError, type Logger } from "#internal/logging.js";
 
 /** Channel state that remembers a final reply the user never saw. */
@@ -47,7 +47,7 @@ export async function reportUndeliveredReply(
  * Tells the model, ahead of the next message, that its previous reply never
  * reached `surfaceName`, so it does not assume the user read that reply.
  */
-export function withUndeliveredReplyNote<T extends DeliverPayload>(
+export function withUndeliveredReplyNote<T extends ChannelDelivery<unknown>>(
   state: UndeliveredReplyState,
   payload: T,
   surfaceName: string,

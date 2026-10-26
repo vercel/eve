@@ -2,7 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
 import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
-import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
@@ -44,6 +43,11 @@ export interface EveNuxtModuleOptions {
    * dependencies (`node <path-to>/eve/bin/eve.js build`).
    */
   eveBuildCommand?: string;
+}
+
+/** Opaque setup entry consumed by Nuxt. Register it in `modules`, rather than invoking it directly. */
+export interface EveNuxtModule {
+  (options: EveNuxtModuleOptions, nuxt: object): void;
 }
 
 function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): string {
@@ -110,7 +114,7 @@ async function resolveEveProxyTarget(input: {
  * production. Requires Nuxt >= 4.0.0. Configure via
  * {@link EveNuxtModuleOptions}.
  */
-const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxtModuleOptions>({
+const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   meta: {
     name: "eve",
     configKey: "eve",
@@ -179,6 +183,6 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       });
     }
   },
-});
+}) as EveNuxtModule;
 
 export default eveNuxtModule;

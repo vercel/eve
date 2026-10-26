@@ -19,6 +19,7 @@ import {
   ParentTraceContextKey,
   ScheduleIdKey,
   ScheduleInstanceKey,
+  EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionTitleKey,
   TraceRootKey,
@@ -108,6 +109,9 @@ export function buildRunContext(input: {
 
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
+  }
+  if (run.callback !== undefined && run.earlierCallerProtocol !== undefined) {
+    ctx.set(EarlierRemoteCallerKey, run.earlierCallerProtocol);
   }
 
   if (run.parent !== undefined) {

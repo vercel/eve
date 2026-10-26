@@ -26,9 +26,16 @@ describe("defineWorkflowTool", () => {
         const review = await ctx.agent("researcher").send("Review the deployment.", {
           outputSchema: z.object({ findings: z.array(z.string()), score: z.number().optional() }),
         });
-        expectTypeOf(await review.result()).toEqualTypeOf<
+        const reviewed = await review.result();
+        expectTypeOf(reviewed).toEqualTypeOf<
           AgentMessageResult<{ findings: string[]; score?: number | undefined }>
         >();
+        expectTypeOf(reviewed.status).toEqualTypeOf<"completed" | "cancelled" | "failed">();
+        if (reviewed.status === "failed") {
+          expectTypeOf(reviewed.error).toEqualTypeOf<{ readonly message: string }>();
+        } else {
+          expectTypeOf(reviewed.error).toEqualTypeOf<undefined>();
+        }
         void ctx.agent("agent", {
           model: {
             model: "anthropic/claude-opus-5.5",
@@ -42,10 +49,6 @@ describe("defineWorkflowTool", () => {
         const useStepContext = async (stepCtx: WorkflowStepToolContext) => stepCtx;
         void useStepContext(ctx);
         return { deployed: input.service };
-      },
-      approvalKey(input) {
-        expectTypeOf(input).toEqualTypeOf<Readonly<{ service: string }>>();
-        return `deploy:${input.service}`;
       },
       toModelOutput(output) {
         expectTypeOf(output).toEqualTypeOf<{ deployed: string }>();

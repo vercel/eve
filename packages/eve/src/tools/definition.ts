@@ -1,21 +1,19 @@
-import type { ModelMessage, ToolExecutionOptions } from "ai";
+import type { Principal } from "#protocol/session-events/envelope.js";
+import type { ToolExecutionOptions } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-import type { InputOption } from "#shared/input.js";
-import {
-  collectDurableDynamicToolCallbacks,
-  stampDurableDynamicToolCallbacks,
-} from "#tools/durable-callbacks.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
@@ -99,8 +97,6 @@ export interface PublicToolDefinition<
    * The AI SDK can use this for tool result typing.
    */
   outputSchema?: PublicToolOutputSchema<TOutput>;
-  /** Derives the input-scoped key recorded when this tool is approved. */
-  approvalKey?: (input: Readonly<ApprovalContextInput<TInput>>) => string;
 }
 
 export interface InternalToolDefinitionWithExecuteFn<
@@ -115,28 +111,13 @@ export interface InternalToolDefinitionWithExecuteFn<
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
  * way they render tool approvals.
  */
-export interface ToolInputRequest {
-  /**
-   * Whether the user may answer with free text instead of one of the
-   * {@link options}.
-   */
-  readonly allowFreeform?: boolean;
-  /** Rendering hint: confirmation buttons, a selection list, or a text field. */
-  readonly display?: "confirmation" | "select" | "text";
-  /** Selectable answers. */
-  readonly options?: readonly InputOption[];
-  readonly prompt: string;
-}
-
-/** Public identity fields for the authenticated person who answered a question. */
-export interface ToolInputResponseResponder {
-  readonly authenticator: string;
-  readonly principalId: string;
-  readonly principalType: string;
-}
+export type ToolQuestion = Pick<
+  InteractionRequest,
+  "prompt" | "title" | "options" | "allowFreeform" | "display"
+>;
 
 /**
- * The outcome of a {@link ToolInputRequest}.
+ * The outcome of a {@link ToolQuestion}.
  *
  * - `answered`: the user picked an option or typed an answer. An answer the
  *   session accepted before a withdrawal wins, even after a signal aborted.
@@ -145,13 +126,13 @@ export interface ToolInputResponseResponder {
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
-export type ToolInputResponse =
+export type ToolAnswer =
   | {
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
       /** Authenticated identity of the responder, without channel attributes. */
-      readonly responder?: ToolInputResponseResponder;
+      readonly responder?: Principal;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
@@ -159,7 +140,7 @@ export type ToolInputResponse =
   | { readonly status: "unavailable" };
 
 /** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
-export interface ToolInputRequestOptions {
+export interface ToolAskOptions {
   /**
    * Withdraws the request when it aborts: the channel stops offering the
    * question and the ask resolves as `cancelled`, unless the session accepted
@@ -295,7 +276,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * - {@link never}: never require approval
    * - {@link once}: require approval only the first time per session
    */
-  approval?: ToolApproval<ApprovalContextInput<TInput>>;
+  approval?: Approval<ApprovalContextInput<TInput>>;
   /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
@@ -303,7 +284,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    *
    * When omitted, the model sees the full `execute` return value
    * (default AI SDK serialization). Channel event handlers
-   * (`action.result`) always receive the full output regardless.
+   * (`call.settled`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
@@ -345,7 +326,6 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
-  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -369,7 +349,6 @@ export function defineTool<
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
@@ -393,7 +372,6 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -411,7 +389,6 @@ export function defineTool<TReturn>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
@@ -434,8 +411,7 @@ export function stampToolDefinition<
     readonly outputSchema?: unknown;
     readonly execute?: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
-    readonly approval?: ToolApproval<never>;
-    readonly approvalKey?: (...args: never[]) => unknown;
+    readonly approval?: Approval<never>;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -445,20 +421,12 @@ export function stampToolDefinition<
         `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
     );
   }
+  if ("approvalKey" in definition) {
+    throw new Error(
+      `${definer}: approvalKey is no longer supported. Use an approval policy for input-dependent decisions.`,
+    );
+  }
   Object.assign(definition, { [TOOL_BRAND]: true });
-  stampDurableDynamicToolCallbacks(
-    definition,
-    collectDurableDynamicToolCallbacks({
-      inputSchema: definition.inputSchema,
-      outputSchema: definition.outputSchema,
-      label: definition.label,
-      approval: definition.approval,
-      approvalKey: definition.approvalKey,
-      endsTurn: (definition as { readonly endsTurn?: unknown }).endsTurn,
-      execute: definition.execute,
-      toModelOutput: definition.toModelOutput,
-    }),
-  );
   stampDefinitionKey(definition, `tool:${definition.description}`);
   return definition;
 }

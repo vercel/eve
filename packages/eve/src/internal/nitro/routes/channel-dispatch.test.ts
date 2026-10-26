@@ -71,6 +71,7 @@ function createRuntime(overrides: Partial<Runtime> = {}): Runtime {
     dispatchContinuation: vi.fn(),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveContinuation: vi.fn(),
     ...overrides,
@@ -246,6 +247,9 @@ describe("dispatchChannelRequest", () => {
       },
       async reset() {
         return { previousSessionId: "sess_target", status: "reset" };
+      },
+      async getLineStream() {
+        return new ReadableStream();
       },
       async getEventStream() {
         return new ReadableStream();
@@ -480,11 +484,12 @@ describe("dispatchChannelRequest", () => {
     );
 
     await expect(response.json()).resolves.toEqual({
-      previousSessionId: "sess_previous",
-      status: "reset",
+      sessionId: "sess_previous",
+      deliveryId: expect.any(String),
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
-      command: { kind: "reset", reason: "User requested /new" },
+      // A control is a delivery with its own id.
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "User requested /new" },
       continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
   });
@@ -522,10 +527,10 @@ describe("dispatchChannelRequest", () => {
 
     await expect(response.json()).resolves.toEqual({
       sessionId: "sess_active",
-      status: "accepted",
+      deliveryId: expect.any(String),
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
   });

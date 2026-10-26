@@ -39,10 +39,11 @@ import { isObject } from "#shared/guards.js";
  * build than the owner that produced it; bump when any field changes shape so
  * an older successor rejects the handoff instead of misreading state.
  *
- * A newer successor must always accept older checkpoints: every bump adds the
- * upgrade from the previous version in `checkpoint-migrations.ts`.
+ * A successor accepts checkpoints back to `MIN_SESSION_CHECKPOINT_VERSION` and
+ * refuses older ones; a bump that keeps its predecessor readable adds the upgrade
+ * in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 17;
+export const SESSION_CHECKPOINT_VERSION = 18;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

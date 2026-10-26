@@ -450,7 +450,7 @@ export function createSkillPackageSourceRef(
     description: input.description,
     license: input.license,
     logicalPath: normalizeLogicalPath(input.logicalPath),
-    markdown: input.markdown,
+    content: input.markdown,
     metadata: input.metadata !== undefined ? { ...input.metadata } : undefined,
     name: input.name,
     referencesPath: input.referencesPath,

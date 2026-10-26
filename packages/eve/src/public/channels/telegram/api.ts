@@ -1,3 +1,5 @@
+import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
+export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 /**
  * Minimal Telegram Bot API wrapper for the Telegram channel.
  *
@@ -16,9 +18,6 @@ export type TelegramBotToken = string | (() => string | Promise<string>);
 export type TelegramFetch = typeof fetch;
 
 /** Credentials for the native Telegram channel. */
-export interface TelegramCredentials {
-  readonly botToken?: TelegramBotToken;
-}
 
 /**
  * Common options for the Telegram API helpers. `apiBaseUrl` defaults to
@@ -27,7 +26,7 @@ export interface TelegramCredentials {
  */
 export interface TelegramApiOptions {
   readonly apiBaseUrl?: string;
-  readonly credentials?: TelegramCredentials;
+  readonly credentials?: TelegramChannelCredentials;
   readonly fetch?: TelegramFetch;
   readonly fileBaseUrl?: string;
 }

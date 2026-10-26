@@ -19,6 +19,6 @@ export default defineWorkflowTool({
     const result = await helper.result();
     if (result.status === "failed") throw new Error('Agent "workflow-marker" failed.');
     await sleep("3s");
-    return result.message ?? null;
+    return result.reply ?? null;
   },
 });

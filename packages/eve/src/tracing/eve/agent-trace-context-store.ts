@@ -1,6 +1,5 @@
 import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
-import type { SessionTraceContext } from "#channel/types.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { ContextAccessor } from "#context/key.js";
@@ -139,7 +138,7 @@ export function readTurnTraceContext(
   serializedContext: Readonly<Record<string, unknown>>,
   sessionId: string,
   turnId: string,
-): SessionTraceContext | undefined {
+): SessionTraceSeed | undefined {
   const raw = serializedContext[AgentTraceContextKey.name];
   if (raw === undefined) return undefined;
   const state = deserializeAgentTraceContextState(raw);
@@ -159,7 +158,7 @@ export function readActionTraceContext(
   sessionId: string,
   turnId: string,
   callId: string,
-): SessionTraceContext | undefined {
+): SessionTraceSeed | undefined {
   const raw = serializedContext[AgentTraceContextKey.name];
   if (raw === undefined) return undefined;
   const state = deserializeAgentTraceContextState(raw);
@@ -177,7 +176,7 @@ function withTraceDecision(
   serializedContext: Readonly<Record<string, unknown>>,
   context: SpanContext,
   storedDecision?: InstrumentationDecision,
-): SessionTraceContext {
+): SessionTraceSeed {
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
   const traceState = resolveForwardedTraceSeed({
     decision: storedDecision ?? seed?.decision,

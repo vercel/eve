@@ -1,11 +1,11 @@
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -56,9 +56,6 @@ import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 /**
  * Target accepted by `receive(github, { target })` for proactive sessions.
  * Requires `owner`, `repo`, and exactly one of `issueNumber` or
@@ -91,7 +88,7 @@ export interface GitHubInboundContext {
 }
 
 /** Channel-owned GitHub context rebuilt from persisted channel state. */
-interface GitHubChannelContext {
+export interface GitHubChannelContext {
   readonly conversation: GitHubConversationRef;
   readonly github: GitHubHandle;
   readonly repository: GitHubRepositoryRef;
@@ -120,44 +117,31 @@ export type GitHubInboundResult = {
  * Return type of GitHub inbound hooks: a {@link GitHubInboundResult} or a
  * promise for one.
  */
-export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
-type GitHubEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: GitHubEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type GitHubSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: GitHubEventContext,
+type GitHubEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<GitHubEventContext>,
 ) => void | Promise<void>;
 
 /**
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), `input.requested`, `input.resolved`, and
- * `approval.settled` (post each prompt in turn),
- * and `session.failed`/`turn.failed` (posts an error comment). A handler supplied
+ * `content.completed` (posts the reply), `interaction.opened` and `interaction.settled`
+ * (post each prompt in turn), and `session.ended`/`turn.settled` (posts an error comment). A handler supplied
  * here replaces the built-in for that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
-  readonly "action.partial"?: GitHubEventHandler<"action.partial">;
-  readonly "action.result"?: GitHubEventHandler<"action.result">;
-  readonly "actions.requested"?: GitHubEventHandler<"actions.requested">;
-  readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
-  readonly "authorization.required"?: GitHubEventHandler<"authorization.required">;
-  readonly "input.requested"?: GitHubEventHandler<"input.requested">;
-  readonly "input.resolved"?: GitHubEventHandler<"input.resolved">;
-  readonly "approval.settled"?: GitHubEventHandler<"approval.settled">;
-  readonly "message.appended"?: GitHubEventHandler<"message.appended">;
-  readonly "message.completed"?: GitHubEventHandler<"message.completed">;
-  readonly "session.completed"?: GitHubEventHandler<"session.completed">;
-  readonly "session.failed"?: GitHubSessionFailedHandler;
-  readonly "session.waiting"?: GitHubEventHandler<"session.waiting">;
-  readonly "turn.completed"?: GitHubEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: GitHubEventHandler<"turn.cancelled">;
-  readonly "turn.failed"?: GitHubEventHandler<"turn.failed">;
+  readonly "call.progress"?: GitHubEventHandler<"call.progress">;
+  readonly "call.settled"?: GitHubEventHandler<"call.settled">;
+  readonly "call.requested"?: GitHubEventHandler<"call.requested">;
+  readonly "interaction.opened"?: GitHubEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: GitHubEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: GitHubEventHandler<"response.admitted">;
+  readonly "content.delta"?: GitHubEventHandler<"content.delta">;
+  readonly "content.completed"?: GitHubEventHandler<"content.completed">;
+  readonly "session.ended"?: GitHubEventHandler<"session.ended">;
+  readonly "delivery.settled"?: GitHubEventHandler<"delivery.settled">;
+  readonly "turn.settled"?: GitHubEventHandler<"turn.settled">;
   readonly "turn.started"?: GitHubEventHandler<"turn.started">;
 }
 
@@ -184,7 +168,10 @@ export interface GitHubChannelConfig {
    * Return `{ auth }` to dispatch or `null` to ignore. Replaces the default
    * mention gate.
    */
-  onComment?(ctx: GitHubInboundContext, comment: GitHubComment): GitHubInboundResultOrPromise;
+  onComment?(
+    ctx: GitHubInboundContext,
+    comment: GitHubComment,
+  ): GitHubInboundResult | Promise<GitHubInboundResult>;
 
   /**
    * Opt-in handler for `check_suite` webhook events. There is no default
@@ -194,7 +181,7 @@ export interface GitHubChannelConfig {
   onCheckSuite?(
     ctx: GitHubInboundContext,
     checkSuite: GitHubCheckSuiteEvent,
-  ): GitHubInboundResultOrPromise;
+  ): GitHubInboundResult | Promise<GitHubInboundResult>;
 
   /**
    * Opt-in handler for `check_run` webhook events. There is no default
@@ -204,13 +191,16 @@ export interface GitHubChannelConfig {
   onCheckRun?(
     ctx: GitHubInboundContext,
     checkRun: GitHubCheckRunEvent,
-  ): GitHubInboundResultOrPromise;
+  ): GitHubInboundResult | Promise<GitHubInboundResult>;
 
   /**
    * Opt-in handler for `issues` webhook events. There is no default dispatch;
    * define this to act on issues (e.g. `issue.action === "opened"`).
    */
-  onIssue?(ctx: GitHubInboundContext, issue: GitHubIssueEvent): GitHubInboundResultOrPromise;
+  onIssue?(
+    ctx: GitHubInboundContext,
+    issue: GitHubIssueEvent,
+  ): GitHubInboundResult | Promise<GitHubInboundResult>;
 
   /**
    * Opt-in handler for `pull_request` webhook events. There is no default
@@ -219,7 +209,7 @@ export interface GitHubChannelConfig {
   onPullRequest?(
     ctx: GitHubInboundContext,
     pullRequest: GitHubPullRequestEvent,
-  ): GitHubInboundResultOrPromise;
+  ): GitHubInboundResult | Promise<GitHubInboundResult>;
 
   /**
    * Opt-in handler for `workflow_run` webhook events. There is no default
@@ -229,7 +219,7 @@ export interface GitHubChannelConfig {
   onWorkflowRun?(
     ctx: GitHubInboundContext,
     workflowRun: GitHubWorkflowRunEvent,
-  ): GitHubInboundResultOrPromise;
+  ): GitHubInboundResult | Promise<GitHubInboundResult>;
 }
 
 /** Concrete return type of {@link githubChannel}. */
@@ -253,7 +243,6 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   };
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
-    kindHint: "github",
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
 
@@ -455,7 +444,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
 
 function rebuildGitHubContext(
   state: GitHubChannelState,
-  _session: SessionHandle,
+  _session: ChannelContext,
   config: GitHubChannelConfig,
 ): GitHubChannelContext {
   const binding = buildGitHubBinding({ config, state });

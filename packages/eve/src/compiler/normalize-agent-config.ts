@@ -17,7 +17,6 @@ import {
   type ModelRouting,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
@@ -112,7 +111,6 @@ export async function compileAgentConfig(
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
   if (dynamicModelDefinition !== undefined) {
     dynamicModel = {
-      eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
       exportName: configModule.exportName,
       sourceKind: "module",
       logicalPath: configModule.logicalPath,

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
-import type { ConnectionAuthDefinition, ConnectionAuthProvider } from "#shared/connection-types.js";
+import type {
+  ConnectionAuthDefinition,
+  AuthorizationDefinition,
+} from "#shared/connection-types.js";
 
 const MSG = "Expected the connection export to match the public eve shape.";
 
@@ -17,7 +20,7 @@ function validInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function authProvider(auth: ConnectionAuthDefinition | undefined): ConnectionAuthProvider {
+function authProvider(auth: ConnectionAuthDefinition | undefined): AuthorizationDefinition {
   if (auth === undefined || typeof auth === "function") {
     throw new Error("Expected a static auth provider.");
   }
@@ -77,15 +80,14 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.auth).toMatchObject({ getToken, principalType: "app" });
     });
 
-    it("normalizes credentialOwner into the runtime principalType", () => {
+    it("rejects retired credentialOwner with guidance to use principalType", () => {
       const getToken = async () => ({ token: "x" });
-      const result = normalizeMcpClientConnectionDefinition(
-        validInput({ auth: { credentialOwner: "user", getToken } }),
-        MSG,
-      );
-
-      expect(result.auth).toMatchObject({ getToken, principalType: "user" });
-      expect(result.auth).not.toHaveProperty("credentialOwner");
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ auth: { credentialOwner: "user", getToken } }),
+          MSG,
+        ),
+      ).toThrow(/credentialOwner.*no longer supported.*principalType/);
     });
 
     it("preserves a context-aware auth resolver without invoking it at build time", () => {
@@ -158,7 +160,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect((result.auth as Record<string, unknown>).vercelConnect).toEqual({
+      expect(authProvider(result.auth).vercelConnect).toEqual({
         connector: "oauth/mcp-linear-app",
         requirement: {
           reference: "connector:oauth/mcp-linear-app",
@@ -182,7 +184,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect((result.auth as Record<string, unknown>).evict).toBe(evict);
+      expect(authProvider(result.auth).evict).toBe(evict);
     });
 
     it("preserves the optional auth displayName", () => {
@@ -217,7 +219,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect((result.auth as Record<string, unknown>).vercelConnect).toBeUndefined();
+      expect(authProvider(result.auth).vercelConnect).toBeUndefined();
     });
   });
 
@@ -333,7 +335,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
           }),
           MSG,
         ),
-      ).toThrow(/must not provide both "credentialOwner" and "principalType"/);
+      ).toThrow(/credentialOwner.*no longer supported.*principalType/);
     });
 
     it('rejects interactive auth with principalType "app"', () => {

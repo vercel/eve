@@ -1,9 +1,10 @@
+import type { MessageContent } from "#shared/message-content.js";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
-import type { ToolApproval } from "#approval/definition.js";
-import type { MessageResult, SendTurnOptions } from "#client/types.js";
+import type { Approval } from "#approval/definition.js";
+import type { DeliveryResult, SendTurnOptions } from "#client/types.js";
 import type {
   AgentModelOptionsDefinition,
   AgentReasoningDefinition,
@@ -13,9 +14,9 @@ import {
   stampToolDefinition,
   type PublicToolDefinition,
   type ToolContext,
-  type ToolInputRequest,
-  type ToolInputRequestOptions,
-  type ToolInputResponse,
+  type ToolQuestion,
+  type ToolAskOptions,
+  type ToolAnswer,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 import {
@@ -71,19 +72,21 @@ export interface AgentSendOptions<TOutput = unknown> {
 }
 
 /**
- * How one agent turn ended, as the client's `MessageResult` reports it:
- * `"waiting"` when the session waits for its next message, including after a
- * cancelled turn, which carries neither `data` nor `message`; `"completed"`
- * when the session ended with the turn; and `"failed"` when the turn failed,
- * with the reason in `error`.
+ * How one delegated turn ended. Questions relay to the parent while this result waits for the
+ * final reply; session termination is separate from request completion.
  */
 export type AgentMessageResult<TOutput = unknown> = Pick<
-  MessageResult<TOutput>,
-  "data" | "message" | "status"
-> & {
-  /** Why the turn failed, present only when `status` is `"failed"`. */
-  readonly error?: { readonly message: string };
-};
+  DeliveryResult<TOutput>,
+  "data" | "reply" | "sessionEnded"
+> &
+  (
+    | { readonly status: "completed" | "cancelled"; readonly error?: never }
+    | {
+        readonly status: "failed";
+        /** Why the turn failed. */
+        readonly error: { readonly message: string };
+      }
+  );
 
 /** The response to one message sent to a `ctx.agent` session. */
 export interface AgentResponse<TOutput = unknown> {
@@ -102,7 +105,7 @@ export interface AgentSession {
    * running turn ends before the agent reads it.
    */
   send<TOutput = unknown>(
-    message: string,
+    message: MessageContent<string | URL>,
     options?: AgentSendOptions<TOutput>,
   ): Promise<AgentResponse<TOutput>>;
 }
@@ -128,7 +131,7 @@ export type WorkflowSharedContext = Pick<
    * run. The request is withdrawn, resolving as `cancelled`, when
    * `options.signal` or the call's `abortSignal` aborts.
    */
-  ask(request: ToolInputRequest, options?: ToolInputRequestOptions): PromiseLike<ToolInputResponse>;
+  ask(request: ToolQuestion, options?: ToolAskOptions): PromiseLike<ToolAnswer>;
 };
 
 /**
@@ -204,7 +207,7 @@ interface WorkflowToolDefinitionBase<TInput, TOutput> extends PublicToolDefiniti
   TOutput
 > {
   readonly [WORKFLOW_TOOL_BRAND]: true;
-  approval?: ToolApproval<unknown extends TInput ? Record<string, unknown> : TInput>;
+  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 

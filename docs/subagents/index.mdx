@@ -124,45 +124,36 @@ configuration to expose the subagent, or `null` to omit it from the parent's too
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.research === true
-        ? defineAgent({
-            description: "Investigate ambiguous questions before the parent responds.",
-            model: "anthropic/claude-opus-5.5",
-          })
-        : null,
-  },
-});
-```
-
-Resolvers run at `session.started` or `turn.started`; `step.started` is not
-supported for subagents. A nullish result (`null` or `undefined`) removes the
-subagent's description and tool definition from the model-visible surface.
-The subagent's filesystem manifest is always compiled; a non-nullish result injects
-the returned agent configuration when the child runs.
-
-Packaging controls must be available before the resolver runs. Put them on
-`defineDynamic`, rather than the `defineAgent` returned by an event handler:
-
-```ts
-export default defineDynamic({
-  build: { externalDependencies: ["native-package"] },
-  events: {
-    "session.started": () =>
-      defineAgent({
-        description: "Use a native package when handling delegated work.",
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes.role === "researcher"
+    ? defineAgent({
+        description: "Investigate ambiguous questions before the parent responds.",
         model: "anthropic/claude-opus-5.5",
-      }),
-  },
+      })
+    : null,
+);
+```
+
+eve evaluates the subagent before each parent model call. A nullish result (`null` or `undefined`)
+removes the subagent's description and tool definition from the model-visible
+surface. The subagent's filesystem manifest is always compiled; a non-nullish
+result injects the returned agent configuration when the child runs.
+
+Packaging controls must be available at compile time. `defineDynamic` takes only a function;
+put packaging configuration on the root agent instead:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  build: { externalDependencies: ["native-package"] },
 });
 ```
 
-The compiler applies `build.externalDependencies` while bundling every authored
-module in that dynamic subagent.
+The root's external dependencies apply when bundling subagent modules too.
 See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
-scope precedence, failure behavior, and the dispatch-time guard.
+when eve evaluates a subagent, failure behavior, and the dispatch-time guard.
 
 Minimum files:
 
@@ -233,9 +224,9 @@ By default, a subagent named `researcher` collides with an authored tool named `
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
-Each delegated subagent spins up its own child session and stream. The parent stream carries the call's `task.started` and `task.settled` events, `agent.started` when the child session opens, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. The parent emits `input.resolved` when it routes an answer back down to the descendant that asked. A tool approval is the exception: the descendant decides it, since its response policy can refuse the person who answered, so the approval stays open on the parent until the descendant settles or resolves it. The parent relays the descendant's `approval.settled` and `input.resolved` for it. On text-only channels, a typed reply that matches an option of the first open prompt, such as `approve` for a tool approval or `continue` for a session limit, answers it as the person who typed it, so a person answers several proxied prompts one message at a time. `task.settled` carries the child's reply as `output` when the call completes, or `error.message` when it fails, along with the same tool `name` and `kind: "agent"` as the call's `task.started`. To follow the child's other progress, pass the `agent.started` event to [`session.agent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent and follow the child with `stream()`. It reads `agent.started.data.streamPath`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
+Each delegated subagent spins up its own child session and stream. The parent stream carries the task's `task.started`, the call's `call.started` and `call.settled`, and `child.opened` when the child session opens, plus the approvals, questions, and sign-ins descendants open, relayed as the parent's own `interaction.opened` so the root channel can prompt the user. A relayed interaction's `origin` names the descendant session and request, and `origin.call` the descendant's call. The parent settles a relayed question when it routes an answer back down to the descendant that asked. A tool approval is the exception: the descendant decides it, since its response policy can refuse the person who answered, so the approval stays open on the parent until the descendant settles it. The parent relays that `interaction.settled`. On text-only channels, a typed reply that matches an option of the first open prompt, such as `approve` or `deny` for a tool approval or the budget prompt, answers it as the person who typed it, so a person answers several proxied prompts one message at a time. `call.settled` carries the child's reply as `output` when the call completes, or `error.message` when it fails. To follow the child's other progress, pass the `child.opened` event to [`session.agent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent and follow the child with `stream()`. It reads the event's `stream`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
 
-`agent.started` carries the `callId` and `turnId` of the call that opened the session, the call's `taskId`, the agent `name`, and the child's `sessionId`. Later calls with the same `taskId` reach the same session and do not announce it again, so match a child to its calls by `taskId`. A session an authored workflow tool opens with `ctx.agent` is announced the same way, with its `taskId` only when the workflow tool call runs as a task.
+`child.opened` carries its `owner` (the call that opened the session, or the task whose run did), the agent `name`, the child's `sessionId`, and the `stream` path to follow it. Later calls with the same `taskId` reach the same session and do not announce it again, so match a child to its calls by `taskId`: each later call's `call.started` carries it. A session an authored workflow tool opens with `ctx.agent` is announced the same way.
 
 Channels with activity reporting show a subagent's tool activity beneath that subagent's progress item. Activity reporting is best-effort and does not change execution or result delivery.
 
@@ -245,11 +236,11 @@ Subagent model calls automatically retry classified transient provider failures,
 
 A child parks after answering instead of terminating, keeping its session and conversation history alive. Pass the task's `taskId` to the same subagent tool with a new `message` to continue that session. Omitting `taskId` always starts a new child. When a child's turn fails, the call fails and the task ends. A `taskId` that names no task of that subagent tool, including one that ended, fails with `UNKNOWN_TASK`. Any later turn can continue the child, and each continuation runs with the auth of the caller that sends it.
 
-A call with the `taskId` of a child that is still working joins the child's current turn, and that turn's final reply settles both calls. If the turn ends before the child reads the message, the message starts the child's next turn, and that turn's reply settles both calls. Use it to correct or add to work in progress. `eve__task_cancel` with the task's `taskId` cancels the child's current turn and keeps its conversation, so a later call with the same `taskId` continues where it left off.
+A call with the `taskId` of a child that is still working joins the child's current turn, and that turn's final reply settles both calls. If the turn ends before the child reads the message, the message starts the child's next turn, and that turn's reply settles both calls. Use it to correct or add to work in progress. `eve__task_cancel` with the task's `taskId` ends the task and stops the child's current work. Start a new task to delegate again after a cancel.
 
 eve adds a framework-injected `[Tasks]` note to the conversation that lists the working and idle tasks by `taskId` and tool, so the model can find a child to continue. See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels agent tasks.
 
-The parent holds each child for the life of the task's run, which lasts until the parent session ends. Then eve resets local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
+The parent holds each child for the life of the task's run, which lasts until the parent session ends or its task is cancelled. Then eve requests child shutdown, using authenticated reset requests for remote children. Cleanup is best effort: a child whose inbox or deployment is unavailable may remain running or parked. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 
 ## When to split
 

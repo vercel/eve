@@ -4,10 +4,10 @@ import { isObject } from "#shared/guards.js";
  * One prior message passed as `history` to `send()` or `create()`.
  *
  * Entries become real user and assistant turns in the session's model history
- * and are published in the `history.imported` stream event.
+ * and are recorded on the `delivery.consumed` of the message that brings them.
  */
 export interface SessionHistoryMessage {
-  /** Optional app-owned id, echoed in `history.imported` so clients can join annotations. */
+  /** Optional app-owned id, echoed in `delivery.consumed` history so clients can join annotations. */
   readonly id?: string;
   readonly role: "user" | "assistant";
   /** Plain text. Channels render speaker attribution into this text when needed. */

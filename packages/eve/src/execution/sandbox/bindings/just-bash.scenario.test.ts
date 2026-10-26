@@ -10,7 +10,7 @@ import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provi
 import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
 import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
-import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
+import { executeGrepSearch } from "#execution/sandbox/grep-search.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -103,12 +103,22 @@ describe("just-bash sandbox file API", () => {
       path: "/source",
     });
     await expect(
-      executeGrepOnSandbox(handle.sandbox, { path: "/source", pattern: "before" }),
-    ).resolves.toMatchObject({
-      content: "/source/instructions.md:1:before",
-      matchCount: 1,
-      path: "/source",
-    });
+      executeGrepSearch(
+        {
+          path: "/source",
+          pattern: "before",
+          outputMode: "content",
+        },
+        handle.sandbox,
+      ),
+    ).rejects.toThrow("outside the workspace");
+    await handle.sandbox.writeTextFile({ path: "/workspace/grep-note.txt", content: "before" });
+    await expect(
+      executeGrepSearch({ pattern: "before", outputMode: "content" }, handle.sandbox),
+    ).resolves.toMatchObject({ content: "/workspace/grep-note.txt:1:before", matchCount: 1 });
+    await expect(
+      executeGrepSearch({ pattern: "[", literal: false, outputMode: "content" }, handle.sandbox),
+    ).rejects.toThrow("grep failed");
     await handle.sandbox.writeTextFile({
       content: "after",
       path: "/source/instructions.md",

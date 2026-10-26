@@ -37,10 +37,19 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
   }) => {
     agent.models.push(model);
     agent.read.push(message);
-    return { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId: "reviewer-session" };
+    return {
+      address: {
+        kind: "local",
+        name: "reviewer",
+        nodeId: "reviewer",
+        sessionId: "reviewer-session",
+      },
+      deliveryId: `delivery-${String(agent.read.length)}`,
+    };
   },
   sendAgentSessionMessageStep: async ({ message }: { readonly message: string }) => {
     agent.read.push(message);
+    return { deliveryId: `delivery-${String(agent.read.length)}`, sessionId: "reviewer-session" };
   },
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({

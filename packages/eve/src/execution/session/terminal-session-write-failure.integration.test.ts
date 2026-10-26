@@ -12,12 +12,9 @@ let terminalEvents: string[] = [];
 
 const terminalWriteFailureChannel = defineChannel({
   events: {
-    async "session.completed"() {
-      terminalEvents.push("session.completed");
-      failAnchorStreamWrites = true;
-    },
-    async "session.failed"() {
-      terminalEvents.push("session.failed");
+    async "session.ended"({ data }) {
+      terminalEvents.push(data.outcome);
+      if (data.outcome === "completed") failAnchorStreamWrites = true;
     },
   },
   routes: [POST("/test", async () => new Response("ok"))],
@@ -29,9 +26,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// On Vercel, a session's stream stays on its first run. Once that run's deployment is deleted,
-// its run key is gone and every write fails as a FatalError, the way this test injects it.
-it("does not report an expired session as failed when its terminal stream write fails", async () => {
+// The terminal fact commits before channel delivery in v27. Fail the following stream close,
+// after the channel has handled completion, rather than failing an uncommitted fact's write.
+it("does not report an expired session as failed when its terminal stream close fails", async () => {
   const runtime = await createTestRuntime({
     agent: { name: "terminal-session-write-failure" },
     modules: [
@@ -52,22 +49,12 @@ it("does not report an expired session as failed when its terminal stream write 
       return true;
     };
 
-    const write = world.streams.write.bind(world.streams);
-    vi.spyOn(world.streams, "write").mockImplementation(async (runId, name, chunk) => {
+    const close = world.streams.close.bind(world.streams);
+    vi.spyOn(world.streams, "close").mockImplementation(async (runId, name) => {
       if (await failAnchorWrite(runId))
-        throw new FatalError("simulated terminal stream write failure");
-      await write(runId, name, chunk);
+        throw new FatalError("simulated terminal stream close failure");
+      await close(runId, name);
     });
-
-    const writeMulti = world.streams.writeMulti?.bind(world.streams);
-    if (writeMulti !== undefined) {
-      vi.spyOn(world.streams, "writeMulti").mockImplementation(async (runId, name, chunks) => {
-        if (await failAnchorWrite(runId)) {
-          throw new FatalError("simulated terminal stream write failure");
-        }
-        await writeMulti(runId, name, chunks);
-      });
-    }
 
     const run = await startSessionOwner(workflowEntry, [
       {
@@ -85,7 +72,7 @@ it("does not report an expired session as failed when its terminal stream write 
     try {
       await expect(run.returnValue).rejects.toThrow("Agent workflow failed");
       expect(failedStreamWrites).toBeGreaterThan(0);
-      expect(terminalEvents).toEqual(["session.completed"]);
+      expect(terminalEvents).toEqual(["completed"]);
     } finally {
       await run.cancel().catch(() => undefined);
     }

@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { type SlackChannelConfig, slackChannel } from "#public/channels/slack/index.js";
-import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
+import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
   type Person,
@@ -66,7 +66,7 @@ interface SlackMessageBody {
  */
 export function slackDriver(
   surface: Exclude<Surface, "public"> = "shared",
-  config: Pick<SlackChannelConfig, "onInputResponse"> = {},
+  config: Pick<SlackChannelConfig, "onAnswers"> = {},
 ): ChannelDriver {
   const dm = surface === "private";
   // A fresh channel per driver keeps each test's session apart in the shared workflow world.
@@ -275,7 +275,7 @@ function hitlOptions(
       (block as { readonly actions?: readonly SlackElement[] }).actions ??
       []
     )
-      .filter((element) => element.action_id?.startsWith(HITL_ACTION_PREFIX) === true)
+      .filter((element) => element.action_id?.startsWith(ANSWER_ACTION_PREFIX) === true)
       .flatMap((element) => renderedOptions(element, messageBlocks, messageTs)),
   );
 }

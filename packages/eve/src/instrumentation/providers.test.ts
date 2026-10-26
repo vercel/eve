@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { turnIdempotencyKey } from "#instrumentation/lifecycle.js";
@@ -17,7 +18,7 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { agentRuns, localTraces, otelIntegration } from "#public/instrumentation/otel.js";
 import {
   disableInstrumentation,
-  type ProviderSetupContext,
+  type InstrumentationSetupContext,
 } from "#public/instrumentation/provider.js";
 
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
@@ -57,7 +58,7 @@ describe("registerInstrumentationProvider", () => {
   });
 
   it("awaits setup with the resolved provider context", async () => {
-    const contexts: ProviderSetupContext[] = [];
+    const contexts: InstrumentationSetupContext[] = [];
     await register(
       "otel",
       defineInstrumentation({
@@ -77,7 +78,7 @@ describe("registerInstrumentationProvider", () => {
 
   it("reports Vercel preview separately from production", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
-    const contexts: ProviderSetupContext[] = [];
+    const contexts: InstrumentationSetupContext[] = [];
 
     await register(
       "otel",
@@ -91,7 +92,7 @@ describe("registerInstrumentationProvider", () => {
     vi.stubEnv(EVE_EVALUATION_ENV_FLAG, "1");
     vi.stubEnv(EVE_EVALUATION_RUN_ID_ENV, "eval-run-1");
 
-    const contexts: ProviderSetupContext[] = [];
+    const contexts: InstrumentationSetupContext[] = [];
     await register(
       "otel",
       defineInstrumentation({
@@ -247,26 +248,29 @@ describe("finalizeInstrumentationProviders", () => {
       "audit",
       defineInstrumentation({
         events: {
-          "tool.call.started": started,
-          "tool.call.completed": completed,
+          "call.requested": started,
+          "call.settled": completed,
         },
       }),
     );
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
     const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
-    const scope = {
-      attemptId: "attempt",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      turnId: "turn-1",
-      stepIndex: 0,
-    };
+    const scope = instrumentationScope(
+      {
+        runId: "attempt",
+        attempt: 0,
+        sessionId: "session-1",
+        turnId: "turn-1",
+      },
+      0,
+    );
     await hooks.publish({
-      type: "tool.call.started",
+      type: "call.requested",
       idempotencyKey: "call",
       callId: "call-1",
       toolName: "weather",
-      kind: "tool-call",
+      capability: { kind: "tool", name: "weather" },
+      frameworkTool: false,
       input: undefined,
       scope,
     });
@@ -281,13 +285,17 @@ describe("finalizeInstrumentationProviders", () => {
       },
       () => Promise.resolve(),
     );
-    await hooks.publish({ type: "step.attempt.completed", idempotencyKey: "attempt", scope });
     await hooks.publish({
-      type: "tool.call.completed",
+      outcome: "completed",
+      type: "model.settled",
+      idempotencyKey: "attempt",
+      scope,
+    });
+    await hooks.publish({
+      type: "call.settled",
       idempotencyKey: "call",
       outcome: "completed",
       usage: { inputTokens: 10 },
-      output: { type: "result" },
       scope,
     });
     expect(started).toHaveBeenCalledOnce();
@@ -308,13 +316,15 @@ describe("finalizeInstrumentationProviders", () => {
     const result = await runtime.runInContext(
       {
         idempotencyKey: "tool:session-1:turn-1:0:0:call-1:0",
-        scope: {
-          attemptId: "session-1:turn-1:0:0",
-          attemptIndex: 0,
-          sessionId: "session-1",
-          stepIndex: 0,
-          turnId: "turn-1",
-        },
+        scope: instrumentationScope(
+          {
+            runId: "session-1:turn-1:0:0",
+            attempt: 0,
+            sessionId: "session-1",
+            turnId: "turn-1",
+          },
+          0,
+        ),
         type: "tool.call",
       },
       () => Promise.resolve("ran"),

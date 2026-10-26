@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 
@@ -18,17 +19,16 @@ import {
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
-import type { ActionPresentationByCallId, HandleMessageStreamEvent } from "#protocol/message.js";
-import {
-  callStatus,
-  foldSession,
-  initialSessionProjection,
-  type SessionCallStatus,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import { isFactType } from "#protocol/session-events/catalog.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
+import { callLabel, callOutputSource, callState } from "#protocol/session-projection/selectors.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import { actionLabel } from "#shared/action-label.js";
+import { failureOf } from "#client/session-utils.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { Answer } from "#shared/input.js";
 
 const ANSWER_FIELD = "answer";
 const ERROR_CODE_BUSY = -32_001;
@@ -44,11 +44,13 @@ interface ActivePrompt {
   turnId?: string;
 }
 
+interface AdapterDelivery {
+  stream(): AsyncIterable<SessionStreamEvent>;
+}
+
 interface AdapterClientSession {
-  send(message: SendTurnInput["message"]): Promise<AsyncIterable<HandleMessageStreamEvent>>;
-  respond(
-    inputResponses: readonly InputResponse[],
-  ): Promise<AsyncIterable<HandleMessageStreamEvent>>;
+  send(message: SendTurnInput["message"]): Promise<AdapterDelivery>;
+  respond(answers: readonly Answer[]): Promise<AdapterDelivery>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
   reset(): Promise<unknown>;
 }
@@ -56,7 +58,7 @@ interface AdapterClientSession {
 interface AdapterClient {
   readonly sessions: {
     create(input: SendTurnInput): Promise<{
-      readonly response: AsyncIterable<HandleMessageStreamEvent>;
+      readonly delivery: AdapterDelivery;
       readonly session: AdapterClientSession;
     }>;
   };
@@ -66,20 +68,32 @@ interface AcpSession {
   client?: AdapterClientSession;
   active?: ActivePrompt;
   /** The session's lifecycle, folded from every event it streams. */
-  projection: SessionProjection;
+  view: SessionView;
   readonly tools: Map<string, ToolCall>;
+  readonly parts: Map<string, "text" | "reasoning">;
 }
 
-/** ACP v1 has no statuses for denied or stopped calls, so they report `failed`. */
-const ACP_TOOL_STATUS: Record<SessionCallStatus | "interrupted", ToolCallStatus> = {
-  running: "in_progress",
-  "awaiting-input": "pending",
-  completed: "completed",
-  failed: "failed",
-  rejected: "failed",
-  cancelled: "failed",
-  interrupted: "failed",
-};
+/**
+ * A call's ACP status, from the tables: pending until it starts or while its approval is open, in
+ * progress while it runs. ACP v1 has no statuses for denied or stopped calls, so they report
+ * `failed`.
+ */
+function acpStatus(view: SessionView, callId: string): ToolCallStatus | undefined {
+  switch (callState(view, callId)) {
+    case undefined:
+      return undefined;
+    case "requested":
+    case "approval":
+      return "pending";
+    case "running":
+    case "blocked":
+      return "in_progress";
+    case "completed":
+      return "completed";
+    default:
+      return "failed";
+  }
+}
 
 /** Configuration for translating one ACP client connection to an eve server. */
 export interface EveAcpAdapterOptions {
@@ -115,7 +129,7 @@ export class EveAcpAdapter {
       new Client({
         auth: options.auth,
         headers: options.headers,
-        host: options.serverUrl,
+        baseUrl: options.serverUrl,
         redirect: "manual",
       });
   }
@@ -162,8 +176,9 @@ export class EveAcpAdapter {
 
     const sessionId = randomUUID();
     this.#sessions.set(sessionId, {
-      projection: initialSessionProjection(),
+      view: emptySessionView(),
       tools: new Map(),
+      parts: new Map(),
     });
     return { sessionId };
   }
@@ -183,6 +198,7 @@ export class EveAcpAdapter {
 
     const message = promptContent(params);
     session.tools.clear();
+    session.parts.clear();
     const settled = Promise.withResolvers<void>();
     const active: ActivePrompt = {
       cancelRequested: false,
@@ -208,62 +224,67 @@ export class EveAcpAdapter {
       }
       let input: SendTurnPayload = { message };
       for (;;) {
-        let response: AsyncIterable<HandleMessageStreamEvent>;
+        let response: AdapterDelivery;
         if (session.client === undefined) {
           if (input.message === undefined) {
             throw new Error("ACP session has not started.");
           }
           const created = await this.#client.sessions.create({ ...input, message: input.message });
           session.client = created.session;
-          response = created.response;
+          response = created.delivery;
         } else {
           response =
-            input.inputResponses === undefined
+            input.answers === undefined
               ? await session.client.send(input.message!)
-              : await session.client.respond(input.inputResponses);
+              : await session.client.respond(input.answers);
         }
         if (active.cancelRequested || active.protocolCancelled) {
           await this.#cancelActive(session);
         }
 
-        const inputRequests: InputRequest[] = [];
+        const interactions: Interaction[] = [];
         let cancelled = false;
-        let failure:
-          | Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>
-          | undefined;
+        let failure: ErrorInfo | undefined;
         let unsupportedEvent: RequestError | undefined;
 
-        for await (const event of response) {
+        for await (const event of response.stream()) {
           const data = "data" in event ? event.data : undefined;
           const turnId = data !== undefined && "turnId" in data ? data.turnId : undefined;
           if (typeof turnId === "string") active.turnId = turnId;
 
-          if (event.type === "input.requested") inputRequests.push(...event.data.requests);
-          if (event.type === "authorization.required") {
+          if (event.type === "interaction.opened" && event.data.request.kind === "sign-in") {
             unsupportedEvent = unsupported(
               "Connection authorization cannot be completed through eve ACP mode.",
             );
           }
-          if (event.type === "turn.cancelled") cancelled = true;
-          if (event.type === "turn.failed" || event.type === "session.failed") failure = event;
+          if (event.type === "turn.settled" && event.data.outcome === "cancelled") cancelled = true;
+          failure = failureOf(event) ?? failure;
           await this.#projectEvent(params.sessionId, session, event, client);
+          // The projection rebuilds the request with the call it's about.
+          if (event.type === "interaction.opened") {
+            const request = interaction(session.view, event.data.interactionId);
+            if (request !== undefined && request.request.kind !== "sign-in")
+              interactions.push(request);
+          }
         }
 
         if (active.protocolCancelled) {
           throw RequestError.requestCancelled({ sessionId: params.sessionId });
         }
-        if (cancelled || active.cancelRequested) return { stopReason: "cancelled" };
+        // A session that fails ends its turn cancelled: its error, not the cancel, is the stop.
+        if (active.cancelRequested || (cancelled && failure === undefined))
+          return { stopReason: "cancelled" };
         if (failure !== undefined) {
           await this.#failRunningCalls(params.sessionId, session, client);
           throw eveFailure(failure);
         }
         if (unsupportedEvent !== undefined) throw unsupportedEvent;
-        if (inputRequests.length === 0) return { stopReason: "end_turn" };
+        if (interactions.length === 0) return { stopReason: "end_turn" };
 
-        let inputResponses: InputResponse[];
+        let answers: Answer[];
         try {
-          inputResponses = await Promise.all(
-            inputRequests.map((request) =>
+          answers = await Promise.all(
+            interactions.map((request) =>
               this.#requestInput(params.sessionId, session, request, client, signal),
             ),
           );
@@ -278,7 +299,7 @@ export class EveAcpAdapter {
           throw RequestError.requestCancelled({ sessionId: params.sessionId });
         }
         if (active.cancelRequested) return { stopReason: "cancelled" };
-        input = { inputResponses };
+        input = { answers };
       }
     } catch (error) {
       throw acpRequestError(error);
@@ -355,54 +376,37 @@ export class EveAcpAdapter {
   async #projectEvent(
     sessionId: string,
     session: AcpSession,
-    event: HandleMessageStreamEvent,
+    event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
-    const before = session.projection;
-    session.projection = foldSession(before, event);
-    await this.#projectContent(sessionId, session, event, client);
-    // A call's status is the projection's: a task call runs until its task settles, and a
-    // stopped or denied call ends when the stream says so.
-    // `tool_call` already announced the calls an `actions.requested` adds. Only an announced
-    // call gets updates: an approval reaches the client through its permission request.
-    if (event.type === "actions.requested") return;
-    const updated = new Set<string>();
-    const { calls, tasks, turns } = session.projection;
-    if (calls !== before.calls || tasks !== before.tasks || turns !== before.turns) {
-      for (const callId of Object.keys(calls)) {
-        if (!session.tools.has(callId)) continue;
-        const status = callStatus(session.projection, callId);
-        if (status === undefined || status === callStatus(before, callId)) continue;
-        updated.add(callId);
-        await notifyUpdate(client, sessionId, {
-          sessionUpdate: "tool_call_update",
-          toolCallId: callId,
-          status: ACP_TOOL_STATUS[status],
-          ...callOutput(event, callId),
-          ...resultTitle(event, callId),
-        });
-      }
+    if (!isFactType(event.type)) {
+      await this.#projectContent(sessionId, session, event, client);
+      return;
     }
-    // A result reports its content even when its call had already settled, such as the reason
-    // for a denial that `input.resolved` decided first.
-    const resultCallId =
-      event.type === "action.result"
-        ? event.data.result.callId
-        : event.type === "task.settled"
-          ? event.data.callId
-          : undefined;
-    if (resultCallId === undefined || updated.has(resultCallId)) return;
-    if (!session.tools.has(resultCallId)) return;
-    const output = callOutput(event, resultCallId);
-    const status = callStatus(session.projection, resultCallId);
-    if (!("content" in output) || status === undefined) return;
-    await notifyUpdate(client, sessionId, {
-      sessionUpdate: "tool_call_update",
-      toolCallId: resultCallId,
-      status: ACP_TOOL_STATUS[status],
-      ...output,
-      ...resultTitle(event, resultCallId),
-    });
+    foldReceivedEvent(session.view, event);
+    await this.#projectContent(sessionId, session, event, client);
+    // `tool_call` announced the request. Only an announced call gets updates: an approval
+    // reaches the client through its permission request.
+    if (event.type === "call.requested") return;
+    // Each announced call reports when the tables' status differs from the one it last
+    // reported: a task call runs until its task settles, and a stopped or denied call ends when
+    // the stream says so. A result reports its content even when its call had already settled,
+    // such as the reason for a denial that `interaction.settled` decided first.
+    const resultCallId = event.type === "call.settled" ? event.data.callId : undefined;
+    for (const [callId, call] of session.tools) {
+      const status = acpStatus(session.view, callId);
+      if (status === undefined) continue;
+      const output = callOutput(event, callId, session.view);
+      if (status === call.status && !(callId === resultCallId && "content" in output)) continue;
+      session.tools.set(callId, { ...call, status });
+      await notifyUpdate(client, sessionId, {
+        sessionUpdate: "tool_call_update",
+        toolCallId: callId,
+        status,
+        ...output,
+        ...resultTitle(event, callId),
+      });
+    }
   }
 
   /**
@@ -415,11 +419,11 @@ export class EveAcpAdapter {
     client: AgentContext,
   ): Promise<void> {
     for (const callId of session.tools.keys()) {
-      if (callStatus(session.projection, callId) !== "running") continue;
+      if (acpStatus(session.view, callId) !== "in_progress") continue;
       await notifyUpdate(client, sessionId, {
         sessionUpdate: "tool_call_update",
         toolCallId: callId,
-        status: ACP_TOOL_STATUS.failed,
+        status: "failed",
       });
     }
   }
@@ -427,31 +431,50 @@ export class EveAcpAdapter {
   async #projectContent(
     sessionId: string,
     session: AcpSession,
-    event: HandleMessageStreamEvent,
+    event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
     switch (event.type) {
-      case "message.appended":
+      case "content.delta": {
+        const { partId, kind, delta } = event.data;
+        if (kind === "text") session.parts.set(partId, "text");
+        else if (kind === "reasoning") session.parts.set(partId, "reasoning");
+        const partKind = session.parts.get(partId);
+        if (partKind === undefined || delta === undefined) return;
         await notifyUpdate(client, sessionId, {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: event.data.messageDelta },
-          messageId: `${event.data.turnId}:message:${event.data.stepIndex}`,
+          sessionUpdate: partKind === "text" ? "agent_message_chunk" : "agent_thought_chunk",
+          content: { type: "text", text: delta },
+          messageId: partId,
         });
         return;
-      case "reasoning.appended":
+      }
+      case "content.completed": {
+        const { partId, kind, value } = event.data;
+        if (session.parts.has(partId) || typeof value !== "string") return;
+        if (kind !== "text" && kind !== "reasoning") return;
+        session.parts.set(partId, kind === "text" ? "text" : "reasoning");
         await notifyUpdate(client, sessionId, {
-          sessionUpdate: "agent_thought_chunk",
-          content: { type: "text", text: event.data.reasoningDelta },
-          messageId: `${event.data.turnId}:thought:${event.data.stepIndex}`,
+          sessionUpdate: kind === "text" ? "agent_message_chunk" : "agent_thought_chunk",
+          content: { type: "text", text: value },
+          messageId: partId,
         });
         return;
-      case "actions.requested":
-        for (const action of visibleActions(event.data.actions)) {
-          const toolCall = toolCallForAction(action, event.data.presentation);
-          session.tools.set(action.callId, toolCall);
-          await notifyUpdate(client, sessionId, { sessionUpdate: "tool_call", ...toolCall });
-        }
+      }
+      case "call.requested": {
+        const { callId, capability, input } = event.data;
+        const row = session.view.calls[callId];
+        if (capability.kind === "control" || row === undefined) return;
+        const toolCall: ToolCall = {
+          toolCallId: callId,
+          title: callLabel(row),
+          kind: "other",
+          status: "pending",
+          rawInput: input,
+        };
+        session.tools.set(callId, toolCall);
+        await notifyUpdate(client, sessionId, { sessionUpdate: "tool_call", ...toolCall });
         return;
+      }
       default:
         return;
     }
@@ -460,16 +483,17 @@ export class EveAcpAdapter {
   async #requestInput(
     sessionId: string,
     session: AcpSession,
-    request: InputRequest,
+    request: Interaction,
     client: AgentContext,
     signal: AbortSignal,
-  ): Promise<InputResponse> {
+  ): Promise<Answer> {
     const cancellationSignal = AbortSignal.any([signal, session.active!.outboundController.signal]);
-    if (request.display === "confirmation") {
-      const approveId = `${request.requestId}:approve`;
-      const denyId = `${request.requestId}:deny`;
+    if (request.request.display === "confirmation") {
+      const approveId = `${request.interactionId}:approve`;
+      const denyId = `${request.interactionId}:deny`;
       const toolCall =
-        session.tools.get(request.action.callId) ?? toolCallForAction(request.action);
+        (request.call === undefined ? undefined : session.tools.get(request.call.callId)) ??
+        toolCallForAsked(request);
       const response = await client.request(
         methods.client.session.requestPermission,
         {
@@ -484,13 +508,13 @@ export class EveAcpAdapter {
       );
       if (response.outcome.outcome === "cancelled") {
         this.#cancelClientInput(session);
-        return { requestId: request.requestId };
+        return { interactionId: request.interactionId };
       }
       if (response.outcome.optionId === approveId) {
-        return { requestId: request.requestId, optionId: "approve" };
+        return { interactionId: request.interactionId, optionId: "approve" };
       }
       if (response.outcome.optionId === denyId) {
-        return { requestId: request.requestId, optionId: "deny" };
+        return { interactionId: request.interactionId, optionId: "deny" };
       }
       throw RequestError.invalidParams(
         { optionId: response.outcome.optionId },
@@ -510,7 +534,7 @@ export class EveAcpAdapter {
       {
         mode: "form",
         sessionId,
-        message: request.prompt,
+        message: request.request.prompt,
         requestedSchema: {
           type: "object",
           properties: { [ANSWER_FIELD]: property },
@@ -521,7 +545,7 @@ export class EveAcpAdapter {
     );
     if (response.action !== "accept") {
       this.#cancelClientInput(session);
-      return { requestId: request.requestId };
+      return { interactionId: request.interactionId };
     }
     const content = response.content as Record<string, unknown> | null | undefined;
     const answer = content?.[ANSWER_FIELD];
@@ -531,13 +555,13 @@ export class EveAcpAdapter {
         "ACP elicitation response must contain a string answer",
       );
     }
-    if (request.display === "select") {
-      if (!request.options?.some((option) => option.id === answer)) {
+    if (request.request.display === "select") {
+      if (!request.request.options?.some((option) => option.id === answer)) {
         throw RequestError.invalidParams({ answer }, "Unknown eve question option");
       }
-      return { requestId: request.requestId, optionId: answer };
+      return { interactionId: request.interactionId, optionId: answer };
     }
-    return { requestId: request.requestId, text: answer };
+    return { interactionId: request.interactionId, text: answer };
   }
 
   #cancelClientInput(session: AcpSession): void {
@@ -574,33 +598,38 @@ function promptContent(params: PromptRequest): Array<{ type: "text"; text: strin
   return content;
 }
 
-function toolCallForAction(
-  action: RuntimeActionRequest,
-  presentation?: ActionPresentationByCallId,
-): ToolCall {
+function toolCallForAsked(request: Interaction): ToolCall {
+  const name = request.call?.name ?? request.request.kind;
   return {
-    toolCallId: action.callId,
-    title: actionLabel(action, presentation),
+    toolCallId: request.call?.callId ?? request.interactionId,
+    title: actionLabel(
+      { callId: request.call?.callId ?? "", input: {}, kind: "tool-call", toolName: name },
+      undefined,
+    ),
     kind: "other",
     status: "pending",
-    rawInput: action.input,
+    rawInput: request.call?.input ?? {},
   };
 }
 
-function elicitationProperty(request: InputRequest) {
-  if (request.display === "select" && request.allowFreeform !== true && request.options?.length) {
+function elicitationProperty(request: Interaction) {
+  if (
+    request.request.display === "select" &&
+    request.request.allowFreeform !== true &&
+    request.request.options?.length
+  ) {
     return {
       type: "string" as const,
-      title: request.prompt,
-      oneOf: request.options.map((option) => ({
+      title: request.request.prompt,
+      oneOf: request.request.options.map((option) => ({
         const: option.id,
         title: option.label,
         description: option.description,
       })),
     };
   }
-  if (request.display === "text" && request.allowFreeform !== false) {
-    return { type: "string" as const, title: request.prompt, minLength: 1 };
+  if (request.request.display === "text" && request.request.allowFreeform !== false) {
+    return { type: "string" as const, title: request.request.prompt, minLength: 1 };
   }
   throw unsupported("This eve question shape cannot be represented by ACP form elicitation.");
 }
@@ -621,12 +650,11 @@ function unsupported(message: string): RequestError {
   return new RequestError(ERROR_CODE_UNSUPPORTED, message);
 }
 
-function eveFailure(
-  event: Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>,
-): RequestError {
-  return new RequestError(ERROR_CODE_EVE, event.data.message, {
-    code: event.data.code,
-    details: event.data.details,
+function eveFailure(error: ErrorInfo): RequestError {
+  return new RequestError(ERROR_CODE_EVE, error.message, {
+    code: error.code,
+    id: error.id,
+    hint: error.hint,
   });
 }
 
@@ -643,22 +671,24 @@ function errorMessage(error: unknown): string {
 }
 
 /** A result's completion label retitles its call, such as a search reporting what it found. */
-function resultTitle(event: HandleMessageStreamEvent, callId: string): { title?: string } {
-  const label =
-    event.type === "action.result" ? event.data.presentation?.[callId]?.label : undefined;
-  return label === undefined ? {} : { title: label };
+function resultTitle(event: SessionStreamEvent, callId: string): { title?: string } {
+  const title =
+    event.type === "call.settled" && event.data.callId === callId ? event.data.label : undefined;
+  return title === undefined ? {} : { title };
 }
 
 /** The output an event carries for a call, if it reports one. */
-function callOutput(event: HandleMessageStreamEvent, callId: string) {
+function callOutput(event: SessionStreamEvent, callId: string, view: SessionView) {
+  if (event.type !== "call.settled" || event.data.callId !== callId) return {};
+  const outputOf = event.data.outputOf;
+  const shared =
+    outputOf === undefined ? undefined : callOutputSource(view, outputOf.callId)?.output;
   const output =
-    event.type === "action.result" && event.data.result.callId === callId
-      ? event.data.result.output
-      : event.type === "task.settled" && event.data.callId === callId
-        ? event.data.output !== undefined
-          ? event.data.output
-          : event.data.error?.message
-        : undefined;
+    event.data.output !== undefined
+      ? event.data.output
+      : shared !== undefined
+        ? shared
+        : event.data.error?.message;
   if (output === undefined) return {};
   return {
     content: [

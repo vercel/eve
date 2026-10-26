@@ -1,12 +1,10 @@
-import type {
-  AgentStartedStreamEvent,
-  MessageStreamEvent,
-  TaskSettledStreamEvent,
-} from "#protocol/message.js";
-import { foldSession, initialSessionProjection, openInputs } from "#protocol/session-projection.js";
-import type { InputRequest } from "#shared/input.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { TokenUsage } from "#shared/token-usage.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { callOutputSource } from "#protocol/session-projection/selectors.js";
+import type { CallRow } from "#protocol/session-projection/tables.js";
+import { ownerOf } from "#protocol/session-projection/tree.js";
+import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
+import { isJsonObjectValue } from "#shared/json.js";
 import type {
   EveEvalDerivedFacts,
   EveEvalSkillLoad,
@@ -14,265 +12,148 @@ import type {
   EveEvalToolCall,
 } from "#evals/types.js";
 
-interface MutableToolCall {
-  name: string;
-  input: JsonObject;
-  output: JsonValue | undefined;
-  status: EveEvalToolCall["status"];
-  turnIndex: number;
-  sessionId?: string;
-}
-
-type MutableSkillLoad = { -readonly [K in keyof EveEvalSkillLoad]: EveEvalSkillLoad[K] };
-
-/** One call to an agent task, as `task.started` reports it. */
-interface AgentCall {
-  readonly callId: string;
-  readonly name: string;
-  readonly taskId: string;
-  readonly turnIndex: number;
-}
-
-/**
- * Options for {@link deriveRunFacts}.
- */
 export interface DeriveRunFactsOptions {
   /** Session id stamped onto every derived tool call, skill load, and subagent call. */
   readonly sessionId?: string;
+  /** Session events through this turn: cumulative usage and reusable task/child metadata. */
+  readonly usageEvents?: readonly SessionStreamEvent[];
 }
 
 /**
- * Event types that only park or close out a turn. A run that ends on one while
- * a request is open ended parked on unanswered HITL input.
- */
-const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
-  "turn.waiting",
-  "turn.completed",
-  "session.waiting",
-  "session.completed",
-]);
-
-/**
- * Extracts derived execution facts from a completed run's stream events.
- *
- * Tool calls and skill loads pair each `actions.requested` entry with its
- * matching `action.result` by call id. Subagent calls are the calls to agent tasks,
- * paired with their `task.settled` the same way. These facts power checks,
- * scorers, and reporters.
+ * What a segment of a session's events did: its tool calls, skill loads and subagent calls, the
+ * requests it opened, its content and models, read from the session's tables as the segment
+ * leaves them. A call counts when the segment requested or settled it, as an approved call
+ * requested in an earlier segment is; a subagent call when the segment started it on its task.
  */
 export function deriveRunFacts(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
-  const toolCalls: MutableToolCall[] = [];
-  const toolCallsByCallId = new Map<string, MutableToolCall>();
-  const skillLoads = new Map<string, MutableSkillLoad>();
-  const agentCalls: AgentCall[] = [];
-  const settledTaskCalls = new Map<string, TaskSettledStreamEvent["data"]>();
-  const agentSessions: AgentStartedStreamEvent["data"][] = [];
-  const inputRequests: InputRequest[] = [];
-  let turnIndex = -1;
+  const view = emptySessionView();
+  // Readers of one session, such as a turn's and a steering message's, record its lines in the
+  // order each read them; the fold skips a line behind the last it read, so it reads them in
+  // stream order.
+  const folded = [...(options?.usageEvents ?? events)].sort(
+    (a, b) =>
+      a.meta.position.line - b.meta.position.line || a.meta.position.index - b.meta.position.index,
+  );
+  for (const event of folded) foldReceivedEvent(view, event);
+
+  // The turn each call happened in, in the order the segment first reports it.
+  const callTurns = new Map<string, number>();
+  const agentCalls = new Map<string, number>();
+  const interactions: Interaction[] = [];
+  const turnIndexes = new Map<string, number>();
+  const models = new Set<string>();
   let messageCount = 0;
   let reasoningBlockCount = 0;
-  const models = new Set<string>();
   let failureCode: string | undefined;
-
-  const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
-    const existing = toolCallsByCallId.get(callId);
-    if (existing !== undefined) return existing;
-
-    const call: MutableToolCall = {
-      name,
-      input,
-      output: undefined,
-      status: "pending",
-      turnIndex: Math.max(turnIndex, 0),
-      sessionId,
-    };
-    toolCalls.push(call);
-    toolCallsByCallId.set(callId, call);
-    return call;
-  };
-
+  const indexOf = (turnId: string | undefined) =>
+    Math.max(
+      (turnId === undefined ? undefined : turnIndexes.get(turnId)) ?? turnIndexes.size - 1,
+      0,
+    );
   for (const event of events) {
     switch (event.type) {
-      case "turn.started": {
-        turnIndex += 1;
+      case "turn.started":
+        if (!turnIndexes.has(event.data.turnId))
+          turnIndexes.set(event.data.turnId, turnIndexes.size);
+        break;
+      case "call.requested":
+        if (!callTurns.has(event.data.callId))
+          callTurns.set(event.data.callId, indexOf(event.scope?.turnId));
+        break;
+      case "call.settled":
+        if (!callTurns.has(event.data.callId)) callTurns.set(event.data.callId, indexOf(undefined));
+        break;
+      case "call.started": {
+        const { callId, taskId } = event.data;
+        if (taskId !== undefined && view.tasks[taskId]?.kind === "agent" && !agentCalls.has(callId))
+          agentCalls.set(callId, indexOf(event.scope?.turnId));
         break;
       }
-
-      case "actions.requested": {
-        for (const action of event.data.actions) {
-          if (action.kind === "tool-call") {
-            ensureToolCall(action.callId, action.toolName, action.input);
-          } else if (action.kind === "subagent-call" || action.kind === "remote-agent-call") {
-            // Keyed by the model's tool name, which the call's `tool-result` reports.
-            ensureToolCall(action.callId, action.name, action.input);
-          } else if (action.kind === "load-skill") {
-            skillLoads.set(action.callId, {
-              output: undefined,
-              sessionId,
-              skill: action.name,
-              status: "pending",
-              turnIndex: Math.max(turnIndex, 0),
-            });
-          }
-        }
+      case "interaction.opened": {
+        const request = interaction(view, event.data.interactionId);
+        if (request !== undefined) interactions.push(request);
         break;
       }
-
-      case "action.result": {
-        const { result, status } = event.data;
-        const call =
-          result.kind === "tool-result"
-            ? ensureToolCall(result.callId, result.toolName, {})
-            : result.kind === "subagent-result"
-              ? toolCallsByCallId.get(result.callId)
-              : undefined;
-        if (call !== undefined) {
-          call.output = result.output;
-          call.status = status;
-        }
-        const load =
-          result.kind === "load-skill-result" ? skillLoads.get(result.callId) : undefined;
-        if (load !== undefined) {
-          load.output = result.output;
-          load.status = status;
-        }
+      case "content.completed":
+        if (event.data.kind === "text" && event.data.phase === "reply") messageCount += 1;
+        else if (event.data.kind === "reasoning") reasoningBlockCount += 1;
         break;
-      }
-
-      case "task.started": {
-        const { callId, kind, name, taskId } = event.data;
-        if (kind !== "agent") break;
-        agentCalls.push({ callId, name, taskId, turnIndex: Math.max(turnIndex, 0) });
-        break;
-      }
-
-      case "task.settled": {
-        settledTaskCalls.set(event.data.callId, event.data);
-        break;
-      }
-
-      case "agent.started": {
-        agentSessions.push(event.data);
-        break;
-      }
-
-      case "input.requested": {
-        inputRequests.push(...event.data.requests);
-        for (const request of event.data.requests) {
-          ensureToolCall(request.action.callId, request.action.toolName, request.action.input);
-        }
-        break;
-      }
-
-      case "message.completed": {
-        if (event.data.finishReason !== "tool-calls") {
-          messageCount += 1;
-        }
-        break;
-      }
-
-      case "reasoning.completed": {
-        reasoningBlockCount += 1;
-        break;
-      }
-
-      case "step.started": {
+      case "model.started":
         models.add(event.data.modelId);
         break;
-      }
-
-      case "session.failed": {
-        failureCode = event.data.code;
+      case "turn.settled":
+      case "session.ended":
+        if (event.data.outcome === "failed") failureCode = event.data.error?.code;
         break;
-      }
     }
   }
 
-  const subagentCalls = deriveSubagentCalls({
-    agentCalls,
-    agentSessions,
-    sessionId,
-    settledTaskCalls,
+  // A settled call's status is its outcome, and its output the one it carries or shares.
+  const settled = (row: CallRow) =>
+    row.status === "settled"
+      ? { output: callOutputSource(view, row.callId)?.output, status: row.outcome ?? "failed" }
+      : { output: undefined, status: "pending" as const };
+  const toolCalls: EveEvalToolCall[] = [];
+  const skillLoads: EveEvalSkillLoad[] = [];
+  for (const [callId, turnIndex] of callTurns) {
+    const row = view.calls[callId];
+    if (row === undefined) continue;
+    if (row.capability.kind === "skill") {
+      skillLoads.push({ sessionId, skill: row.capability.name, turnIndex, ...settled(row) });
+      continue;
+    }
+    // Every other call is a tool the model called by name: a tool, an agent or a task control.
+    const input = isJsonObjectValue(row.input) ? row.input : {};
+    toolCalls.push({
+      callId,
+      input,
+      name: row.capability.name,
+      sessionId,
+      turnIndex,
+      ...settled(row),
+    });
+  }
+  const subagentCalls = [...agentCalls].flatMap(([callId, turnIndex]): EveEvalSubagentCall[] => {
+    const row = view.calls[callId];
+    const task = row?.taskId === undefined ? undefined : view.tasks[row.taskId];
+    if (row === undefined || task === undefined) return [];
+    const child = Object.values(view.children)
+      .filter(
+        (entry) => ownerOf(view, { family: "child", id: entry.sessionId }, "task") === task.taskId,
+      )
+      .at(-1);
+    return [
+      {
+        callId,
+        childSessionId: child?.sessionId,
+        name: task.name,
+        sessionId,
+        turnIndex,
+        ...settled(row),
+      },
+    ];
   });
+  const spent = Object.keys(view.usage.byKind).length > 0 ? view.usage.total : undefined;
   return {
-    toolCalls: toolCalls as readonly EveEvalToolCall[],
+    toolCalls,
     toolCallCount: toolCalls.length,
-    skillLoads: [...skillLoads.values()],
+    skillLoads,
     subagentCalls,
     subagentCallCount: subagentCalls.length,
-    inputRequests,
+    interactions,
     parked: endedParkedOnInput(events),
     messageCount,
     reasoningBlockCount,
     models: [...models],
-    usage: latestUsage(events)?.usage,
+    usage: spent,
     failureCode,
   };
 }
 
-/**
- * The last event in `events` (in stream order) that carries the session's
- * running usage total (`session.waiting`, `turn.waiting`, `session.failed`, or
- * `session.completed`), with its time, so an eval that captured a session more
- * than once can keep the latest total by time rather than by capture order.
- * `usage` is undefined when that event reported none.
- */
-export function latestUsage(
-  events: readonly MessageStreamEvent[],
-): { readonly usage: TokenUsage | undefined; readonly at: number } | undefined {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event === undefined) continue;
-    switch (event.type) {
-      case "session.waiting":
-      case "turn.waiting":
-      case "session.failed":
-        return { usage: event.data.usage, at: Date.parse(event.meta.at) };
-      case "session.completed":
-        return { usage: event.data?.usage, at: Date.parse(event.meta.at) };
-    }
-  }
-  return undefined;
-}
-
-/**
- * Every call to an agent task, with its session from the task's
- * `agent.started` once that session opened.
- */
-function deriveSubagentCalls(input: {
-  readonly agentCalls: readonly AgentCall[];
-  readonly agentSessions: readonly AgentStartedStreamEvent["data"][];
-  readonly sessionId: string | undefined;
-  readonly settledTaskCalls: ReadonlyMap<string, TaskSettledStreamEvent["data"]>;
-}): EveEvalSubagentCall[] {
-  const agentSessionsByTaskId = new Map<string, AgentStartedStreamEvent["data"]>();
-  for (const session of input.agentSessions) {
-    if (session.taskId !== undefined) agentSessionsByTaskId.set(session.taskId, session);
-  }
-  return input.agentCalls.map((call) => {
-    const session = agentSessionsByTaskId.get(call.taskId);
-    const settled = input.settledTaskCalls.get(call.callId);
-    return {
-      callId: call.callId,
-      childSessionId: session?.sessionId,
-      name: call.name,
-      output: settled?.output,
-      remoteUrl: session?.remote?.url,
-      sessionId: input.sessionId,
-      status: settled?.status ?? "working",
-      turnIndex: call.turnIndex,
-    };
-  });
-}
-
-/**
- * Returns empty derived facts, used when a case produced no events
- * (execution errors, transport failures).
- */
 export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
   return {
     toolCalls: [],
@@ -280,7 +161,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
     skillLoads: [],
     subagentCalls: [],
     subagentCallCount: 0,
-    inputRequests: [],
+    interactions: [],
     parked: false,
     messageCount: 0,
     reasoningBlockCount: 0,
@@ -288,49 +169,14 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
   };
 }
 
-/**
- * Input requests the last started turn raised, or a child relayed, that nobody
- * has answered yet. A partial answer settles only the requests it answers; the
- * rest stay open.
- *
- * An eval may watch how a request ends outside the session (for example
- * through `t.target`), so two kinds of open request don't count: the session's
- * own requests from earlier turns, and answered ones whose responder still has
- * to sign in. Relayed requests keep the child's `turnId`, so they never match
- * the parent's turn and are kept by `callId`/`taskId` instead.
- */
-export function openInputRequests(events: readonly MessageStreamEvent[]): InputRequest[] {
-  let projection = initialSessionProjection();
-  let lastTurnId: string | undefined;
-  for (const event of events) {
-    projection = foldSession(projection, event);
-    if (event.type === "turn.started") lastTurnId = event.data.turnId;
+/** The explicit pause says whether the turn is waiting on a person rather than background work. */
+function endedParkedOnInput(events: readonly SessionStreamEvent[]): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event?.type === "turn.paused") {
+      return event.data.awaiting.some((awaiting) => "interactionId" in awaiting);
+    }
+    if (event?.type === "turn.settled" || event?.type === "session.ended") return false;
   }
-  const awaitingSignIn = new Set(
-    Object.values(projection.candidates)
-      .filter((candidate) => candidate.outcome === "pending")
-      .map((candidate) => candidate.requestId),
-  );
-  return openInputs(projection)
-    .filter(
-      (input) =>
-        lastTurnId === undefined ||
-        input.turnId === lastTurnId ||
-        input.callId !== undefined ||
-        input.taskId !== undefined,
-    )
-    .filter((input) => !awaitingSignIn.has(input.request.requestId))
-    .map((input) => input.request);
-}
-
-/**
- * A run ended parked when it ends on a parking event while a request is still
- * open: the turn ended on the request (`turn.completed` → `session.waiting`),
- * or the open turn parked on it (`turn.waiting`), also after a partial answer.
- */
-function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
-  const last = events.at(-1);
-  return (
-    last !== undefined && PARKING_EVENT_TYPES.has(last.type) && openInputRequests(events).length > 0
-  );
+  return false;
 }

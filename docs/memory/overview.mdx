@@ -59,8 +59,8 @@ eve and the provider split responsibilities along a fixed boundary:
 | --------------------------------------------------- | ------------------------------------- |
 | Slot names, derived from the file path              | Storage and indexing                  |
 | Namespace and scope resolution from trusted context | Retrieval, ranking, and formatting    |
-| When recall and capture run, including compaction   | What to extract and how to capture it |
-| Attribution and supersession of recalled messages   | Retention and deletion                |
+| When recall and capture run                         | What to extract and how to capture it |
+| Attribution of recalled messages                    | Retention and deletion                |
 | Qualifying provider tools as `<slot>__<tool>`       | Which model-facing tools to offer     |
 
 Because the boundary is fixed, a bounded text document, a hosted semantic
@@ -216,7 +216,6 @@ Each file exports one `defineMemory()` value with these fields:
 | `scope`       | Yes      | Who or what shares this slot's memory; see [Scope](#scope)                               |
 | `description` | No       | Prepended to every provider tool description to tell the model what belongs in this slot |
 | `namespace`   | No       | The application domain the scope lives in; see [Namespace](#namespace)                   |
-| `visibility`  | No       | What the model sees after the scope changes mid-session; see [Visibility](#visibility)   |
 
 Slots are independent. Two slots can use the same provider without merging
 their recalled context or tools, and the default namespace includes the slot
@@ -297,22 +296,15 @@ A custom namespace is complete; eve adds no suffix. Returning `null` disables
 the slot. Scope resolves first, so a disabled scope never calls the namespace
 resolver.
 
-## Visibility
+## When the scope changes
 
-`visibility` controls which previously recalled messages stay in model context
-after a slot's scope changes within one session. It does not change the scope
-passed to the provider.
-
-| Value               | After a scope change                                                |
-| ------------------- | ------------------------------------------------------------------- |
-| `"scope"` (default) | Hide recalled messages from the slot's earlier scope                |
-| `"session"`         | Keep earlier recalled messages visible within the current namespace |
-
-Use `"session"` only when every scope that can appear in the session belongs
-to one trusted audience. Namespace remains an isolation boundary in both modes,
-and visibility cannot remove information already included in an assistant
-response; applications that need hard isolation between participants must use
-separate sessions.
+What a turn recalls stays in model context for the rest of the session, and eve
+recalls again when the session's principal changes. When that gives the slot
+another scope, the slot starts over: messages recalled for the earlier scope
+leave model context.
+This cannot remove information already included in an assistant response;
+applications that need hard isolation between participants must use separate
+sessions.
 
 ## Tell the model how to use memory
 

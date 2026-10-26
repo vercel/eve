@@ -14,12 +14,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import {
-  ALLOWED_DYNAMIC_CONNECTION_EVENTS,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
@@ -60,20 +55,10 @@ export async function compileConnectionDefinition(
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 
   if (isDynamicSentinel(loaded)) {
-    assertResolverOnlyDynamicSentinel(loaded, message);
-    const eventNames = Object.keys(loaded.events);
-    const unsupportedEvent = eventNames.find(
-      (eventName) => !ALLOWED_DYNAMIC_CONNECTION_EVENTS.has(eventName),
-    );
-    if (unsupportedEvent !== undefined) {
-      throw new Error(
-        `${message} Dynamic connections support only "session.started" and "turn.started" handlers. Unsupported event: "${unsupportedEvent}".`,
-      );
-    }
+    assertDynamicSentinelKeys(loaded, message);
     return {
       kind: "dynamic-connection",
       definition: {
-        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug: source.connectionName,
@@ -119,7 +104,7 @@ export async function compileConnectionDefinition(
       ...shared,
       description: normalized.description,
       protocol: "mcp",
-      ...(normalized.experimental_events === undefined
+      ...(normalized.experimental?.events === undefined
         ? {}
         : { experimental_events: true as const }),
       url: normalized.url,

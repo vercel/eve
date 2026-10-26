@@ -81,7 +81,7 @@ type HarnessOptions = Pick<
 function createHarness(options: HarnessOptions = {}) {
   const { info = async () => INFO, ...controllerOptions } = options;
   const credentials = createDevelopmentCredentialGate(TARGET.serverUrl);
-  const client = new Client({ host: TARGET.serverUrl });
+  const client = new Client({ baseUrl: TARGET.serverUrl });
   const infoSpy = vi.spyOn(client, "info").mockImplementation(() => info(credentials));
   const controller = createRemoteConnectionController({
     ...controllerOptions,

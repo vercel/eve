@@ -1,5 +1,8 @@
+import type { RequestStatus } from "#protocol/session-projection/request-status.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { failureOf } from "#client/session-utils.js";
+import { replyTextOf } from "#public/channels/reply.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   deepEquals,
   eventMatches,
@@ -17,9 +20,9 @@ import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector
 /** Minimal captured scope consumed by deterministic eval assertions. */
 export interface EveEvalAssertionSubject {
   readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly output: unknown;
-  readonly status: "completed" | "failed" | "waiting";
+  readonly status: RequestStatus | "working";
 }
 
 const PASS: AssertionOutcome = { score: 1 };
@@ -50,9 +53,9 @@ export function succeeded(): RunAssertion {
 /**
  * Asserts the run ended cleanly parked on HITL input.
  */
-export function parked(): RunAssertion {
+export function awaitingInput(): RunAssertion {
   return {
-    name: "parked",
+    name: "awaitingInput",
     evaluate(result) {
       const failure = runFailure(result);
       if (failure !== undefined) return failure;
@@ -117,13 +120,13 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
  * Asserts the skill `skill` was loaded. `output`/`status`/`count` constrain
  * the matching load exactly as for `calledTool`.
  */
-export function loadedSkill(
+export function calledSkill(
   skill: string,
   options: EveEvalSkillLoadMatchOptions = {},
 ): RunAssertion {
   validateCount(options.count);
   return {
-    name: `loadedSkill(${skill})`,
+    name: `calledSkill(${skill})`,
     evaluate(result) {
       const named = result.derived.skillLoads.filter((load) => load.skill === skill);
       const matching = named.filter((load) => toolCallMatches(load, options));
@@ -206,26 +209,24 @@ export function maxToolCalls(max: number): RunAssertion {
 }
 
 /**
- * Asserts no action result (tool, subagent, or skill) reported a failure.
+ * Asserts no call reported a failure.
  */
-export function noFailedActions(): RunAssertion {
+export function noFailedCalls(): RunAssertion {
   return {
-    name: "noFailedActions",
+    name: "noFailedCalls",
     evaluate(result) {
       const failed = result.events.filter(
-        (evt): evt is Extract<MessageStreamEvent, { type: "action.result" }> =>
-          evt.type === "action.result" &&
-          (evt.data.status === "failed" || evt.data.result.isError === true),
+        (evt): evt is Extract<SessionStreamEvent, { type: "call.settled" }> =>
+          evt.type === "call.settled" && evt.data.outcome === "failed",
       );
       if (failed.length === 0) return PASS;
-      const details = failed.map(formatFailedActionResult);
-      return fail(`${failed.length} failed action(s): ${details.join("; ")}`, {
-        failedActions: failed.map((evt) => ({
-          callId: evt.data.result.callId,
+      const details = failed.map(formatFailedCallResult);
+      return fail(`${failed.length} failed call(s): ${details.join("; ")}`, {
+        failedCalls: failed.map((evt) => ({
+          callId: evt.data.callId,
           error: evt.data.error,
-          kind: evt.data.result.kind,
-          output: evt.data.result.output,
-          status: evt.data.status,
+          output: evt.data.output,
+          status: evt.data.outcome,
         })),
       });
     },
@@ -234,17 +235,17 @@ export function noFailedActions(): RunAssertion {
 
 /**
  * Asserts a call to the agent tool `name` occurred. Each call to an agent
- * task counts once: its status and `output` come from `task.settled`, and the
- * session and remote metadata from the task's `agent.started` once its
+ * task counts once: its status and `output` come from `call.settled`, and the
+ * session and remote metadata from the task's `child.opened` once its
  * session opened.
  */
-export function calledSubagent(
+export function calledAgent(
   name: string,
   options: EveEvalSubagentCallMatchOptions = {},
 ): RunAssertion {
   validateCount(options.count);
   return {
-    name: `calledSubagent(${name})`,
+    name: `calledAgent(${name})`,
     evaluate(result) {
       const named = result.derived.subagentCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => subagentCallMatches(call, options));
@@ -273,7 +274,7 @@ export function calledSubagent(
  */
 export function eventsSatisfy(
   label: string,
-  predicate: (events: readonly MessageStreamEvent[]) => boolean,
+  predicate: (events: readonly SessionStreamEvent[]) => boolean,
 ): RunAssertion {
   return {
     name: `eventsSatisfy(${label})`,
@@ -374,12 +375,12 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
   };
 }
 
-function joinCompletedMessages(events: readonly MessageStreamEvent[]): string {
+function joinCompletedMessages(events: readonly SessionStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
-    if (evt.type === "message.completed") {
-      parts.push(evt.data.message);
-    }
+    if (evt.type !== "content.completed") continue;
+    const text = replyTextOf(evt.data);
+    if (text !== undefined) parts.push(text);
   }
   return parts.join("\n");
 }
@@ -388,45 +389,28 @@ function failureDetail(prefix: string, code: string | undefined): string {
   return code === undefined ? prefix : `${prefix} (code: ${code})`;
 }
 
-function formatFailedActionResult(
-  event: Extract<MessageStreamEvent, { type: "action.result" }>,
+function formatFailedCallResult(
+  event: Extract<SessionStreamEvent, { type: "call.settled" }>,
 ): string {
-  const { result, status } = event.data;
+  const { callId, outcome, output, error } = event.data;
   const parts = [
-    actionResultLabel(result),
-    `callId=${result.callId}`,
-    `status=${status}`,
-    result.isError === true ? "isError=true" : undefined,
-    event.data.error?.message === undefined ? undefined : `error=${event.data.error.message}`,
-    `output=${truncate(formatUnknown(result.output))}`,
+    `callId=${callId}`,
+    `status=${outcome}`,
+    error === undefined ? undefined : `error=${error.message}`,
+    `output=${truncate(formatUnknown(output))}`,
   ];
   return parts.filter((part) => part !== undefined).join(" ");
-}
-
-function actionResultLabel(
-  result: Extract<MessageStreamEvent, { type: "action.result" }>["data"]["result"],
-): string {
-  switch (result.kind) {
-    case "tool-result":
-      return `tool-result:${result.toolName}`;
-    case "subagent-result":
-      return `subagent-result:${result.subagentName}`;
-    case "load-skill-result":
-      return `load-skill-result:${result.name}`;
-  }
 }
 
 function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefined {
   if (result.status === "failed") {
     return fail(failureDetail("run failed", result.derived.failureCode));
   }
-  const failedEvent = result.events.find(
-    (event): event is Extract<MessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
-      event.type === "turn.failed" || event.type === "step.failed",
-  );
-  return failedEvent === undefined
-    ? undefined
-    : fail(`${failedEvent.type} (${failedEvent.data.code}): ${failedEvent.data.message}`);
+  for (const event of result.events) {
+    const error = failureOf(event);
+    if (error !== undefined) return fail(`${event.type} (${error.code}): ${error.message}`);
+  }
+  return undefined;
 }
 
 function truncate(text: string | undefined, max = 200): string {
@@ -481,7 +465,7 @@ interface ToolRequestEntry {
   readonly name: string;
 }
 
-function requestedTools(events: readonly MessageStreamEvent[]): readonly ToolRequestEntry[] {
+function requestedTools(events: readonly SessionStreamEvent[]): readonly ToolRequestEntry[] {
   const entries: ToolRequestEntry[] = [];
   const seenCallIds = new Set<string>();
   const append = (callId: string, name: string): void => {
@@ -491,15 +475,8 @@ function requestedTools(events: readonly MessageStreamEvent[]): readonly ToolReq
   };
 
   for (const event of events) {
-    if (event.type === "actions.requested") {
-      for (const action of event.data.actions) {
-        if (action.kind === "tool-call") append(action.callId, action.toolName);
-      }
-    } else if (event.type === "input.requested") {
-      for (const request of event.data.requests) {
-        const { action } = request;
-        if (action.kind === "tool-call") append(action.callId, action.toolName);
-      }
+    if (event.type === "call.requested" && event.data.capability.kind !== "skill") {
+      append(event.data.callId, event.data.capability.name);
     }
   }
   return entries;

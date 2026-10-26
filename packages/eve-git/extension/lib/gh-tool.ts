@@ -1,9 +1,4 @@
-import {
-  defineDurableCallback,
-  defineDurableSchema,
-  defineTool,
-  type ToolContext,
-} from "eve/tools";
+import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import {
@@ -24,37 +19,23 @@ const ghOutputSchema = z.object({
   truncated: z.boolean(),
 });
 
-/**
- * The Connect-brokered `gh` tool, bound to one extension's GitHub config.
- *
- * Callbacks declare durable descriptors with empty closures: eve's transform
- * would capture the `github` getter, which is not JSON, and imports through
- * `eve/extensions/git/sandbox` are not transformed. The getter is boot-time
- * wiring, not per-tool data; a fresh process reruns the dynamic resolver
- * before replay, which binds a new getter.
- */
+/** The Connect-brokered `gh` tool, rebuilt by the dynamic resolver with its current config. */
 export function defineGhTool(
   github: () => GitHubConfig | undefined,
   description = GH_TOOL_DESCRIPTION,
 ) {
   return defineTool({
     description,
-    approval: defineDurableCallback({
-      closure: {},
-      callback: (_closure, { toolInput }: { readonly toolInput?: unknown }) =>
-        githubShellApproval(toolInput as GitHubShellInput | undefined),
-    }),
-    inputSchema: defineDurableSchema({ closure: {}, schema: () => githubShellInputSchema }),
-    outputSchema: defineDurableSchema({ closure: {}, schema: () => ghOutputSchema }),
-    execute: defineDurableCallback({
-      closure: {},
-      callback: (_closure, input: GitHubShellInput, ctx: ToolContext) =>
-        executeGitHubShell(input, github(), {
-          context: ctx,
-          auth: ctx.session.auth.current,
-          getSandbox: () => ctx.getSandbox(),
-          sessionId: ctx.session.id,
-        }),
-    }),
+    approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
+    inputSchema: githubShellInputSchema,
+    outputSchema: ghOutputSchema,
+    execute(input, ctx) {
+      return executeGitHubShell(input, github(), {
+        context: ctx,
+        auth: ctx.session.auth.current,
+        getSandbox: () => ctx.getSandbox(),
+        sessionId: ctx.session.id,
+      });
+    },
   });
 }

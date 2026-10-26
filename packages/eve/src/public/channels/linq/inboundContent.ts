@@ -1,8 +1,8 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { Attachment, Message } from "#compiled/chat/index.js";
 import { readLimitedBytes } from "#internal/attachments/limited-read.js";
-import { messageToUserContent } from "#public/channels/chat-sdk/index.js";
+import { messageContentOf } from "#public/channels/chat-sdk/index.js";
 import {
   fetchMessageBestEffort,
   type MessageLookup,
@@ -11,8 +11,8 @@ import type { QuotedMessage } from "#public/channels/chat-sdk/reply-context.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 
 /** Returns model-visible Linq content, or `undefined` for blank messages. */
-export function linqInboundContent(message: Message): string | UserContent | undefined {
-  const content = messageToUserContent(message);
+export function linqInboundContent(message: Message): MessageContent | undefined {
+  const content = messageContentOf(message);
   if (typeof content === "string") return content.trim().length > 0 ? content : undefined;
   return content.length > 0 ? content : undefined;
 }

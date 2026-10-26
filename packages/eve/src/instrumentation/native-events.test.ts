@@ -1,628 +1,561 @@
-import { TEST_USAGE } from "#internal/testing/events.js";
-import { describe, expect, it, vi } from "vitest";
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ActiveChannelDeliveriesKey } from "#context/keys.js";
-import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { eventsOf } from "#harness/publication.js";
+import { cascade } from "#harness/session-machine/cascade.js";
 import {
-  createActionResultEvent,
-  createActionsRequestedEvent,
-  createInputRequestedEvent,
-  createSessionStartedEvent,
-  createSessionWaitingEvent,
-  createStepCompletedEvent,
-  createStepStartedEvent,
-  createTurnCompletedEvent,
-  createTurnCancelledEvent,
-  createTurnFailedEvent,
-  createTurnStartedEvent,
-} from "#protocol/message.js";
-import {
-  createInstrumentationHandleEvent,
-  publishInputResolutions,
-} from "#instrumentation/native-events.js";
-import type { InstrumentationEvent, InstrumentationHooks } from "#instrumentation/lifecycle.js";
-import {
-  actionIdempotencyKey,
-  inputIdempotencyKey,
-  sessionIdempotencyKey,
-  turnIdempotencyKey,
-} from "#instrumentation/lifecycle.js";
-import { createRuntimeToolResultFromToolError } from "#harness/action-result-helpers.js";
-import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+  currentView,
+  enterSessionProjectionAt,
+  nextLinePosition,
+  recordPublishedLine,
+} from "#harness/session-machine/current.js";
+import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
+import { createInstrumentationHandleEvent } from "#instrumentation/native-events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
-describe("createInstrumentationHandleEvent", () => {
-  it.each([
-    ["completed", createTurnCompletedEvent({ sequence: 0, turnId: "turn_0" })],
-    ["cancelled", createTurnCancelledEvent({ sequence: 0, turnId: "turn_0" })],
-    [
-      "failed",
-      createTurnFailedEvent({
-        code: "MODEL_CALL_FAILED",
-        message: "failed",
-        sequence: 0,
-        terminal: false,
-        turnId: "turn_0",
-      }),
-    ],
-  ] as const)("terminates active channel deliveries when a turn is %s", async (outcome, event) => {
-    const ctx = new ContextContainer();
-    ctx.set(ActiveChannelDeliveriesKey, [
+const at = "2026-10-09T00:00:00.000Z";
+const turn = { turnId: "turn_0" };
+const scope = (runId: string) => ({ runId, turnId: "turn_0" });
+const overloaded = { code: "MODEL_CALL_FAILED", message: "Overloaded" };
+
+/**
+ * Publishes each commit as the writer does, closing what its owners' ends hold, and collects what
+ * instrumentation hears.
+ */
+function session(
+  options: { readonly capturesContent?: boolean; readonly frameworkTools?: readonly string[] } = {},
+) {
+  const ctx = new ContextContainer();
+  enterSessionProjectionAt(ctx, undefined);
+  const heard: InstrumentationEvent[] = [];
+  const handle = createInstrumentationHandleEvent({
+    functionId: "assistant",
+    handleEvent: async (publication) => {
+      const facts = cascade(currentView(ctx), eventsOf(publication));
+      recordPublishedLine(ctx, { at, facts }, nextLinePosition(ctx), facts);
+    },
+    hooks: {
+      capturesContent: options.capturesContent ?? false,
+      publish: async (event) => void heard.push(event),
+    },
+    isFrameworkTool: (name) => options.frameworkTools?.includes(name) === true,
+    sessionId: "s",
+  })!;
+  return {
+    ctx,
+    heard,
+    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(facts)),
+  };
+}
+
+const opening: SessionEvent[] = [
+  { data: {}, type: "session.started" },
+  {
+    data: { cause: { hook: "h" }, follows: null, turnId: "turn_0" },
+    scope: turn,
+    type: "turn.started",
+  },
+  { data: { owner: turn, runId: "run_0" }, scope: scope("run_0"), type: "model.requested" },
+] as SessionEvent[];
+
+function started(runId: string, attempt: number): SessionEvent {
+  return { data: { attempt, modelId: "m", runId }, scope: scope(runId), type: "model.started" };
+}
+
+describe("step attempts from the stream", () => {
+  it("ends each attempt of a run as its facts do, scoped from the run's row", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit({
+      data: { attempt: 0, error: overloaded, runId: "run_0" },
+      scope: scope("run_0"),
+      type: "model.retried",
+    });
+    await commit(started("run_0", 1));
+    await commit({
+      data: { outcome: "completed", runId: "run_0" },
+      scope: scope("run_0"),
+      type: "model.settled",
+    });
+
+    expect(heard.filter((event) => event.type.startsWith("model."))).toMatchObject([
       {
-        delivery: {
-          channelKind: "channel:slack",
-          channelName: "slack",
-          deliveryId: "delivery-1",
+        error: new Error("Overloaded"),
+        idempotencyKey: "model-run:s:run_0:0",
+        scope: {
+          runId: "run_0",
+          attempt: 0,
+          functionId: "assistant",
         },
-        policyAgentName: "weather",
-        rootSessionId: "session-1",
-        traceSessionId: "session-1",
-        sequence: 0,
-        sessionId: "session-1",
-        turnId: "turn_0",
+        type: "model.retried",
+      },
+      {
+        outcome: "completed",
+        idempotencyKey: "model-run:s:run_0:1",
+        scope: { runId: "run_0", attempt: 1 },
+        type: "model.settled",
       },
     ]);
-    const events: InstrumentationEvent[] = [];
-    const handleEvent = createInstrumentationHandleEvent({
-      handleEvent: async () => {},
-      hooks: {
-        capturesContent: false,
-        publish: async (published) => {
-          events.push(published);
-        },
-      },
-      sessionId: "session-1",
-    })!;
+  });
 
-    await contextStorage.run(ctx, () => handleEvent(event));
+  it("counts a replacement run's attempts on from the run a retry gave up", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit({
+      data: { outcome: "abandoned", runId: "run_0" },
+      scope: scope("run_0"),
+      type: "model.settled",
+    });
+    await commit({
+      data: { owner: turn, runId: "run_1" },
+      scope: scope("run_1"),
+      type: "model.requested",
+    });
+    await commit(started("run_1", 1));
+    await commit({
+      data: { outcome: "completed", runId: "run_1" },
+      scope: scope("run_1"),
+      type: "model.settled",
+    });
 
     expect(
-      events.find((published) => published.type.startsWith("channel.delivery.")),
-    ).toMatchObject({
-      errorCode: outcome === "failed" ? "MODEL_CALL_FAILED" : undefined,
-      outcome,
-      type: `channel.delivery.${outcome}`,
-    });
-    expect(ctx.get(ActiveChannelDeliveriesKey)).toBeUndefined();
-  });
-
-  it("publishes native lifecycle transitions after durable handling", async () => {
-    const order: string[] = [];
-    const hooks: InstrumentationHooks = {
-      capturesContent: false,
-      publish: async (event) => {
-        order.push(`lifecycle:${event.type}`);
-      },
-    };
-    const handleEvent = createInstrumentationHandleEvent({
-      agentName: "weather",
-      handleEvent: async (event) => {
-        order.push(`durable:${event.type}`);
-      },
-      hooks,
-      sessionId: "session-1",
-    })!;
-
-    await handleEvent(createSessionStartedEvent());
-    await handleEvent(createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(
-      createStepStartedEvent({
-        modelId: "openai/gpt-5.5",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-    );
-    await handleEvent(
-      createStepCompletedEvent({
-        finishReason: "stop",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-    );
-    await handleEvent(createTurnCompletedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(createSessionWaitingEvent(TEST_USAGE));
-
-    expect(order).toEqual([
-      "durable:session.started",
-      "lifecycle:session.started",
-      "durable:turn.started",
-      "lifecycle:turn.started",
-      "durable:step.started",
-      "durable:step.completed",
-      "durable:turn.completed",
-      "lifecycle:turn.completed",
-      "durable:session.waiting",
-      "lifecycle:session.waiting",
+      heard
+        .filter((event) => event.type.startsWith("model."))
+        .map((event) => ("scope" in event ? [event.type, attemptIdempotencyKey(event.scope)] : [])),
+    ).toEqual([
+      ["model.settled", "model-run:s:run_0:0"],
+      ["model.settled", "model-run:s:run_1:1"],
     ]);
   });
 
-  it("forwards the source event to the durable handler", async () => {
-    const source = createSessionStartedEvent();
-    let forwarded: unknown;
-    const handleEvent = createInstrumentationHandleEvent({
-      handleEvent: async (event) => {
-        forwarded = event;
+  // A cancel stops the model call on purpose, so its attempt is cancelled, not failed (#5025).
+  it("hears what a turn's end closes with it, as the writer commits it", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit({
+      data: {
+        callId: "call_0",
+        capability: { kind: "tool", name: "wait" },
+        input: {},
+        owner: { runId: "run_0" },
       },
-      hooks: { capturesContent: false, publish: async () => {} },
-      sessionId: "session-1",
-    })!;
+      scope: scope("run_0"),
+      type: "call.requested",
+    } as SessionEvent);
+    await commit({
+      data: { outcome: "cancelled", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
 
-    await handleEvent(source);
-
-    expect(forwarded).toBe(source);
-  });
-
-  it("does not change execution mode when hooks have no durable handler", () => {
     expect(
-      createInstrumentationHandleEvent({
-        hooks: {
-          capturesContent: false,
-          publish: async () => {},
-        },
-        sessionId: "session-1",
-      }),
-    ).toBeUndefined();
-  });
-
-  it("uses the restored turn id when a continuation step emits a session transition", async () => {
-    const events: unknown[] = [];
-    const handleEvent = createInstrumentationHandleEvent({
-      handleEvent: async () => {},
-      hooks: {
-        capturesContent: false,
-        publish: async (event) => {
-          events.push(event);
-        },
-      },
-      sessionId: "session-1",
-      turnId: "turn-1",
-    })!;
-
-    await handleEvent(createSessionWaitingEvent(TEST_USAGE));
-
-    expect(events).toEqual([
-      {
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        sessionId: "session-1",
-        turnId: "turn-1",
-        type: "session.waiting",
-      },
+      heard
+        .filter((event) => event.type.startsWith("model.") || event.type.startsWith("call."))
+        .map((event) => [event.type, "outcome" in event ? event.outcome : undefined]),
+    ).toEqual([
+      ["call.requested", undefined],
+      ["call.settled", "interrupted"],
+      ["model.settled", "cancelled"],
     ]);
   });
 
-  it("carries the dispatch lineage onto every turn a child session starts", async () => {
-    const events: { readonly type: string }[] = [];
-    const parentLineage = {
-      callId: "call-7",
-      sessionId: "session-1",
-      subagentName: "researcher",
-      turnId: "turn-1",
-    };
-    const handleEvent = createInstrumentationHandleEvent({
-      handleEvent: async () => {},
-      hooks: {
-        capturesContent: false,
-        publish: async (event) => {
-          events.push(event);
-        },
-      },
-      parentLineage,
-      rootSessionId: "session-1",
-      sessionId: "child-1",
-    })!;
+  it("fails the attempt a failed turn's end closes", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit({
+      data: { error: overloaded, outcome: "failed", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
 
-    await handleEvent(createTurnStartedEvent({ sequence: 0, turnId: "child-turn-1" }));
-    await handleEvent(createTurnStartedEvent({ sequence: 1, turnId: "child-turn-2" }));
+    expect(
+      heard.flatMap((event) => (event.type === "model.settled" ? [event.outcome] : [])),
+    ).toEqual(["interrupted"]);
+  });
+});
 
-    expect(events.filter((event) => event.type === "turn.started")).toEqual([
-      {
-        idempotencyKey: turnIdempotencyKey("child-1", "child-turn-1"),
-        parentLineage,
-        parentTraceContext: undefined,
-        rootSessionId: "session-1",
-        sequence: 0,
-        sessionId: "child-1",
-        turnId: "child-turn-1",
-        type: "turn.started",
+describe("calls and deliveries from the stream", () => {
+  function agentCall(callId: string, remote?: true): SessionEvent {
+    return {
+      data: {
+        callId,
+        capability: { kind: "agent", name: "research", ...(remote && { remote }) },
+        input: { message: "Find the 2025 report." },
+        owner: { runId: "run_0" },
       },
-      {
-        idempotencyKey: turnIdempotencyKey("child-1", "child-turn-2"),
-        parentLineage,
-        parentTraceContext: undefined,
-        rootSessionId: "session-1",
-        sequence: 1,
-        sessionId: "child-1",
-        turnId: "child-turn-2",
-        type: "turn.started",
-      },
+      scope: scope("run_0"),
+      type: "call.requested",
+    } as SessionEvent;
+  }
+
+  it("reports a remote agent's call as one, and a subagent's as a subagent call", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(agentCall("call_remote", true), agentCall("call_local"));
+
+    expect(
+      heard.flatMap((event) =>
+        event.type === "call.requested" ? [[event.callId, event.capability]] : [],
+      ),
+    ).toEqual([
+      ["call_remote", { kind: "agent", name: "research", remote: true }],
+      ["call_local", { kind: "agent", name: "research" }],
     ]);
   });
 
-  it("publishes every runtime action and settles it in a replacement worker", async () => {
-    const events: unknown[] = [];
-    const scope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const context = new ContextContainer();
-    const requested = createActionsRequestedEvent({
-      actions: [
-        {
-          callId: "delegate-1",
-          description: "Delegate work.",
-          input: { task: "research" },
-          kind: "subagent-call",
-          name: "delegate",
-          nodeId: "workers",
-          subagentName: "worker",
-        },
-        {
-          callId: "remote-1",
-          description: "Call a remote agent.",
-          input: { task: "analyze" },
-          kind: "remote-agent-call",
-          name: "remote",
-          nodeId: "remote-agents",
-          remoteAgentName: "analyst",
-        },
-        { callId: "add-1", input: { a: 1, b: 2 }, kind: "tool-call", toolName: "add" },
-        {
-          callId: "workflow-1",
-          input: { report: "weekly" },
-          kind: "workflow-tool-call",
-          toolName: "publish",
-          workflowId: "publish-workflow",
-        },
-      ],
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "turn-1",
-    });
-
-    await contextStorage.run(context, async () => {
-      const handleEvent = createInstrumentationHandleEvent({
-        getAttemptScope: () => scope,
-        handleEvent: async () => {
-          clock.mockReturnValue(2_000);
-        },
-        hooks: { capturesContent: true, publish: async (event) => void events.push(event) },
-        sessionId: "session-1",
-      })!;
-      const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
-      try {
-        await handleEvent(requested);
-        await handleEvent(requested);
-      } finally {
-        clock.mockRestore();
-      }
-    });
-
-    const restored = await deserializeContext(await serializeContext(context));
-    await contextStorage.run(restored, async () => {
-      restored.set(RuntimeActionSettlementTimesKey, { "remote-1": 1_234 });
-      const handleEvent = createInstrumentationHandleEvent({
-        handleEvent: async () => {},
-        hooks: { capturesContent: true, publish: async (event) => void events.push(event) },
-        sessionId: "session-1",
-      })!;
-      await handleEvent(
-        createActionResultEvent({
-          result: {
-            callId: "delegate-1",
-            isError: true,
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: { kind: "failed", error: "unavailable" },
-              usageDelta: {
-                cacheReadTokens: 1,
-                cacheWriteTokens: 2,
-                costUsd: 0.003,
-                inputTokens: 4,
-                outputTokens: 2,
-              },
-            },
-            output: "unavailable",
-            subagentName: "worker",
-            usage: {
-              cacheReadTokens: 1,
-              cacheWriteTokens: 2,
-              costUsd: 0.003,
-              inputTokens: 4,
-              outputTokens: 2,
-            },
-          },
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn-2",
-        }),
-      );
-      await handleEvent(
-        createActionResultEvent({
-          result: {
-            callId: "remote-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: { kind: "succeeded", output: "done" },
-              usageDelta: {
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                inputTokens: 0,
-                outputTokens: 0,
-              },
-            },
-            output: "done",
-            subagentName: "analyst",
-            usage: {
-              cacheReadTokens: 3,
-              cacheWriteTokens: 4,
-              costUsd: 0.012,
-              inputTokens: 10,
-              outputTokens: 5,
-            },
-          },
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn-2",
-        }),
-      );
-      await handleEvent(
-        createActionResultEvent({
-          result: {
-            callId: "add-1",
-            kind: "tool-result",
-            output: 3,
-            toolName: "add",
-          },
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn-2",
-        }),
-      );
-    });
-
-    expect(events.slice(0, 4)).toEqual([
-      {
-        callId: "delegate-1",
-        frameworkTool: false,
-        startedAtMs: 1_000,
-        idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
-        input: { task: "research" },
-        kind: "subagent-call",
-        toolName: "delegate",
-        isWorkflowTool: true,
-        scope,
-        type: "tool.call.started",
-      },
-      {
-        callId: "remote-1",
-        frameworkTool: false,
-        startedAtMs: 1_000,
-        idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
-        input: { task: "analyze" },
-        kind: "remote-agent-call",
-        toolName: "remote",
-        isWorkflowTool: true,
-        scope,
-        type: "tool.call.started",
-      },
-      {
-        callId: "add-1",
-        frameworkTool: false,
-        startedAtMs: 1_000,
-        idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
-        input: { a: 1, b: 2 },
-        kind: "tool-call",
-        toolName: "add",
-        scope,
-        type: "tool.call.started",
-      },
-      {
-        callId: "workflow-1",
-        frameworkTool: false,
-        startedAtMs: 1_000,
-        idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "workflow-1"),
-        input: { report: "weekly" },
-        isWorkflowTool: true,
-        kind: "tool-call",
-        toolName: "publish",
-        scope,
-        type: "tool.call.started",
-      },
-    ]);
-    const terminals = events.filter(
-      (event) =>
-        (event as { type: string }).type === "tool.call.failed" ||
-        (event as { type: string }).type === "tool.call.completed",
+  it("publishes delivery settlement in committed fact order without synthesizing a terminal", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(
+      { type: "delivery.admitted", data: { deliveryId: "d_0" } },
+      { type: "delivery.consumed", data: { deliveryId: "d_0", turnId: "turn_0", parts: [] } },
     );
-    expect(terminals[0]).toMatchObject({
-      errorCode: "ACTION_RESULT_FAILED",
-      idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
-      outcome: "failed",
-      scope,
-      type: "tool.call.failed",
-      usage: {
-        costUsd: 0.003,
-        inputTokenDetails: { cacheReadTokens: 1, cacheWriteTokens: 2 },
-        inputTokens: 4,
-        outputTokens: 2,
+    await commit({
+      data: { outcome: "completed", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
+
+    expect(
+      heard
+        .filter(
+          (event) =>
+            (event.type === "delivery.settled" && event.outcome === "handled") ||
+            event.type === "turn.settled",
+        )
+        .map((event) => [event.type, "turnId" in event ? event.turnId : undefined]),
+    ).toEqual([
+      ["turn.settled", "turn_0"],
+      ["delivery.settled", "turn_0"],
+    ]);
+  });
+});
+
+function requested(
+  callId: string,
+  capability: { readonly kind: string; readonly name: string },
+  runId = "run_0",
+): SessionEvent {
+  return {
+    data: { callId, capability, input: { city: "Oslo" }, owner: { runId } },
+    scope: scope(runId),
+    type: "call.requested",
+  } as SessionEvent;
+}
+
+function settled(callId: string, data: Record<string, unknown>, runId = "run_0"): SessionEvent {
+  return { data: { callId, ...data }, scope: scope(runId), type: "call.settled" } as SessionEvent;
+}
+
+const approval = (interactionId: string, subject: { readonly callId: string }): SessionEvent =>
+  ({
+    data: {
+      interactionId,
+      request: { kind: "approval", options: [{ id: "approve", label: "Approve" }], prompt: "Go?" },
+      subject,
+    },
+    scope: turn,
+    type: "interaction.opened",
+  }) as SessionEvent;
+
+const of = (heard: readonly InstrumentationEvent[], prefix: string) =>
+  heard.filter((event) => event.type.startsWith(prefix));
+
+describe("session and turn endings", () => {
+  it("names the turn that failed the session, and the latest turn otherwise", async () => {
+    const failing = session();
+    await failing.commit(...opening);
+    await failing.commit({
+      data: {
+        cause: { turnId: "turn_0" },
+        error: { code: "MODEL_CALL_FAILED", message: "Overloaded" },
+        outcome: "failed",
       },
-    });
-    expect(terminals[1]).toEqual({
-      acceptedAtMs: 1_234,
-      idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
-      outcome: "completed",
-      output: { output: "done", type: "result" },
-      scope,
-      type: "tool.call.completed",
-      usage: {
-        costUsd: 0.012,
-        inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
-        inputTokens: 10,
-        outputTokens: 5,
+      type: "session.ended",
+    } as SessionEvent);
+    expect(of(failing.heard, "session.ended")).toMatchObject([
+      {
+        error: new Error("Overloaded"),
+        outcome: "failed",
+        turnId: "turn_0",
+        type: "session.ended",
       },
-    });
-    expect(terminals[2]).toEqual({
-      acceptedAtMs: undefined,
-      idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
-      outcome: "completed",
-      output: { output: 3, type: "result" },
-      scope,
-      type: "tool.call.completed",
-      usage: undefined,
-    });
-    expect(events).toHaveLength(7);
-    expect(events.every(Object.isFrozen)).toBe(true);
+    ]);
+
+    const reset = session();
+    await reset.commit(...opening);
+    await reset.commit({
+      data: { cause: { deliveryId: "d_reset" }, outcome: "completed" },
+      type: "session.ended",
+    } as SessionEvent);
+    const [ended] = of(reset.heard, "session.ended");
+    expect(ended).toMatchObject({ outcome: "completed", turnId: "turn_0" });
+    expect(ended).not.toHaveProperty("error", expect.anything());
   });
 
-  // https://github.com/vercel/eve/issues/4820
-  it("keeps the class name of the error a tool threw", async () => {
-    class QuotaError extends Error {
-      override name = "QuotaError";
+  it("hears a session's end close its open turn first, with the turn's own outcome", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit({ data: { outcome: "completed" }, type: "session.ended" } as SessionEvent);
+
+    expect(
+      heard
+        .filter((event) => !event.type.startsWith("model."))
+        .map((event) => [event.type, "outcome" in event ? event.outcome : undefined]),
+    ).toEqual([
+      ["session.started", undefined],
+      ["turn.started", undefined],
+      ["turn.settled", "cancelled"],
+      ["session.ended", "completed"],
+    ]);
+  });
+
+  it("gives a failed turn its error, and a cancelled one none", async () => {
+    const failed = session();
+    await failed.commit(...opening);
+    await failed.commit({
+      data: { error: { code: "X", message: "Broke" }, outcome: "failed", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
+    expect(of(failed.heard, "turn.settled")).toMatchObject([
+      { error: new Error("Broke"), outcome: "failed", turnId: "turn_0" },
+    ]);
+
+    const cancelled = session();
+    await cancelled.commit(...opening);
+    await cancelled.commit({
+      data: { outcome: "cancelled", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
+    expect(of(cancelled.heard, "turn.settled")[0]).toMatchObject({ error: undefined });
+  });
+});
+
+describe("calls", () => {
+  it("names each capability's kind, and marks eve's own tools and skills as framework", async () => {
+    const { commit, heard } = session({ frameworkTools: ["bash"] });
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(
+      requested("call_tool", { kind: "tool", name: "weather" }),
+      requested("call_bash", { kind: "tool", name: "bash" }),
+      requested("call_skill", { kind: "skill", name: "load_skill" }),
+      requested("call_agent", { kind: "agent", name: "researcher" }),
+    );
+
+    expect(
+      of(heard, "call.requested").map((event) =>
+        event.type === "call.requested"
+          ? [event.callId, event.capability.kind, event.frameworkTool]
+          : [],
+      ),
+    ).toEqual([
+      ["call_tool", "tool", false],
+      ["call_bash", "tool", true],
+      ["call_skill", "skill", true],
+      ["call_agent", "agent", false],
+    ]);
+  });
+
+  it("carries inputs and outputs only when the provider captures content", async () => {
+    for (const capturesContent of [false, true]) {
+      const { commit, heard } = session({ capturesContent });
+      await commit(...opening);
+      await commit(started("run_0", 0));
+      await commit(requested("call_0", { kind: "tool", name: "weather" }));
+      await commit(settled("call_0", { outcome: "completed", output: { temperature: 4 } }));
+      await commit(requested("call_1", { kind: "tool", name: "weather" }));
+      await commit(
+        settled("call_1", {
+          error: { code: "TOOL_FAILED", message: "No city", name: "QuotaError" },
+          outcome: "failed",
+        }),
+      );
+
+      const [request] = of(heard, "call.requested");
+      const [completed, failed] = of(heard, "call.settled");
+      expect(request).toMatchObject({ input: capturesContent ? { city: "Oslo" } : undefined });
+      expect(completed).toMatchObject({
+        output: capturesContent ? { temperature: 4 } : undefined,
+      });
+      // The failure's code reaches every provider; its message is content.
+      expect(failed).toMatchObject({ errorCode: "TOOL_FAILED", outcome: "failed" });
+      if (capturesContent) expect(failed).toHaveProperty("error.name", "QuotaError");
+      expect(failed && "error" in failed ? failed.error : undefined).toEqual(
+        capturesContent
+          ? Object.assign(new Error("No city"), { code: "TOOL_FAILED", name: "QuotaError" })
+          : undefined,
+      );
     }
-    const events: InstrumentationEvent[] = [];
-    const handleEvent = createInstrumentationHandleEvent({
-      getAttemptScope: () => ({
-        attemptId: "session-1:turn-1:0:0",
-        attemptIndex: 0,
-        sessionId: "session-1",
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-      handleEvent: async () => {},
-      hooks: {
-        capturesContent: true,
-        publish: async (event) => void events.push(event),
-      },
-      sessionId: "session-1",
-    })!;
-
-    await contextStorage.run(new ContextContainer(), async () => {
-      await handleEvent(
-        createActionsRequestedEvent({
-          actions: [{ callId: "charge-1", input: {}, kind: "tool-call", toolName: "charge" }],
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn-1",
-        }),
-      );
-      await handleEvent(
-        createActionResultEvent({
-          result: createRuntimeToolResultFromToolError({
-            error: new QuotaError("quota exceeded"),
-            input: {},
-            toolCallId: "charge-1",
-            toolName: "charge",
-            type: "tool-error",
-          }),
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn-1",
-        }),
-      );
-    });
-
-    const failed = events.find((event) => event.type === "tool.call.failed");
-    expect(failed).toMatchObject({ outcome: "failed", type: "tool.call.failed" });
-    expect(failed).toHaveProperty("error.message", "quota exceeded");
-    expect(failed).toHaveProperty("error.name", "QuotaError");
   });
 
-  it("publishes each input request and resolves it in a replacement worker", async () => {
-    const events: unknown[] = [];
-    const scope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const request = {
-      action: {
-        callId: "call-1",
-        input: { city: "SF" },
-        kind: "tool-call" as const,
-        toolName: "weather",
-      },
-      display: "confirmation" as const,
-      kind: "tool-approval" as const,
-      options: [
-        { id: "approve", label: "Approve" },
-        { id: "deny", label: "Deny", style: "danger" as const },
-      ],
-      prompt: "Approve weather?",
-      requestId: "request-1",
-    };
-    const requested = createInputRequestedEvent({
-      requests: [request],
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "turn-1",
+  it("settles a retried attempt's calls under that attempt, before its replacement run's", async () => {
+    // An attempt that announced calls gives its run up; eve can't tell whether they ran.
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(requested("call_0", { kind: "tool", name: "weather" }));
+    await commit({
+      data: { outcome: "abandoned", runId: "run_0" },
+      scope: scope("run_0"),
+      type: "model.settled",
     });
-    const context = new ContextContainer();
-    await contextStorage.run(context, async () => {
-      const handleEvent = createInstrumentationHandleEvent({
-        getAttemptScope: () => scope,
-        handleEvent: async () => {},
-        hooks: { capturesContent: true, publish: async (event) => void events.push(event) },
-        sessionId: "session-1",
-      })!;
-      await handleEvent(requested);
-      await handleEvent(requested);
+    await commit({
+      data: { owner: turn, runId: "run_1" },
+      scope: scope("run_1"),
+      type: "model.requested",
     });
+    await commit(started("run_1", 1));
+    await commit(requested("call_1", { kind: "tool", name: "weather" }, "run_1"));
 
-    const restored = await deserializeContext(await serializeContext(context));
-    await contextStorage.run(restored, () =>
-      publishInputResolutions({
-        batch: {
-          event: { sequence: 0, stepIndex: 0, turnId: "turn-1" },
-          inputs: [
-            {
-              outcome: "approved",
-              request,
-              response: { optionId: "approve", requestId: "request-1" },
-            },
-          ],
-        },
-        hooks: { capturesContent: true, publish: async (event) => void events.push(event) },
-        sessionId: "session-1",
-      }),
-    );
-
-    const idempotencyKey = inputIdempotencyKey("session-1", "turn-1", "request-1");
-    expect(events).toEqual([
-      {
-        action: { callId: "call-1", name: "weather" },
-        idempotencyKey,
-        kind: "tool-approval",
-        request: {
-          allowFreeform: undefined,
-          display: "confirmation",
-          options: request.options,
-          prompt: "Approve weather?",
-        },
-        requestId: "request-1",
-        scope,
-        type: "input.requested",
-      },
-      {
-        idempotencyKey,
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
-        response: { optionId: "approve", text: undefined },
-        scope,
-        type: "input.resolved",
-      },
+    expect(
+      heard
+        .filter((event) => event.type.startsWith("call.") || event.type.startsWith("model."))
+        .map((event) => [
+          event.type,
+          "outcome" in event ? event.outcome : undefined,
+          "scope" in event ? attemptIdempotencyKey(event.scope) : undefined,
+        ]),
+    ).toEqual([
+      ["call.requested", undefined, "model-run:s:run_0:0"],
+      ["call.settled", "abandoned", "model-run:s:run_0:0"],
+      ["model.settled", "abandoned", "model-run:s:run_0:0"],
+      ["call.requested", undefined, "model-run:s:run_1:1"],
     ]);
-    expect(events.every(Object.isFrozen)).toBe(true);
+  });
+
+  it("scopes a compaction run without inventing a turn or step", async () => {
+    const { commit, heard } = session();
+    await commit({ data: {}, type: "session.started" } as SessionEvent);
+    await commit({
+      data: { changeId: "change_0", kind: "compaction" },
+      scope: { changeId: "change_0" },
+      type: "context.started",
+    } as SessionEvent);
+    await commit({
+      data: { owner: { changeId: "change_0" }, runId: "run_0" },
+      scope: { changeId: "change_0", runId: "run_0" },
+      type: "model.requested",
+    } as SessionEvent);
+    await commit({
+      data: { attempt: 0, modelId: "m", runId: "run_0" },
+      scope: { changeId: "change_0", runId: "run_0" },
+      type: "model.started",
+    } as SessionEvent);
+    await commit({
+      data: { outcome: "completed", runId: "run_0" },
+      scope: { changeId: "change_0", runId: "run_0" },
+      type: "model.settled",
+    } as SessionEvent);
+
+    expect(heard.map((event) => event.type)).toEqual(["session.started", "model.settled"]);
+    expect(heard[1]).toMatchObject({ outcome: "completed", scope: { runId: "run_0", attempt: 0 } });
+    expect((heard[1] as InstrumentationEvent<"model.settled">).scope.turnId).toBeUndefined();
+  });
+});
+
+describe("interactions", () => {
+  it("places an approval on its call's attempt and reports the chosen option", async () => {
+    const { commit, heard } = session({ capturesContent: true });
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(requested("call_0", { kind: "tool", name: "deploy" }));
+    await commit(approval("i_0", { callId: "call_0" }));
+    await commit({
+      data: {
+        cause: { responseId: "r_0" },
+        interactionId: "i_0",
+        outcome: "accepted",
+        response: { optionId: "approve" },
+      },
+      scope: turn,
+      type: "interaction.settled",
+    } as SessionEvent);
+
+    expect(of(heard, "interaction.")).toMatchObject([
+      {
+        call: { callId: "call_0", name: "deploy" },
+        kind: "approval",
+        request: { prompt: "Go?" },
+        scope: { attempt: 0, runId: "run_0" },
+        type: "interaction.opened",
+      },
+      { answer: { optionId: "approve" }, outcome: "accepted", type: "interaction.settled" },
+    ]);
+  });
+
+  it("places a request about the turn on its latest run, and keeps sign-ins out", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit({
+      data: { outcome: "completed", runId: "run_0" },
+      scope: scope("run_0"),
+      type: "model.settled",
+    });
+    await commit({
+      data: { owner: turn, runId: "run_1" },
+      scope: scope("run_1"),
+      type: "model.requested",
+    });
+    await commit(started("run_1", 0));
+    await commit({
+      data: {
+        interactionId: "i_budget",
+        request: { kind: "budget", prompt: "Keep going?" },
+        subject: { turnId: "turn_0" },
+      },
+      scope: turn,
+      type: "interaction.opened",
+    } as SessionEvent);
+    await commit({
+      data: {
+        interactionId: "i_sign_in",
+        request: { kind: "sign-in", prompt: "Sign in to Calendar" },
+        subject: { turnId: "turn_0" },
+      },
+      scope: turn,
+      type: "interaction.opened",
+    } as SessionEvent);
+
+    expect(of(heard, "interaction.")).toMatchObject([
+      { interactionId: "i_budget", request: undefined, scope: { runId: "run_1" } },
+    ]);
+  });
+
+  it("hears a withdrawn approval's end when its turn is cancelled, with no answer", async () => {
+    const { commit, heard } = session({ capturesContent: true });
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(requested("call_0", { kind: "tool", name: "deploy" }));
+    await commit(approval("i_0", { callId: "call_0" }));
+    await commit({
+      data: { outcome: "cancelled", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
+
+    expect(
+      heard
+        .filter((event) => event.type !== "session.started" && event.type !== "turn.started")
+        .map((event) => [event.type, "outcome" in event ? event.outcome : undefined]),
+    ).toEqual([
+      ["call.requested", undefined],
+      ["interaction.opened", undefined],
+      ["interaction.settled", "interrupted"],
+      ["call.settled", "interrupted"],
+      ["model.settled", "cancelled"],
+      ["turn.settled", "cancelled"],
+    ]);
+    expect(of(heard, "interaction.settled")[0]).toMatchObject({ answer: undefined });
   });
 });

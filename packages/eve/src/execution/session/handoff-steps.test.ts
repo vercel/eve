@@ -2,7 +2,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { trace } from "#compiled/@opentelemetry/api/index.js";
 
-import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { IncompatibleStateLayoutError } from "#context/serialize.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import {
@@ -10,7 +10,6 @@ import {
   signalSessionOwnerActivationStep,
   startSuccessorStep,
   sendSessionHandoverPartStep,
-  stopUntrackedChildSessionsStep,
   type SuccessorStartInput,
 } from "#execution/session/handoff-steps.js";
 import { positionState } from "#internal/testing/session-machine.js";
@@ -21,7 +20,6 @@ import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 
 const deserializeContextMock = vi.fn();
 const readDurableSessionMock = vi.fn();
-const cancelRunMock = vi.fn();
 const setAttributesMock = vi.fn();
 const getWorldMock = vi.fn(async () => ({}));
 const getRunMock = vi.fn();
@@ -108,7 +106,6 @@ vi.mock("#execution/durable-session-read.js", async (importOriginal) => ({
 }));
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  cancelRun: (...args: unknown[]) => cancelRunMock(...args),
   getRun: (...args: unknown[]) => getRunMock(...args),
   getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getWorld: () => getWorldMock(),
@@ -158,7 +155,7 @@ describe("prepareSuccessorStep", () => {
     await expect(
       prepareSuccessorStep({
         handoffVersion: 3,
-        migration: { kind: "current", checkpoint: createCheckpoint(), childRunIdsToStop: [] },
+        migration: { kind: "current", checkpoint: createCheckpoint() },
         sessionId: "session-1",
         source: { hookTokens: SOURCE_TOKENS, runId: "run-a" },
       }),
@@ -211,9 +208,9 @@ describe("prepareSuccessorStep", () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.workflowTool": {
-          version: 4,
-          runs: [
+        "eve.work": {
+          version: 1,
+          calls: [
             {
               callId: "call",
               toolName: "research",
@@ -380,29 +377,10 @@ describe("signalSessionOwnerActivationStep", () => {
   });
 });
 
-describe("stopUntrackedChildSessionsStep", () => {
-  it("stops every child except the session itself and tolerates finished runs", async () => {
-    cancelRunMock.mockReset();
-    cancelRunMock.mockImplementation(async (_world: unknown, runId: string) => {
-      if (runId === "child-gone") throw new WorkflowRunNotFoundError(runId);
-    });
-
-    await stopUntrackedChildSessionsStep({
-      runIds: ["child-gone", "session-1", "child-parked"],
-      sessionId: "session-1",
-    });
-
-    expect(cancelRunMock.mock.calls.map(([, runId]) => runId)).toEqual([
-      "child-gone",
-      "child-parked",
-    ]);
-  });
-});
-
 function validate(checkpoint: SessionCheckpoint) {
   return prepareSuccessorStep({
     handoffVersion: 3,
-    migration: { kind: "current", checkpoint, childRunIdsToStop: [] },
+    migration: { kind: "current", checkpoint },
     sessionId: "session-1",
   });
 }

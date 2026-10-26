@@ -1,4 +1,3 @@
-import type { DynamicResolveContext } from "#dynamic/definition.js";
 import {
   installLocalDevCapabilityEnvironment,
   withLocalDevRequestScope,
@@ -10,12 +9,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defineSelfModificationAgent, type SelfModificationAgentOptions } from "./agent.js";
 
 const serverUrl = "http://127.0.0.1:3000";
-const context: DynamicResolveContext = {
-  channel: {},
-  messages: [],
-  model: null,
-  session: { auth: { current: null, initiator: null }, id: "session" },
-};
+/** The context a subagent's function reads, with the parent's model. */
+const contextWith = (model = "openai/gpt-6-luna-fast") =>
+  ({
+    channel: { kind: "unknown", metadata: {} },
+    messages: async () => [],
+    model: { id: model },
+    session: { auth: { current: null, initiator: null }, id: "session" },
+  }) as never;
+const context = contextWith();
 
 const savedEnvironment = { ...process.env };
 
@@ -38,9 +40,8 @@ describe("self-modification local agent", () => {
     await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-      await expect(agent.events["turn.started"]?.({}, context)).resolves.toMatchObject({
+      await expect(Promise.resolve(agent.evaluate(context))).resolves.toMatchObject({
         model: "openai/gpt-6-luna-fast",
-        reasoning: "high",
       });
     });
   });
@@ -48,7 +49,7 @@ describe("self-modification local agent", () => {
   it.each<{
     label: string;
     options: SelfModificationAgentOptions;
-    parent: DynamicResolveContext["model"];
+    parent: string | null;
     model: string;
     reasoning: string | undefined;
   }>([
@@ -62,7 +63,7 @@ describe("self-modification local agent", () => {
     {
       label: "parent model",
       options: {},
-      parent: { id: "openai/gpt-6-luna-fast" },
+      parent: "openai/gpt-6-luna-fast",
       model: "openai/gpt-6-luna-fast",
       reasoning: undefined,
     },
@@ -88,7 +89,7 @@ describe("self-modification local agent", () => {
           ...options,
           config: { local: { enabled: true } },
         });
-        const resolved = await agent.events["turn.started"]?.({}, { ...context, model: parent });
+        const resolved = await agent.evaluate(contextWith(parent ?? undefined));
 
         expect(resolved).toMatchObject({ model });
         expect(resolved).toHaveProperty("reasoning", reasoning);
@@ -106,7 +107,7 @@ describe("self-modification local agent", () => {
       await withLocalDevRequestScope(new Request(serverUrl, { headers }), async () => {
         const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-        await expect(agent.events["turn.started"]?.({}, context)).resolves.not.toBeNull();
+        await expect(Promise.resolve(agent.evaluate(context))).resolves.not.toBeNull();
       });
     });
   });
@@ -115,14 +116,14 @@ describe("self-modification local agent", () => {
     process.env.EVE_DEV = "1";
     const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-    await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+    await expect(Promise.resolve(agent.evaluate(context))).resolves.toBeNull();
   });
 
   it("honors local.enabled: false even when eve dev facilities are available", async () => {
     await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: false } } });
 
-      await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+      await expect(Promise.resolve(agent.evaluate(context))).resolves.toBeNull();
     });
   });
 });

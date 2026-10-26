@@ -12,7 +12,7 @@ export default slackChannel({
     const auth = defaultSlackAuth(message, ctx);
     return canReadModels(auth, process.env) ? { auth } : null;
   },
-  onInputResponse(ctx) {
+  onAnswers(ctx) {
     return canReadModels(ctx.defaultAuth, process.env) ? { auth: ctx.defaultAuth } : null;
   },
 });

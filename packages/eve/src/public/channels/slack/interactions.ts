@@ -41,11 +41,11 @@ import {
   settleHitlCard,
   updateAnsweredHitlCard,
 } from "#public/channels/slack/interaction-cards.js";
-import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
+import { authorizeAnswer } from "#public/channels/slack/answers.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
-  SlackInputResponseSubmission,
+  SlackAnswerSubmission,
   SlackInteractionAction,
   SlackInteractionContext,
   SlackInteractionUser,
@@ -62,7 +62,7 @@ import {
   withSlackResponder,
 } from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
-import { parseInputResponse } from "#shared/input.js";
+import { parseAnswer } from "#shared/input.js";
 
 const log = createLogger("slack.interactions");
 
@@ -244,14 +244,14 @@ function readInstallationTeamId(value: unknown): string | undefined {
 export interface InteractionHandlerDeps {
   readonly api: SlackTransportOptions | undefined;
   readonly config: SlackChannelConfig;
-  readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
+  readonly onAnswers: NonNullable<SlackChannelConfig["onAnswers"]>;
 }
 
 /**
  * Entry point for Slack's form-encoded interactivity endpoint. Routes
  * `view_submission` payloads to the freeform-answer flow, intercepts
  * "Type your answer" button clicks to open a modal, resolves
- * framework HITL clicks through `onInputResponse` to the parked session,
+ * framework HITL clicks through `onAnswers` to the parked session,
  * forwards other block actions to `config.onInteraction`, shortcuts to
  * `config.onShortcut`, and slash commands to `config.onSlashCommand`.
  */
@@ -320,7 +320,7 @@ export async function handleInteractionPost(
     const user = hitlActions[0]!.action.user;
     const route = hitlActions[0]!.derived.route;
     ctx.waitUntil(
-      dispatchBlockInputResponses({
+      dispatchBlockAnswers({
         ctx,
         deps,
         interaction,
@@ -328,7 +328,7 @@ export async function handleInteractionPost(
         submission: {
           type: "block_actions",
           actions: hitlActions.map(({ action }) => action),
-          inputResponses: hitlActions.map(({ derived }) => derived.response),
+          answers: hitlActions.map(({ derived }) => derived.response),
           messageTs: hitlActions[0]!.action.messageTs,
           user,
         },
@@ -351,7 +351,10 @@ export async function handleInteractionPost(
       });
       const slackCtx: SlackInteractionContext = {
         ...bindSlackSessionOperations({
-          address: slackContinuationToken(interaction.channelId, interaction.threadTs),
+          address: slackContinuationToken({
+            channelId: interaction.channelId,
+            threadTs: interaction.threadTs,
+          }),
           defaultAuth: buildSlackAuthContext({
             channelId: interaction.channelId,
             installationTeamId: interaction.installationTeamId,
@@ -480,18 +483,18 @@ function dispatchInteractionHook(
   );
 }
 
-async function dispatchBlockInputResponses(input: {
+async function dispatchBlockAnswers(input: {
   readonly ctx: {
     from: ChannelFrom<SlackChannelState>;
   };
   readonly deps: InteractionHandlerDeps;
   readonly interaction: ParsedBlockActionsPayload;
   readonly route?: { readonly channelId: string; readonly threadTs: string };
-  readonly submission: Extract<SlackInputResponseSubmission, { type: "block_actions" }>;
+  readonly submission: Extract<SlackAnswerSubmission, { type: "block_actions" }>;
 }): Promise<void> {
   const channelId = input.route?.channelId ?? input.interaction.channelId;
   const threadTs = input.route?.threadTs ?? input.interaction.threadTs;
-  const result = await authorizeInputResponse({
+  const result = await authorizeAnswer({
     channelId,
     deps: input.deps,
     installationTeamId: input.interaction.installationTeamId,
@@ -504,8 +507,8 @@ async function dispatchBlockInputResponses(input: {
   const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx
-        .from(slackContinuationToken(channelId, threadTs))
-        .respond(input.submission.inputResponses, {
+        .from(slackContinuationToken({ channelId, threadTs }))
+        .respond(input.submission.answers, {
           auth: result.auth,
           state: withSlackResponder(undefined, input.submission.user.id),
         }),
@@ -599,7 +602,7 @@ async function openFreeformModal(input: {
   const channelId = decoded?.route?.channelId ?? input.interaction.channelId;
   const threadTs = decoded?.route?.threadTs ?? input.interaction.threadTs;
   const metadata: HitlFreeformModalMetadata = {
-    continuationToken: slackContinuationToken(channelId, threadTs),
+    continuationToken: slackContinuationToken({ channelId: channelId, threadTs: threadTs }),
     channelId,
     installationTeamId: input.interaction.installationTeamId,
     messageChannelId: input.interaction.channelId,
@@ -674,9 +677,9 @@ async function handleViewSubmission(
   const triggeringUserId = payload.userId;
   const teamId = user?.teamId ?? payload.teamId ?? null;
   const installationTeamId = metadata.installationTeamId ?? readInstallationTeamId(payload.raw);
-  const submission: SlackInputResponseSubmission = {
+  const submission: SlackAnswerSubmission = {
     type: "view_submission",
-    inputResponses: [parseInputResponse({ requestId: metadata.requestId, text })],
+    answers: [parseAnswer({ interactionId: metadata.requestId, text })],
     messageTs: metadata.messageTs,
     user: {
       id: triggeringUserId,
@@ -686,7 +689,7 @@ async function handleViewSubmission(
   };
 
   ctx.waitUntil(
-    dispatchViewInputResponse({
+    dispatchViewAnswer({
       ctx,
       deps,
       installationTeamId,
@@ -700,18 +703,18 @@ async function handleViewSubmission(
   return ack;
 }
 
-async function dispatchViewInputResponse(input: {
+async function dispatchViewAnswer(input: {
   readonly ctx: {
     from: ChannelFrom<SlackChannelState>;
   };
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
   readonly metadata: HitlFreeformModalMetadata;
-  readonly submission: Extract<SlackInputResponseSubmission, { type: "view_submission" }>;
+  readonly submission: Extract<SlackAnswerSubmission, { type: "view_submission" }>;
   readonly teamId: string | null;
   readonly text: string;
 }): Promise<void> {
-  const result = await authorizeInputResponse({
+  const result = await authorizeAnswer({
     channelId: input.metadata.channelId,
     deps: input.deps,
     installationTeamId: input.installationTeamId,
@@ -724,7 +727,7 @@ async function dispatchViewInputResponse(input: {
   const cardChannelId = input.metadata.messageChannelId ?? input.metadata.channelId;
   const response = await respondOrRetireInactivePrompt(
     () =>
-      input.ctx.from(input.metadata.continuationToken).respond(input.submission.inputResponses, {
+      input.ctx.from(input.metadata.continuationToken).respond(input.submission.answers, {
         auth: result.auth,
         state: withSlackResponder(undefined, input.submission.user.id),
       }),

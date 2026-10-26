@@ -7,7 +7,7 @@ A skill is a model-loadable procedure that follows the `SKILL.md` convention. It
 
 ## How loading works
 
-eve scans the files under `agent/skills/` and lists each one's name and description in the system prompt. When a request matches a skill's description (or you name the skill outright), the model loads it with `eve__skill({ name })`, and the skill's markdown becomes the call's result in the active turn. An agent with skills always has the [`eve__skill` tool](./concepts/built-in-tools#eve__search-eve__tool-and-eve__skill). A load reports a `load-skill` action named for the skill, and `t.loadedSkill` asserts it in [evals](./evals/assertions).
+eve scans the files under `agent/skills/` and lists each one's name and description in the system prompt. When a request matches a skill's description (or you name the skill outright), the model loads it with `eve__skill({ name })`, and the skill's markdown becomes the call's result in the active turn. An agent with skills always has the [`eve__skill` tool](./concepts/built-in-tools#eve__search-eve__tool-and-eve__skill). A load reports a `load-skill` action named for the skill, and `t.calledSkill` asserts it in [evals](./evals/assertions).
 
 Listing skills and loading their instructions do not require a sandbox: loading returns static instructions from the compiled agent and dynamic instructions from session state. Only access to supporting package files requires a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
 
@@ -64,7 +64,7 @@ import { defineSkill } from "eve/skills";
 
 export default defineSkill({
   description: "Research unfamiliar topics before answering with confidence.",
-  markdown:
+  content:
     "When the task is novel or ambiguous, gather evidence first, then answer with the key facts and the remaining uncertainty.",
   files: {
     "references/checklist.md": "# Checklist\n\n- Find primary sources.\n",
@@ -72,7 +72,7 @@ export default defineSkill({
 });
 ```
 
-eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
+eve generates `SKILL.md` from `content`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
 A static `defineSkill` module is evaluated during compilation and its resolved definition is stored in the manifest; a dynamic skill module is also retained as a runtime entry. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
@@ -97,12 +97,12 @@ Supporting files are for the model. After loading a skill, the model reads its r
 
 ## Dynamic skills
 
-To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in a `defineDynamic` resolver keyed on `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities).
+To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in `defineDynamic` and select the attribute it depends on from `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-skills).
 
-Subagent lifecycle events do not re-run skill resolvers. The parent's resolved dynamic skills remain available when it resumes after delegation.
+Delegating to a subagent does not change the parent's dynamic skills. They remain available when the parent resumes after delegation.
 
 ## What to read next
 
 - [Connections](./connections): add tools from external MCP and OpenAPI servers
-- [Dynamic capabilities](./guides/dynamic-capabilities): resolve skills per caller with `defineDynamic`
+- [Dynamic capabilities](./guides/dynamic-capabilities): choose skills per caller with `defineDynamic`
 - [Context control](./concepts/context-control): how skills fit the full context model

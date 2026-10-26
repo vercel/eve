@@ -8,13 +8,11 @@ import { sendTaskRunCommands } from "#execution/tasks/steps.js";
 import {
   findTask,
   isTaskAvailable,
-  isTaskWorking,
   MAX_WORKING_TASKS,
   readTaskTable,
   recordTaskCall,
   recordTaskRun,
   removeTask,
-  workingTasks,
   writeTaskTable,
   type TaskRecord,
   type TaskTable,
@@ -27,7 +25,10 @@ import {
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCallStart } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { isWorking, tasks } from "#protocol/session-projection/selectors.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type {
   RuntimeToolResultActionResult,
@@ -43,7 +44,9 @@ type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 interface TaskDispatchResult {
   readonly result: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
-  readonly started?: TaskStartedStreamEvent["data"];
+  readonly started?: TaskCallStart;
+  /** A dispatch admission refused the call before any run started. Not inferred from output. */
+  readonly refusal?: "task-limit" | "task-unavailable";
 }
 
 /** The entry of a run that does a task's work. */
@@ -57,18 +60,29 @@ type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
  */
 export async function startTaskRun(
   input: StartWorkflowTaskInput & { readonly entry: TaskRunEntry },
+  admissionView = storedProjection(input.session.state).view,
 ): Promise<TaskDispatchResult> {
   const { entry, session, task } = input;
   const { taskId } = entry;
   const dispatch = { ...input, taskId };
   const receipt = startReceipt(dispatch, entry.entryPoint === "serve");
   const table = readTaskTable(session.state);
-  const record = startableTask(table, taskId);
-  if (record === undefined) return { result: receipt, session };
+  const record = findTask(table, taskId);
+  // Cancelled before the session could start it: there is nothing to run.
+  if (admissionView.calls[task.callId]?.status === "settled") return { result: receipt, session };
+  if (record === undefined)
+    return {
+      result: startFailureResult(task, new Error(`Task dispatch record ${taskId} is unavailable.`)),
+      session,
+    };
 
-  const overCap = tooManyTasks(dispatch, table);
+  const overCap = tooManyTasks(dispatch, admissionView);
   if (overCap !== undefined) {
-    return { result: overCap, session: writeTaskTable(session, removeTask(table, taskId)) };
+    return {
+      result: overCap,
+      refusal: "task-limit",
+      session: writeTaskTable(session, removeTask(table, taskId)),
+    };
   }
 
   let address;
@@ -85,7 +99,7 @@ export async function startTaskRun(
   return {
     result: receipt,
     session: writeTaskTable(session, recordTaskRun(table, taskId, address)),
-    started: taskStartedEvent(dispatch, record),
+    started: taskCallStart(dispatch, record),
   };
 }
 
@@ -95,17 +109,23 @@ export async function startTaskRun(
  * counts toward the cap. The call is recorded, reported as started, and sent
  * to the task's run, whose body receives it from `receive()`.
  */
-export async function sendToTask(input: TaskDispatchInput): Promise<TaskDispatchResult> {
+export async function sendToTask(
+  input: TaskDispatchInput,
+  admissionView = storedProjection(input.session.state).view,
+): Promise<TaskDispatchResult> {
   const { session, task, taskId } = input;
   const table = readTaskTable(session.state);
   const record = findTask(table, taskId);
-  if (!isTaskAvailable(record, task.toolName)) {
-    return { result: unknownTaskResult(input), session };
+  if (
+    admissionView.tasks[taskId]?.status !== "running" ||
+    !isTaskAvailable(record, task.toolName)
+  ) {
+    return { result: unknownTaskResult(input), refusal: "task-unavailable", session };
   }
 
-  if (!isTaskWorking(record)) {
-    const overCap = tooManyTasks(input, table);
-    if (overCap !== undefined) return { result: overCap, session };
+  if (!isWorking(admissionView, taskId)) {
+    const overCap = tooManyTasks(input, admissionView);
+    if (overCap !== undefined) return { result: overCap, refusal: "task-limit", session };
   }
 
   const recorded = recordTaskCall(table, taskId, {
@@ -122,7 +142,7 @@ export async function sendToTask(input: TaskDispatchInput): Promise<TaskDispatch
   return {
     result: toolResult(input, renderTaskSentReceipt(taskId)),
     session: writeTaskTable(session, recorded.table),
-    started: taskStartedEvent(input, record),
+    started: taskCallStart(input, record),
   };
 }
 
@@ -133,6 +153,7 @@ export async function sendToTask(input: TaskDispatchInput): Promise<TaskDispatch
  */
 export function runEntryToStart(
   table: TaskTable,
+  view: SessionView,
   task: RuntimeWorkflowTaskRequest,
 ): WorkflowToolRunEntry | undefined {
   const { entry } = task;
@@ -141,16 +162,13 @@ export function runEntryToStart(
       return { entryPoint: "execute" };
     case "task":
     case "serve":
-      return startableTask(table, entry.taskId) === undefined ? undefined : entry;
+      return findTask(table, entry.taskId) === undefined ||
+        view.calls[task.callId]?.status === "settled"
+        ? undefined
+        : entry;
     case "receive":
       return undefined;
   }
-}
-
-/** The task's record while it still needs its run, which it doesn't once cancelled. */
-function startableTask(table: TaskTable, taskId: string): TaskRecord | undefined {
-  const record = findTask(table, taskId);
-  return record !== undefined && isTaskWorking(record) ? record : undefined;
 }
 
 /**
@@ -160,31 +178,29 @@ function startableTask(table: TaskTable, taskId: string): TaskRecord | undefined
  */
 export function startsEveryRun(
   table: TaskTable,
+  view: SessionView,
   tasks: readonly RuntimeWorkflowTaskRequest[],
 ): boolean {
   if (tasks.some((task) => task.entry.entryPoint === "receive")) return false;
   const starting = tasks.filter(
-    (task) => task.entry.entryPoint !== "execute" && runEntryToStart(table, task) !== undefined,
+    (task) =>
+      task.entry.entryPoint !== "execute" && runEntryToStart(table, view, task) !== undefined,
   );
-  return hasTaskSlots(table, starting.length);
+  return workingTasks(view).length + starting.length <= MAX_WORKING_TASKS;
 }
 
-function runningTasks(table: TaskTable): readonly TaskRecord[] {
-  return workingTasks(table).filter((candidate) => candidate.run !== undefined);
-}
-
-/** Whether the task cap leaves room to run `count` more tasks. */
-function hasTaskSlots(table: TaskTable, count: number): boolean {
-  return runningTasks(table).length + count <= MAX_WORKING_TASKS;
+function workingTasks(view: SessionView) {
+  return tasks(view, { status: "working" });
 }
 
 /** The `TOO_MANY_TASKS` error when the session already runs as many tasks as it may. */
 function tooManyTasks(
   input: TaskDispatchInput,
-  table: TaskTable,
+  view: SessionView,
 ): RuntimeToolResultActionResult | undefined {
-  if (hasTaskSlots(table, 1)) return undefined;
-  const runningIds = runningTasks(table).map((candidate) => candidate.id);
+  const running = workingTasks(view);
+  if (running.length < MAX_WORKING_TASKS) return undefined;
+  const runningIds = running.map((candidate) => candidate.taskId);
   return createRuntimeToolResultFromValue({
     callId: input.task.callId,
     isError: true,
@@ -208,12 +224,10 @@ function unknownTaskResult(input: TaskDispatchInput): RuntimeToolResultActionRes
   });
 }
 
-function taskStartedEvent(
-  input: TaskDispatchInput,
-  record: TaskRecord,
-): TaskStartedStreamEvent["data"] {
+function taskCallStart(input: TaskDispatchInput, record: TaskRecord): TaskCallStart {
   return {
     callId: input.task.callId,
+    clearedBy: input.task.clearedBy,
     kind: record.kind,
     name: input.task.toolName,
     taskId: input.taskId,
