@@ -24,8 +24,10 @@ import { currentView, enteredView } from "#harness/session-machine/current.js";
 import { isTerminalType } from "#protocol/session-events/catalog.js";
 import { askedCall, decidingAnswer } from "#protocol/session-projection/reader.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
+import { copyView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { HandleEventFn } from "#harness/types.js";
+import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
@@ -102,22 +104,38 @@ export function createInstrumentationHandleEvent(
     const startedAtMs = Date.now();
     const ctx = contextStorage.getStore();
     const before = ctx === undefined ? undefined : enteredView(ctx);
-    await handleEvent(publication, messages);
+    let cancellation: { readonly error: unknown } | undefined;
+    try {
+      await handleEvent(publication, messages);
+    } catch (error) {
+      // Turn hooks cancel after the publication commits; its instrumentation must still settle.
+      if (
+        !isTurnCancellation(error) ||
+        before === undefined ||
+        ctx === undefined ||
+        currentView(ctx).position <= before.position
+      )
+        throw error;
+      cancellation = { error };
+    }
+    // Operational state may already have retired a summary run when its context change settled.
+    const published = eventsOf(publication);
+    const committed =
+      before !== undefined && published.some((event) => isTerminalType(event.type))
+        ? cascade(before, published)
+        : published;
+    const view = before === undefined ? undefined : copyView(before);
+    if (view !== undefined)
+      for (const event of committed)
+        foldReceivedEvent(view, { ...event, meta: { endOfLine: false } });
     const line: Line = {
       attemptScope: (place) => attemptScopeOf(input, place),
       capturesInputs: hooks.capturesInputs ?? hooks.capturesContent ?? false,
       capturesOutputs: hooks.capturesOutputs ?? hooks.capturesContent ?? false,
       settledAtMs: ctx?.get(RuntimeActionSettlementTimesKey),
       startedAtMs,
-      view: ctx === undefined ? undefined : currentView(ctx),
+      view: view ?? (ctx === undefined ? undefined : currentView(ctx)),
     };
-    // The writer commits what an owner's end closes along with it; instrumentation hears that
-    // commit, folded on the tables as they stood.
-    const published = eventsOf(publication);
-    const committed =
-      before !== undefined && published.some((event) => isTerminalType(event.type))
-        ? cascade(before, published)
-        : published;
     for (const event of committed) {
       const delivery = deliveryEvent(event, ctx, input);
       if (delivery !== undefined) await hooks.publish(Object.freeze(delivery));
@@ -125,6 +143,7 @@ export function createInstrumentationHandleEvent(
         await hooks.publish(Object.freeze(derived));
       }
     }
+    if (cancellation !== undefined) throw cancellation.error;
   };
 }
 
