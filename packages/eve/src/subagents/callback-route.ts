@@ -1,4 +1,3 @@
-import { renameLegacyTaskCallback } from "#execution/legacy-remote-agent/protocol.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -163,7 +162,7 @@ export async function handleSessionCallbackRequest(
 
   let body: unknown;
   try {
-    body = renameLegacyTaskCallback(await request.json());
+    body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }

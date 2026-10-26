@@ -5,7 +5,6 @@ import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
-  UNVERSIONED_REMOTE_AGENT_PROTOCOL,
   formatRemoteAgentProtocolMismatch,
   readRemoteAgentProtocolVersion,
 } from "#protocol/remote-agent-protocol.js";
@@ -184,11 +183,7 @@ export async function startRemoteAgentSession(input: {
     );
   }
   const receiverVersion = readRemoteAgentProtocolVersion(parsed.data.protocolVersion);
-  // A protocol-1 remote already accepted the work and settles it with the same result callbacks.
-  if (
-    receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION &&
-    receiverVersion !== UNVERSIONED_REMOTE_AGENT_PROTOCOL
-  ) {
+  if (receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION) {
     throw new FatalError(
       `${formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion })} ${UNKNOWN_REMOTE_OUTCOME} Remote session: ${parsed.data.sessionId}.`,
     );

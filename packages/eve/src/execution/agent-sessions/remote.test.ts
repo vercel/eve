@@ -253,7 +253,7 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
-  it("accepts an unversioned (protocol 1) remote's create response", async () => {
+  it("rejects an unversioned (eve 0.66–0.68) remote's create response", async () => {
     vi.stubGlobal(
       "fetch",
       vi
@@ -270,7 +270,7 @@ describe("startRemoteAgentSession", () => {
         remote: createRemoteAgent(),
         session: { continuationToken: "eve:parent-token" },
       }),
-    ).resolves.toEqual({ sessionId: "legacy-session" });
+    ).rejects.toThrow(/speaks eve remote agent protocol 1.*Remote session: legacy-session/s);
   });
 
   it.each([true, false])(

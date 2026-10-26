@@ -1,12 +1,10 @@
 import type { ContextContainer } from "#context/container.js";
 import {
   ContinuationTokenKey,
-  LegacyRemoteAgentCallerKey,
   SessionCallbackKey,
   SessionIdKey,
   SessionInboxKey,
 } from "#context/keys.js";
-import { forwardLegacySessionInput } from "#execution/legacy-remote-agent/protocol.js";
 import { resolvedForParent } from "#harness/hitl/relays.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -20,8 +18,6 @@ export async function forwardSessionInput(
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
   if (callback === undefined) return false;
-  const legacyCaller = ctx.get(LegacyRemoteAgentCallerKey);
-  if (legacyCaller !== undefined) return await forwardLegacySessionInput(ctx, legacyCaller, event);
   if (event.type === "input.resolved") {
     const relayed = resolvedForParent(event.data);
     if (relayed === undefined) return false;

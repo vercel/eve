@@ -1429,6 +1429,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
       }),
     );
 
@@ -1451,6 +1452,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/other-token",
         },
         message: "hi",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
       }),
     );
 
@@ -1474,6 +1476,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
       }),
     );
 
@@ -1608,74 +1611,37 @@ describe("eveChannel — create session (text)", () => {
   });
 });
 
-describe("eveChannel — remote agent protocol 1 callers", () => {
+describe("eveChannel — remote agent protocol versions", () => {
   const callback = {
     callId: "call-1",
     subagentName: "research",
     token: "tok123",
     url: "https://caller.example.com/eve/v1/callback/tok123",
   };
-  // What an eve 0.66–0.68 background task adds when it delegates.
-  const legacyTaskFields = {
-    activityObserver: {
-      sink: {
-        url: "https://caller.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-        version: 1,
-      },
-      workIdentity: {
-        callId: "call-1",
-        id: "work:caller:turn-1:call-1",
-        kind: "task",
-        name: "research",
-        rootSessionId: "caller",
-        rootTurnId: "turn-1",
-      },
-    },
-    callback: { ...callback, taskId: "task-1" },
-  };
 
+  // eve 0.66–0.68 callers send no protocolVersion; a background task also names itself on the callback.
   it.each([
-    ["a direct call", { callback }, {}],
-    ["a background task", legacyTaskFields, { taskId: "task-1" }],
-  ])(
-    "serves an unversioned create from %s and answers protocol 1",
-    async (_caller, fields, legacyCaller) => {
-      const logs = captureLogRecords();
-      const handler = createEveCreateHandler({ auth: none() });
-
-      const response = await handler.fetch(
-        createJsonMessageRequest({ capabilities: {}, message: "hi", ...fields }),
-      );
-
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
-        ok: true,
-        protocolVersion: 1,
-        sessionId: "test-session-id",
-        status: "accepted",
-      });
-      const runInput = handler.createSession.mock.calls[0]?.[0];
-      expect(runInput?.callback).toEqual(callback);
-      expect(runInput?.legacyRemoteAgentCaller).toEqual(legacyCaller);
-      expect(logs.records).toContainEqual(
-        expect.objectContaining({
-          level: "info",
-          message: "serving a remote agent protocol 1 caller",
-        }),
-      );
-    },
-  );
-
-  it("serves a protocol-1 continuation", async () => {
-    const handler = createEveContinueHandler({ auth: none() });
+    ["a direct call", { callback }],
+    ["a background task", { callback: { ...callback, taskId: "task-1" } }],
+  ])("rejects an unversioned create from %s as a protocol mismatch", async (_caller, fields) => {
+    const handler = createEveCreateHandler({ auth: none() });
 
     const response = await handler.fetch(
-      createJsonMessageRequest({ message: "and then?", ...legacyTaskFields }),
+      createJsonMessageRequest({ capabilities: {}, message: "hi", ...fields }),
     );
 
-    expect(response.status).toBe(202);
-    const options = handler.send.mock.calls[0]?.[1];
-    expect(options?.callback).toEqual(callback);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "REMOTE_AGENT_PROTOCOL_MISMATCH",
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+    });
+    expect(handler.createSession).not.toHaveBeenCalled();
+  });
+
+  // The route took unauthenticated answers that settled approvals as the session's current user.
+  it("serves no task-input route", () => {
+    const paths = eveChannel({ auth: none() }).routes.map((route) => route.path);
+    expect(paths.filter((path) => path.includes("task-input"))).toEqual([]);
   });
 
   it("rejects a delegating caller on a protocol this deployment does not serve", async () => {

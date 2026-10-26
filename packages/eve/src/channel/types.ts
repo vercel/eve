@@ -1,6 +1,5 @@
 import type { UserContent } from "ai";
 
-import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
@@ -495,8 +494,6 @@ export interface RunInput {
    * caller for their own turn.
    */
   readonly callback?: SessionCallback;
-  /** Set when {@link callback} belongs to a remote agent protocol 1 caller. */
-  readonly legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * add a continuation address during the first turn via

@@ -183,6 +183,10 @@ client that accepts only versions up to 25 fails the stream with an unsupported-
 
 ## Upgrade remote agents before their callers
 
+Later eve releases no longer serve protocol-1 callers or accept protocol-1 remote agents. Upgrade
+every caller and remote agent past 0.68 before you upgrade any of them past that later release.
+The rest of this section describes this release.
+
 The remote agent protocol is now version 2. Deploy each [remote agent](/docs/guides/remote-agents)
 before the deployments that call it. A remote agent on this release still serves callers on eve 0.66
 through 0.68, which speak protocol 1. It runs their turns, sends each result to their callback, and

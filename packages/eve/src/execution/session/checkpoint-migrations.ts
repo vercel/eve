@@ -50,14 +50,14 @@ const CHECKPOINT_UPGRADES: Readonly<
     };
   },
   // eve 0.69 removed background tasks, subagent handles, activity artifacts, and
-  // cached connection search results, and moved protocol-1 caller detection.
+  // cached connection search results.
   9: (checkpoint, effects) => {
     const sessionState = readRecord(checkpoint, "sessionState");
     const snapshot = readRecord(sessionState, "snapshot");
     const { taskId: _taskId, ...session } = readRecord(snapshot, "session");
     return {
       ...checkpoint,
-      serializedContext: upgradeLegacyCaller(
+      serializedContext: dropCallbackTaskId(
         omitKeys(readRecord(checkpoint, "serializedContext"), [
           "eve.activityObserver",
           "eve.activityPendingBlockers",
@@ -279,21 +279,12 @@ function omitKeys(record: CheckpointRecord, keys: readonly string[]): Checkpoint
   return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
 }
 
-/**
- * Earlier builds forwarded a session's questions to its caller as `task.*`
- * callbacks only when the callback named a task. The current build reads that
- * choice from the protocol-1 caller record instead.
- */
-function upgradeLegacyCaller(context: CheckpointRecord): CheckpointRecord {
+/** Earlier builds named the caller's background task on the callback; no build reads it now. */
+function dropCallbackTaskId(context: CheckpointRecord): CheckpointRecord {
   const callback = context["eve.sessionCallback"];
   if (!isObject(callback)) return context;
-  const { taskId, ...current } = callback;
-  return {
-    ...context,
-    "eve.legacyRemoteAgentCaller":
-      typeof taskId === "string" && taskId.length > 0 ? { taskId } : {},
-    "eve.sessionCallback": current,
-  };
+  const { taskId: _taskId, ...current } = callback;
+  return { ...context, "eve.sessionCallback": current };
 }
 
 // Task notifications are framework-authored task results; history validation rejects the old kind.

@@ -23,7 +23,6 @@ describe("migrateSessionCheckpoint", () => {
           "eve.auth": null,
           "eve.bundle": { source: { kind: "bundled" } },
           "eve.channel": { kind: "http", state: {} },
-          "eve.legacyRemoteAgentCaller": { taskId: "caller-task" },
           "eve.sessionCallback": CALLBACK,
           "eve.sessionTitle": "Alice asks for a report.",
         },
