@@ -61,8 +61,14 @@ type CompactionStrategy = (
 - `checkpoint`: builds eve's two-message checkpoint head;
 - `estimateTokens` and an `abortSignal`.
 
-The strategy can do anything else it likes, including call external services. `fixedTail()`, today's
-behavior, is exported so a strategy can configure or wrap it.
+The strategy can do anything else it likes, including call external services. For example, it can
+prune or redact old tool outputs, keeping each call paired with its result, and summarize only
+if that isn't enough.
+
+`fixedTail()` is today's behavior, exported so a strategy can configure or wrap it. It first caps
+oversized tool results in the older history, keeping each output's head and tail, with no model
+call. It summarizes the older history only if capping doesn't make enough room. The recent
+messages stay word for word.
 
 An agent has exactly one strategy, as today, so configuration is its natural home. It needs no
 new file convention and no new definition type. A function field on `defineAgent` already exists:
@@ -224,9 +230,11 @@ kernel (threshold) ┘                               (shared path)
 
 ### Where it could go, and what's hard
 
-The same shape could describe kinds of rewrite eve doesn't have: pruning old tool outputs,
-redacting, rewinding to a turn. `selects: { turnId }` already anticipates rewinding. An authored
-kind might look like this:
+The same shape could describe rewrites that aren't compactions. These run for a reason other than
+size and report their own `kind`: redacting on request, or rewinding to a turn.
+`selects: { turnId }` already anticipates rewinding. A compaction can already prune or redact as
+part of making room. A separate kind is for a change that has to happen whether or not the history
+is large. An authored kind might look like this:
 
 ```ts
 // Illustration only. Not proposed.
