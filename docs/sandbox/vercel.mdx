@@ -11,7 +11,7 @@ import { VercelSandbox } from "eve/sandbox/vercel";
 
 export const environment = VercelSandbox.environment({
   prepare: async (sandbox) => {
-    await sandbox.run({ command: "pnpm install --frozen-lockfile" });
+    await sandbox.run({ command: "npm ci" });
   },
 });
 
