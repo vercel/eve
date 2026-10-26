@@ -6,11 +6,19 @@ name: Mirror Stress Artifacts
 # benchmark run from each release build
 # (scripts/eval-benchmark/import-stress-artifacts.mjs). Both skip what they
 # already wrote. Each release imports its build once Release finishes; the
-# daily run catches anything that missed, such as a renamed release PR.
+# daily run catches anything that missed, such as a renamed release PR. A
+# metric definition change on main re-derives every release under the new
+# metrics version right away: eve-evals reads only the newest import root, so
+# waiting for the daily run would leave it without the hosted history.
 on:
   schedule:
     - cron: "41 6 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    # METRICS_VERSION lives in standard.mjs; any definition change bumps it.
+    paths:
+      - scripts/eval-metrics/**
   # Runs after Release, never inside it, so it cannot block or slow a publish.
   # By then the release PR is merged and its final head's e2e-vercel run, a
   # required check, has uploaded the archive. workflow_run runs main's copy of
