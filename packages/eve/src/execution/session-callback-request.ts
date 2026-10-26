@@ -1,7 +1,10 @@
+import { FatalError } from "#compiled/@workflow/core/index.js";
 import {
   assertPublicHostname,
   createPublicDispatcher,
   fetchWithDispatcher,
+  findUnsafeDestinationError,
+  UnsafeDestinationError,
 } from "#execution/public-destination.js";
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
@@ -47,6 +50,19 @@ export async function postSessionCallbackRequest(input: {
       signal,
     });
   } catch (error) {
+    const blocked = findUnsafeDestinationError(error);
+    if (blocked !== undefined) {
+      // The policy decides the same way on every attempt, so do not retry.
+      // The policy message carries no part of the URL.
+      if (input.logFailures !== false) {
+        log.error("callback delivery failed", {
+          ...callbackLogFields(input),
+          failure: "blocked-destination",
+          error: new Error(blocked.message),
+        });
+      }
+      throw new FatalError(`Callback delivery refused: ${blocked.message}`);
+    }
     // Fetch errors can contain the capability URL or credentials in their
     // cause chain. Log a safe summary, but preserve the original rejection.
     if (input.logFailures !== false) {
@@ -80,7 +96,7 @@ async function requestCallback(
 ): Promise<Response> {
   const url = new URL(urlText);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Callback URL must use http or https.");
+    throw new UnsafeDestinationError("Callback URL must use http or https.");
   }
   const policy = { allowLoopback: isLocalDevelopmentServer() };
   assertPublicHostname(url.hostname, policy);

@@ -95,6 +95,8 @@ describe("parseSessionCallback destination guard", () => {
     "http://[fd00::1]",
   ])("rejects %s outside local development", (origin) => {
     vi.stubEnv("EVE_DEV", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
     expect(parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`))).toMatchObject({
       message: expect.stringContaining("must not be a loopback, private, link-local, or reserved"),
       ok: false,

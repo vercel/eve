@@ -5,8 +5,15 @@ import type { Dispatcher1Wrapper } from "undici";
 
 import { isBlockedDestinationHost } from "#shared/network-address.js";
 
-export const UNSAFE_DESTINATION_ERROR =
-  "URL must not target localhost, private, link-local, or reserved IP addresses.";
+/** Rejection for a destination that the {@link PublicDestinationPolicy} blocks. */
+export class UnsafeDestinationError extends Error {
+  constructor(
+    message = "URL must not target localhost, private, link-local, or reserved IP addresses.",
+  ) {
+    super(message);
+    this.name = "UnsafeDestinationError";
+  }
+}
 
 /** Destination policy for a framework request to an untrusted URL. */
 export interface PublicDestinationPolicy {
@@ -24,7 +31,7 @@ type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
  */
 export function assertPublicHostname(hostname: string, policy: PublicDestinationPolicy): void {
   if (isBlockedDestinationHost(hostname, policy)) {
-    throw new Error(UNSAFE_DESTINATION_ERROR);
+    throw new UnsafeDestinationError();
   }
 }
 
@@ -38,6 +45,14 @@ export async function createPublicDispatcher(
 ): Promise<Dispatcher1Wrapper> {
   const { Agent, Dispatcher1Wrapper } = await import("undici");
   return new Dispatcher1Wrapper(new Agent({ connect: { lookup: createPublicLookup(policy) } }));
+}
+
+/** Finds the policy rejection in an error, including one fetch wrapped from the socket lookup. */
+export function findUnsafeDestinationError(error: unknown): UnsafeDestinationError | undefined {
+  if (error instanceof UnsafeDestinationError) return error;
+  return error instanceof Error && error.cause instanceof UnsafeDestinationError
+    ? error.cause
+    : undefined;
 }
 
 export function fetchWithDispatcher(url: string | URL, init: DispatcherRequestInit) {
@@ -57,7 +72,7 @@ function createPublicLookup(policy: PublicDestinationPolicy): LookupFunction {
       }
 
       if (addresses.some(({ address }) => isBlockedDestinationHost(address, policy))) {
-        callback(new Error(UNSAFE_DESTINATION_ERROR), "", 0);
+        callback(new UnsafeDestinationError(), "", 0);
         return;
       }
 

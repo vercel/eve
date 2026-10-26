@@ -63,6 +63,8 @@ describe("postSessionCallbackRequest destination guard", () => {
     ["loopback outside local development", "", [{ address: "127.0.0.1", family: 4 }]],
   ])("refuses to connect when a callback hostname resolves to %s", async (_name, eveDev, addrs) => {
     vi.stubEnv("EVE_DEV", eveDev);
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
     dnsMocks.addresses = addrs;
 
     const delivery = postSessionCallbackRequest({
@@ -72,7 +74,8 @@ describe("postSessionCallbackRequest destination guard", () => {
     });
 
     await expect(delivery).rejects.toMatchObject({
-      cause: { message: expect.stringContaining("must not target localhost, private") },
+      message: expect.stringContaining("must not target localhost, private"),
+      name: "FatalError",
     });
     expect(received).toEqual([]);
   });

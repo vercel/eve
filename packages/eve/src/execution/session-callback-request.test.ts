@@ -158,16 +158,21 @@ describe("postSessionCallbackRequest", () => {
     ["a private address", { EVE_DEV: "1" }, "http://10.0.0.5/eve/v1/callback/token"],
     ["cloud metadata", { EVE_DEV: "1" }, "http://169.254.169.254/eve/v1/callback/token"],
     ["a non-HTTP scheme", { EVE_DEV: "1" }, "file:///eve/v1/callback/token"],
-  ])("rejects %s before connecting", async (_name, env, url) => {
-    vi.stubEnv("EVE_DEV", "");
+  ])("rejects %s before connecting without retries", async (_name, env, url) => {
+    stubProductionServer();
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     const fetchMock = stubFetch();
 
-    await expect(postSessionCallbackRequest({ body: { ok: true }, url })).rejects.toThrow(
-      /must not target localhost, private|must use http or https/,
-    );
+    await expect(postSessionCallbackRequest({ body: { ok: true }, url })).rejects.toMatchObject({
+      message: expect.stringMatching(/must not target localhost, private|must use http or https/),
+      name: "FatalError",
+    });
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
+      "[eve:execution.session-callback] callback delivery failed",
+      expect.objectContaining({ failure: "blocked-destination" }),
+    );
   });
 
   it("allows loopback callbacks on a local development server", async () => {
@@ -183,6 +188,12 @@ describe("postSessionCallbackRequest", () => {
     expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "POST" }));
   });
 });
+
+function stubProductionServer(): void {
+  vi.stubEnv("EVE_DEV", "");
+  vi.stubEnv("VERCEL", "");
+  vi.stubEnv("VERCEL_ENV", "");
+}
 
 function stubFetch() {
   const fetchMock = vi.fn(
