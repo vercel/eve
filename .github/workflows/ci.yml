@@ -156,6 +156,10 @@ jobs:
         with:
           bun-version: "1.4.4"
 
+      # This job builds agents whose sandboxes pull eve's default image.
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -240,6 +244,10 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
+      # This job builds agents whose sandboxes pull eve's default image.
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -265,6 +273,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
+
+      # This job builds agents whose sandboxes pull eve's default image.
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
