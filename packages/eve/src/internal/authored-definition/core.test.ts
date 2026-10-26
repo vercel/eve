@@ -129,36 +129,32 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
-  it("accepts positive agent limits", () => {
+  it("accepts agent limits and keeps the session usage function", () => {
+    const sessionUsage = ({ window }: { window: { inputTokens: number } }) =>
+      window.inputTokens >= 1_000;
     const definition = normalizeAgentDefinition(
       {
         model: "openai/gpt-5.5",
         limits: {
-          maxInputTokensPerSession: 200_000,
-          maxOutputTokensPerSession: 20_000,
-          maxTokenCostUsdPerSession: 1.5,
           sessionTimeoutMs: 86_400_000,
+          sessionUsage,
         },
       },
       FAILURE_MESSAGE,
     );
 
     expect(definition.limits).toEqual({
-      maxInputTokensPerSession: 200_000,
-      maxOutputTokensPerSession: 20_000,
-      maxTokenCostUsdPerSession: 1.5,
       sessionTimeoutMs: 86_400_000,
+      sessionUsage,
     });
+    expect(definition.limits?.sessionUsage).toBe(sessionUsage);
   });
 
-  it("accepts false to uncap session token limits", () => {
+  it("accepts false to disable the session timeout", () => {
     const definition = normalizeAgentDefinition(
       {
         model: "openai/gpt-5.5",
         limits: {
-          maxInputTokensPerSession: false,
-          maxOutputTokensPerSession: false,
-          maxTokenCostUsdPerSession: false,
           sessionTimeoutMs: false,
         },
       },
@@ -166,11 +162,25 @@ describe("normalizeAgentDefinition", () => {
     );
 
     expect(definition.limits).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-      maxTokenCostUsdPerSession: false,
       sessionTimeoutMs: false,
     });
+  });
+
+  it.each([
+    ["maxInputTokensPerSession", 200_000],
+    ["maxOutputTokensPerSession", 20_000],
+    ["maxTokenCostUsdPerSession", 1.5],
+    ["maxInputTokensPerSession", false],
+  ])("rejects the removed numeric session limit %s=%j", (key, value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          limits: { [key]: value },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects the removed subagent max depth limit", () => {
@@ -198,22 +208,15 @@ describe("normalizeAgentDefinition", () => {
   });
 
   it.each([
-    ["maxInputTokensPerSession", 0],
-    ["maxInputTokensPerSession", 1.5],
-    ["maxInputTokensPerSession", -1],
-    ["maxInputTokensPerSession", "200000"],
-    ["maxOutputTokensPerSession", 0],
-    ["maxOutputTokensPerSession", 1.5],
-    ["maxOutputTokensPerSession", -1],
-    ["maxOutputTokensPerSession", "20000"],
-    ["maxTokenCostUsdPerSession", 0],
-    ["maxTokenCostUsdPerSession", -0.01],
-    ["maxTokenCostUsdPerSession", Number.POSITIVE_INFINITY],
-    ["maxTokenCostUsdPerSession", "1.50"],
     ["sessionTimeoutMs", 0],
     ["sessionTimeoutMs", 1.5],
     ["sessionTimeoutMs", -1],
     ["sessionTimeoutMs", "30d"],
+    ["sessionUsage", true],
+    ["sessionUsage", false],
+    ["sessionUsage", 40_000_000],
+    ["sessionUsage", { inputTokens: 40_000_000 }],
+    ["sessionUsage", "() => true"],
   ])("rejects invalid session runtime limit %s=%j", (key, value) => {
     expect(() =>
       normalizeAgentDefinition(

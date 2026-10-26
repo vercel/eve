@@ -1,5 +1,5 @@
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
-import type { LanguageModel } from "ai";
+import { type LanguageModel, NoOutputGeneratedError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -147,7 +147,9 @@ describe("model request envelope accounting", () => {
         requests.push(request);
         if (requests.length === 1) {
           setInstructions(ctx, 1_400);
-          return "";
+          throw new NoOutputGeneratedError({
+            message: "The model stream ended without a finish chunk.",
+          });
         }
         return "Recovered after compaction.";
       },

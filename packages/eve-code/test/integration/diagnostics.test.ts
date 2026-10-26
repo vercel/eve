@@ -155,6 +155,9 @@ function commandSandbox(
     async writeBinaryFile() {
       throw new Error("not used by this test");
     },
+    async writeFiles() {
+      throw new Error("not used by this test");
+    },
     async writeTextFile() {
       throw new Error("not used by this test");
     },

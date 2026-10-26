@@ -1,16 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import {
+  EVE_DEV_STATE_DIR_ENV,
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
 } from "#internal/application/dev-environment.js";
 import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
+import {
+  createEvalStateDirectory,
+  removeEvalStateDirectory,
+} from "#evals/cli/eval-state-directory.js";
 import { filterEvalsByTags } from "#evals/cli/filter.js";
 import {
   discoverAndImportEvals,
@@ -29,6 +34,7 @@ export interface EvalCliOptions {
   url?: string;
   timeout?: string;
   maxConcurrency?: string;
+  repeat?: string;
   json?: boolean;
   junit?: string;
   skipReport?: boolean;
@@ -36,6 +42,7 @@ export interface EvalCliOptions {
   list?: boolean;
   tag?: string[];
   excludeTag?: string[];
+  keepState?: boolean;
   verbose?: boolean;
 }
 
@@ -109,9 +116,11 @@ export async function runEvalCommand(
 
   let maxConcurrency: number | undefined;
   let timeoutMs: number | undefined;
+  let repeat: number | undefined;
   try {
     maxConcurrency = parsePositiveInteger(options.maxConcurrency, "--max-concurrency");
     timeoutMs = parseNonNegativeInteger(options.timeout, "--timeout");
+    repeat = parsePositiveInteger(options.repeat, "--repeat");
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
@@ -129,6 +138,7 @@ export async function runEvalCommand(
 
   // Resolve target
   let devServer: DevelopmentServer | undefined;
+  let devStateDirectory: string | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
   let setupContext: unknown;
@@ -137,6 +147,11 @@ export async function runEvalCommand(
     setupContext = await config.setup?.();
 
     if (options.url) {
+      if (options.keepState === true) {
+        logger.error(
+          "--keep-state has no effect with --url: the remote server keeps its own state.",
+        );
+      }
       client = await createEvalClient(
         { kind: "remote", url: options.url },
         { workspaceRoot: appRoot },
@@ -150,8 +165,14 @@ export async function runEvalCommand(
     } else {
       // Set before the server boots, because a provider's `setup` reads it
       // once at startup and never again.
+      const evaluationRunId = randomUUID();
       process.env[EVE_EVALUATION_ENV_FLAG] = "1";
-      process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
+      process.env[EVE_EVALUATION_RUN_ID_ENV] = evaluationRunId;
+      // The eval server owns its runtime generations, Workflow data, and
+      // server record, so it runs beside an `eve dev` session for the same
+      // agent instead of refusing to start or swapping that session's state.
+      devStateDirectory = await createEvalStateDirectory(appRoot, evaluationRunId);
+      process.env[EVE_DEV_STATE_DIR_ENV] = devStateDirectory;
       devServer = createDevelopmentServer(appRoot, {
         developmentExtensions: noDevelopmentExtensions(),
         host: "127.0.0.1",
@@ -183,6 +204,7 @@ export async function runEvalCommand(
       includeEvalReporters: options.skipReport !== true,
       maxConcurrency,
       timeoutMs,
+      repeat,
       onEvalLog:
         options.verbose === true
           ? (evalId, message) => logger.log(`[${evalId}] ${message}`)
@@ -204,7 +226,13 @@ export async function runEvalCommand(
   } finally {
     for (const cleanup of [
       () => devServer?.close(),
-      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () =>
+        devServer && shutdownActiveSandboxConnections({ log: (message) => logger.error(message) }),
+      async () => {
+        if (devStateDirectory === undefined) return;
+        if (options.keepState !== true) return await removeEvalStateDirectory(devStateDirectory);
+        logger.error(`Kept the eval server's state in ${relative(appRoot, devStateDirectory)}.`);
+      },
       () => config.teardown?.(setupContext),
     ]) {
       try {
@@ -252,7 +280,7 @@ async function flushStream(stream: NodeJS.WriteStream): Promise<void> {
 // Option parsing
 // ---------------------------------------------------------------------------
 
-/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`). */
+/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`, `--repeat`). */
 function parsePositiveInteger(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);

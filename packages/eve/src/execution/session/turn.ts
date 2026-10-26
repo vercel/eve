@@ -3,7 +3,10 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
+import {
+  dispatchCoordinationStep,
+  publishTaskStartedStep,
+} from "#execution/coordination-dispatch-step.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -82,6 +85,7 @@ export interface SessionExecutionInput {
  */
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
+  private observedHandoverAttemptKey: string | undefined;
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
@@ -102,20 +106,14 @@ export class SessionExecution {
       readonly control?: TurnControl;
     } = {},
   ): Promise<TurnOutcome> {
-    let turn: ActiveTurn;
-    try {
-      turn = new ActiveTurn(
-        this.input,
-        {
-          caller: options.caller,
-          principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
-        },
-        options.control,
-      );
-    } catch (error) {
-      options.control?.dispose();
-      throw error;
-    }
+    const turn = new ActiveTurn(
+      this.input,
+      {
+        caller: options.caller,
+        principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+      },
+      options.control,
+    );
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
       // Tasks run beside the turn, and a run can open a session after its call
@@ -145,23 +143,31 @@ export class SessionExecution {
   private async handleBoundaryMessages(
     messages: readonly WorkflowToolRunMessage[],
     ending = false,
+    turn?: ActiveTurn,
   ): Promise<void> {
     let applied: AppliedRunMessage[] = [];
     for (const message of messages) {
       if (!isAppliedRunMessage(message)) {
-        await this.applyRunMessages(applied);
+        await this.applyRunMessages(applied, turn);
         applied = [];
         await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
       } else if (!ending || message.kind !== "agent-started") {
         applied.push(message);
       }
     }
-    await this.applyRunMessages(applied);
+    await this.applyRunMessages(applied, turn);
   }
 
-  private async applyRunMessages(messages: readonly AppliedRunMessage[]): Promise<void> {
+  /** Hooks on the messages' events may cancel `turn`, the turn that is running. */
+  private async applyRunMessages(
+    messages: readonly AppliedRunMessage[],
+    turn?: ActiveTurn,
+  ): Promise<void> {
     if (messages.length === 0) return;
-    await this.input.cursor.advance((state) => applyRunMessagesStep({ ...state, messages }));
+    const { cancelled } = await this.input.cursor.advance((state) =>
+      applyRunMessagesStep({ ...state, canCancelTurn: turn !== undefined, messages }),
+    );
+    if (cancelled) turn?.abort();
   }
 
   private async runTurnSteps(
@@ -178,15 +184,20 @@ export class SessionExecution {
       const { cursor } = this.input;
       const caller = bindCaller;
       bindCaller = undefined;
+      const observation = this.input.inbox.handoverObservation;
+      const handover =
+        observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
       const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
+          handover,
           abortSignal: turn.signal,
           caller,
           input: nextStepInput,
           steeringSignal: turn.steeringSignal,
         }),
       );
+      if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
@@ -197,7 +208,12 @@ export class SessionExecution {
       // reply to it.
       const stepAdmission = this.input.queue.nextAdmission;
       await turn.admitBoundary();
-      await this.handleBoundaryMessages(turn.takeBoundaryMessages(), result.action === "done");
+      const ending = result.action === "done";
+      await this.handleBoundaryMessages(
+        turn.takeBoundaryMessages(),
+        ending,
+        ending ? undefined : turn,
+      );
 
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       if (!turnCompleted && turn.signal.aborted && pendingCallIds === undefined) {
@@ -267,15 +283,23 @@ export class SessionExecution {
    * session answers them itself.
    */
   private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
-    const dispatched = await this.input.cursor.advance((state) =>
+    const { cursor } = this.input;
+    const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
       dispatchCoordinationStep({
         action: "park",
+        serializedContext,
+        sessionState,
         workflowToolRunOwner: {
           inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
         },
-        ...state,
       }),
     );
+    // Published in a step of its own, so a retry while it runs cannot start the runs again.
+    if (dispatched.started.length > 0) {
+      await cursor.advance((state) =>
+        publishTaskStartedStep({ ...state, started: dispatched.started }),
+      );
+    }
     return dispatched.results;
   }
 
@@ -291,7 +315,7 @@ export class SessionExecution {
     if (isAppliedRunMessage(message)) {
       const following =
         turn?.takeAppliedRunMessages() ?? takeLeadingAppliedRunMessages(this.input.inbox);
-      await this.applyRunMessages([message, ...following]);
+      await this.applyRunMessages([message, ...following], turn);
       return undefined;
     }
     return await handleWorkflowToolRunMessage({

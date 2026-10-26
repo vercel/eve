@@ -77,7 +77,9 @@ export function expectNoModelCallWhileOpen(on: EveEvalAssertions, requestId: str
 }
 
 /**
- * No `step.started` falls between the authorization `attemptId` opening and closing.
+ * The model says nothing between the authorization `attemptId` opening and closing. A step may start
+ * in that window: it runs the call the sign-in was for, and reports the sign-in as it settles, before
+ * the step's model call.
  * `before` carries the events streamed before `on` started, such as the ask.
  */
 export function expectNoModelCallDuringAuthorization(
@@ -85,22 +87,35 @@ export function expectNoModelCallDuringAuthorization(
   attemptId: string,
   before: EveEvalTurn["events"] = [],
 ) {
-  on.eventsSatisfy(`no model step starts while authorization ${attemptId} is open`, (observed) => {
-    const events = [...before, ...observed];
-    const asked = events.findIndex(
-      (event) => event.type === "authorization.required" && event.data.attemptId === attemptId,
-    );
-    if (asked < 0) return false;
-    const closed = events.findIndex(
-      (event, index) =>
-        index > asked &&
-        event.type === "authorization.completed" &&
-        event.data.attemptId === attemptId,
-    );
-    const open = events.slice(asked + 1, closed < 0 ? events.length : closed);
-    return !open.some((event) => event.type === "step.started");
-  });
+  on.eventsSatisfy(
+    `the model says nothing while authorization ${attemptId} is open`,
+    (observed) => {
+      const events = [...before, ...observed];
+      const asked = events.findIndex(
+        (event) => event.type === "authorization.required" && event.data.attemptId === attemptId,
+      );
+      if (asked < 0) return false;
+      const closed = events.findIndex(
+        (event, index) =>
+          index > asked &&
+          event.type === "authorization.completed" &&
+          event.data.attemptId === attemptId,
+      );
+      const open = events.slice(asked + 1, closed < 0 ? events.length : closed);
+      return !open.some((event) => MODEL_OUTPUT_EVENTS.has(event.type));
+    },
+  );
 }
+
+const MODEL_OUTPUT_EVENTS = new Set<string>([
+  "actions.requested",
+  "action.input.appended",
+  "message.appended",
+  "message.completed",
+  "reasoning.appended",
+  "reasoning.completed",
+  "step.completed",
+]);
 
 /** The latest authorization `turn` asked for: its attempt and its fixture callback URL. */
 export function authorizationFrom(turn: Pick<EveEvalTurn, "events">): {

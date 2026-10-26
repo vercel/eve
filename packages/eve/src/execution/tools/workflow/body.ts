@@ -7,11 +7,7 @@ import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
 import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
-import type {
-  AgentSession,
-  WorkflowSharedContext,
-  WorkflowToolContext,
-} from "#tools/workflow-definition.js";
+import type { WorkflowSharedContext, WorkflowToolContext } from "#tools/workflow-definition.js";
 import {
   ask,
   attachWorkflowToolRunContext,
@@ -26,8 +22,9 @@ import type {
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
+import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 import type { WorkflowToolRunEntry } from "#shared/action-types.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface WorkflowBodyDefinition {
@@ -188,7 +185,7 @@ async function executeCallBody(
     }
     const entryPoint = resolveWorkflowEntryPoint<WorkflowCallEntryPoint>(input);
     const result = entryPoint(input.executeInput ?? input.input, ctx);
-    let output: JsonValue;
+    let output: unknown;
     if (!isAsyncIterable(result)) {
       output = await result;
     } else {
@@ -200,13 +197,28 @@ async function executeCallBody(
         await input.owner.send({ from, kind: "report", update: next.value });
         next = await iterator.next();
       }
-      output = (next.value as JsonValue | undefined) ?? last ?? null;
+      output = next.value ?? last;
     }
-    return { output, status: "completed" };
+    return { output: toWorkflowOutput(input, output), status: "completed" };
   } catch (error) {
     if (signals.interrupted) return { output: INTERRUPTED_OUTPUT, status: "completed" };
     return toFailedOutcome(error, signals.runSignal);
   }
+}
+
+/**
+ * An authored result as the run's JSON outcome, parsed the way a local tool's
+ * result is: undefined properties are omitted, a missing result is `null`,
+ * and a value JSON can't carry throws, failing the run.
+ */
+export function toWorkflowOutput(
+  call: { readonly callId: string; readonly toolName: string },
+  output: unknown,
+): JsonValue {
+  return withToolOutputSerializationError(
+    { boundary: "execute", toolCallId: call.callId, toolName: call.toolName },
+    () => parseJsonValue(output ?? null),
+  );
 }
 
 /** A body's failure, or its cancellation when the run stopped. */
@@ -257,7 +269,7 @@ export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput)
  */
 export function createSharedContext(
   input: WorkflowBodyInput,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
   askPerson: WorkflowSharedContext["ask"],
 ): Omit<
   ToolContext & WorkflowSharedContext,
@@ -271,7 +283,11 @@ export function createSharedContext(
   return {
     agent,
     ask: askPerson,
-    getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
+    getSandbox: () =>
+      unavailable(
+        "getSandbox()",
+        'pass ctx directly to a "use step" helper to open the session\'s sandbox',
+      ),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
     requireAuth: () =>
@@ -302,7 +318,7 @@ export function createAgentsView(context: AgentSessionContext): WorkflowSharedCo
 function createCallContext(
   input: WorkflowBodyInput,
   signals: WorkflowCallSignals,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
 ): WorkflowCallContext {
   const ctx: WorkflowCallContext = {
     ...createSharedContext(input, agent, (request, options) => ask(ctx, request, options)),

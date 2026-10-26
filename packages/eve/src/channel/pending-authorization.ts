@@ -42,6 +42,7 @@ export async function findPendingAuthorization(
   return [...pending.values()].at(-1);
 }
 
-function attemptKey(event: { readonly attemptId?: string; readonly name: string }): string {
+/** Identifies one sign-in attempt: a connection name and its `attemptId`. */
+export function attemptKey(event: { readonly attemptId?: string; readonly name: string }): string {
   return JSON.stringify([event.name, event.attemptId ?? null]);
 }

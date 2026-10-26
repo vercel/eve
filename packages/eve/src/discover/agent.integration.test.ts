@@ -30,7 +30,7 @@ import {
   DISCOVER_TOOL_NAME_INVALID,
   DISCOVER_UNSUPPORTED_DIRECTORY,
 } from "#discover/grammar.js";
-import { DISCOVER_LIB_DIRECTORY_INVALID, DISCOVER_LIB_ENTRY_UNSUPPORTED } from "#discover/lib.js";
+import { DISCOVER_LIB_DIRECTORY_INVALID } from "#discover/lib.js";
 import { DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS } from "#discover/memory.js";
 import {
   DISCOVER_SCHEDULE_FILE_UNSUPPORTED,
@@ -544,11 +544,12 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.lib).toEqual([]);
   });
 
-  it("discovers module-only lib sources and reports unsupported lib entries", async () => {
+  it("discovers module-only lib sources and ignores non-module lib files", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
+        "lib/data/contract.json": '{"openapi":"3.1.0"}\n',
         "lib/generated.d.ts": "export declare const generated: true;\n",
-        "lib/notes.md": "unsupported",
+        "lib/notes.md": "incidental notes",
         "lib/weather/client.ts": "export const client = {};\n",
         "instructions.md": "You are a precise assistant.",
       },
@@ -560,9 +561,7 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_LIB_ENTRY_UNSUPPORTED,
-    ]);
+    expect(result.diagnostics).toEqual([]);
     expect(result.manifest.lib).toEqual([
       {
         sourceKind: "module",

@@ -1,7 +1,7 @@
 import type { DynamicSkillManifest } from "#context/keys.js";
 import type { Announcement } from "#harness/announcements.js";
 import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { FALLBACK_SKILL_ROOT, MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
+import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 
 export interface AvailableSkillDescription {
   readonly description: string;
@@ -40,7 +40,7 @@ export function formatAvailableSkillsSection(
     `If the user names a skill or the request clearly matches one of the descriptions below, load it with ${SKILL_TOOL_NAME}({ name }) before proceeding.`,
     "If multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.",
     "If activation fails, say so briefly and continue with the best available alternative.",
-    `Skill files live under \`${MODEL_SKILL_ROOT}/<skill>/\`, with \`${FALLBACK_SKILL_ROOT}/<skill>/\` as the fallback when \`$HOME\` is unavailable.`,
+    `Skill files live under \`${MODEL_SKILL_ROOT}/<skill>/\`, with \`skills/<skill>/\` under the workspace root as the fallback when \`$HOME\` is unavailable.`,
     "When a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.",
     ...skills.map(formatAvailableSkillLine),
   ];

@@ -780,6 +780,44 @@ describe("SlackThread.postEphemeral", () => {
     expect(body.thread_ts).toBe("1.0");
     expect(body.text).toBe("psst");
   });
+
+  function ephemeralThreadTs(): (string | undefined)[] {
+    return mock.calls
+      .filter((c) => c.url === "https://slack.com/api/chat.postEphemeral")
+      .map((c) => (c.body as { thread_ts?: string }).thread_ts);
+  }
+
+  it("threads under a message without replies only after replying to it", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      threadHasReplies: false,
+      teamId: undefined,
+    });
+
+    await thread.postEphemeral("U99", "before");
+    await thread.post("reply");
+    await thread.postEphemeral("U99", "after");
+
+    expect(ephemeralThreadTs()).toEqual([undefined, "1.0"]);
+  });
+
+  it("does not thread under its own top-level anchor post", async () => {
+    const { thread, slack } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "",
+      teamId: undefined,
+    });
+
+    await thread.post("anchor");
+    await thread.postEphemeral("U99", "before");
+    await thread.post("reply");
+    await thread.postEphemeral("U99", "after");
+
+    expect(ephemeralThreadTs()).toEqual([undefined, slack.threadTs]);
+  });
 });
 
 describe("SlackThread.postDirectMessage", () => {

@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { ActionResultError, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { contextStorage } from "#context/container.js";
 import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js";
 import type {
@@ -283,7 +283,7 @@ async function publishActionTerminal(
   const error = capturesOutputs
     ? event.data.error === undefined
       ? event.data.result.output
-      : Object.assign(new Error(event.data.error.message), { code: event.data.error.code })
+      : toThrownError(event.data.error)
     : undefined;
   await hooks.publish(
     Object.freeze({
@@ -299,6 +299,12 @@ async function publishActionTerminal(
       usage: actionUsage(event.data.result),
     } satisfies InstrumentationToolCallFailedEvent),
   );
+}
+
+function toThrownError({ code, message, name }: ActionResultError): Error {
+  const error = Object.assign(new Error(message), { code });
+  if (name !== undefined) error.name = name;
+  return error;
 }
 
 function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefined {

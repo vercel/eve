@@ -21,9 +21,11 @@ export class NodeModuleEvaluationContext {
     mounts?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["mounts"],
     evaluationId?: string,
     appRoot?: string,
+    graph?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["graph"],
   ) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
       appRoot,
+      graph,
       mountSourceId,
       mounts,
       evaluationId,
@@ -51,7 +53,13 @@ export function markConfigRuntimeEntries(
   config: CompiledAgentDefinition,
   evaluation: NodeModuleEvaluationContext,
 ): void {
-  const sources = [config.dynamicModel, config.model?.source, config.compaction?.model?.source];
+  const sources = [
+    config.dynamicModel,
+    config.model?.source,
+    config.compaction?.model?.source,
+    // The runtime loads `limits.sessionUsage` from the agent config module.
+    config.limits?.sessionUsage === true ? config.source : undefined,
+  ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);
   }

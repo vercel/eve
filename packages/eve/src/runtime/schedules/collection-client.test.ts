@@ -97,12 +97,21 @@ describe("schedule subscription client", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("isolates callers and checks policy separately for every management operation", async () => {
-    const { definition, client, provider } = setup();
-    const created = await client.create(input);
-    const bob = createScheduleCollectionClient(definition, {
+  it.each([false, true])("caller isolation and scope (scheduled: %s)", async (scheduled) => {
+    const { definition, provider } = setup();
+    const context = {
       ...callContext,
       session: {
+        ...callContext.session,
+        schedule: scheduled ? { definition: "requests", occurrenceId: "exec-1" } : undefined,
+      },
+    };
+    const client = createScheduleCollectionClient(definition, context);
+    const created = await client.create(input);
+    const bob = createScheduleCollectionClient(definition, {
+      ...context,
+      session: {
+        ...context.session,
         id: "bob",
         auth: {
           current: { ...callContext.session.auth.current!, principalId: "bob" },
@@ -119,7 +128,7 @@ describe("schedule subscription client", () => {
     );
     const denied = createScheduleCollectionClient(
       { ...definition, scope, preparePayload: prepare },
-      callContext,
+      context,
     );
     const get = vi.spyOn(provider, "get");
     await expect(denied.get(created.name)).rejects.toThrow("not available");
@@ -151,21 +160,5 @@ describe("schedule subscription client", () => {
     ).rejects.toThrow();
     expect(update).not.toHaveBeenCalled();
     await expect(client.get(created.name)).resolves.toEqual(created);
-  });
-
-  it("refuses scheduled-execution management through the custom client too", async () => {
-    const { definition, create } = setup();
-    const scheduled = createScheduleCollectionClient(definition, {
-      ...callContext,
-      session: {
-        ...callContext.session,
-        schedule: { definition: "requests", occurrenceId: "exec-1" },
-      },
-    });
-    await expect(scheduled.create(input)).rejects.toThrow("unavailable during scheduled execution");
-    await expect(scheduled.update("report", { payload })).rejects.toThrow(
-      "unavailable during scheduled execution",
-    );
-    expect(create).not.toHaveBeenCalled();
   });
 });

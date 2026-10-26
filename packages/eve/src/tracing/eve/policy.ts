@@ -15,6 +15,7 @@ import {
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 export function createEveCapturePolicy(input: {
   readonly stateStore: AgentTraceStateStore;
@@ -80,16 +81,21 @@ export function createEveCapturePolicy(input: {
         { applyAudienceCeiling: false },
       );
     },
-    async forOperation(scope: InstrumentationAttemptScope) {
+    async forOperation(scope: Pick<InstrumentationAttemptScope, "sessionId" | "channelAudience">) {
       const session = await input.stateStore.get("session", scope.sessionId);
-      const seed = resolveForwardedTraceSeed(contextStorage.getStore()?.get(SessionTraceSeedKey));
+      const context = contextStorage.getStore();
+      const seed = resolveForwardedTraceSeed(context?.get(SessionTraceSeedKey));
       const decision = seed?.decision ?? session?.decision;
       const effective =
         decision === undefined
           ? undefined
           : applyLiveDeliveryAudienceCeiling(
               decision,
-              normalizeChannelAudience(scope.channelAudience),
+              normalizeChannelAudience(
+                scope.channelAudience ??
+                  context?.get(ConversationContextKey)?.audience ??
+                  session?.channelAudience,
+              ),
               seed?.forwardedTracePolicy,
               input.environment,
             );

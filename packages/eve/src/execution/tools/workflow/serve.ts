@@ -18,6 +18,7 @@ import {
   createWorkflowBodyRef,
   resolveWorkflowEntryPoint,
   toFailedOutcome,
+  toWorkflowOutput,
   WorkflowToolRunCancelledError,
   type StartedWorkflowBody,
   type WorkflowBodyControl,
@@ -34,7 +35,6 @@ import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
-  AgentSession,
   WorkflowServeCall,
   WorkflowServeContext,
   WorkflowServeReceive,
@@ -385,7 +385,7 @@ async function executeServeBody(
       target === undefined
         ? await resolveWorkflowEntryPoint<ServeEntryPoint>(input)(receive, ctx)
         : await serveStub(target.scope, target.tool, receive, ctx);
-    outcome = { output, status: "completed" };
+    outcome = { output: toWorkflowOutput(input, output), status: "completed" };
   } catch (error) {
     outcome = toFailedOutcome(error, calls.runSignal);
   }
@@ -404,7 +404,7 @@ async function executeServeBody(
 function createServeContext(
   input: WorkflowBodyInput,
   calls: WorkflowServeCalls,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
 ): ServeContext {
   const ctx: ServeContext = {
     ...createSharedContext(input, agent, (request, options) => {
@@ -423,7 +423,8 @@ function createServeContext(
     get session() {
       return calls.current.session;
     },
-    reply: (output) => calls.reply(output),
+    reply: (output) =>
+      calls.reply(toWorkflowOutput({ callId: ctx.callId, toolName: input.toolName }, output)),
   };
   return ctx;
 }

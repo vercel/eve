@@ -158,15 +158,18 @@ reports each wait with the new `turn.waiting` event, which carries the open turn
   subagent's question, emitted `turn.completed` and `session.waiting` in the middle of the turn.
   It now emits `input.requested` or `authorization.required`, then `turn.waiting`, and the turn
   resumes under the same `turnId` after the answer. The session you answer on emits
-  `input.resolved` for every question it routes an answer to. A tool approval the turn itself
-  requests still ends the turn with `turn.completed` and `session.waiting`.
+  `input.resolved` for every question it routes an answer to. A sign-in or tool approval the
+  turn itself requests holds the turn the same way, with `turn.waiting` on `"input"`.
 - **`turn.completed` comes only when the turn really ends,** and `session.waiting` always means
   the turn has ended.
 
 The TypeScript client's `send(...).result()` reads past `turn.waiting` and returns the final reply
-of a held turn, not the text written before the wait. It stops at `turn.waiting` only while a
-question is pending, and returns `status: "waiting"` with that question; `respond()` then reads the
-same turn to its end. A custom client that ends a response at `turn.completed` or
+of a held turn, not the text written before the wait. At `turn.waiting`, an unanswered input
+request (a question, approval, or `session-limit` prompt) makes `result()` return
+`status: "waiting"`; use `respond()` to answer it and continue reading the same turn.
+A sign-in keeps the response attached while its authorization callback is pending. Render the
+sign-in prompt from the live `authorization.required` event rather than waiting for `result()`.
+A custom client that ends a response at `turn.completed` or
 `session.waiting` mid-turn, or that shows the first completed message as the reply, should follow
 the same rule. See [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
 
@@ -197,5 +200,7 @@ Two things differ from a remote agent on the caller's own release:
 
 Each protocol-1 create logs `serving a remote agent protocol 1 caller` with the caller's origin.
 
-Upgrade a caller after every remote agent it calls. A caller on this release fails a call at start,
-with an error that names both versions, when the remote agent's deployment speaks protocol 1.
+Upgrade a caller after every remote agent it calls. A caller on this release accepts a protocol-1
+remote agent's results and failures, but that remote agent's approvals and sign-in requests don't
+reach the caller. Any other protocol mismatch fails the call at start, with an error that names
+both versions.

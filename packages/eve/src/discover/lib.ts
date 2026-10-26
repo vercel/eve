@@ -10,8 +10,8 @@ import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source
 export const DISCOVER_LIB_DIRECTORY_INVALID = "discover/lib-directory-invalid";
 
 /**
- * Diagnostic emitted when discovery finds an unsupported entry under the
- * authored `lib/` tree.
+ * Diagnostic emitted when discovery finds an entry under the authored `lib/`
+ * tree that is neither a regular file nor a directory.
  */
 export const DISCOVER_LIB_ENTRY_UNSUPPORTED = "discover/lib-entry-unsupported";
 
@@ -34,7 +34,8 @@ interface DiscoverLibSourcesResult {
 
 /**
  * Discovers module-only helper sources under `lib/` without executing
- * authored modules.
+ * authored modules. Other files, such as JSON data imported by a helper, are
+ * left to the bundler.
  */
 export async function discoverLibSources(
   input: DiscoverLibSourcesInput,
@@ -49,10 +50,7 @@ export async function discoverLibSources(
     source: input.source,
     unsupportedEntryCode: DISCOVER_LIB_ENTRY_UNSUPPORTED,
     unsupportedEntryMessage: (sourcePath) =>
-      `Expected "${sourcePath}" to be a supported authored module within "lib/".`,
-    unsupportedFileCode: DISCOVER_LIB_ENTRY_UNSUPPORTED,
-    unsupportedFileMessage: (sourcePath) =>
-      `Expected "${sourcePath}" to be a supported authored module within "lib/".`,
+      `Expected "${sourcePath}" to be a regular file or directory within "lib/".`,
   });
 
   return {

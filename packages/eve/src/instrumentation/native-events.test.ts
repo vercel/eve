@@ -28,6 +28,7 @@ import {
   sessionIdempotencyKey,
   turnIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
+import { createRuntimeToolResultFromToolError } from "#harness/action-result-helpers.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 
 describe("createInstrumentationHandleEvent", () => {
@@ -480,6 +481,59 @@ describe("createInstrumentationHandleEvent", () => {
     });
     expect(events).toHaveLength(7);
     expect(events.every(Object.isFrozen)).toBe(true);
+  });
+
+  // https://github.com/vercel/eve/issues/4820
+  it("keeps the class name of the error a tool threw", async () => {
+    class QuotaError extends Error {
+      override name = "QuotaError";
+    }
+    const events: InstrumentationEvent[] = [];
+    const handleEvent = createInstrumentationHandleEvent({
+      getAttemptScope: () => ({
+        attemptId: "session-1:turn-1:0:0",
+        attemptIndex: 0,
+        sessionId: "session-1",
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      handleEvent: async () => {},
+      hooks: {
+        capturesContent: true,
+        publish: async (event) => void events.push(event),
+      },
+      sessionId: "session-1",
+    })!;
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      await handleEvent(
+        createActionsRequestedEvent({
+          actions: [{ callId: "charge-1", input: {}, kind: "tool-call", toolName: "charge" }],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+      );
+      await handleEvent(
+        createActionResultEvent({
+          result: createRuntimeToolResultFromToolError({
+            error: new QuotaError("quota exceeded"),
+            input: {},
+            toolCallId: "charge-1",
+            toolName: "charge",
+            type: "tool-error",
+          }),
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+      );
+    });
+
+    const failed = events.find((event) => event.type === "tool.call.failed");
+    expect(failed).toMatchObject({ outcome: "failed", type: "tool.call.failed" });
+    expect(failed).toHaveProperty("error.message", "quota exceeded");
+    expect(failed).toHaveProperty("error.name", "QuotaError");
   });
 
   it("publishes each input request and resolves it in a replacement worker", async () => {

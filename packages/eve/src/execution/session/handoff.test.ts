@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import {
   SESSION_CHECKPOINT_VERSION,
   SessionHandoff,
@@ -10,36 +10,73 @@ import {
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
-const isSessionIdleForHandoffStepMock = vi.fn(async (..._args: unknown[]) => true);
 const reportSessionHandoffRetainedStepMock = vi.fn();
-const startSessionOwnerStepMock = vi.fn();
+const sendSessionHandoverPartStepMock = vi.fn();
+const reportHandoverPartStuckStepMock = vi.fn();
+const startSuccessorStepMock = vi.fn();
 const createHookMock = vi.fn();
+const sleepMock = vi.fn();
+
+const abandonHandoverIfRunEndsMock = vi.fn();
+/** Resolving it ends the watched candidate run. */
+let candidateEnded = Promise.withResolvers<void>();
+/** Resolvers for the inbox's pending arrival waits; resolving one delivers a payload. */
+const arrivals: (() => void)[] = [];
+/** The workflow clock, in milliseconds since the attempt began. */
+let now = 0;
+const watchedRuns: string[] = [];
+const endedRuns = new Set<string>();
 
 vi.mock("#execution/session/handoff-steps.js", () => ({
-  isSessionIdleForHandoffStep: (...args: unknown[]) => isSessionIdleForHandoffStepMock(...args),
+  hasRunEndedStep: async (input: { runId: string }) => endedRuns.has(input.runId),
+  reportHandoverPartStuckStep: (...args: unknown[]) => reportHandoverPartStuckStepMock(...args),
   reportSessionHandoffRetainedStep: (...args: unknown[]) =>
     reportSessionHandoffRetainedStepMock(...args),
+  sendSessionHandoverPartStep: (...args: unknown[]) => sendSessionHandoverPartStepMock(...args),
+  startSuccessorStep: (...args: unknown[]) => startSuccessorStepMock(...args),
 }));
-vi.mock("#execution/workflow-runtime.js", () => ({
-  startSessionOwnerStep: (...args: unknown[]) => startSessionOwnerStepMock(...args),
+vi.mock("#execution/session/run-watch.js", () => ({
+  abandonHandoverIfRunEnds: (...args: unknown[]) => abandonHandoverIfRunEndsMock(...args),
+  watchRunEnd: (runId: string) => {
+    watchedRuns.push(runId);
+    return { ended: candidateEnded.promise, stop: () => {} };
+  },
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
+  sleep: (...args: unknown[]) => sleepMock(...args),
 }));
+
+beforeEach(() => {
+  sendSessionHandoverPartStepMock.mockResolvedValue("delivered");
+  sleepMock.mockResolvedValue(undefined);
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+});
 
 afterEach(() => {
   vi.resetAllMocks();
-  isSessionIdleForHandoffStepMock.mockResolvedValue(true);
+  candidateEnded = Promise.withResolvers<void>();
+  arrivals.length = 0;
+  now = 0;
+  vi.restoreAllMocks();
+  watchedRuns.length = 0;
+  endedRuns.clear();
 });
 
-const STABLE = "eve:session:session-1:inbox";
+const STARTED = { kind: "started", runId: "candidate-1" } as const;
+
+const TOKENS = ["eve:session:session-1:inbox", "channel:current"];
 
 describe("SessionHandoff", () => {
-  it("transfers one eligible conversational trigger with a structural checkpoint", async () => {
-    const handoff = createHandoff(createInbox());
-    installActivation({ kind: "active" });
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
+  it("hands over what it accepted once the successor takes over every hook", async () => {
+    const accepted: SessionInboxPayload[] = [
+      { kind: "send", payload: { message: "Bob writes during the move." } },
+    ];
+    const inbox = createInbox({ takenOver: true, unread: accepted });
+    const handoff = createHandoff(inbox);
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue(STARTED);
     const trigger = selection("deployment-b");
     const history = [
       { content: "Alice asks for the status.", kind: "user" as const, role: "user" as const },
@@ -48,17 +85,33 @@ describe("SessionHandoff", () => {
     await expect(handoff.tryTransfer(trigger, { ...state(), history })).resolves.toEqual({
       kind: "transferred",
     });
-    expect(startSessionOwnerStepMock).toHaveBeenCalledWith({
-      activationToken: "owner-1:handoff",
+    expect(startSuccessorStepMock).toHaveBeenCalledWith({
+      activationToken: "owner-1:handoff:0",
       anchorRunId: "session-1",
+      attemptKey: "owner-1:0",
       checkpoint: expect.objectContaining({
         history,
         sessionTimeoutMs: 60_000,
         version: SESSION_CHECKPOINT_VERSION,
       }),
       delivery: trigger.delivery,
+      hookTokens: TOKENS,
+      sourceRunId: "owner-1",
       targetDeploymentId: "deployment-b",
     });
+    expect(sendSessionHandoverPartStepMock.mock.calls.map(([call]) => call)).toEqual([
+      {
+        bufferedPayloadCount: 1,
+        part: { attemptKey: "owner-1:0", index: 0, payloads: accepted },
+        sessionId: "session-1",
+      },
+      {
+        bufferedPayloadCount: 1,
+        part: { attemptKey: "owner-1:0", final: true, index: 1, payloads: [] },
+        sessionId: "session-1",
+      },
+    ]);
+    expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
     await expect(handoff.awaitAnchoredResult()).resolves.toEqual({ output: "done" });
   });
 
@@ -66,222 +119,369 @@ describe("SessionHandoff", () => {
     ["same-deployment", "deployment-a"],
     ["missing-deployment", "latest"],
   ] as const)("retains ownership for %s", async (reason, deployment) => {
-    installActivation({ kind: "active" });
+    installActivation();
     const handoff = createHandoff(createInbox());
     await expect(handoff.tryTransfer(selection(deployment), state())).resolves.toEqual({
       kind: "retained",
       reason,
     });
-    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
+    expect(startSuccessorStepMock).not.toHaveBeenCalled();
   });
 
-  it("moves a compacted session to this deployment with the delivery that arrived first", async () => {
-    installActivation({ kind: "active" });
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
-    const sessionTimeoutDeadline = new Date("2026-11-01T00:00:00.000Z");
-    const trigger = selection("deployment-a");
+  it("moves a compacted session to a parked successor on this deployment", async () => {
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue(STARTED);
 
     await expect(
-      createHandoff(createInbox()).tryTransfer(trigger, state(), {
-        compaction: { sessionTimeoutDeadline },
-      }),
+      createHandoff(createInbox({ takenOver: true })).tryCompactionTransfer(state()),
     ).resolves.toEqual({ kind: "transferred" });
-    expect(startSessionOwnerStepMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        delivery: trigger.delivery,
-        reason: "compaction",
-        sessionTimeoutDeadline,
-        targetDeploymentId: "deployment-a",
-      }),
-    );
+    const [start] = startSuccessorStepMock.mock.calls[0] as [Record<string, unknown>];
+    expect(start).toMatchObject({
+      reason: "compaction",
+      targetDeploymentId: "deployment-a",
+    });
+    expect(start).not.toHaveProperty("delivery");
   });
 
-  it("moves a compacted session to a newer deployment as a deployment handoff", async () => {
-    installActivation({ kind: "active" });
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
-
+  it.each([
+    ["the selection was not a lone fresh delivery", { handoffEligible: false }, {}],
+    ["a previous attempt's handover has not arrived", {}, { awaitingHandover: true }],
+  ] as const)("stays busy when %s", async (_name, selected, inboxState) => {
+    installActivation();
     await expect(
-      createHandoff(createInbox()).tryTransfer(selection("deployment-b"), state(), {
-        compaction: { sessionTimeoutDeadline: new Date("2026-11-01T00:00:00.000Z") },
-      }),
-    ).resolves.toEqual({ kind: "transferred" });
-    const [start] = startSessionOwnerStepMock.mock.calls[0] as [Record<string, unknown>];
-    expect(start).toMatchObject({ targetDeploymentId: "deployment-b" });
-    expect(start).not.toHaveProperty("reason");
-  });
-
-  it("retains ownership when the selection was not a lone fresh conversational delivery", async () => {
-    installActivation({ kind: "active" });
-    const inbox = createInbox();
-    await expect(
-      createHandoff(inbox).tryTransfer(
-        { ...selection("deployment-b"), handoffEligible: false },
+      createHandoff(createInbox(inboxState)).tryTransfer(
+        { ...selection("deployment-b"), ...selected },
         state(),
       ),
     ).resolves.toEqual({ kind: "retained", reason: "busy" });
-    expect(inbox.release).not.toHaveBeenCalled();
+    expect(startSuccessorStepMock).not.toHaveBeenCalled();
   });
 
   it("retains ownership when durable state still holds work", async () => {
-    installActivation({ kind: "active" });
-    isSessionIdleForHandoffStepMock.mockResolvedValue(false);
+    const inbox = createInbox();
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), {
+        ...state(),
+        sessionState: createTestSessionState(
+          { sessionId: "session-1" },
+          { sequence: 0, turnId: "turn_0" },
+        ),
+      }),
+    ).resolves.toEqual({ kind: "retained", reason: "not-idle" });
+    expect(startSuccessorStepMock).not.toHaveBeenCalled();
+  });
+
+  it("retains ownership without a handover when the start step finds work", async () => {
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue({ kind: "not-idle" });
     const inbox = createInbox();
     await expect(
       createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
     ).resolves.toEqual({ kind: "retained", reason: "not-idle" });
-    expect(inbox.release).not.toHaveBeenCalled();
+    expect(sendSessionHandoverPartStepMock).not.toHaveBeenCalled();
+    expect(created.find((hook) => hook.token === "owner-1:handoff:0")?.dispose).toHaveBeenCalled();
   });
 
-  it("hands off alias-bearing sessions, marking every address while it is unowned", async () => {
-    const inbox = createInbox();
-    installActivation({ kind: "active" });
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
-    const aliased = state({
-      continuationToken: "channel:current",
-      serializedContext: { "eve.continuationHookTokens": ["channel:old", "channel:current"] },
-    });
+  it("still hands over once the successor took over when the start step failed after creating it", async () => {
+    const inbox = createInbox({ takenOver: true });
+    installActivation();
+    leaseHolder = "candidate-1";
+    startSuccessorStepMock.mockRejectedValue(new Error("start response lost"));
 
     await expect(
-      createHandoff(inbox).tryTransfer(selection("deployment-b"), aliased),
-    ).resolves.toEqual({
-      kind: "transferred",
-    });
-    const markerTokens = createHookMock.mock.calls
-      .map((call) => (call[0] as { token: string }).token)
-      .filter((token) => token.startsWith("eve:inbox:handoff:"));
-    expect(markerTokens).toEqual([
-      `eve:inbox:handoff:${STABLE}`,
-      "eve:inbox:handoff:channel:old",
-      "eve:inbox:handoff:channel:current",
-    ]);
-    // Markers and the activation hook are released; the anchor stays for the parked original run.
-    for (const hook of createdHooks().filter((hook) => !hook.token.endsWith(":anchor"))) {
-      expect(hook.dispose).toHaveBeenCalled();
-    }
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
+    ).resolves.toEqual({ kind: "transferred" });
+    expect(sendSessionHandoverPartStepMock).toHaveBeenCalledOnce();
   });
 
-  it("keeps ownership and restores accepted payloads when activation fails", async () => {
-    const inbox = createInbox();
-    const payloads: SessionInboxPayload[] = [
-      { kind: "send", payload: { message: "Alice sends the first input." } },
-      { kind: "send", payload: { message: "Bob sends the second input." } },
-    ];
-    installActivation({ error: new Error("bundle mismatch"), kind: "failed", payloads });
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
+  it("retains the session when it wins the lease of an attempt whose start step failed", async () => {
+    const inbox = createInbox({ takenOver: true });
+    installActivation();
+    startSuccessorStepMock.mockRejectedValue(new Error("deployment unreachable"));
 
     await expect(
-      createHandoff(inbox).tryTransfer(
-        selection("deployment-b"),
-        state({ continuationToken: "channel:current" }),
-      ),
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
     ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
-    expect(inbox.claimSessionHooks).toHaveBeenCalledWith([STABLE, "channel:current"]);
-    expect(inbox.restore).toHaveBeenCalledWith(payloads);
+    expect(created.map((hook) => hook.token)).toContain("eve:handoff:lease:owner-1:0");
+    expect(sendSessionHandoverPartStepMock).not.toHaveBeenCalled();
+  });
+
+  it("fences at the deadline once one early message waits, and watches a live lease holder", async () => {
+    let pending = false;
+    const inbox = createInbox({ hasPending: () => pending });
+    const deadline = Promise.withResolvers<void>();
+    sleepMock.mockReturnValueOnce(deadline.promise);
+    installActivation();
+    leaseHolder = "candidate-1";
+    startSuccessorStepMock.mockResolvedValue(STARTED);
+    const outcome = createHandoff(inbox).tryTransfer(selection("deployment-b"), state());
+
+    // Nothing waits, so no timer runs.
+    await vi.waitFor(() => expect(arrivals).toHaveLength(1));
+    expect(sleepMock).not.toHaveBeenCalled();
+    now = 60_000;
+    pending = true;
+    arrivals.shift()!();
+    await vi.waitFor(() => expect(sleepMock).toHaveBeenCalledWith(4 * 60_000));
+    expect(created.map((hook) => hook.token)).not.toContain("eve:handoff:lease:owner-1:0");
+
+    // No further input arrives; the deadline alone fences the attempt.
+    deadline.resolve();
+    await vi.waitFor(() => expect(watchedRuns).toEqual(["candidate-1"]));
+    expect(reportSessionHandoffRetainedStepMock).not.toHaveBeenCalled();
+    endedRuns.add("candidate-1");
+    candidateEnded.resolve();
+
+    await expect(outcome).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
+    // It may hold addresses this run's pumps have not seen it take yet.
+    expect(inbox.claimSessionHooks).toHaveBeenCalledWith(TOKENS, { force: true });
+  });
+
+  it("counts input accepted during the start step and wins the lease from a candidate that never boots", async () => {
+    const inbox = createInbox({ hasPending: () => true });
+    installActivation();
+    startSuccessorStepMock.mockImplementation(async () => {
+      now = 30_000;
+      return STARTED;
+    });
+
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
+    ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
+    expect(sleepMock).toHaveBeenCalledWith(5 * 60_000 - 30_000);
+    const lease = created.find((hook) => hook.token === "eve:handoff:lease:owner-1:0");
+    // Disposing it would free the token for a candidate that boots late.
+    expect(lease?.dispose).not.toHaveBeenCalled();
+    expect(watchedRuns).toEqual([]);
+    expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
+  });
+
+  it("keeps waiting for the lease winner when a duplicate candidate reports a failure", async () => {
+    const takeover = Promise.withResolvers<void>();
+    const inbox = createInbox({ whenTakenOver: takeover.promise });
+    installActivation({
+      error: new Error("lost the race to prepare"),
+      kind: "failed",
+      payloads: [],
+      runId: "candidate-2",
+    });
+    // The start step ran twice: it returned the duplicate, and the first run holds the lease.
+    leaseHolder = "candidate-1";
+    startSuccessorStepMock.mockResolvedValue({ kind: "started", runId: "candidate-2" });
+    const outcome = createHandoff(inbox).tryTransfer(selection("deployment-b"), state());
+
+    await vi.waitFor(() => expect(watchedRuns).toEqual(["candidate-1"]));
+    expect(reportSessionHandoffRetainedStepMock).not.toHaveBeenCalled();
+    expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
+    expect(sleepMock).not.toHaveBeenCalled();
+    takeover.resolve();
+
+    await expect(outcome).resolves.toEqual({ kind: "transferred" });
+  });
+
+  it("retains on the verdict of the candidate that holds the lease", async () => {
+    installActivation({
+      error: new Error("could not read state"),
+      kind: "failed",
+      payloads: [],
+      runId: "candidate-1",
+    });
+    leaseHolder = "candidate-1";
+    startSuccessorStepMock.mockResolvedValue(STARTED);
+
+    const inbox = createInbox();
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
+    ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
+    expect(watchedRuns).toEqual([]);
+    // It reported holding no address.
+    expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
+  });
+
+  it("retries every handover part until it is delivered, in order", async () => {
+    const accepted: SessionInboxPayload[] = [
+      { kind: "send", payload: { message: "Bob's first note." } },
+      { kind: "send", payload: { message: "Bob's second note." } },
+    ];
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue(STARTED);
+    sendSessionHandoverPartStepMock
+      .mockRejectedValueOnce(new Error("store unavailable"))
+      .mockRejectedValueOnce(new Error("store unavailable"))
+      .mockResolvedValueOnce("delivered")
+      .mockResolvedValueOnce("delivered")
+      .mockRejectedValueOnce(new Error("store unavailable"))
+      .mockResolvedValueOnce("delivered");
+
+    await expect(
+      createHandoff(createInbox({ takenOver: true, unread: accepted })).tryTransfer(
+        selection("deployment-b"),
+        state(),
+      ),
+    ).resolves.toEqual({ kind: "transferred" });
+    expect(sendSessionHandoverPartStepMock.mock.calls.map(([call]) => call.part.index)).toEqual([
+      0, 0, 0, 1, 2, 2,
+    ]);
+    expect(sleepMock.mock.calls).toEqual([[1000], [2000], [1000]]);
+  });
+
+  it("reports a part that keeps failing once, and keeps retrying it", async () => {
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue(STARTED);
+    reportHandoverPartStuckStepMock.mockResolvedValue(undefined);
+    for (let failure = 0; failure < 6; failure++)
+      sendSessionHandoverPartStepMock.mockRejectedValueOnce(new Error("store unavailable"));
+    sendSessionHandoverPartStepMock.mockResolvedValue("delivered");
+
+    await expect(
+      createHandoff(createInbox({ takenOver: true })).tryTransfer(
+        selection("deployment-b"),
+        state(),
+      ),
+    ).resolves.toEqual({ kind: "transferred" });
+    expect(sendSessionHandoverPartStepMock).toHaveBeenCalledTimes(7);
+    expect(reportHandoverPartStuckStepMock.mock.calls).toEqual([
+      [
+        {
+          attemptKey: "owner-1:0",
+          error: "store unavailable",
+          failures: 5,
+          index: 0,
+          sessionId: "session-1",
+        },
+      ],
+    ]);
+  });
+
+  it("stops sending once the session has ended", async () => {
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue(STARTED);
+    sendSessionHandoverPartStepMock.mockResolvedValue("session-ended");
+    const unread: SessionInboxPayload[] = [
+      { kind: "send", payload: { message: "Bob's note." } },
+      { kind: "send", payload: { message: "Bob's follow-up." } },
+    ];
+
+    await expect(
+      createHandoff(createInbox({ takenOver: true, unread })).tryTransfer(
+        selection("deployment-b"),
+        state(),
+      ),
+    ).resolves.toEqual({ kind: "transferred" });
+    expect(sendSessionHandoverPartStepMock).toHaveBeenCalledOnce();
   });
 
   it("remembers every incompatible target for the rest of the owner run", async () => {
     const inbox = createInbox();
-    const payloads: SessionInboxPayload[] = [
-      { kind: "send", payload: { message: "Alice sends a follow-up." } },
-    ];
-    installActivationSequence(
-      { kind: "incompatible", payloads, reason: "checkpoint-version" },
-      { kind: "incompatible", payloads, reason: "checkpoint-version" },
+    installActivation(
+      { kind: "incompatible", payloads: [], reason: "checkpoint-version" },
+      // A successor older than this protocol cannot take over from an owner that keeps its hooks.
+      {
+        error: { message: "Hook token is already in use", name: "HookConflictError" },
+        kind: "failed",
+        payloads: [],
+      },
     );
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
+    startSuccessorStepMock.mockResolvedValue(STARTED);
     const handoff = createHandoff(inbox);
 
     await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
       kind: "retained",
       reason: "checkpoint-incompatible",
     });
-    expect(inbox.restore).toHaveBeenCalledWith(payloads);
-
     await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
       kind: "retained",
       reason: "known-incompatible",
     });
-    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(1);
-    expect(inbox.release).toHaveBeenCalledTimes(1);
-
     await expect(handoff.tryTransfer(selection("deployment-c"), state())).resolves.toEqual({
       kind: "retained",
-      reason: "checkpoint-incompatible",
+      reason: "activation-failed",
     });
-    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
-
-    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+    await expect(handoff.tryTransfer(selection("deployment-c"), state())).resolves.toEqual({
       kind: "retained",
       reason: "known-incompatible",
     });
-    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
-    // Each refusing deployment is reported once; remembered skips stay quiet.
-    expect(reportSessionHandoffRetainedStepMock.mock.calls).toEqual(
-      ["deployment-b", "deployment-c"].map((targetDeploymentId) => [
-        {
-          error: undefined,
-          reason: "checkpoint-incompatible",
-          sessionId: "session-1",
-          sourceDeploymentId: "deployment-a",
-          targetDeploymentId,
-        },
-      ]),
-    );
+    expect(startSuccessorStepMock.mock.calls.map(([start]) => start.attemptKey)).toEqual([
+      "owner-1:0",
+      "owner-1:1",
+    ]);
+    expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
+    expect(reportSessionHandoffRetainedStepMock.mock.calls.map(([report]) => report)).toEqual([
+      expect.objectContaining({
+        reason: "checkpoint-incompatible",
+        targetDeploymentId: "deployment-b",
+      }),
+      expect.objectContaining({ reason: "activation-failed", targetDeploymentId: "deployment-c" }),
+    ]);
   });
 
-  it("attempts handoff on every turn when the owner only sees a generic activation failure", async () => {
-    installActivation({ error: new Error("unsupported checkpoint"), kind: "failed", payloads: [] });
-    startSessionOwnerStepMock.mockResolvedValue(undefined);
+  it("stops attempting for the owner's lifetime on a World that cannot force-claim hooks", async () => {
+    installActivation();
+    startSuccessorStepMock.mockResolvedValue({ kind: "unsupported" });
     const handoff = createHandoff(createInbox());
 
     await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
       kind: "retained",
-      reason: "activation-failed",
+      reason: "unsupported-world",
     });
-    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+    await expect(handoff.tryCompactionTransfer(state())).resolves.toEqual({
       kind: "retained",
-      reason: "activation-failed",
+      reason: "unsupported-world",
     });
-    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
+    expect(startSuccessorStepMock).toHaveBeenCalledTimes(1);
+    expect(reportSessionHandoffRetainedStepMock).not.toHaveBeenCalled();
+  });
+
+  it("attempts again on every turn after a generic activation failure", async () => {
+    const failure = {
+      error: new Error("unsupported checkpoint"),
+      kind: "failed",
+      payloads: [],
+    } as const;
+    installActivation(failure, failure);
+    startSuccessorStepMock.mockResolvedValue(STARTED);
+    const handoff = createHandoff(createInbox());
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+        kind: "retained",
+        reason: "activation-failed",
+      });
+    }
+    expect(startSuccessorStepMock).toHaveBeenCalledTimes(2);
     expect(reportSessionHandoffRetainedStepMock).toHaveBeenCalledWith(
       expect.objectContaining({ error: "unsupported checkpoint", reason: "activation-failed" }),
     );
   });
-
-  it("abandons transfer when input was accepted during release", async () => {
-    installActivation({ kind: "active" });
-    const accepted: SessionInboxPayload[] = [{ kind: "send", payload: { message: "late" } }];
-    const inbox = createInbox({ released: accepted });
-
-    await expect(
-      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
-    ).resolves.toEqual({ kind: "retained", reason: "accepted-during-release" });
-    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
-    expect(inbox.restore).toHaveBeenCalledWith(accepted);
-  });
 });
 
 const created: { token: string; dispose: ReturnType<typeof vi.fn> }[] = [];
-function createdHooks() {
-  return created;
-}
+/** The run already holding the attempt lease, if any. */
+let leaseHolder: string | undefined;
 
-function installActivation(activation: SessionOwnerActivation): void {
-  installActivationSequence(activation);
-}
-
-function installActivationSequence(...activations: SessionOwnerActivation[]): void {
+/**
+ * Like a real hook, each await of an activation hook takes the next verdict;
+ * once they run out it never answers.
+ */
+function installActivation(...verdicts: SessionOwnerActivation[]): void {
   created.length = 0;
-  let index = 0;
+  leaseHolder = undefined;
+  const remaining = [...verdicts];
   createHookMock.mockImplementation((options: { token: string }) => {
-    const resolved = options.token.endsWith(":anchor")
-      ? { output: "done" }
-      : (activations[Math.min(index++, activations.length - 1)] ?? activations.at(-1)!);
-    const hook = Object.assign(Promise.resolve(resolved), {
+    const isLease = options.token.startsWith("eve:handoff:lease:");
+    const next = (): Promise<unknown> => {
+      if (options.token.endsWith(":anchor")) return Promise.resolve({ output: "done" });
+      const verdict = isLease ? undefined : remaining.shift();
+      return verdict === undefined ? new Promise(() => {}) : Promise.resolve(verdict);
+    };
+    const conflict = isLease ? leaseHolder : undefined;
+    const hook = {
+      // oxlint-disable-next-line unicorn/no-thenable -- Workflow hooks are awaited for each payload.
+      then: (...handlers: Parameters<Promise<unknown>["then"]>) => next().then(...handlers),
       dispose: vi.fn(),
-      getConflict: vi.fn(async () => null),
+      getConflict: vi.fn(async () => (conflict === undefined ? null : { runId: conflict })),
       token: options.token,
-    });
+    };
     created.push(hook);
     return hook;
   });
@@ -315,19 +515,15 @@ function selection(acceptedDeploymentId: string): TurnSelection {
   };
 }
 
-function state(
-  input: {
-    readonly continuationToken?: string;
-    readonly serializedContext?: Record<string, unknown>;
-  } = {},
-) {
+function state() {
   return {
+    admittedDeliveryKeys: [],
     history: [],
-    serializedContext: input.serializedContext ?? {},
-    sessionState: {
-      continuationToken: input.continuationToken ?? "",
+    serializedContext: {},
+    sessionState: createTestSessionState({
+      continuationToken: "channel:current",
       sessionId: "session-1",
-    } as DurableSessionState,
+    }),
   };
 }
 
@@ -341,20 +537,37 @@ function createHandoff(inbox: SessionInboxHandle): SessionHandoff {
   });
 }
 
-function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionInboxHandle {
+function createInbox(
+  input: {
+    readonly awaitingHandover?: boolean;
+    readonly takenOver?: boolean;
+    readonly unread?: SessionInboxPayload[];
+    readonly whenTakenOver?: Promise<void>;
+    readonly hasPending?: () => boolean;
+  } = {},
+): SessionInboxHandle {
   return {
+    abandonHandover: vi.fn(),
+    awaitingHandover: input.awaitingHandover ?? false,
+    takenOver: false,
+    whenHandoverSettled: () => new Promise<void>(() => {}),
     claimSessionHook: vi.fn(async () => {}),
     claimSessionHooks: vi.fn(async () => {}),
-    claimedTokens: [],
+    claimedTokens: TOKENS,
     takeLeading: () => [],
     dispose: vi.fn(async () => {}),
-    drain: vi.fn(() => []),
-    hasPending: vi.fn(() => false),
+    drain: vi.fn(() => input.unread ?? []),
+    hasPending: vi.fn(input.hasPending ?? (() => false)),
     whenPending: () => new Promise<void>(() => {}),
+    whenArrival: () => new Promise<void>((resolve) => arrivals.push(resolve)),
+    whenBlockedOnHandover: () => new Promise<void>(() => {}),
+    whenTakenOver: () =>
+      input.whenTakenOver ??
+      (input.takenOver === true ? Promise.resolve() : new Promise<void>(() => {})),
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),
     onInterrupt: vi.fn(() => () => {}),
-    release: vi.fn(async () => input.released ?? []),
+    release: vi.fn(async () => []),
     restore: vi.fn(),
   };
 }

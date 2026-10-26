@@ -99,7 +99,7 @@ const model = mockModel((request) => {
 });
 
 export default defineAgent({
-  ${options.sessionInputLimit === undefined ? "" : `limits: { maxInputTokensPerSession: ${String(options.sessionInputLimit)} },`}
+  ${options.sessionInputLimit === undefined ? "" : `limits: { sessionUsage: ({ window }) => window.inputTokens >= ${String(options.sessionInputLimit)} },`}
   model,
   modelContextWindowTokens: 32_000,
 });

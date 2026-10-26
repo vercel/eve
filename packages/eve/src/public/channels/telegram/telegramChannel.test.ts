@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -15,6 +15,8 @@ import {
 } from "#public/channels/telegram/index.js";
 import { isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
+import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const SECRET = "telegram-secret";
@@ -80,7 +82,10 @@ function fakeTelegramFetch(): typeof fetch {
 async function firePost(
   channel: unknown,
   body: unknown,
-  options: { readonly resolveSession?: () => Promise<any> } = {},
+  options: {
+    readonly resolveSession?: () => Promise<any>;
+    readonly send?: Mock<(...args: any[]) => Promise<unknown>>;
+  } = {},
 ): Promise<{
   readonly response: Response;
   readonly send: ReturnType<typeof vi.fn>;
@@ -91,7 +96,7 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected telegram channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ id: "s1" });
+  const send = options.send ?? vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(signedRequest(JSON.stringify(body)), {
@@ -319,6 +324,47 @@ describe("telegramChannel() inbound route", () => {
         message: "Telegram authorization callback delivery failed",
       }),
     );
+  });
+
+  it("tells the presser a prompt is inactive without waiting for its buttons to clear", async () => {
+    let releaseEdit!: () => void;
+    const editHeld = new Promise<void>((resolve) => {
+      releaseEdit = resolve;
+    });
+    const methods: string[] = [];
+    const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
+      const method = String(url).split("/").pop()!;
+      methods.push(method);
+      if (method === "editMessageText") await editHeld;
+      return new Response(JSON.stringify({ ok: true, result: true }));
+    });
+    const channel = telegramChannel({
+      api: { fetch: fetchMock },
+      credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+    });
+
+    const posted = firePost(
+      channel,
+      {
+        callback_query: {
+          id: "cb-inactive",
+          from: { id: "U1", is_bot: false },
+          data: "eve:0",
+          message: { message_id: 55, chat: { id: 42, type: "private" }, text: "Deploy?" },
+        },
+      },
+      { send: vi.fn().mockRejectedValue(new SessionNotActiveError()) },
+    );
+    await vi.waitFor(() => expect(methods).toEqual(["editMessageText", "answerCallbackQuery"]));
+    releaseEdit();
+    await posted;
+
+    const ack = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/answerCallbackQuery"));
+    expect(JSON.parse(String((ack![1] as RequestInit).body))).toEqual({
+      callback_query_id: "cb-inactive",
+      text: INACTIVE_REQUEST_NOTICE,
+    });
+    expect(methods).toEqual(["editMessageText", "answerCallbackQuery"]);
   });
 
   it("sends a reply to a bot prompt as a message carrying the replied-to id", async () => {

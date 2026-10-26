@@ -23,6 +23,10 @@ describe("createWorkflowWorldPluginSource", () => {
       'await installWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
     );
     expect(source).not.toContain("resolveLocalWorkflowWorldDataDirectory");
+    expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
+    expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
+      source.indexOf("await createWorldFromModule("),
+    );
   });
 
   it("configures the vendored local World with eve's app-local data resolver", () => {
@@ -35,10 +39,16 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("/compiled/@workflow/world-local/index.js");
     expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
     expect(source).toContain("applyLocalWorkflowWorldDeliveryTimeoutDefaults");
+    expect(source).toContain("authenticateLocalWorkflowDeliveries(");
+    expect(source).toContain("recoverActiveRuns: false");
     expect(source.indexOf("applyLocalWorkflowWorldDeliveryTimeoutDefaults();")).toBeLessThan(
       source.indexOf("workflowWorldModule.createWorld"),
     );
     expect(source).not.toContain("createWorldFromModule(workflowWorldModule)");
+    expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
+    expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
+      source.indexOf("await workflowWorldModule.createWorld("),
+    );
   });
 
   it("selects the vendored Vercel World with Workflow's selector", () => {
@@ -51,6 +61,11 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
     expect(source).toContain("applyVercelWorkflowWorldDefaults(workflowWorld);");
+    expect(source).not.toContain("authenticateLocalWorkflowDeliveries");
+    expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
+    expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
+      source.indexOf("await workflowWorldModule.createWorld("),
+    );
     expect(source.indexOf("applyVercelWorkflowWorldDefaults(workflowWorld);")).toBeLessThan(
       source.indexOf("await installWorkflowWorld("),
     );

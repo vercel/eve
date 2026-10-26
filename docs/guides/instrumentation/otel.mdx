@@ -7,6 +7,29 @@ url: "/observability/otel"
 `eve dev` records local traces by default. Use `otel()` for process-wide
 settings and `otelIntegration()` for third-party destinations.
 
+## Session handover events
+
+Existing Workflow step spans include these events when tracing is active:
+
+- `eve.session.handover.forwarding_started`: the previous owner starts submitting its buffered messages, including an empty buffer.
+- `eve.session.handover.part_submitted`: a buffered part was durably submitted.
+- `eve.session.handover.final_submitted`: the final marker was durably submitted. This does not confirm that the successor has processed it.
+- `eve.session.handover.inbox_unblocked`: an existing turn step observes that the inbox applied every buffered part and the final marker.
+
+Join both owners with `eve.session.id` and `eve.handoff.attempt_key`.
+`workflow.run.id` identifies the emitting owner; submission events also include
+`eve.handoff.destination_run_id`. Counts and part indexes describe the transfer
+without recording message content. Step IDs and `eve.handoff.step_attempt`
+distinguish retries; these events are not exactly-once counters.
+
+The receiver records `eve.handoff.applied_at_ms` using Workflow's replay-stable
+clock, identified by `eve.handoff.applied_at_clock: workflow`. This is logical
+event time, not the host time when replay applied the marker. The event's own
+timestamp is when the next turn step exports the observation. No receiver
+observation is exported if no subsequent turn step runs. An abandoned handover
+does not emit a successful receipt. No additional Workflow steps or writes are
+created for tracing.
+
 ## Configure OpenTelemetry
 
 `otel()` and `otelIntegration()` are optional:
@@ -37,6 +60,16 @@ destination. A destination cannot restore content excluded by this policy. It
 does not affect lifecycle instrumentation created with `defineInstrumentation()`.
 See [Audience](../channels/overview#audience) for how channels classify the
 conversation passed to this policy.
+
+The session's resolved capture decision also selects its default
+[Workflow run-data retention](/docs/agent-config#run-data-retention). Allowing
+both inputs and outputs uses the World's default; dropping the trace or excluding
+either direction requests deletion of durable payloads and streams when the run
+ends. This makes completed private and unknown-audience transcripts unreadable
+under the default policy outside development. Set
+`experimental.workflow.retention: "default"` on the agent to retain completed
+sessions independently of tracing. Destination `exportPolicy` filters do not
+change Workflow retention, and Workflow deletion does not delete exported traces.
 
 ## Instrument Node.js dependencies
 
@@ -177,6 +210,26 @@ and the trace-content policy. See
 Gateway-routed model calls propagate the configured OpenTelemetry context at
 each provider request. Eve-owned baggage is removed before forwarding. Gateway
 controls whether its spans are sampled and which destinations receive them.
+
+When AI Gateway reports
+[session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity)
+for a model call, the `agent.step` span records it. These attributes appear even
+when the trace content policy omits outputs.
+
+`vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for
+affinity. It is not the eve session ID that `vercel.session_id` records. It
+equals `gen_ai.conversation.id` unless you set `gateway.sessionId` yourself or
+the ID is longer than 256 characters, in which case AI Gateway hashes it. An
+authored `gateway.sessionId` is recorded verbatim, so don't put personal data in
+it.
+
+| Attribute                                       | Value                                                           |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| `vercel.ai_gateway.client_session_id`           | Session ID AI Gateway used                                      |
+| `vercel.ai_gateway.client_session_id_source`    | `explicit`, `agent`, or `fingerprint`                           |
+| `vercel.ai_gateway.affinity.outcome`            | What affinity did, such as `promoted`, `confirmed`, or `no_pin` |
+| `vercel.ai_gateway.affinity.pinned_provider`    | Provider the session's pin named                                |
+| `vercel.ai_gateway.affinity.displaced_provider` | Provider that would have gone first, when the pin moved it      |
 
 ## Local traces
 

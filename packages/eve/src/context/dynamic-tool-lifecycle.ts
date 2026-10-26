@@ -200,6 +200,7 @@ export function validateDurableDynamicToolCallbacks(
   const raw = readDurableDynamicToolCallbacks(entry) ?? {};
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
+      key !== "endsTurn" &&
       key !== "execute" &&
       key !== "inputSchema" &&
       key !== "outputSchema" &&
@@ -286,6 +287,13 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.toModelOutput,
     required: entry.toModelOutput !== undefined,
   });
+  const endsTurn = validateReference({
+    name,
+    owner,
+    phase: "endsTurn",
+    stamped: raw.endsTurn,
+    required: typeof entry.endsTurn === "function",
+  });
 
   const inputSchema = validateReference({
     name,
@@ -303,6 +311,7 @@ export function validateDurableDynamicToolCallbacks(
   });
 
   const callbacks: {
+    endsTurn?: DurableDynamicCallbackReference;
     execute: DurableDynamicCallbackReference;
     inputSchema?: DurableDynamicCallbackReference;
     outputSchema?: DurableDynamicCallbackReference;
@@ -331,6 +340,7 @@ export function validateDurableDynamicToolCallbacks(
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;
+  if (endsTurn !== undefined) callbacks.endsTurn = endsTurn;
   return callbacks;
 }
 
@@ -354,23 +364,14 @@ function createMetadata(input: {
     }),
     description: input.entry.description,
     frameworkTool: isFrameworkTool(input.entry) || undefined,
-    endsTurn: readDynamicEndsTurn(input.name, input.entry.endsTurn) || undefined,
+    // A function is replayed from its durable callback instead.
+    endsTurn: input.entry.endsTurn === true || undefined,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),
     name: input.name,
     outputSchema: serializeOutputSchema(input.entry.outputSchema),
     resolverSlug: input.resolver.slug,
   };
-}
-
-/** Dynamic tool metadata is durable, so it can hold only a literal `endsTurn`. */
-function readDynamicEndsTurn(name: string, endsTurn: DynamicToolEntry["endsTurn"]): boolean {
-  if (typeof endsTurn === "function") {
-    throw new Error(
-      `Dynamic tool "${name}" sets endsTurn to a function, which dynamic tools do not support. Set endsTurn to true or false; the resolver runs for each event, so it can decide then.`,
-    );
-  }
-  return endsTurn === true;
 }
 
 /**

@@ -41,4 +41,19 @@ describe("sleep", () => {
 
     await expect(output).resolves.toEqual({ waitedSeconds: 2.5001 });
   });
+
+  it.each(["before", "during"])(
+    "stops when steering arrives %s execution",
+    async (timing) => {
+      vi.mocked(workflowSleep).mockImplementation(() => new Promise<void>(() => {}));
+      const controller = new AbortController();
+      if (timing === "before") controller.abort();
+
+      const output = sleep().execute({ seconds: 600 }, { abortSignal: controller.signal } as never);
+      if (timing === "during") controller.abort();
+
+      await expect(output).resolves.toEqual({ interrupted: true });
+    },
+    1_000,
+  );
 });

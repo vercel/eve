@@ -60,7 +60,6 @@ function fixture(
     continuationToken: name,
     sessionId: name,
     history: [],
-    limits: outputLimit === undefined ? undefined : { maxOutputTokensPerSession: outputLimit },
     outputSchema,
   };
   const model = new MockLanguageModelV4({
@@ -178,6 +177,8 @@ function fixture(
     capabilities: { requestInput: true },
     tools,
     resolveModel: async () => model,
+    sessionUsageLimit:
+      outputLimit === undefined ? undefined : ({ window }) => window.outputTokens >= outputLimit,
     handleEvent: async (event) => {
       events.push(event);
       recorder.record(event);
@@ -446,7 +447,8 @@ it("reaches the next budget prompt after a grant without an older approval [cont
   await f.drive(f.respond("session_limit_continuation", "continue"));
   expect(f.executions).toEqual(["read"]);
   expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
-  expect(f.pending()[0]?.requestId).toContain(":output:2");
+  // The grant started the second usage window.
+  expect(f.pending()[0]?.requestId).toMatch(/:limit:usage:1$/u);
 });
 
 for (const pending of [true, false]) {

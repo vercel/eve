@@ -188,6 +188,93 @@ describe("deriveRunFacts", () => {
     expect(facts.toolCallCount).toBe(2);
   });
 
+  it("records the input the model sent an agent tool", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "c1",
+              description: "Research agent",
+              input: { message: "Find three sources" },
+              kind: "subagent-call",
+              name: "research",
+              nodeId: "subagents/research",
+              subagentName: "research",
+            },
+            {
+              callId: "c2",
+              description: "Weather agent",
+              input: { message: "Forecast for Brooklyn" },
+              kind: "remote-agent-call",
+              name: "weather",
+              nodeId: "remote-agents/weather",
+              remoteAgentName: "weather",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      actionResult({ callId: "c1", toolName: "research", output: "Three sources" }),
+      actionResult({ callId: "c2", toolName: "weather", output: "Sunny" }),
+    ]);
+
+    expect(facts.toolCalls.map(({ input, name }) => ({ input, name }))).toEqual([
+      { input: { message: "Find three sources" }, name: "research" },
+      { input: { message: "Forecast for Brooklyn" }, name: "weather" },
+    ]);
+  });
+
+  it("settles an agent tool call from its subagent result", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "c1",
+              description: "Research agent",
+              input: { message: "Find three sources" },
+              kind: "subagent-call",
+              name: "research",
+              nodeId: "subagents/research",
+              subagentName: "research",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            callId: "c1",
+            isError: true,
+            kind: "subagent-result",
+            origin: "dispatch",
+            output: "Subagent depth limit reached",
+            subagentName: "research",
+          },
+          sequence: 1,
+          stepIndex: 0,
+          status: "failed",
+          turnId: "t1",
+        },
+      },
+    ]);
+
+    expect(facts.toolCalls.map(({ name, output, status }) => ({ name, output, status }))).toEqual([
+      { name: "research", output: "Subagent depth limit reached", status: "failed" },
+    ]);
+  });
+
   it("uses the normalized failed lifecycle status for error results", () => {
     const events: UnstampedMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),
@@ -511,19 +598,88 @@ describe("deriveRunFacts", () => {
     expect(facts.parked).toBe(true);
   });
 
-  it("does not mark the run parked when the turn continued past the input request", () => {
+  it("does not mark the run parked when the turn continued past an answered input request", () => {
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       {
-        type: "message.completed",
-        data: { finishReason: "stop", message: "done", stepIndex: 1, turnId: "t1", sequence: 2 },
+        type: "input.resolved",
+        data: {
+          resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "r1" }],
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "t1",
+        },
       },
-      { type: "turn.completed", data: { sequence: 3, turnId: "t1" } },
+      {
+        type: "message.completed",
+        data: { finishReason: "stop", message: "done", stepIndex: 1, turnId: "t1", sequence: 3 },
+      },
+      { type: "turn.completed", data: { sequence: 4, turnId: "t1" } },
       {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
+    ] as UnstampedMessageStreamEvent[];
+
+    const facts = derive(events);
+    expect(facts.parked).toBe(false);
+  });
+
+  it("does not mark the run parked on a request an earlier turn left open", () => {
+    // A cancel observed outside the session (e.g. through `t.target`) withdraws the
+    // request without its `input.resolved` reaching these events.
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      inputRequested(["r1"]),
+      turnStarted("t2", 1),
+      {
+        type: "message.completed",
+        data: { finishReason: "stop", message: "done", stepIndex: 0, turnId: "t2", sequence: 1 },
+      },
+      { type: "turn.completed", data: { sequence: 1, turnId: "t2" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ] as UnstampedMessageStreamEvent[];
+
+    const facts = derive(events);
+    expect(facts.parked).toBe(false);
+  });
+
+  it("marks the run parked on a request a child relays during a later parent turn", () => {
+    // The relay keeps the child's own `turnId`, which does not match the parent's turn.
+    const relayed = inputRequested(["child_approval"]);
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t0", 0),
+      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
+      turnStarted("t1", 1),
+      { ...relayed, data: { ...relayed.data, callId: "call_child", turnId: "turn_0" } },
+      { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t1" } },
+    ] as UnstampedMessageStreamEvent[];
+
+    const facts = derive(events);
+    expect(facts.parked).toBe(true);
+  });
+
+  it("does not mark the run parked on an answered request whose responder must sign in", () => {
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      inputRequested(["r1"]),
+      {
+        type: "approval.candidate",
+        data: {
+          candidateId: "c1",
+          outcome: "pending",
+          requestId: "r1",
+          responderPrincipalId: "responder",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t1" } },
     ] as UnstampedMessageStreamEvent[];
 
     const facts = derive(events);

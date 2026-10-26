@@ -185,6 +185,23 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect((result.auth as Record<string, unknown>).evict).toBe(evict);
     });
 
+    it("preserves the optional auth displayName", () => {
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({
+          auth: {
+            completeAuthorization: async () => ({ token: "fresh" }),
+            displayName: "Example",
+            getToken: async () => ({ token: "cached" }),
+            principalType: "user",
+            startAuthorization: async () => ({ challenge: { url: "https://idp.example/auth" } }),
+          },
+        }),
+        MSG,
+      );
+
+      expect(authProvider(result.auth).displayName).toBe("Example");
+    });
+
     it("drops a malformed vercelConnect marker without throwing", () => {
       // A misbehaving auth provider could attach a malformed marker; the
       // normalizer treats it as absent rather than failing the whole

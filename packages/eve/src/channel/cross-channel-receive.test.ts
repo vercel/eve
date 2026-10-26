@@ -39,6 +39,9 @@ function makeSession(): Session {
     async respond() {
       return { sessionId: "sess_1", status: "accepted" };
     },
+    async prewarm() {
+      return { status: "ready" as const };
+    },
     async compact() {
       return { status: "no_active_session" };
     },

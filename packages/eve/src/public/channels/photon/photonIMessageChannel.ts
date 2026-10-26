@@ -1,12 +1,22 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import { vercelOidc } from "#public/channels/auth.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   chatSdkChannel,
   type ChatSdkChannel,
   type ChatSdkChannelBridge,
   type ChatSdkChannelEvents,
 } from "#public/channels/chat-sdk/index.js";
-import type { Message, Thread } from "#compiled/chat/index.js";
+import {
+  dispatchIMessageTapbacks,
+  iMessageTapbackTool,
+  type IMessageTapback,
+  type IMessageTapbackContext,
+  type IMessageTapbackResult,
+  type IMessageTapbackToolInput,
+} from "#public/channels/imessage-tapbacks.js";
+import type { ToolDefinition } from "#public/tools/index.js";
+import type { Adapter, Message, Thread } from "#compiled/chat/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   createiMessageAdapter,
@@ -18,7 +28,11 @@ import {
   addPhotonAttachmentDownloads,
   addPhotonAttachmentRehydration,
 } from "#public/channels/photon/attachments.js";
-import { photonInboundContent } from "#public/channels/photon/inboundContent.js";
+import { formatReplyContext } from "#public/channels/chat-sdk/reply-context.js";
+import {
+  photonInboundContent,
+  photonQuotedMessage,
+} from "#public/channels/photon/inboundContent.js";
 
 /** Photon project credentials used by {@link photonIMessageChannel}. */
 export type PhotonIMessageChannelCredentials = iMessageCredentialProvider;
@@ -33,6 +47,8 @@ export interface PhotonInboundMessageContext {
 export type PhotonInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Prior conversation added as user and assistant turns before this message. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
@@ -51,6 +67,15 @@ export interface PhotonIMessageChannelConfig {
     ctx: PhotonInboundMessageContext,
     message: Message,
   ) => PhotonInboundResultOrPromise;
+  /**
+   * Inbound tapback policy. Tapbacks are ignored by default. Return a result to
+   * send the tapback to the agent as a message such as `Tapback: Loved “See you at 7”`,
+   * or `null` to ignore it.
+   */
+  readonly onTapback?: (
+    ctx: IMessageTapbackContext,
+    tapback: IMessageTapback,
+  ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
   /** Override the default webhook route (`/eve/v1/photon`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -64,7 +89,13 @@ export interface PhotonIMessageChannelConfig {
 }
 
 /** First-class eve channel backed by Photon iMessage. */
-export interface PhotonIMessageChannel extends ChatSdkChannel {}
+export interface PhotonIMessageChannel extends ChatSdkChannel {
+  /**
+   * Returns a tool that lets the model react to the latest message in the
+   * conversation with a tapback. Export it from a file in `agent/tools/`.
+   */
+  tapbackTool(): ToolDefinition<IMessageTapbackToolInput, string>;
+}
 
 /**
  * Creates an eve channel for Photon-powered iMessage.
@@ -87,7 +118,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
       ? { webhookVerifier: config.webhookVerifier }
       : webhookSecret
         ? { webhookSecret }
-        : { webhookVerifier: vercelOidc() }),
+        : { webhookVerifier: sameEnvironmentVercelOidc() }),
   });
   addPhotonAttachmentRehydration(imessage);
   const bridge = chatSdkChannel({
@@ -108,12 +139,41 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
+  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
 
-  return bridge.channel;
+  const channel: PhotonIMessageChannel = Object.assign(bridge.channel, {
+    tapbackTool: () =>
+      iMessageTapbackTool({
+        adapterName: "imessage",
+        bot: bridge.bot,
+        channel,
+        channelLabel: "Photon iMessage",
+        sendEmoji: sendPhotonEmojiTapback,
+      }),
+  });
+  return channel;
+}
+
+/**
+ * The Photon adapter's `addReaction` accepts only the six standard tapbacks,
+ * but the spectrum message it returns from `fetchMessage` can react with any emoji.
+ */
+async function sendPhotonEmojiTapback(
+  adapter: Adapter,
+  threadId: string,
+  messageId: string,
+  emoji: string,
+): Promise<void> {
+  const message = await adapter.fetchMessage?.(threadId, messageId);
+  const target = message?.raw as { react?: (emoji: string) => Promise<unknown> } | undefined;
+  if (typeof target?.react !== "function") {
+    throw new Error("Photon could not find the message to react to.");
+  }
+  await target.react(emoji);
 }
 
 /** Default Photon auth projection for inbound Chat SDK message authors. */
-export function defaultPhotonAuth(message: Message): SessionAuthContext {
+export function defaultPhotonAuth(message: Pick<Message, "author">): SessionAuthContext {
   const attributes: Record<string, string> = {};
   if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
   return {
@@ -143,12 +203,18 @@ async function dispatchMessage(
   if (result === null) return;
   const adapter = bridge.bot.getAdapter("imessage");
   await markReadBestEffort(adapter, thread, message);
-  addPhotonAttachmentDownloads(message, adapter);
+  await addPhotonAttachmentDownloads(message, adapter);
   const content = photonInboundContent(message);
   if (content === undefined) return;
+  const quoted = photonQuotedMessage(message);
   await bridge.send(content, {
+    idempotencyKey: message.id,
     auth: result.auth,
-    context: [...(result.context ?? [])],
+    context: [
+      ...(result.context ?? []),
+      ...(quoted ? [formatReplyContext(quoted, message.text)] : []),
+    ],
+    history: result.history,
     thread,
     title: result.title,
   });

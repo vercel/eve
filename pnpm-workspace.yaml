@@ -1,6 +1,9 @@
 autoDedupe: true
 enableGlobalVirtualStore: false
 
+lockfile:
+  includeResolutionSettings: true
+
 packages:
   - apps/*
   - apps/fixtures/*
@@ -30,7 +33,6 @@ ignoredOptionalDependencies:
 
 catalog:
   "@ai-sdk/anthropic": "^4.0.78"
-  "@ai-sdk/code-mode": "^1.0.94"
   "@ai-sdk/google": "^4.0.93"
   "@ai-sdk/mcp": "^2.0.73"
   "@ai-sdk/openai": "^4.0.91"
@@ -40,17 +42,17 @@ catalog:
   "@opentelemetry/context-async-hooks": "2.6.1"
   "@opentelemetry/core": "2.6.1"
   "@opentelemetry/sdk-trace-base": "2.6.1"
-  "@types/node": "24.13.3"
+  "@types/node": "26.6.5"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  "@vercel/connect": "2.3.3"
+  "@vercel/connect": "2.5.2"
   "@vercel/otel": "2.1.3"
   "@vercel/sandbox": "3.3.0"
-  "@workflow/world-postgres": "5.0.3"
+  "@workflow/world-postgres": "5.0.5"
   ai: "^7.0.137"
   better-auth: "1.6.26"
   marked: "17.0.6"
-  next: "16.3.4"
+  next: "16.3.8"
   phase: "0.0.1"
   picocolors: "1.1.1"
   react: "19.2.6"
@@ -65,6 +67,11 @@ overrides:
   # @vercel/cli-config, which @vercel/oidc uses, pins its own Zod 4 release,
   # and the vendor build fails on a second copy.
   "@vercel/cli-config>zod": "catalog:"
+  # @vercel/connect peers on eve. Inside packages/eve that peer cannot resolve
+  # to the workspace package, so pnpm pulls a published eve from npm instead.
+  # Since pnpm 12.9, `pnpm update` re-resolves that peer to the workspace
+  # version, which is unpublished on release PRs and fails the install.
+  "@vercel/connect>eve": "workspace:*"
 
 minimumReleaseAge: 2880 # 2 days
 
@@ -75,15 +82,19 @@ minimumReleaseAgeExclude:
   - "@vercel/*"
   - "@workflow/*"
   - workflow
-  - "@chat-adapter/gchat@4.41.0"
-  - "@chat-adapter/gmail@4.41.0"
-  - "@chat-adapter/messenger@4.41.0"
-  - "@chat-adapter/shared@4.41.0"
-  - "@chat-adapter/state-memory@4.41.0"
-  - "@chat-adapter/state-redis@4.41.0"
-  - "@chat-adapter/whatsapp@4.41.0"
-  - "@chat-adapter/x@4.41.0"
+  - "@chat-adapter/catalog@4.42.0"
+  - "@chat-adapter/gchat@4.42.0"
+  - "@chat-adapter/gmail@4.42.0"
+  - "@chat-adapter/messenger@4.42.0"
+  - "@chat-adapter/shared@4.42.0"
+  - "@chat-adapter/slack@4.42.0"
+  - "@chat-adapter/state-memory@4.42.0"
+  - "@chat-adapter/state-redis@4.42.0"
+  - "@chat-adapter/twilio@4.42.0"
+  - "@chat-adapter/whatsapp@4.42.0"
+  - "@chat-adapter/x@4.42.0"
+  - "@nimble-way/eve@0.1.1"
   - "@shadcn/registry@0.1.3"
   - "@stripe/link-integrations-eve@0.2.0"
   - "@stripe/link-sdk@0.9.0"
-  - "chat@4.41.0"
+  - "chat@4.42.0"

@@ -36,6 +36,32 @@ describe("buildSingleRolldownChunk", () => {
     ).rejects.toThrow('standard condition "import"');
   });
 
+  it("keeps bundle bytes stable across compiler workspace paths", async () => {
+    const bundle = async (workspace: string) => {
+      const entry = `virtual:${workspace}/module-map.mjs`;
+      return await buildSingleRolldownChunk("compiler workspace fixture", {
+        input: entry,
+        plugins: [
+          {
+            name: "compiler-workspace-fixture",
+            resolveId(id: string) {
+              return id === entry ? id : undefined;
+            },
+            load(id: string) {
+              return id === entry ? "export const answer = 42;" : undefined;
+            },
+          },
+        ],
+        output: { comments: false, format: "esm" },
+      });
+    };
+
+    const first = await bundle("first");
+    const second = await bundle("second");
+
+    expect(second.code).toBe(first.code);
+  });
+
   it("preserves require conditions inside bundled CommonJS dependencies", async () => {
     const dir = mkdtempSync(join(tmpdir(), "eve-rolldown-conditions-"));
     const parentRoot = join(dir, "node_modules", "cjs-parent");

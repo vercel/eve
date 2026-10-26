@@ -216,9 +216,14 @@ class DatadogReporter implements EvalReporter {
     }
 
     const newRecords: DatadogDatasetRecordInput[] = [];
+    const syncedRecordKeys = new Set<string>();
     for (const result of results) {
+      // Repeated attempts share one dataset record per eval.
+      const recordKey = this.#getRecordKey(result.id);
+      if (syncedRecordKeys.has(recordKey)) continue;
+      syncedRecordKeys.add(recordKey);
       const nextRecord = this.#composeDatasetRecord(result);
-      const index = recordIndexes.get(this.#getRecordKey(result.id));
+      const index = recordIndexes.get(recordKey);
       if (index === undefined) {
         newRecords.push({
           inputData: nextRecord.input,
@@ -325,6 +330,9 @@ class DatadogReporter implements EvalReporter {
     }
     if (datasetRecordId !== undefined) {
       spanInput.datasetRecordId = datasetRecordId;
+    }
+    if (result.attempt !== undefined) {
+      spanInput.runIteration = result.attempt;
     }
 
     const span = await this.#experiment.submitSpan(spanInput);

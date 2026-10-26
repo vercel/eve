@@ -208,6 +208,21 @@ describe("Braintrust", () => {
     );
   });
 
+  it("logs each repeated attempt as its own row", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(makeEvalResult({ attempt: 1 }));
+    reporter.onEvalComplete(makeEvalResult({ attempt: 2 }));
+
+    expect(
+      braintrustMocks.log.mock.calls.map(([row]) => [row.id, row.metadata.eveAttempt]),
+    ).toEqual([
+      ["eval-1#1", 1],
+      ["eval-1#2", 2],
+    ]);
+  });
+
   it("logs an empty output for an eval that produced no agent output", async () => {
     const reporter = Braintrust(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());

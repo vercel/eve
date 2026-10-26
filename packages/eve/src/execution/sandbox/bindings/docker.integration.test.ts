@@ -6,13 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   DockerDaemonUnavailableError,
   type DockerCli,
-  type DockerCommandResult,
-  type DockerProcess,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import {
-  createDockerSandboxProvider,
-  pruneDockerSandboxTemplates,
-} from "#execution/sandbox/bindings/docker.js";
+import { pruneDockerSandboxTemplates } from "#execution/sandbox/bindings/docker.js";
 import { EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV } from "#execution/sandbox/development-run.js";
 import {
   createDockerSandboxOptionsHash,
@@ -24,115 +19,36 @@ import type {
   DockerSandboxEnvironmentOptions,
   DockerSandboxRuntimeOptions,
 } from "#public/sandbox/docker-sandbox.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createDockerSandboxHarness } from "#internal/testing/docker-sandbox-runtime.js";
+import {
+  createFakeDockerCli,
+  fakeDockerContainerIdentity,
+  findCall,
+  isContainerInspect,
+  type FakeResponse,
+} from "#internal/testing/fake-docker-cli.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { bufferToStream } from "#execution/sandbox/stream-utils.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
-import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
-import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
-import { createSandboxProviderResources } from "#shared/sandbox-provider.js";
 
 const createScratchDirectory = useTemporaryDirectories();
-
-type FakeResponse = Partial<DockerCommandResult> & {
-  readonly streamStdout?: string;
-};
-
-interface FakeDockerCall {
-  readonly args: readonly string[];
-  readonly stdin?: Buffer;
-}
-
-function createFakeDockerCli(
-  respond: (args: readonly string[]) => FakeResponse | undefined = () => undefined,
-): { calls: FakeDockerCall[]; cli: DockerCli; killedStreams: (readonly string[])[] } {
-  const calls: FakeDockerCall[] = [];
-  const createdContainerNames = new Set<string>();
-  const killedStreams: (readonly string[])[] = [];
-
-  function resolve(args: readonly string[]): DockerCommandResult {
-    let partial = respond(args) ?? {};
-    if (args[0] === "container" && args[1] === "inspect" && args[3] === "{{.Id}}") {
-      const containerName = args.at(-1) ?? "unknown";
-      if (createdContainerNames.has(containerName) || (partial.exitCode ?? 0) === 0) {
-        partial = { ...partial, exitCode: 0, stdout: fakeDockerContainerIdentity(containerName) };
-      }
-    }
-    const stdout = partial.stdout ?? "";
-    const result = {
-      exitCode: partial.exitCode ?? 0,
-      stderr: partial.stderr ?? "",
-      stdout,
-      stdoutBytes: partial.stdoutBytes ?? Buffer.from(stdout, "utf8"),
-    };
-    if (args[0] === "run" && result.exitCode === 0) {
-      const nameIndex = args.indexOf("--name");
-      const containerName = nameIndex === -1 ? undefined : args[nameIndex + 1];
-      if (containerName !== undefined) createdContainerNames.add(containerName);
-    }
-    return result;
-  }
-
-  return {
-    calls,
-    killedStreams,
-    cli: {
-      async run(args, options) {
-        calls.push({
-          args: [...args],
-          stdin: options?.stdin === undefined ? undefined : Buffer.from(options.stdin),
-        });
-        return resolve(args);
-      },
-      stream(args): DockerProcess {
-        calls.push({ args: [...args] });
-        const partial = respond(args) ?? {};
-        return {
-          stdout: bufferToStream(Buffer.from(partial.streamStdout ?? "", "utf8")),
-          stderr: bufferToStream(Buffer.alloc(0)),
-          async wait() {
-            return { exitCode: partial.exitCode ?? 0 };
-          },
-          async kill() {
-            killedStreams.push([...args]);
-          },
-        };
-      },
-    },
-  };
-}
 
 function createEngine(input: {
   readonly cli: DockerCli;
   readonly options?: DockerSandboxEnvironmentOptions;
   readonly runtimeOptions?: DockerSandboxRuntimeOptions;
 }) {
-  return createSandboxProviderHarness(
-    createDockerSandboxProvider(input.options, input.cli),
-    input.runtimeOptions ?? {},
-    { preparedArtifact: () => ({ imageReference: TEMPLATE_IMAGE }) },
-  );
-}
-
-function findCall(
-  calls: readonly FakeDockerCall[],
-  predicate: (args: readonly string[]) => boolean,
-): FakeDockerCall | undefined {
-  return calls.find((call) => predicate(call.args));
+  return createDockerSandboxHarness({
+    ...input,
+    preparedArtifact: () => ({ imageReference: TEMPLATE_IMAGE }),
+    runtimeOptions: input.runtimeOptions ?? {},
+  });
 }
 
 function isImageInspect(args: readonly string[], reference: string): boolean {
   return args[0] === "image" && args[1] === "inspect" && args.at(-1) === reference;
-}
-
-function isContainerInspect(args: readonly string[]): boolean {
-  return args[0] === "container" && args[1] === "inspect";
-}
-
-function fakeDockerContainerIdentity(containerName: string): string {
-  return `sha256:${containerName}`;
 }
 
 const TEMPLATE_KEY = "eve-sbx-tpl-local-abc123";
@@ -142,13 +58,14 @@ const TEMPLATE_IMAGE = dockerTemplateImageReference({
   templateKey: TEMPLATE_KEY,
 });
 const SESSION_KEY = "eve-sbx-ses-local-session-1";
-const PROVIDER_CONTAINER_NAME = `eve-sbx-${createSandboxProviderIdentity({
-  artifact: { imageReference: TEMPLATE_IMAGE },
-  environment: createDockerSandboxOptionsHash(resolveDockerSandboxOptions(undefined)),
-  open: {},
-  sessionId: SESSION_KEY,
-  version: 1,
-}).slice(0, 32)}`;
+/** The session container's name, which derives from the app's storage path and the session key alone. */
+function providerContainerName(appRoot: string): string {
+  return `eve-sbx-${createSandboxProviderIdentity({
+    namespace: appRoot,
+    sessionId: SESSION_KEY,
+    version: 2,
+  }).slice(0, 32)}`;
+}
 
 describe("Docker provider prewarm", () => {
   it("uses a colocated Dockerfile as the template base image", async () => {
@@ -168,7 +85,6 @@ describe("Docker provider prewarm", () => {
 
     await createEngine({ cli }).prepare({
       appRoot,
-      seedFiles: [],
     });
 
     expect(findCall(calls, (args) => args[0] === "build")?.args).toEqual([
@@ -198,7 +114,7 @@ describe("Docker provider prewarm", () => {
         : undefined,
     );
 
-    await createEngine({ cli, options: { env } }).prepare({ appRoot, seedFiles: [] });
+    await createEngine({ cli, options: { env } }).prepare({ appRoot });
 
     const runArgs = findCall(calls, (args) => args[0] === "run")?.args ?? [];
     expect(runArgs.filter((arg) => arg.startsWith("AI_AGENT="))).toEqual([expected]);
@@ -223,7 +139,7 @@ describe("Docker provider prewarm", () => {
 
     const result = await createEngine({ cli }).prepare({
       appRoot,
-      seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
+      workspace: [{ content: "# Weather skill\n", relativePath: "skills/weather.md" }],
     });
 
     expect(result.imageReference).toMatch(/^eve-sandbox-template:/u);
@@ -294,7 +210,7 @@ describe("Docker provider prewarm", () => {
       return undefined;
     });
 
-    const result = await createEngine({ cli }).prepare({ appRoot, seedFiles: [] });
+    const result = await createEngine({ cli }).prepare({ appRoot });
     expect(result.imageReference).toBe(publishedReference);
     expect(
       calls.filter(({ args }) =>
@@ -318,7 +234,7 @@ describe("Docker provider prewarm", () => {
       return undefined;
     });
 
-    await expect(createEngine({ cli }).prepare({ appRoot, seedFiles: [] })).rejects.toThrow(
+    await expect(createEngine({ cli }).prepare({ appRoot })).rejects.toThrow(
       /Failed to commit sandbox template image .*: disk full/u,
     );
     expect(committedReference).toMatch(/^eve-sandbox-template:/u);
@@ -344,7 +260,6 @@ describe("Docker provider prewarm", () => {
       resourcesKey: "resources-hash",
       resourcesPath,
       appRoot,
-      seedFiles: [],
     });
 
     const run = findCall(calls, (args) => args[0] === "run");
@@ -356,7 +271,10 @@ describe("Docker provider prewarm", () => {
         calls,
         (args) =>
           args[0] === "exec" &&
-          (args.at(-1) ?? "").includes("cp -a /eve/resources/workspace/. /workspace/"),
+          // The spawn wrapper re-quotes the script for `bash -lc`, escaping its quoted root.
+          (args.at(-1) ?? "").includes(
+            "cp -a '\\''/eve/resources'\\''/workspace/. '\\''/workspace'\\''/",
+          ),
       ),
     ).toBeDefined();
   });
@@ -373,7 +291,6 @@ describe("Docker provider prewarm", () => {
     await expect(
       createEngine({ cli }).prepare({
         appRoot,
-        seedFiles: [],
       }),
     ).rejects.toThrow(DockerDaemonUnavailableError);
   });
@@ -449,7 +366,7 @@ describe("Docker provider create", () => {
       });
 
       const run = findCall(calls, (args) => args[0] === "run");
-      expect(run?.args).toContain(PROVIDER_CONTAINER_NAME);
+      expect(run?.args).toContain(providerContainerName(appRoot));
       expect(run?.args).toContain("eve.sandbox.role=session");
       expect(run?.args.at(-3)).toBe(TEMPLATE_IMAGE);
 
@@ -461,12 +378,12 @@ describe("Docker provider create", () => {
 
       // An authored stop releases the container; filesystem state survives
       // for the next `create` to restart from.
-      await handle.onSandboxStop();
+      await handle.connection.stop();
       expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
         "stop",
         "-t",
         "0",
-        fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+        fakeDockerContainerIdentity(providerContainerName(appRoot)),
       ]);
     } finally {
       if (previousRunId === undefined) {
@@ -493,7 +410,7 @@ describe("Docker provider create", () => {
 
     expect(findCall(calls, (args) => args[0] === "start")?.args).toEqual([
       "start",
-      PROVIDER_CONTAINER_NAME,
+      providerContainerName(appRoot),
     ]);
     expect(findCall(calls, (args) => args[0] === "run")).toBeUndefined();
   });
@@ -519,18 +436,37 @@ describe("Docker provider create", () => {
     expect(findCall(calls, (args) => args[0] === "run")).toBeUndefined();
   });
 
+  it("reports a session as gone only when Docker has no such container", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let inspect: FakeResponse = { exitCode: 0, stdout: "true\n" };
+    const { cli } = createFakeDockerCli((args) => (isContainerInspect(args) ? inspect : undefined));
+    const engine = createEngine({ cli });
+    const { state } = await engine.start({ appRoot, sandboxName: SESSION_KEY });
+    const resume = () => engine.openSession({ existing: state, appRoot, sandboxName: SESSION_KEY });
+
+    inspect = { exitCode: 1, stderr: "Cannot connect to the Docker daemon. Is it running?" };
+    const unavailable = resume();
+    await expect(unavailable).rejects.toThrow("Cannot connect to the Docker daemon");
+    await expect(unavailable).rejects.not.toBeInstanceOf(SandboxSessionGoneError);
+
+    inspect = { exitCode: 1, stderr: "Error: No such container: eve-session" };
+    await expect(resume()).rejects.toBeInstanceOf(SandboxSessionGoneError);
+  });
+
   it("attaches to the peer container when another process wins the create race", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     let peerCreated = false;
     const { calls, cli } = createFakeDockerCli((args) => {
       if (isContainerInspect(args)) {
-        return peerCreated ? { exitCode: 0, stdout: "true\n" } : { exitCode: 1 };
+        return peerCreated
+          ? { exitCode: 0, stdout: "true\n" }
+          : { exitCode: 1, stderr: "Error: No such container" };
       }
       if (args[0] === "run") {
         peerCreated = true;
         return {
           exitCode: 125,
-          stderr: `docker: Error response from daemon: Conflict. The container name "/${PROVIDER_CONTAINER_NAME}" is already in use by container "d6b4ad87".`,
+          stderr: `docker: Error response from daemon: Conflict. The container name "/${providerContainerName(appRoot)}" is already in use by container "d6b4ad87".`,
         };
       }
       return undefined;
@@ -557,11 +493,11 @@ describe("Docker provider create", () => {
       appRoot,
       sandboxName: SESSION_KEY,
     });
-    return { calls, handle, killedStreams };
+    return { appRoot, calls, handle, killedStreams };
   }
 
   it("spawns commands through a pid-recording bash -lc wrapper with cwd and env", async () => {
-    const { calls, handle } = await createRunningSessionHandle({
+    const { appRoot, calls, handle } = await createRunningSessionHandle({
       respond: (args) => {
         if (args[0] === "exec" && args.includes("bash")) {
           return { exitCode: 0, streamStdout: "staging\n" };
@@ -585,7 +521,7 @@ describe("Docker provider create", () => {
       "/workspace",
       "-e",
       "DEPLOY_ENV=staging",
-      fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+      fakeDockerContainerIdentity(providerContainerName(appRoot)),
       "bash",
       "-c",
     ]);
@@ -599,7 +535,7 @@ describe("Docker provider create", () => {
   });
 
   it("kill() tree-kills inside the container before killing the docker exec client", async () => {
-    const { calls, handle, killedStreams } = await createRunningSessionHandle({});
+    const { appRoot, calls, handle, killedStreams } = await createRunningSessionHandle({});
 
     const spawned = await handle.sandbox.spawn({ command: "sleep 300" });
     const spawnExec = findCall(calls, (args) => args[0] === "exec" && args.includes("bash"));
@@ -612,7 +548,7 @@ describe("Docker provider create", () => {
     const treeKill = findCall(calls, (args) => args.includes("eve-kill-tree"));
     expect(treeKill?.args.slice(0, 2)).toEqual([
       "exec",
-      fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+      fakeDockerContainerIdentity(providerContainerName(appRoot)),
     ]);
     expect(treeKill?.args.at(-1)).toBe(pidFilePath);
     expect(String(treeKill?.args.at(-3))).toContain("kill_tree");
@@ -670,14 +606,14 @@ describe("Docker provider create", () => {
   });
 
   it("maps removePath options onto rm flags", async () => {
-    const { calls, handle } = await createRunningSessionHandle({});
+    const { appRoot, calls, handle } = await createRunningSessionHandle({});
 
     await handle.sandbox.removePath({ force: true, path: "skills/tenant", recursive: true });
 
     const remove = findCall(calls, (args) => args[0] === "exec" && args.includes("rm"));
     expect(remove?.args).toEqual([
       "exec",
-      fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+      fakeDockerContainerIdentity(providerContainerName(appRoot)),
       "rm",
       "-rf",
       "--",
@@ -686,7 +622,7 @@ describe("Docker provider create", () => {
   });
 
   it("applies deny-all by disconnecting every container network", async () => {
-    const { calls, handle } = await createRunningSessionHandle({
+    const { appRoot, calls, handle } = await createRunningSessionHandle({
       respond: (args) => {
         if (isContainerInspect(args) && args[3] === "{{json .NetworkSettings.Networks}}") {
           return { exitCode: 0, stdout: '{"bridge":{}}' };
@@ -704,12 +640,12 @@ describe("Docker provider create", () => {
       "disconnect",
       "--force",
       "bridge",
-      fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+      fakeDockerContainerIdentity(providerContainerName(appRoot)),
     ]);
   });
 
   it("applies allow-all to a deny-all-created container by detaching none before bridge", async () => {
-    const { calls, handle } = await createRunningSessionHandle({
+    const { appRoot, calls, handle } = await createRunningSessionHandle({
       respond: (args) => {
         if (isContainerInspect(args) && args[3] === "{{json .NetworkSettings.Networks}}") {
           // Containers created with `--network none` report the special
@@ -731,16 +667,17 @@ describe("Docker provider create", () => {
         "disconnect",
         "--force",
         "none",
-        fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+        fakeDockerContainerIdentity(providerContainerName(appRoot)),
       ],
-      ["network", "connect", "bridge", fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME)],
+      ["network", "connect", "bridge", fakeDockerContainerIdentity(providerContainerName(appRoot))],
     ]);
   });
 
   it("rejects domain-level network policies with guidance toward the Vercel provider", async () => {
     const { handle } = await createRunningSessionHandle({});
 
-    await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } })).rejects.toThrow(
+    // DefaultSandbox forwards the shared network policy type unchanged.
+    await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } } as never)).rejects.toThrow(
       /Vercel provider/,
     );
   });
@@ -766,11 +703,8 @@ describe("Docker template prune", () => {
 
   // Mirrors how prewarm and session start build the provider context.
   async function prepareLikeDevelopment(appRoot: string, cli: DockerCli) {
-    return await createDockerSandboxProvider(undefined, cli).prepare({
-      files: createSandboxProviderFiles(join(appRoot, "sandbox")),
-      host: createSandboxProviderHost(appRoot),
-      resources: createSandboxProviderResources({}),
-      sourceRevision: "test-source-revision",
+    return await createDockerSandboxHarness({ cli }).prepare({
+      appRoot,
       storagePath: resolveSandboxCacheDirectory(appRoot),
     });
   }

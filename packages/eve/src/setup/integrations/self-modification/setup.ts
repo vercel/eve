@@ -21,10 +21,7 @@ import {
 } from "#self-modification/migration.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { ensurePackageDependencies } from "#setup/scaffold/index.js";
-import {
-  DEFAULT_CONNECT_PACKAGE_VERSION,
-  DEFAULT_MICROSANDBOX_PACKAGE_VERSION,
-} from "#setup/scaffold/version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION } from "#setup/scaffold/version-tokens.js";
 
 import { describeIntegrationSetupEnvironment } from "../shared/environment.js";
 import { installScaffoldDependencies } from "../shared/scaffold.js";
@@ -46,7 +43,6 @@ const defaultApplyDependencies: SelfModificationApplyDependencies = {
 
 const SELF_MODIFICATION_PRODUCTION_DEPENDENCIES = {
   "@vercel/connect": DEFAULT_CONNECT_PACKAGE_VERSION,
-  microsandbox: DEFAULT_MICROSANDBOX_PACKAGE_VERSION,
 };
 
 type SelfModificationSetupPlan = (
@@ -179,7 +175,6 @@ export async function prepareSelfModificationSetup(
     connector: `github/${name}`,
     directory,
     repository: `github.com/${owner}/${repo}`,
-    vercelBackend: true,
   };
   context.presenter.note(
     renderSelfModificationConfig(values),
@@ -242,9 +237,7 @@ export async function applySelfModificationSetup(
   context.presenter.log.success(`Updated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}.`);
   context.presenter.nextSteps([
     "Install the managed GitHub App for the configured repository, then deploy or redeploy.",
-    plan.values.vercelBackend
-      ? `After deployment, try self-modification by running \`eve dev <deployment-url>\` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update \`${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}\`.`
-      : `Before deployment, configure \`authorize\` in \`${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}\` to admit a trusted principal for your deployment's channel. After deployment, use that channel to try self-modification.`,
+    `After deployment, try self-modification by running \`eve dev <deployment-url>\` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update \`${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}\`.`,
   ]);
   return {
     deploymentRequired: true as const,

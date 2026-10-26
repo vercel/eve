@@ -198,7 +198,9 @@ describe("McpConnectionClient", () => {
       expect(init.redirect).toBe("error");
 
       await send({ ...userAuth("anon"), principalType: "anonymous" });
-      expect(sent.mock.calls[1]![1]).toEqual({});
+      expect(new Headers(sent.mock.calls[1]![1]?.headers).has("eve-forwarded-principal")).toBe(
+        false,
+      );
 
       const delegated = ctxWithAuth(userAuth("alice"));
       delegated.set(InitiatorAuthKey, userAuth("bob"));

@@ -5,6 +5,7 @@ import {
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -146,6 +147,7 @@ class BraintrustReporter implements EvalReporter {
 
     const metadata: Record<string, unknown> = {
       ...evaluation?.metadata,
+      eveAttempt: result.attempt,
       eveSessionId: result.result.sessionId,
       eveStatus: result.result.status,
       eveVerdict: result.verdict,
@@ -180,7 +182,8 @@ class BraintrustReporter implements EvalReporter {
     };
 
     this.#experiment.log({
-      id: result.id,
+      // Braintrust upserts rows by id, so each attempt needs its own row id.
+      id: formatAttemptLabel(result.id, result.attempt),
       input: evaluation?.description ?? "",
       output: result.result.output ?? "",
       error: result.error ?? undefined,

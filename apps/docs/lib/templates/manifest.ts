@@ -6,11 +6,14 @@ export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing
 export type TemplateIntegration =
   | "Contentful"
   | "Datadog"
+  | "Discord"
+  | "dbt"
   | "GitHub"
   | "HTTP API"
   | "Linear"
   | "Linq"
   | "Mux"
+  | "MotherDuck"
   | "Notion"
   | "Postgres"
   | "Resend"
@@ -139,7 +142,6 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-slack-agent",
     title: "Slack Assistant",
-    featured: true,
     setupPrompt:
       "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -161,6 +163,91 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/instructions.md",
       "agent/skills/plan_a_trip.md",
       "agent/tools/get_weather.ts",
+    ],
+  },
+  {
+    slug: "eve-discord-agent",
+    title: "Discord Agent",
+    setupPrompt:
+      "Set up the eve Discord agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the Discord bot, Vercel Connect, and Vercel Daemon setup steps.",
+    description:
+      "A Discord community agent that answers questions in threads, catches people up on what they missed, and stays quiet while they talk, through a Discord Gateway relay on Vercel Daemons.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Discord", "Vercel"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-discord-agent-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/discord.ts",
+      "agent/instructions.md",
+      "agent/skills/catch_up.md",
+      "agent/tools/read_recent_messages.ts",
+    ],
+  },
+  {
+    slug: "eve-company-brain-template",
+    title: "Company Brain",
+    featured: true,
+    setupPrompt:
+      "Set up the eve company brain template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-company-brain-template as the source. Copy the project files, install its dependencies, and follow the README to build the sample data and configure Slack. Preserve the existing project if the workspace is not empty. Use local DuckDB for development and explain how to switch to MotherDuck when deployed, including separate writer and read-only credentials and Slack access allowlists.",
+    description:
+      "Answer employees' business questions in Slack using documented dbt models, with local DuckDB or deployed MotherDuck and a Jaffle Shop sample dataset.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-company-brain-template",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "dbt", "MotherDuck"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-company-brain-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/instructions.md",
+      "agent/tools/list_models.ts",
+      "agent/tools/get_model.ts",
+      "agent/tools/query_sql.ts",
+      "agent/lib/query.ts",
+    ],
+  },
+  {
+    slug: "eve-coding-agent-template",
+    title: "Coding Agent on Slack",
+    setupPrompt:
+      "Set up the eve coding agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-coding-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Slack, GitHub, and Vercel setup steps.",
+    description:
+      "A coding agent you mention in Slack or on GitHub that investigates bugs, reviews changes, and opens pull requests from an isolated Vercel Sandbox, with GitHub tokens scoped to one repository per command.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-coding-agent-template",
+    category: "Collaboration",
+    model: "anthropic/claude-opus-5.5",
+    integrations: ["Slack", "GitHub", "Vercel"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-coding-agent-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/channels/github.ts",
+      "agent/extensions/code.ts",
+      "agent/extensions/git.ts",
+      "agent/hooks/reset-github-egress.ts",
+      "agent/instructions.md",
+      "agent/lib/github.ts",
+      "agent/sandbox.ts",
     ],
   },
   {
@@ -195,7 +282,7 @@ export const templateManifest: TemplateManifestEntry[] = [
       "A Slack-based Contentful assistant that searches, drafts, and edits entries, with approval before publishing content.",
     sourceHref: "https://github.com/vercel-labs/eve-contentful-agent-template/tree/main",
     category: "Collaboration",
-    model: "openai/gpt-6.1-sol-fast",
+    model: "anthropic/claude-opus-5.5-fast",
     integrations: ["Slack", "Contentful", "Vercel"],
     source: "Vercel Templates",
     github: { owner: "vercel-labs", repo: "eve-contentful-agent-template", ref: "main" },
@@ -204,8 +291,9 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/channels/slack.ts",
       "agent/instructions.md",
       "agent/schedules/contentful-mirror-nightly.ts",
-      "agent/skills/contentful-query.ts",
-      "agent/tools/search_contentful_entries.ts",
+      "agent/skills/contentful_api.md",
+      "agent/skills/search_content/SKILL.md",
+      "agent/tools/run_contentful_query.ts",
       "agent/tools/update_contentful_fields.ts",
       "agent/tools/publish_contentful_entry.ts",
     ],
@@ -377,11 +465,11 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/channels/resend.ts",
       "agent/connections/linear.ts",
       "agent/connections/resend.ts",
+      "agent/extensions/github.ts",
       "agent/instructions.ts",
       "agent/schedules/weekly-digest.ts",
       "agent/skills/triaging-issues/SKILL.md",
       "agent/subagents/researcher/agent.ts",
-      "agent/tools/github.ts",
     ],
   },
   {
@@ -406,8 +494,8 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/sandbox.ts",
       "agent/schedules/weekly-analytics.ts",
       "agent/skills/x-style/SKILL.md",
-      "agent/subagents/researcher/agent.ts",
-      "agent/subagents/reviewer/agent.ts",
+      "agent/subagents/draft-reviewer/agent.ts",
+      "agent/subagents/web-researcher/agent.ts",
       "agent/tools/lint_against_style.ts",
     ],
   },

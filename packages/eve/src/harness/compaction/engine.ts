@@ -1,19 +1,29 @@
 import type { ModelMessage } from "ai";
 
 import {
+  clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
+  serializeToolResultOutput,
   sliceUtf16Safe,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
+import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
-const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
+/**
+ * Most of the conversation kept word for word next to a compaction summary.
+ * A fixed budget, not a share of the context window: the history after a
+ * compaction is the summary plus at most this much, however far the character
+ * estimate sits below the provider's count (about 1.6x on URL- and JSON-heavy
+ * text), so the next compaction is far off.
+ */
+const KEPT_TAIL_TOKENS = 20_000;
 
 /**
  * Element type of a non-string `ModelMessage.content` array.
@@ -86,10 +96,10 @@ export type CompactionSummarizer = (prompt: {
 /** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
   readonly config: CompactionConfig;
-  readonly conversation: readonly ModelMessage[];
   readonly older: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
+  readonly replay: ModelMessage | undefined;
   readonly tokenEstimateAdjustment: number;
 }
 
@@ -128,7 +138,7 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
         ];
   const capped = withResumptionGuard(
     [...checkpointHead, ...capToolResults(input.older), ...input.recent],
-    input.conversation,
+    input.replay,
     input.config.threshold,
   );
 
@@ -181,11 +191,31 @@ export async function compactMessages(
   historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
-  let keep = selectRecentWindowSize(conversation, recentConfig);
 
-  if (!forceSummary) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+  // The current request is replayed after every compaction. One over the tail
+  // budget keeps its start and end; the cut-out middle goes to the summarizer.
+  const planTail = (history: readonly ModelMessage[]) => {
+    const index = findLastRealUserIndex(history);
+    const current = history[index];
+    const fit = current === undefined ? undefined : fitCurrentMessage(current, budget);
+    const replay = fit?.replay ?? current;
+    let keep = selectRecentWindowSize(history, recentConfig, budget);
+    if (replay !== undefined && index < history.length - keep) {
+      // The window leaves the request out, so it is replayed after the summary.
+      keep = selectRecentWindowSize(
+        history,
+        recentConfig,
+        Math.max(0, budget - estimateTokens([replay])),
+      );
+    }
+    return { currentIndex: index, fit, keep, replay };
+  };
+
+  const first = planTail(conversation);
+  if (!forceSummary && first.fit === undefined) {
+    const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
     }
@@ -200,10 +230,10 @@ export async function compactMessages(
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
         config,
-        conversation,
         older,
         previousCheckpoint,
         recent,
+        replay: first.replay,
         tokenEstimateAdjustment,
       });
       if (outcome.type === "within-limit") {
@@ -212,60 +242,143 @@ export async function compactMessages(
     }
   }
 
-  while (true) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+  // Tool results in the kept tail are shortened on this path only: one large
+  // file read would otherwise take the whole tail budget.
+  const cappedConversation = capToolResults(conversation);
+  const summaryPlan = planTail(cappedConversation);
+  const { currentIndex, fit, keep, replay } = summaryPlan;
 
-    const summaryPrompt = createCompactionPrompt({
-      messages: older,
-      previousCheckpoint,
-      transcriptBudgetTokens: config.threshold,
-    });
-
-    const summary = await summarize({
-      messages: [createFrameworkUserMessage("context.compaction", summaryPrompt.prompt)],
-      system: summaryPrompt.system,
-    });
-
-    const summaryHead: ModelMessage[] = [
-      createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
-      { content: summary, role: "assistant" },
-    ];
-
-    // Prefer keeping the recent tail verbatim — surviving tool results are the
-    // model's evidence that work already ran. Degrade to text-only, then to a
-    // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard(
-      [...summaryHead, ...recent],
-      conversation,
-      config.threshold,
+  const current = currentIndex < 0 ? undefined : cappedConversation[currentIndex];
+  const noFiles = current === undefined ? undefined : omitFiles(current);
+  // The least a compaction can be: the checkpoint and the request, or its cut to a note if that is shorter.
+  const floorCut = noFiles === undefined ? undefined : fitCurrentMessage(noFiles, 1)?.replay;
+  const floorRequest =
+    noFiles !== undefined &&
+    floorCut !== undefined &&
+    estimateTokens([floorCut]) < estimateTokens([noFiles])
+      ? floorCut
+      : noFiles;
+  const floor = withResumptionGuard(checkpointHead(""), floorRequest, Number.POSITIVE_INFINITY);
+  if (evaluateThreshold(floor, config, "estimate").type === "over-limit") {
+    throw new CompactionOverLimitError(
+      `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
     );
-    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
-      return verbatim;
-    }
-
-    const stripped = withResumptionGuard(
-      [...summaryHead, ...keepNonToolResultMessages(recent)],
-      conversation,
-      config.threshold,
-    );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
-      return stripped;
-    }
-
-    keep -= 1;
   }
+
+  const { older, recent } = splitMessagesForCompaction(cappedConversation, keep);
+
+  const summaryPrompt = createCompactionPrompt({
+    messages:
+      fit === undefined
+        ? older
+        : older.map((message, index) => (index === currentIndex ? fit.cut : message)),
+    previousCheckpoint,
+    transcriptBudgetTokens: config.threshold,
+  });
+
+  const summary = await summarize({
+    messages: [createFrameworkUserMessage("context.compaction", summaryPrompt.prompt)],
+    system: summaryPrompt.system,
+  });
+
+  const fits = (candidate: readonly ModelMessage[]) =>
+    evaluateThreshold(candidate, config, "estimate").type === "within-limit";
+
+  // Prefer keeping the recent tail verbatim — surviving tool results are the
+  // model's evidence that work already ran. Degrade to text-only, then drop
+  // the tail, then clip the summary, then cut the request: never summarize
+  // again, since a smaller tail does not make the summary smaller.
+  const verbatim = withResumptionGuard(
+    [...checkpointHead(summary), ...recent],
+    replay,
+    config.threshold,
+  );
+  if (fits(verbatim)) {
+    return verbatim;
+  }
+
+  const textTail = keepNonToolResultMessages(recent);
+  const stripped = withResumptionGuard(
+    [...checkpointHead(summary), ...textTail],
+    replay,
+    config.threshold,
+  );
+  if (fits(stripped)) {
+    return stripped;
+  }
+
+  const noTail = withResumptionGuard(checkpointHead(summary), replay, config.threshold);
+  if (fits(noTail)) {
+    return noTail;
+  }
+
+  // Last, the summary is clipped to the largest piece that fits beside the
+  // request; undefined when the request leaves it no room at all.
+  const withClippedSummary = (request: ModelMessage | undefined): ModelMessage[] | undefined => {
+    const build = (chars: number) =>
+      withResumptionGuard(
+        checkpointHead(
+          chars < MIN_CLIP_CHARS
+            ? sliceUtf16Safe(summary, chars)
+            : clipMiddleUtf16Safe(summary, chars),
+        ),
+        request,
+        config.threshold,
+      );
+    if (!fits(build(0))) {
+      return undefined;
+    }
+    let low = 0;
+    let high = summary.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (fits(build(mid))) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return build(low);
+  };
+
+  const clipped = withClippedSummary(replay);
+  if (clipped !== undefined) {
+    return clipped;
+  }
+
+  // The request itself is over: a file it carries gives way to a note first,
+  // then its text is cut to the room that is left.
+  const requestBudget =
+    config.threshold -
+    estimateTokens(withResumptionGuard(checkpointHead(""), undefined, config.threshold));
+  const request =
+    noFiles === undefined
+      ? undefined
+      : (fitCurrentMessage(noFiles, requestBudget)?.replay ?? noFiles);
+  const cutRequest = withClippedSummary(request);
+  if (cutRequest === undefined) {
+    throw new CompactionOverLimitError(
+      `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
+    );
+  }
+  return cutRequest;
 }
 
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
+const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
 
 /**
  * Caps oversized tool-result outputs in place, keeping message structure and
  * tool_use/tool_result pairing untouched. The cap matches the transcript
  * payload clip, so a later summarization sees the same content the model
  * kept — capping never destroys material the summarizer would need, unlike
- * dropping results outright. The annotation leads the value so it survives
- * prefix-capped renderings.
+ * dropping results outright. The cap keeps the head and tail of the output,
+ * where failures and exit codes usually are.
+ *
+ * Capping is idempotent: the capped value, annotation included, fits the
+ * same limit it was measured against, and a text output is measured by its
+ * value, so a later compaction leaves an already-capped part as it is.
  */
 function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
@@ -282,7 +395,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       // size check: serializing raw payloads into a prefix cap would keep
       // bytes the model cannot read while cutting the text it can.
       const output = stubContentOutputFileParts(part.output) as typeof part.output;
-      const serialized = JSON.stringify(output) ?? "";
+      const serialized = serializeToolResultOutput(output);
       if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {
         if (output === part.output) {
           return part;
@@ -296,7 +409,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
         ...part,
         output: {
           type: "text" as const,
-          value: `${CAPPED_RESULT_ANNOTATION}\n\n${sliceUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT)}`,
+          value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
         },
       };
     });
@@ -316,11 +429,10 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
  */
 function withResumptionGuard(
   messages: ModelMessage[],
-  conversation: readonly ModelMessage[],
+  replay: ModelMessage | undefined,
   threshold: number,
 ): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  const replay = findLastRealUserMessage(conversation);
   const alreadyKept =
     replay !== undefined &&
     messages.some((message) => message.role === "user" && message.content === replay.content);
@@ -348,21 +460,156 @@ function withResumptionGuard(
 }
 
 /**
- * Latest user message authored by the user rather than the framework.
+ * Splits `message` when it exceeds the tail budget, or returns `undefined`
+ * when it already fits. `replay` keeps the start (a fifth of the budget) and
+ * the end of its text, behind a note where the middle was cut; `cut` is that
+ * middle, which the summarizer receives in full. Instructions sit at the
+ * start or the end of a request and bulk pasted text in the middle. Non-text
+ * parts (files) stay on the replay.
  */
-function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
-  for (let index = conversation.length - 1; index >= 0; index -= 1) {
-    const message = conversation[index];
-    if (message?.role !== "user" || typeof message.content !== "string") {
-      continue;
-    }
-    if (isFrameworkUserMessage(message)) {
-      continue;
-    }
-    return message;
+function fitCurrentMessage(
+  message: ModelMessage,
+  budget: number,
+): { readonly cut: ModelMessage; readonly replay: ModelMessage } | undefined {
+  const text = messageText(message);
+  // The replay keeps the message's file parts, so when they alone take the
+  // budget, cutting its text frees nothing.
+  if (text === undefined || budget <= 0 || estimateTokens([message]) <= budget) {
+    return undefined;
   }
 
-  return undefined;
+  const note = (omitted: number) =>
+    `\n\n[eve: ${omitted} characters from the middle of this message were cut during context compaction to fit the context window.]\n\n`;
+  const split = (start: number, end: number) =>
+    splitMessageText(message, start, end, note(end - start));
+  let keptChars = Math.floor(budget * 4);
+  while (keptChars > 0) {
+    keptChars = Math.min(keptChars, text.length);
+    const lead = Math.floor(keptChars * 0.2);
+    const start = sliceUtf16Safe(text, lead).length;
+    let end = text.length - (keptChars - lead);
+    const after = text.charCodeAt(end);
+    if (after >= 0xdc00 && after <= 0xdfff) {
+      end += 1;
+    }
+    if (start < end) {
+      const fitted = split(start, end);
+      if (estimateTokens([fitted.replay]) <= budget) {
+        return fitted;
+      }
+    }
+    keptChars = Math.floor(keptChars * 0.9) - 1;
+  }
+  return split(0, text.length);
+}
+
+/** Below this the clip marker would not fit: the summary keeps only its start. */
+const MIN_CLIP_CHARS = 40;
+
+const OMITTED_FILE_NOTE =
+  "[eve: a file in this message was omitted during context compaction: it is too large for the context window.]";
+
+function checkpointHead(summary: string): ModelMessage[] {
+  return [
+    createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
+    { content: summary, role: "assistant" },
+  ];
+}
+
+/** Replaces every non-text part of a message with one note. */
+function omitFiles(message: ModelMessage): ModelMessage {
+  if (typeof message.content === "string") {
+    return message;
+  }
+  const parts: MessagePart[] = [];
+  let noted = false;
+  for (const part of message.content) {
+    if (part.type === "text") {
+      parts.push(part);
+    } else if (!noted) {
+      noted = true;
+      parts.push({ type: "text", text: OMITTED_FILE_NOTE });
+    }
+  }
+  return noted ? ({ ...message, content: parts } as ModelMessage) : message;
+}
+
+/** The text a user message can be cut by: its string content, or its text parts joined in order. */
+function messageText(message: ModelMessage): string | undefined {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  const texts = message.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
+  return texts.length === 0 ? undefined : texts.join("");
+}
+
+type MessagePart = Exclude<ModelMessage["content"], string>[number];
+
+/**
+ * Cuts characters `start` to `end` of {@link messageText}: `cut` keeps only
+ * that middle, `replay` keeps the rest with `note` at the cut. Non-text parts
+ * stay on both.
+ */
+function splitMessageText(
+  message: ModelMessage,
+  start: number,
+  end: number,
+  note: string,
+): { readonly cut: ModelMessage; readonly replay: ModelMessage } {
+  if (typeof message.content === "string") {
+    return {
+      cut: { ...message, content: message.content.slice(start, end) } as ModelMessage,
+      replay: {
+        ...message,
+        content: `${message.content.slice(0, start)}${note}${message.content.slice(end)}`,
+      } as ModelMessage,
+    };
+  }
+  let offset = 0;
+  let noted = false;
+  const cutParts: MessagePart[] = [];
+  const replay: MessagePart[] = [];
+  for (const part of message.content) {
+    if (part.type !== "text") {
+      cutParts.push(part);
+      replay.push(part);
+      continue;
+    }
+    const from = Math.max(0, Math.min(part.text.length, start - offset));
+    const to = Math.max(from, Math.min(part.text.length, end - offset));
+    offset += part.text.length;
+    if (to > from) {
+      cutParts.push({ ...part, text: part.text.slice(from, to) });
+    }
+    const before = part.text.slice(0, from);
+    const after = part.text.slice(to);
+    const cutHere: boolean = to > from && !noted;
+    if (cutHere) {
+      noted = true;
+    }
+    const text = `${before}${cutHere ? note : ""}${after}`;
+    if (text.length > 0) {
+      replay.push({ ...part, text });
+    }
+  }
+  if (!noted) {
+    replay.push({ type: "text", text: note });
+  }
+  return {
+    cut: { ...message, content: cutParts } as ModelMessage,
+    replay: { ...message, content: replay } as ModelMessage,
+  };
+}
+
+function findLastRealUserIndex(conversation: readonly ModelMessage[]): number {
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index];
+    if (message?.role === "user" && !isFrameworkUserMessage(message)) {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
@@ -433,12 +680,16 @@ function assistantMessageText(message: ModelMessage): string {
     .trim();
 }
 
+function keptTailBudget(config: CompactionConfig): number {
+  return Math.min(KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
+}
+
 function selectRecentWindowSize(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  budget: number,
 ): number {
   const maxKeep = Math.min(config.recentWindowSize, Math.max(messages.length - 1, 0));
-  const reserve = resolveCompactionSummaryReserve(config);
   let keep = 0;
   let recentTokens = 0;
 
@@ -449,7 +700,7 @@ function selectRecentWindowSize(
     }
 
     const messageTokens = estimateTokens([message]);
-    if (recentTokens + messageTokens + reserve > config.threshold) {
+    if (recentTokens + messageTokens > budget) {
       break;
     }
 
@@ -458,13 +709,6 @@ function selectRecentWindowSize(
   }
 
   return keep;
-}
-
-function resolveCompactionSummaryReserve(config: CompactionConfig): number {
-  return Math.min(
-    COMPACTION_SUMMARY_RESERVE_TOKENS,
-    Math.max(64, Math.floor(config.threshold / 4)),
-  );
 }
 
 function splitMessagesForCompaction(

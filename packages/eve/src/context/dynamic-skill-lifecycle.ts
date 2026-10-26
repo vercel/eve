@@ -86,56 +86,83 @@ function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillM
   };
 }
 
+// The whole persisted record, including the generation `start()` sets: provider
+// state alone repeats when a gone sandbox is recreated under the same name.
 function sandboxIdentity(state: SandboxState): string | null {
   return state.session === null ? null : JSON.stringify(state.session);
 }
 
 /**
- * Writes only packages with supporting files. Markdown-only skills are served
- * from durable context, so they never need a sandbox. A package is skipped when
- * its revision is unchanged and was written to the same persisted sandbox.
+ * Queues the writes for packages with supporting files, so the model call
+ * never waits for the sandbox; anything that uses the sandbox waits for them.
+ * Markdown-only skills are served from durable context, so they never need a
+ * sandbox. A package is skipped when its revision is unchanged and was written
+ * to the same persisted sandbox, and then the sandbox is never opened.
+ *
+ * Files are removed only when the session no longer has a dynamic skill by that
+ * name. A skill that stops returning supporting files keeps them, since the
+ * sandbox may already provide them, for example from its snapshot.
  */
-async function syncDynamicSkillFiles(input: {
+function syncDynamicSkillFiles(input: {
   readonly ctx: ContextContainer;
+  /** Every dynamic skill the session keeps, with or without supporting files. */
+  readonly kept: ReadonlySet<string>;
   readonly previous: ReadonlyMap<string, string>;
   readonly next: ReadonlyMap<string, SandboxSkillPackage>;
-}): Promise<void> {
-  const { ctx, previous, next } = input;
-  if (previous.size === 0 && next.size === 0) return;
-
-  const access = ctx.require(SandboxKey);
-  const written = ctx.get(DynamicSkillSandboxKey) ?? {};
-  const identity = sandboxIdentity(await access.captureState());
-  const isWritten = (name: string) => identity !== null && written[name] === identity;
-
-  const stale = [...previous.keys()].filter((name) => !next.has(name) && isWritten(name));
-  const pending = [...next.values()].filter(
-    ({ revision, skill }) => previous.get(skill.name) !== revision || !isWritten(skill.name),
+}): void {
+  const { ctx, kept, previous, next } = input;
+  // Forget changed packages before the write is queued: the manifest already
+  // names the new revision, and if the write never lands, this keeps the next
+  // dispatch from counting the old files as current.
+  const recorded = ctx.get(DynamicSkillSandboxKey) ?? {};
+  const changed = [...next.values()].filter(
+    ({ revision, skill }) => previous.get(skill.name) !== revision && skill.name in recorded,
   );
-  if (stale.length === 0 && pending.length === 0) return;
-
-  const sandbox = await access.get();
-  if (sandbox === null) return;
-
-  // Forget touched packages first so a failed write is never skipped later.
-  const nextWritten = { ...written };
-  for (const name of previous.keys()) {
-    if (!next.has(name)) delete nextWritten[name];
+  if (changed.length > 0) {
+    const forgotten = { ...recorded };
+    for (const { skill } of changed) delete forgotten[skill.name];
+    ctx.set(DynamicSkillSandboxKey, forgotten);
   }
-  for (const { skill } of pending) delete nextWritten[skill.name];
-  ctx.set(DynamicSkillSandboxKey, { ...nextWritten });
 
-  for (const name of stale) {
-    await removeSkillPackageFromSandbox({ name, sandbox });
-  }
-  const current = sandboxIdentity(await access.captureState());
-  for (const { skill } of pending) {
-    // Replace the directory so files omitted from the new revision disappear.
-    await removeSkillPackageFromSandbox({ name: skill.name, sandbox });
-    await writeSkillPackageToSandbox({ sandbox, skill });
-    if (current !== null) nextWritten[skill.name] = current;
-  }
-  ctx.set(DynamicSkillSandboxKey, nextWritten);
+  // Markdown-only skills never need a sandbox; work queued earlier in this
+  // step implies one exists, so without one there is nothing to withdraw.
+  const access = next.size === 0 ? ctx.get(SandboxKey) : ctx.require(SandboxKey);
+  if (access === undefined) return;
+  access.prepare(async (open) => {
+    // Read when the work runs: earlier work queued in this step may have changed it.
+    // The written record, not the manifest, finds withdrawn files: a skill that
+    // went markdown-only has no revision left, but its files are still there.
+    const written = ctx.get(DynamicSkillSandboxKey) ?? {};
+    const withdrawn = Object.keys(written).filter((name) => !kept.has(name));
+    const identity = sandboxIdentity(await access.captureState());
+    const isWritten = (name: string) => identity !== null && written[name] === identity;
+
+    const stale = withdrawn.filter(isWritten);
+    const pending = [...next.values()].filter(
+      ({ revision, skill }) => previous.get(skill.name) !== revision || !isWritten(skill.name),
+    );
+    if (stale.length === 0 && pending.length === 0) return;
+
+    const sandbox = await open();
+
+    // Forget touched packages first so a failed write is never skipped later.
+    const nextWritten = { ...written };
+    for (const name of withdrawn) delete nextWritten[name];
+    for (const { skill } of pending) delete nextWritten[skill.name];
+    ctx.set(DynamicSkillSandboxKey, { ...nextWritten });
+
+    for (const name of stale) {
+      await removeSkillPackageFromSandbox({ name, sandbox });
+    }
+    const current = sandboxIdentity(await access.captureState());
+    for (const { skill } of pending) {
+      // Replace the directory so files omitted from the new revision disappear.
+      await removeSkillPackageFromSandbox({ name: skill.name, sandbox });
+      await writeSkillPackageToSandbox({ sandbox, skill });
+      if (current !== null) nextWritten[skill.name] = current;
+    }
+    ctx.set(DynamicSkillSandboxKey, nextWritten);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -144,8 +171,8 @@ async function syncDynamicSkillFiles(input: {
 
 /**
  * Dispatches a stream event to dynamic skill resolvers. On a matching
- * event: runs handlers, stores instructions in durable context, and syncs
- * changed supporting files to the sandbox.
+ * event: runs handlers, stores instructions in durable context, and queues
+ * changed supporting files for the sandbox without waiting for them.
  */
 export async function dispatchDynamicSkillEvent(input: {
   readonly ctx: ContextContainer;
@@ -243,7 +270,7 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
-  await syncDynamicSkillFiles({ ctx, next, previous });
+  syncDynamicSkillFiles({ ctx, kept: new Set(dynamicSkillOwners.keys()), next, previous });
 
   ctx.set(DynamicSkillManifestKey, newManifest);
 }

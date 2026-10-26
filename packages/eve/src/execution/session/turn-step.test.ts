@@ -1,4 +1,4 @@
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { jsonSchema, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -81,6 +81,7 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { defineTool } from "#tools/definition.js";
 import { defineState } from "#public/definitions/state.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
@@ -985,7 +986,6 @@ describe("dispatchCoordinationStep", () => {
     await dispatchCoordinationStep({
       action: "park",
       workflowToolRunOwner: { inbox: "generated-owner-token" },
-      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
@@ -1044,7 +1044,6 @@ describe("dispatchCoordinationStep", () => {
       const dispatched = await dispatchCoordinationStep({
         action: "park",
         workflowToolRunOwner: { inbox: "owner-inbox" },
-        sessionWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
       });
@@ -1109,6 +1108,56 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  describe("session usage limit", () => {
+    const uncappedRoot = () => false;
+    const childLimit = () => true;
+
+    async function limitPassedToHarness(childSessionUsage: (() => boolean) | undefined) {
+      const bundle = createStubBundle();
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+        ...bundle,
+        graph: {
+          ...bundle.graph,
+          nodesByNodeId: new Map([
+            [
+              ROOT_RUNTIME_AGENT_NODE_ID,
+              { agent: { config: { limits: { sessionUsage: uncappedRoot } } } },
+            ],
+          ]),
+        },
+        resolvedAgent: {
+          config:
+            childSessionUsage === undefined ? {} : { limits: { sessionUsage: childSessionUsage } },
+        },
+      } as never);
+      installSessionStoreMocks([createStubSession()]);
+      let passed: unknown = "unset";
+      vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+        passed = input.sessionUsageLimit;
+        return async (session: HarnessSession): Promise<StepResult> => ({
+          next: { done: true, output: "complete" },
+          session,
+        });
+      });
+
+      await turnStep({
+        input: { kind: "deliver", payloads: [{ message: "Survey the pier." }] },
+        sessionWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState: createStubSessionState(),
+      });
+      return passed;
+    }
+
+    it("runs a subagent's own limit over an uncapped root's", async () => {
+      await expect(limitPassedToHarness(childLimit)).resolves.toBe(childLimit);
+    });
+
+    it("runs the root agent's limit for a subagent without one", async () => {
+      await expect(limitPassedToHarness(undefined)).resolves.toBe(uncappedRoot);
+    });
+  });
+
   it("starts model work before the title attribute write settles and joins it before returning", async () => {
     let finishTitle!: () => void;
     vi.mocked(setEveAttributes)
@@ -2203,7 +2252,13 @@ describe("turnStep", () => {
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle());
     const sandbox = mockSandbox({ id: "sbx_cancelled" });
-    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce(sandbox.access as never);
+    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce({
+      ...sandbox.access,
+      end: async () => {},
+      release: async () => {},
+      resumeRecorded: () => {},
+      settle: async () => {},
+    });
     const controller = new AbortController();
     controller.abort(new TurnCancelledError());
 
@@ -3102,12 +3157,12 @@ describe("turnStep", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
     const lifecycleOrder: string[] = [];
     const originalClearVirtualContext = ContextContainer.prototype.clearVirtualContext;
-    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(
-      function (this: ContextContainer) {
-        lifecycleOrder.push("clear");
-        originalClearVirtualContext.call(this);
-      },
-    );
+    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(function (
+      this: ContextContainer,
+    ) {
+      lifecycleOrder.push("clear");
+      originalClearVirtualContext.call(this);
+    });
     const approval = stampDurableDynamicCallback(() => "not-applicable" as const, {
       callback: () => "not-applicable",
       closure: {},

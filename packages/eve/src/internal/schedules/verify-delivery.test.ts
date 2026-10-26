@@ -32,7 +32,11 @@ const schedule = {
 
 describe("schedule queue delivery", () => {
   it("accepts matching occurrences with optional identity/timing and extra transport metadata", () => {
-    const { executionId, scheduledAt, ...withoutOptionalFields } = message;
+    const {
+      executionId: _executionId,
+      scheduledAt: _scheduledAt,
+      ...withoutOptionalFields
+    } = message;
     for (const body of [message, { ...withoutOptionalFields, transportAttempt: 1 }]) {
       const parsed = expectScheduleQueueMessage(body);
       expect(parsed.payload.payload).toBe("Review open incidents");

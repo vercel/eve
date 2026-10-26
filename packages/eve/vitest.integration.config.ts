@@ -40,6 +40,13 @@ export default defineConfig({
     ],
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
     include: ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"],
+    server: {
+      deps: {
+        // Imports matrix-js-sdk paths without file extensions, which Node's ESM loader rejects
+        // and bundlers resolve; registry template tests load it through Vite instead.
+        inline: [/@beeper\/chat-adapter-matrix/u],
+      },
+    },
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 30_000,
   },

@@ -7,9 +7,8 @@ import type {
   ApprovalPolicy,
   ApprovalResponsePolicy,
 } from "#approval/definition.js";
-import { loadContext, contextStorage } from "#context/container.js";
+import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { readSessionSchedule } from "#context/session-schedule.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { isApprovalRecheck } from "#harness/approval-recheck.js";
 import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
@@ -19,10 +18,7 @@ import type {
   DynamicSchedulesDefinition,
   ScheduleCreateApproval,
 } from "#public/schedules/subscription.js";
-import {
-  assertScheduleManagementAllowed,
-  type PreparedScheduleWrite,
-} from "#runtime/schedules/collection-client.js";
+import type { PreparedScheduleWrite } from "#runtime/schedules/collection-client.js";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { MAX_SCHEDULE_DELAY_MINUTES } from "#runtime/schedules/validation.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -94,14 +90,8 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
   return markDynamicCallbackRebind(
     defineDynamic({
       events: {
-        "turn.started": async (_event, context) => {
-          const scope = contextStorage.getStore();
-          if (
-            definition.tool === false ||
-            context.session.schedule !== undefined ||
-            (scope !== undefined && readSessionSchedule(scope) !== undefined)
-          )
-            return null;
+        "turn.started": async () => {
+          if (definition.tool === false) return null;
           const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
           const keyFor = (operation: "create" | "update", callId: string) =>
             `${prefix}${operation}:${callId}`;
@@ -144,6 +134,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
             approval?: Approval,
           ) => {
             const tool = defineTool({
+              deferred: definition.tool === "deferred",
               description: `${definition.description ? `${definition.description}\n\n` : ""}${description}`,
               inputSchema,
               approval,
@@ -151,10 +142,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
                 start: (input: { name?: string }) =>
                   input.name ? `${action}: ${scheduleDisplayName(input.name)}` : action,
               },
-              execute: (input: any, context) => {
-                assertScheduleManagementAllowed();
-                return execute(input, context);
-              },
+              execute,
             });
             stampCallbacks(tool);
             return tool as DynamicToolEntry;

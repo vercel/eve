@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
+import {
+  releasingSessionOwnerWorkflow,
+  sessionCommandInboxWorkflow,
+  sessionInboxForceClaimWorkflow,
+  sessionInboxTakeoverWorkflow,
+} from "#internal/testing/session-inbox-workflow.js";
 import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
 import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
@@ -52,4 +57,71 @@ describe("session command inbox integration", () => {
       if (status === "pending" || status === "running") await run.cancel();
     }
   });
+
+  it("keeps payloads accepted before a forced takeover and can take the address back", async () => {
+    const token = "http:session-inbox:takeover";
+    const physicalToken = sessionInboxHookToken(token);
+    const owner = await start(sessionInboxTakeoverWorkflow, [{ token }]);
+    const runs: { cancel(): Promise<unknown>; status: Promise<string> }[] = [owner];
+    try {
+      await waitForHook(owner, { token: physicalToken });
+      const before = [send("one"), send("two")];
+      for (const payload of before) await resumeHook(physicalToken, payload);
+
+      const claimer = await start(sessionInboxForceClaimWorkflow, [{ token }]);
+      runs.push(claimer);
+      // The claimer returns once the original owner has taken the address back.
+      await claimer.returnValue;
+      await resumeHook(physicalToken, send("three"));
+
+      await expect(owner.returnValue).resolves.toEqual({
+        afterReclaim: send("three"),
+        beforeTakeover: before,
+      });
+    } finally {
+      for (const run of runs) if ((await run.status) === "running") await run.cancel();
+    }
+  });
+
+  it("returns a payload accepted just before the release commits", async () => {
+    const alias = "http:session-inbox:release";
+    const owner = await start(releasingSessionOwnerWorkflow, [
+      { aliases: [alias], release: "session-inbox:release" },
+    ]);
+    const aliasToken = sessionInboxHookToken(alias);
+    const world = await getWorld();
+    const createEvent = world.events.create.bind(world.events);
+    let sent = false;
+    // Alice's message lands while the owner is disposing the address.
+    const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+      const [runId, event] = args;
+      if (
+        !sent &&
+        runId === owner.runId &&
+        event.eventType === "hook_disposed" &&
+        event.eventData?.token === aliasToken
+      ) {
+        sent = true;
+        await resumeHook(aliasToken, send("Alice writes as the owner lets go."));
+      }
+      return await createEvent(...args);
+    });
+    try {
+      await waitForHook(owner, { token: aliasToken });
+      await resumeHook("session-inbox:release", undefined);
+      await vi.waitFor(() => expect(sent).toBe(true));
+      await resumeHook(`${owner.runId}:handoff`, { kind: "active" });
+      await expect(owner.returnValue).resolves.toEqual({
+        activation: { kind: "active" },
+        released: [send("Alice writes as the owner lets go.")],
+      });
+    } finally {
+      spy.mockRestore();
+      if ((await owner.status) === "running") await owner.cancel();
+    }
+  });
 });
+
+function send(message: string) {
+  return { kind: "send", payload: { message } } as const;
+}

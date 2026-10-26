@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
@@ -13,6 +13,17 @@ import type {
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import {
+  createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
+} from "#runtime/compiled-artifacts-source.js";
+import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { defineSandboxProvider } from "#sandbox/provider.js";
 
 const durable = vi.hoisted(() => ({
   attempt: 1,
@@ -30,6 +41,22 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
     }),
   }),
 }));
+const bundle = vi.hoisted(() => ({
+  loadedFrom: [] as unknown[],
+  registry: undefined as RuntimeSandboxRegistry | undefined,
+}));
+vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
+  getCompiledRuntimeAgentBundle: async (input: { compiledArtifactsSource: unknown }) => {
+    bundle.loadedFrom.push(input.compiledArtifactsSource);
+    return {
+      compiledArtifactsSource: input.compiledArtifactsSource,
+      graph: { root: { nodeId: "__root__", sandboxRegistry: bundle.registry } },
+    };
+  },
+}));
+vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
+  loadSandboxPreparedArtifact: async () => null,
+}));
 vi.mock("#internal/workflow/runtime.js", () => ({
   getRun: () => ({
     getReadable: ({ namespace }: { namespace: string }) => ({
@@ -39,7 +66,67 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   }),
 }));
 
-function context(user = "user-1"): WorkflowStepContext {
+/**
+ * A provider whose `start` upserts a sandbox by session id and whose
+ * `onSessionEnd` deletes by it, as the provider contract requires. Each open
+ * hands out its own connection over the shared sandbox; `stopped` and
+ * `closed` record which connections eve stopped and closed.
+ */
+function upsertSandboxes() {
+  const live = new Map<string, ReturnType<typeof mockSandbox>>();
+  const starts: string[] = [];
+  const connections: object[] = [];
+  const stopped: object[] = [];
+  const closed: object[] = [];
+  const deleted: Mock<() => Promise<void>> = vi.fn(async () => {});
+  const connect = (key: string) => {
+    let sandbox = live.get(key);
+    if (sandbox === undefined) {
+      sandbox = mockSandbox();
+      live.set(key, sandbox);
+    }
+    const connection = {
+      ...sandbox.connection,
+      close: async () => void closed.push(connection),
+      stop: async () => void stopped.push(connection),
+    };
+    connections.push(connection);
+    return connection;
+  };
+  const provider = defineSandboxProvider({
+    name: "upsert",
+    environment: () => ({
+      prepare: async () => null,
+      start: async (context) => {
+        starts.push(context.session.id);
+        return { connection: connect(context.session.id), state: { key: context.session.id } };
+      },
+      resume: async (_context, _artifact, state) => connect(state.key),
+      async onSessionEnd(context, _state, { reason }) {
+        if (reason === "deleted") await deleted();
+        live.delete(context.session.id);
+      },
+    }),
+  });
+  const environment = provider.environment();
+  const registry: RuntimeSandboxRegistry = {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "hash",
+        selector: defineSandbox(() => environment.open()),
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+  return { closed, connections, deleted, provider, registry, starts, stopped };
+}
+
+function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext {
   const auth = {
     attributes: {},
     authenticator: "test",
@@ -59,6 +146,7 @@ function context(user = "user-1"): WorkflowStepContext {
     },
     callId: "call-1",
     toolName: "devbox",
+    sandbox: { bundle: { source: createBundledRuntimeCompiledArtifactsSource() }, sessionId },
   };
 }
 
@@ -74,10 +162,12 @@ async function runStep<TContext = ToolContext>(
 }
 
 describe("workflow step authorization", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     durable.attempt = 1;
     durable.stepId = "step-1";
     durable.entries.clear();
+    bundle.loadedFrom = [];
+    await shutdownActiveSandboxConnections();
   });
   afterEach(() => vi.unstubAllEnvs());
   it.each([
@@ -106,6 +196,105 @@ describe("workflow step authorization", () => {
       });
     },
   );
+
+  it("resolves a development delivery's generation and starts the sandbox by key", async () => {
+    const { registry, starts } = upsertSandboxes();
+    bundle.registry = registry;
+    const owner = { ...context("user-1", "owner-session") };
+    // `eve dev` deliveries carry the generation a development source resolves to.
+    const generation = {
+      generationId: "generation-1",
+      source: createDiskRuntimeCompiledArtifactsSource("/virtual/app"),
+    };
+    const plan = { path: "/workspace/plan.txt" };
+    await expect(
+      withDevelopmentWorkflowGeneration(generation, () =>
+        runStep(
+          async (ctx) => {
+            await (await ctx.getSandbox()).writeTextFile({ ...plan, content: "draft" });
+            return "written";
+          },
+          {
+            ...owner,
+            sandbox: { bundle: { source: { kind: "development" } }, sessionId: "owner-session" },
+          },
+        ),
+      ),
+    ).resolves.toMatchObject({ kind: "result", output: "written" });
+    expect(bundle.loadedFrom).toEqual([generation.source]);
+    expect(starts).toEqual(["owner-session"]);
+  });
+
+  it("closes the step's connection and leaves the session's tracked for runtime shutdown", async () => {
+    const { closed, connections, registry, stopped } = upsertSandboxes();
+    bundle.registry = registry;
+    // The session's turn opened its sandbox in this process.
+    const session = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    await session.get();
+    await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
+      kind: "result",
+    });
+    const [sessionConnection, stepConnection] = connections;
+    expect(closed).toEqual([stepConnection]);
+    await shutdownActiveSandboxConnections();
+    // The step's connection neither replaced nor dropped the session's.
+    expect(connections).toHaveLength(2);
+    expect(stopped).toEqual([sessionConnection]);
+  });
+
+  it("fails ctx.getSandbox() without retrying once its step has returned", async () => {
+    const { registry, starts } = upsertSandboxes();
+    bundle.registry = registry;
+    const result = await runStep(async (ctx) => () => ctx.getSandbox());
+    const later = result.kind === "result" ? (result.output as () => Promise<unknown>) : undefined;
+    await expect(later?.()).rejects.toMatchObject({
+      fatal: true,
+      message: expect.stringContaining(
+        'was called after the "use step" function of tool "devbox" returned',
+      ),
+    });
+    expect(starts).toEqual([]);
+  });
+
+  it("accepts its own copy of the session's environment and leaves stopping and deleting to the session", async () => {
+    const { deleted, provider, registry, stopped } = upsertSandboxes();
+    bundle.registry = registry;
+    // The step imports its own copy of the module that declares the environment.
+    await expect(
+      runStep(async (ctx) => {
+        await ctx.getSandbox(provider.environment());
+        return "opened";
+      }),
+    ).resolves.toMatchObject({ output: "opened" });
+    const other = defineSandboxProvider({
+      name: "other",
+      environment: () => ({
+        onSessionEnd: async () => {},
+        prepare: async () => null,
+        resume: vi.fn(),
+        start: vi.fn(),
+      }),
+    }).environment();
+    const misuse: [string, (ctx: ToolContext) => Promise<unknown>][] = [
+      ["received a sandbox environment", (ctx) => ctx.getSandbox(other)],
+      ["sandbox.stop() is unavailable", async (ctx) => await (await ctx.getSandbox()).stop()],
+      ["sandbox.delete() is unavailable", async (ctx) => await (await ctx.getSandbox()).delete()],
+    ];
+    for (const [message, access] of misuse) {
+      await expect(runStep(access)).rejects.toMatchObject({
+        fatal: true,
+        message: expect.stringContaining(message),
+      });
+    }
+    expect(stopped).toEqual([]);
+    expect(deleted).not.toHaveBeenCalled();
+  });
 
   it("does not exchange a consumed code again when the rest of the step retries", async () => {
     let exchanged = false;

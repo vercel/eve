@@ -385,8 +385,10 @@ describe("workflow approval resume (real AI SDK)", () => {
     clearDurableDynamicCallbacks(initial.session.sessionId);
   });
 
-  it("starts an approved workflow and applies the session budget to the next model call", async () => {
-    const fixture = setup([workflow("deploy", always())]);
+  it("starts an approved workflow and applies the session usage limit to the next model call", async () => {
+    const fixture = setup([workflow("deploy", always())], {
+      sessionUsageLimit: ({ window }) => window.inputTokens >= 12,
+    });
     const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
     const totals = {
       cacheReadTokens: 0,
@@ -396,14 +398,11 @@ describe("workflow approval resume (real AI SDK)", () => {
       outputTokens: 1,
       sawCost: false,
     };
-    const exhausted = setTurnUsageState(
-      { ...initial.session, limits: { maxInputTokensPerSession: 12 } },
-      {
-        ...totals,
-        session: totals,
-        turnId: "turn_0",
-      },
-    );
+    const exhausted = setTurnUsageState(initial.session, {
+      ...totals,
+      session: totals,
+      turnId: "turn_0",
+    });
     const approved = await fixture.step(exhausted, {
       inputResponses: requests(initial.session).map((request) => ({
         optionId: "approve",

@@ -1,20 +1,23 @@
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import {
   type BundlerDefaultLogHandler,
   onVendoredDependencyLog,
 } from "#internal/bundler/vendored-dependency-log.js";
 
-type RolldownOutputChunk = {
+export type RolldownOutputChunk = {
   readonly type: "chunk";
   readonly code: string;
   readonly fileName: string;
   readonly imports: readonly string[];
   readonly dynamicImports: readonly string[];
+  readonly isEntry: boolean;
+  readonly name: string;
 };
 
-type RolldownOutputAsset = {
+export type RolldownOutputAsset = {
   readonly type: "asset";
   readonly fileName: string;
   readonly source: string | Uint8Array;
@@ -102,14 +105,24 @@ export async function parseWithNitroRolldownAst(
  * bundle whose consumer expects one in-memory file; use this directly only
  * for multi-file, written-to-disk output. Warnings raised only by dependency
  * code are dropped unless the caller supplies its own `onLog`, except
- * unresolved imports.
+ * unresolved imports. Pseudo-packages such as `server-only` load as empty
+ * modules ahead of every caller plugin.
  */
 export async function buildWithNitroRolldown(
-  options: Record<string, unknown>,
+  options: Record<string, unknown> & {
+    readonly experimental?: Record<string, unknown>;
+    readonly plugins?: readonly unknown[];
+  },
 ): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
   const { build } = await loadNitroRolldown();
-  return await build({ onLog: onRolldownBuildLog, ...options });
+  return await build({
+    onLog: onRolldownBuildLog,
+    ...options,
+    plugins: [createPseudoPackagePlugin(), ...(options.plugins ?? [])],
+    // Debug module IDs contain temporary workspace paths and destabilize runtime fingerprints.
+    experimental: { ...options.experimental, attachDebugInfo: "none" },
+  });
 }
 
 // Unlike the Nitro host build, whose dependency graph deliberately leaves

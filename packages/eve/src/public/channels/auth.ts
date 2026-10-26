@@ -8,6 +8,7 @@
 import { areTokenClaimMatchersSatisfied } from "#channel/auth/token-claims.js";
 import { decodeJwt } from "#compiled/jose/index.js";
 
+import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
@@ -842,13 +843,6 @@ function isLocalDevelopmentServer(): boolean {
   }
   return isEveDevEnvironment();
 }
-
-const ANONYMOUS_SESSION_AUTH_CONTEXT: SessionAuthContext = {
-  attributes: {},
-  authenticator: "none",
-  principalId: "anonymous",
-  principalType: "anonymous",
-};
 
 const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
   attributes: {},

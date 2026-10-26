@@ -1,22 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { InternalSandboxSession } from "#execution/sandbox/session.js";
-import type { SandboxProcess } from "#shared/sandbox-session.js";
-import { buildSandboxSession } from "#execution/sandbox/session.js";
+import { createConnectionSession } from "#execution/sandbox/session.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
+import type { SandboxConnection } from "#sandbox/provider.js";
+import type { SandboxProcess } from "#shared/sandbox-session.js";
 
-function textStream(content: string): ReadableStream<Uint8Array> {
-  return bufferToStream(Buffer.from(content, "utf8"));
-}
-
-function syntheticProcess(input: {
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-}): SandboxProcess {
+function syntheticProcess(input: { exitCode?: number; stdout?: string }): SandboxProcess {
   return {
     stdout: bufferToStream(Buffer.from(input.stdout ?? "", "utf8")),
-    stderr: bufferToStream(Buffer.from(input.stderr ?? "", "utf8")),
+    stderr: bufferToStream(new Uint8Array()),
     async wait() {
       return { exitCode: input.exitCode ?? 0 };
     },
@@ -24,415 +16,146 @@ function syntheticProcess(input: {
   };
 }
 
-function createTestPrimitives(
-  overrides: Partial<InternalSandboxSession> = {},
-): InternalSandboxSession {
-  return {
-    readFile: overrides.readFile ?? vi.fn(async () => null),
-    removePath: overrides.removePath ?? vi.fn(async () => {}),
-    resolvePath: overrides.resolvePath ?? ((path: string) => `/resolved/${path}`),
-    spawn: overrides.spawn ?? vi.fn(async () => syntheticProcess({})),
-    writeFile: overrides.writeFile ?? vi.fn(async () => {}),
-  };
+/** A connection over an in-memory file map; every primitive is a spy. */
+function memoryConnection(initial: Record<string, string> = {}) {
+  const files = new Map(Object.entries(initial).map(([path, text]) => [path, Buffer.from(text)]));
+  const connection = {
+    extensions: { ping: async () => "pong" },
+    readFile: vi.fn(
+      async ({ path }: { readonly path: string }): Promise<Uint8Array | null> =>
+        files.get(path) ?? null,
+    ),
+    removePath: vi.fn(async () => {}),
+    spawn: vi.fn(async () => syntheticProcess({ stdout: "hello" })),
+    stop: vi.fn(async () => {}),
+    writeFiles: vi.fn(
+      async (options: { readonly files: readonly { content: Uint8Array; path: string }[] }) => {
+        for (const file of options.files) files.set(file.path, Buffer.from(file.content));
+      },
+    ),
+  } satisfies SandboxConnection<{ ping(): Promise<string> }>;
+  return { connection, files };
 }
 
-describe("buildSandboxSession", () => {
-  // ---------------------------------------------------------------------------
-  // setNetworkPolicy
-  // ---------------------------------------------------------------------------
+describe("createConnectionSession", () => {
+  it("resolves every path and working directory from /workspace", async () => {
+    const { connection, files } = memoryConnection();
+    const session = createConnectionSession(connection);
 
-  it("forwards setNetworkPolicy to the supplied applier", async () => {
-    const apply = vi.fn(async () => {});
-    const session = buildSandboxSession(createTestPrimitives(), apply);
-    const policy = {
-      allow: {
-        "github.com": [{ transform: [{ headers: { authorization: "Basic abc" } }] }],
-        "*": [],
-      },
-    };
+    await session.writeTextFile({ content: "hi", path: "notes/./a.txt" });
+    await session.writeFiles({ files: [{ content: new Uint8Array([1]), path: "/tmp/b.bin" }] });
+    await session.run({ command: "ls", workingDirectory: "src" });
+    await session.run({ command: "pwd" });
+    await session.removePath({ force: true, path: "../tmp/x", recursive: true });
 
-    await session.setNetworkPolicy(policy);
-
-    expect(apply).toHaveBeenCalledWith(policy);
-  });
-
-  it("returns the common session surface when no applier is supplied", () => {
-    expect(buildSandboxSession(createTestPrimitives())).not.toHaveProperty("setNetworkPolicy");
-  });
-
-  // ---------------------------------------------------------------------------
-  // resolvePath
-  // ---------------------------------------------------------------------------
-
-  it("exposes resolvePath through the public session", () => {
-    const resolvePath = vi.fn((path: string) => `/resolved/${path}`);
-    const session = buildSandboxSession(createTestPrimitives({ resolvePath }));
-
-    expect(session.resolvePath("notes/todo.txt")).toBe("/resolved/notes/todo.txt");
-    expect(resolvePath).toHaveBeenCalledWith("notes/todo.txt");
-  });
-
-  // ---------------------------------------------------------------------------
-  // removePath
-  // ---------------------------------------------------------------------------
-
-  it("resolves removePath paths before delegating to the primitive", async () => {
-    const removePath = vi.fn(async () => {});
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        removePath,
-        resolvePath: (path) => `/workspace/${path}`,
-      }),
-    );
-
-    await session.removePath({ force: true, path: "skills/tenant", recursive: true });
-
-    expect(removePath).toHaveBeenCalledWith({
+    expect(session.resolvePath("notes/todo.txt")).toBe("/workspace/notes/todo.txt");
+    expect([...files.keys()]).toEqual(["/workspace/notes/a.txt", "/tmp/b.bin"]);
+    expect(connection.spawn.mock.calls).toEqual([
+      [{ abortSignal: undefined, command: "ls", env: {}, workingDirectory: "/workspace/src" }],
+      [{ abortSignal: undefined, command: "pwd", env: {}, workingDirectory: "/workspace" }],
+    ]);
+    expect(connection.removePath).toHaveBeenCalledWith({
       abortSignal: undefined,
       force: true,
-      path: "/workspace/skills/tenant",
+      path: "/tmp/x",
       recursive: true,
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // run / spawn
-  // ---------------------------------------------------------------------------
+  it("resolves from the connection's declared workspaceRoot, which must be absolute", async () => {
+    const { connection, files } = memoryConnection();
+    const session = createConnectionSession({ ...connection, workspaceRoot: "/srv/app/" });
 
-  it("implements run by collecting stdout/stderr from the spawn primitive", async () => {
-    const spawn = vi.fn(async () => syntheticProcess({ exitCode: 0, stdout: "hello" }));
-    const session = buildSandboxSession(createTestPrimitives({ spawn }));
-    const result = await session.run({ command: "echo hello" });
+    await session.writeTextFile({ content: "hi", path: "a.txt" });
+    await session.run({ command: "pwd" });
 
-    expect(spawn).toHaveBeenCalledWith({ command: "echo hello" });
-    expect(result).toEqual({ exitCode: 0, stderr: "", stdout: "hello" });
-  });
-
-  it("does not pollute stderr with framework command progress logs", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const spawn = vi.fn(async () => syntheticProcess({ exitCode: 0, stdout: "hello" }));
-    const session = buildSandboxSession(createTestPrimitives({ spawn }));
-
-    try {
-      await session.run({ command: "echo hello" });
-      expect(error).not.toHaveBeenCalled();
-    } finally {
-      error.mockRestore();
-    }
-  });
-
-  it("delegates spawn directly to the primitive", async () => {
-    const process = syntheticProcess({ exitCode: 7, stdout: "live", stderr: "warn" });
-    const spawn = vi.fn(async () => process);
-    const session = buildSandboxSession(createTestPrimitives({ spawn }));
-    const handle = await session.spawn({ command: "tail -f log" });
-
-    expect(spawn).toHaveBeenCalledWith({ command: "tail -f log" });
-    expect(handle).toBe(process);
-  });
-
-  // ---------------------------------------------------------------------------
-  // writeFile (stream)
-  // ---------------------------------------------------------------------------
-
-  it("resolves the path and forwards the stream verbatim to the primitive", async () => {
-    let capturedPath: string | undefined;
-    let capturedBytes: Buffer | undefined;
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        resolvePath: (path) => `/workspace/${path}`,
-        writeFile: async ({ path, content }) => {
-          capturedPath = path;
-          capturedBytes = await streamToBuffer(content);
-        },
-      }),
+    expect(session.resolvePath(".")).toBe("/srv/app");
+    expect([...files.keys()]).toEqual(["/srv/app/a.txt"]);
+    expect(connection.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ workingDirectory: "/srv/app" }),
     );
-
-    await session.writeFile({ content: textStream("buy milk"), path: "notes/todo.txt" });
-
-    expect(capturedPath).toBe("/workspace/notes/todo.txt");
-    expect(capturedBytes?.toString("utf8")).toBe("buy milk");
+    expect(() => createConnectionSession({ ...connection, workspaceRoot: "srv/app" })).toThrow(
+      'Sandbox connection workspaceRoot must be an absolute path, but received "srv/app".',
+    );
   });
 
-  // ---------------------------------------------------------------------------
-  // writeBinaryFile
-  // ---------------------------------------------------------------------------
+  it("implements run over spawn and merges the connection's extensions", async () => {
+    const session = createConnectionSession(memoryConnection().connection);
 
-  it("passes Uint8Array content through writeBinaryFile without lossy conversion", async () => {
-    let capturedBytes: Buffer | undefined;
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        resolvePath: (path) => `/workspace/${path}`,
-        writeFile: async ({ content }) => {
-          capturedBytes = await streamToBuffer(content);
-        },
-      }),
+    await expect(session.run({ command: "echo hello" })).resolves.toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "hello",
+    });
+    await expect(session.ping()).resolves.toBe("pong");
+  });
+
+  it("rejects connection extensions that would replace a session member", () => {
+    const { connection } = memoryConnection();
+    expect(() =>
+      createConnectionSession({ ...connection, extensions: { run: async () => "mine" } } as never),
+    ).toThrow(
+      "Sandbox connection extensions cannot replace the session members eve provides: run.",
     );
+  });
+
+  it("reads bytes or a stream from the connection in every read variant", async () => {
+    const { connection } = memoryConnection({ "/workspace/a.bin": "\u0000\u0001" });
+    const session = createConnectionSession(connection);
+
+    await expect(session.readBinaryFile({ path: "a.bin" })).resolves.toEqual(
+      Buffer.from([0x00, 0x01]),
+    );
+    await expect(session.readBinaryFile({ path: "missing.bin" })).resolves.toBeNull();
+    connection.readFile.mockResolvedValueOnce(new Blob(["streamed"]).stream() as never);
+    await expect(session.readTextFile({ path: "b.txt" })).resolves.toBe("streamed");
+    const stream = await session.readFile({ path: "a.bin" });
+    expect(await streamToBuffer(stream!)).toEqual(Buffer.from([0x00, 0x01]));
+  });
+
+  it("writes stream, binary, and encoded text content as bytes", async () => {
+    const { connection, files } = memoryConnection();
+    const session = createConnectionSession(connection);
     const bytes = new Uint8Array([0x00, 0x01, 0x02, 0xff]);
 
-    await session.writeBinaryFile({ content: bytes, path: "assets/binary.bin" });
+    await session.writeFile({ content: bufferToStream(Buffer.from("buy milk")), path: "a.txt" });
+    await session.writeBinaryFile({ content: bytes, path: "b.bin" });
+    await session.writeTextFile({ content: "aGk=", encoding: "base64", path: "c.txt" });
 
-    expect(capturedBytes).toEqual(Buffer.from(bytes));
+    expect(files.get("/workspace/a.txt")?.toString()).toBe("buy milk");
+    expect(files.get("/workspace/b.bin")).toEqual(Buffer.from(bytes));
+    expect(files.get("/workspace/c.txt")?.toString()).toBe("hi");
   });
 
-  // ---------------------------------------------------------------------------
-  // writeTextFile
-  // ---------------------------------------------------------------------------
-
-  it("encodes a string as utf-8 bytes through writeTextFile by default", async () => {
-    let capturedPath: string | undefined;
-    let capturedBytes: Buffer | undefined;
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        resolvePath: (path) => `/workspace/${path}`,
-        writeFile: async ({ path, content }) => {
-          capturedPath = path;
-          capturedBytes = await streamToBuffer(content);
-        },
-      }),
+  it.each([
+    ["one line", "alpha\nbeta\ngamma\n", { endLine: 2, startLine: 2 }, "beta\n"],
+    ["a range", "one\ntwo\nthree\nfour\n", { endLine: 3, startLine: 2 }, "two\nthree\n"],
+    ["through EOF", "a\nb\nc", { startLine: 2 }, "b\nc"],
+    ["a clamped end", "a\nb\n", { endLine: 999, startLine: 1 }, "a\nb\n"],
+    ["a start past EOF", "only\n", { startLine: 5 }, ""],
+    ["from line 1", "a\nb\nc\n", { endLine: 2 }, "a\nb\n"],
+    [
+      "CRLF endings",
+      "alpha\r\nbeta\r\ngamma\r\n",
+      { endLine: 2, startLine: 1 },
+      "alpha\r\nbeta\r\n",
+    ],
+    ["bare CR endings", "alpha\rbeta\rgamma\r", { endLine: 2, startLine: 2 }, "beta\r"],
+    ["no trailing newline", "first\nsecond", { endLine: 2, startLine: 2 }, "second"],
+  ])("reads %s of a text file", async (_, content, range, expected) => {
+    const session = createConnectionSession(
+      memoryConnection({ "/workspace/f.txt": content }).connection,
     );
-
-    await session.writeTextFile({ content: "buy milk", path: "notes/todo.txt" });
-
-    expect(capturedPath).toBe("/workspace/notes/todo.txt");
-    expect(capturedBytes).toEqual(Buffer.from("buy milk", "utf8"));
+    await expect(session.readTextFile({ path: "f.txt", ...range })).resolves.toBe(expected);
   });
 
-  // ---------------------------------------------------------------------------
-  // readBinaryFile
-  // ---------------------------------------------------------------------------
-
-  it("collects the readFile stream into a Uint8Array for readBinaryFile", async () => {
-    const bytes = Buffer.from([0x00, 0x01, 0x02, 0xff]);
-    const readFile = vi.fn(async () => bufferToStream(bytes));
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile,
-        resolvePath: (path) => `/workspace/${path}`,
-      }),
-    );
-
-    const result = await session.readBinaryFile({ path: "assets/binary.bin" });
-
-    expect(readFile).toHaveBeenCalledWith({
-      abortSignal: undefined,
-      path: "/workspace/assets/binary.bin",
-    });
-    expect(result).toEqual(bytes);
-  });
-
-  it("returns null when readBinaryFile target is missing", async () => {
-    const session = buildSandboxSession(createTestPrimitives({ readFile: async () => null }));
-
-    await expect(session.readBinaryFile({ path: "missing.bin" })).resolves.toBeNull();
-  });
-
-  // ---------------------------------------------------------------------------
-  // readFile (stream)
-  // ---------------------------------------------------------------------------
-
-  it("returns the underlying stream from readFile verbatim", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("streamed content"),
-      }),
-    );
-
-    const stream = await session.readFile({ path: "f.txt" });
-    expect(stream).not.toBeNull();
-    const buf = await streamToBuffer(stream as ReadableStream<Uint8Array>);
-    expect(buf.toString("utf8")).toBe("streamed content");
-  });
-
-  // ---------------------------------------------------------------------------
-  // readTextFile — basic
-  // ---------------------------------------------------------------------------
-
-  it("returns null when the file does not exist", async () => {
-    const session = buildSandboxSession(createTestPrimitives());
-
-    const result = await session.readTextFile({ path: "missing.txt" });
-
-    expect(result).toBeNull();
-  });
-
-  it("returns the full file content when no options are provided", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("line one\nline two\n"),
-      }),
-    );
-    const result = await session.readTextFile({ path: "file.txt" });
-
-    expect(result).toBe("line one\nline two\n");
-  });
-
-  it("resolves the path before reading", async () => {
-    const readFile = vi.fn(async () => textStream("content"));
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile,
-        resolvePath: (path) => `/cwd/${path}`,
-      }),
-    );
-
-    await session.readTextFile({ path: "relative.txt" });
-
-    expect(readFile).toHaveBeenCalledWith({ abortSignal: undefined, path: "/cwd/relative.txt" });
-  });
-
-  // ---------------------------------------------------------------------------
-  // readTextFile — line ranges
-  // ---------------------------------------------------------------------------
-
-  it("returns a single line with startLine and endLine equal", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("alpha\nbeta\ngamma\n"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 2, path: "f.txt", startLine: 2 });
-
-    expect(result).toBe("beta\n");
-  });
-
-  it("returns a range of lines", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("one\ntwo\nthree\nfour\n"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 3, path: "f.txt", startLine: 2 });
-
-    expect(result).toBe("two\nthree\n");
-  });
-
-  it("returns from startLine through EOF when endLine is omitted", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("a\nb\nc"),
-      }),
-    );
-    const result = await session.readTextFile({ path: "f.txt", startLine: 2 });
-
-    expect(result).toBe("b\nc");
-  });
-
-  it("clamps endLine to EOF without error", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("a\nb\n"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 999, path: "f.txt", startLine: 1 });
-
-    expect(result).toBe("a\nb\n");
-  });
-
-  it("returns empty string when startLine is past EOF", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("only\n"),
-      }),
-    );
-    const result = await session.readTextFile({ path: "f.txt", startLine: 5 });
-
-    expect(result).toBe("");
-  });
-
-  it("returns from line 1 through endLine when startLine is omitted", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("a\nb\nc\n"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 2, path: "f.txt" });
-
-    expect(result).toBe("a\nb\n");
-  });
-
-  // ---------------------------------------------------------------------------
-  // readTextFile — preserves original line endings
-  // ---------------------------------------------------------------------------
-
-  it("preserves CRLF line endings in ranged reads", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("alpha\r\nbeta\r\ngamma\r\n"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 2, path: "f.txt", startLine: 1 });
-
-    expect(result).toBe("alpha\r\nbeta\r\n");
-  });
-
-  it("preserves bare CR line endings in ranged reads", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("alpha\rbeta\rgamma\r"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 2, path: "f.txt", startLine: 2 });
-
-    expect(result).toBe("beta\r");
-  });
-
-  it("handles file without trailing newline", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("first\nsecond"),
-      }),
-    );
-    const result = await session.readTextFile({ endLine: 2, path: "f.txt", startLine: 2 });
-
-    expect(result).toBe("second");
-  });
-
-  // ---------------------------------------------------------------------------
-  // readTextFile — validation
-  // ---------------------------------------------------------------------------
-
-  it("throws for non-integer startLine", async () => {
-    const session = buildSandboxSession(createTestPrimitives());
-
-    await expect(session.readTextFile({ path: "f.txt", startLine: 1.5 })).rejects.toThrow(
-      "startLine must be a positive integer (1-based).",
-    );
-  });
-
-  it("throws for zero startLine", async () => {
-    const session = buildSandboxSession(createTestPrimitives());
-
-    await expect(session.readTextFile({ path: "f.txt", startLine: 0 })).rejects.toThrow(
-      "startLine must be a positive integer (1-based).",
-    );
-  });
-
-  it("throws for negative endLine", async () => {
-    const session = buildSandboxSession(createTestPrimitives());
-
-    await expect(session.readTextFile({ endLine: -1, path: "f.txt" })).rejects.toThrow(
-      "endLine must be a positive integer (1-based).",
-    );
-  });
-
-  it("throws when startLine exceeds endLine", async () => {
-    const session = buildSandboxSession(createTestPrimitives());
-
-    await expect(session.readTextFile({ endLine: 3, path: "f.txt", startLine: 5 })).rejects.toThrow(
-      "startLine must not be greater than endLine.",
-    );
-  });
-
-  it("does not throw for valid range options", async () => {
-    const session = buildSandboxSession(
-      createTestPrimitives({
-        readFile: async () => textStream("a\nb\nc\n"),
-      }),
-    );
-
-    await expect(session.readTextFile({ endLine: 3, path: "f.txt", startLine: 1 })).resolves.toBe(
-      "a\nb\nc\n",
-    );
+  it.each([
+    [{ startLine: 1.5 }, "startLine must be a positive integer (1-based)."],
+    [{ startLine: 0 }, "startLine must be a positive integer (1-based)."],
+    [{ endLine: -1 }, "endLine must be a positive integer (1-based)."],
+    [{ endLine: 3, startLine: 5 }, "startLine must not be greater than endLine."],
+  ])("rejects the line range %j", async (range, message) => {
+    const session = createConnectionSession(memoryConnection().connection);
+    await expect(session.readTextFile({ path: "f.txt", ...range })).rejects.toThrow(message);
   });
 });

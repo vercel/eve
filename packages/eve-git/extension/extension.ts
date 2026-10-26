@@ -1,10 +1,13 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-import type { GitHubConfig } from "./lib/github-shell.ts";
+import type { GitHubAuthorize, GitHubConfig } from "./lib/github-shell.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
+export type { GitHubCoAuthor } from "./lib/github-shell.ts";
+export type { GitHubAuthorize, GitHubAuthorizeRequest } from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
+export type GitHubAttribution = NonNullable<GitHubConfig["attribution"]>;
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 
@@ -20,6 +23,17 @@ export default defineExtension({
         connector: z.string().min(1),
         org: z.string().min(1),
         broker: fn<GitHubLeaseBroker>(),
+        /**
+         * Resolves the person each turn publishes for. Their
+         * `Co-authored-by` trailer ends signed commits and new pull requests.
+         */
+        attribution: fn<GitHubAttribution>().optional(),
+        /**
+         * Called before each `gh` command with the session's caller, the
+         * declared repository, and its scoped token. Return `false` to deny.
+         * Without it, the GitHub App installation is the only boundary.
+         */
+        authorize: fn<GitHubAuthorize>().optional(),
       })
       .optional(),
   }),

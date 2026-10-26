@@ -25,6 +25,7 @@ import type {
   AgentResponse,
   AgentSendOptions,
   AgentSession,
+  AgentSessionOptions,
 } from "#tools/workflow-definition.js";
 
 type AgentTurnReply = AgentSessionRequest | RuntimeActionResultHookPayload;
@@ -43,18 +44,18 @@ export function createAgentSessions(
   usage: RunUsageTally,
 ): {
   readonly close: () => Promise<void>;
-  readonly open: (name: string) => AgentSession;
+  readonly open: (name: string, options?: AgentSessionOptions) => AgentSession;
 } {
   const sessions: OpenedAgentSession[] = [];
   let handles = 0;
   return {
-    open: (name) => {
+    open: (name, options = {}) => {
       if (typeof name !== "string" || name.trim() === "") {
         throw new TypeError("ctx.agent() requires a non-empty agent name.");
       }
       const key = `${run.from.runId}:${String(handles)}`;
       handles += 1;
-      return new RunAgentSession({ key, name, run, sessions, usage });
+      return new RunAgentSession({ key, name, options, run, sessions, usage });
     },
     close: async () => {
       if (sessions.length === 0) return;
@@ -76,6 +77,7 @@ interface AwaitedReply {
 class RunAgentSession implements AgentSession {
   readonly #key: string;
   readonly #name: string;
+  readonly #options: AgentSessionOptions;
   readonly #run: WorkflowToolRunContext;
   /** Every session the run opened, which it ends when it finishes. */
   readonly #sessions: OpenedAgentSession[];
@@ -88,12 +90,14 @@ class RunAgentSession implements AgentSession {
   constructor(input: {
     readonly key: string;
     readonly name: string;
+    readonly options: AgentSessionOptions;
     readonly run: WorkflowToolRunContext;
     readonly sessions: OpenedAgentSession[];
     readonly usage: RunUsageTally;
   }) {
     this.#key = input.key;
     this.#name = input.name;
+    this.#options = input.options;
     this.#run = input.run;
     this.#sessions = input.sessions;
     this.#usage = input.usage;
@@ -229,6 +233,7 @@ class RunAgentSession implements AgentSession {
         ...message,
         context,
         key: this.#key,
+        model: this.#options.model,
         name: this.#name,
       });
       const opened = { address, context, key: this.#key };

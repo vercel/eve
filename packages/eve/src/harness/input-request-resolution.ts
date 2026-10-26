@@ -2,6 +2,7 @@ import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers
 import type { SettledCall } from "#harness/session-machine/transitions.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { toErrorMessage } from "#shared/errors.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
@@ -89,17 +90,18 @@ export function unavailableToolMessage(toolName: string, searchable: boolean): s
  */
 export function failedCall(call: {
   readonly callId: string;
-  readonly message: string;
+  /** Why the call failed: the error it threw, or a message when it never ran. */
+  readonly failure: Error | string;
   readonly toolName: string;
 }): Required<SettledCall> {
-  const { callId, message, toolName } = call;
+  const { callId, failure, toolName } = call;
   return {
     part: {
-      output: { type: "error-text", value: message },
+      output: { type: "error-text", value: toErrorMessage(failure) },
       toolCallId: callId,
       toolName,
       type: "tool-result",
     },
-    result: createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
+    result: createRuntimeToolResultFromValue({ callId, isError: true, output: failure, toolName }),
   };
 }

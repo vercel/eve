@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, ScheduleIdKey, OccurrenceIdKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { schedules } from "#public/experimental/schedules/client.js";
@@ -33,7 +33,7 @@ async function bindCaller() {
 }
 
 describe("schedule creation and invocation", () => {
-  it("exposes direct operation schemas and approves prepared data without writing a changed destination", async () => {
+  it.each([false, true])("prepared approvals (scheduled: %s)", async (scheduled) => {
     let destination = "C123";
     const provider = inMemoryScheduleProvider();
     const write = vi.spyOn(provider, "create");
@@ -83,6 +83,11 @@ describe("schedule creation and invocation", () => {
     });
     await app.runAsSession(undefined, async () => {
       await bindCaller();
+      const schedule = scheduled ? { definition: "requests", occurrenceId: "exec-1" } : undefined;
+      if (schedule !== undefined) {
+        loadContext().set(ScheduleIdKey, schedule.definition);
+        loadContext().set(OccurrenceIdKey, schedule.occurrenceId);
+      }
       const wrapper = app.manifest.dynamicTools.find(
         (entry) => entry.logicalPath === "tools/schedule__requests.ts",
       )!;
@@ -90,7 +95,7 @@ describe("schedule creation and invocation", () => {
         .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
       const tools = (await dynamic.events["turn.started"]!(undefined, {
         model: null,
-        session: { id: "alice", auth: { current: alice, initiator: null } },
+        session: { id: "alice", auth: { current: alice, initiator: null }, schedule },
         channel: {},
         messages: [],
       })) as Record<string, DynamicToolEntry>;
@@ -180,6 +185,12 @@ describe("schedule creation and invocation", () => {
       expect(responseTargets.at(-1)).toBe("timing-only");
       await update.execute(timingInput, { callId: "timing" } as never);
       expect(updateWrite.mock.calls[1]![2].payload).toBeUndefined();
+      await expect(
+        tools.schedule__requests__disable!.execute({ name: created.name }, {} as never),
+      ).resolves.toMatchObject({ state: "inactive" });
+      await expect(
+        tools.schedule__requests__enable!.execute({ name: created.name }, {} as never),
+      ).resolves.toMatchObject({ state: "active" });
       const invoke = tools.schedule__requests__invoke!;
       const invoked = { name: created.name };
       const invokeContext = {

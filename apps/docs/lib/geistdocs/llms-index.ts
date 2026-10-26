@@ -79,6 +79,10 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
 
+## Experimental
+
+- [Dynamic Schedules](${EVE_ORIGIN}/docs/experimental/dynamic-schedules.md): Create and manage creator-owned runtime schedules with the experimental API; includes updates, approvals, and local delivery.
+
 ## API Reference and Discovery
 
 - [Agent Files](${EVE_ORIGIN}/docs/reference/agent-files.md): Look up filesystem slots, path-derived names, and discovery rules.

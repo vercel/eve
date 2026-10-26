@@ -296,7 +296,10 @@ type AgentSourceOwner =
     };
 
 type AgentSourceLayer =
-  "framework-default" | "extension-package" | "extension-override" | "application";
+  | "framework-default"
+  | "extension-package"
+  | "extension-override"
+  | "application";
 
 type AgentSourceForm = "derived" | "direct";
 

@@ -16,6 +16,7 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
+  SessionTitleKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -32,8 +33,8 @@ import {
 } from "#instrumentation/lifecycle.js";
 import { bindInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
-import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
+import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-store.js";
@@ -68,7 +69,10 @@ const traceContext = (agentName: string, audience: ChannelAudience) => ({
   principalType: "anonymous",
 });
 
-function createRuntime(tracePolicy?: TraceCapturePolicy) {
+function createRuntime(
+  tracePolicy?: TraceCapturePolicy,
+  content = { recordInputs: true, recordOutputs: true },
+) {
   const exporter = new InMemorySpanExporter();
   const metadata = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -84,8 +88,8 @@ function createRuntime(tracePolicy?: TraceCapturePolicy) {
   const agent = createAgentOtelInstrumentation({
     tracePolicy,
     frameworkVersion: "test",
-    recordInputs: true,
-    recordOutputs: true,
+    environment: "production",
+    ...content,
     stateStore: new ContextAgentTraceStateStore(),
     telemetry: otelTelemetry({
       provider,
@@ -106,8 +110,7 @@ function createRuntime(tracePolicy?: TraceCapturePolicy) {
     ownsAgentSpans: true,
     otelSettings: {
       tracePolicy,
-      recordInputs: true,
-      recordOutputs: true,
+      ...content,
       traceChannelRequests: false,
     },
     forceFlush: () => provider.forceFlush(),
@@ -670,19 +673,39 @@ describe("exported agent telemetry contract", () => {
 
   it.each([
     { audience: "public", explicit: false, recordInputs: true, recordOutputs: true },
+    { audience: "public", explicit: true, recordInputs: false, recordOutputs: false },
     { audience: "private", explicit: false, recordInputs: false, recordOutputs: false },
+    { audience: "unknown", explicit: false, recordInputs: false, recordOutputs: false },
     { audience: "private", explicit: true, recordInputs: true, recordOutputs: true },
     { audience: "unknown", explicit: true, recordInputs: true, recordOutputs: true },
     { audience: "private", explicit: true, recordInputs: true, recordOutputs: false },
     { audience: "private", explicit: true, recordInputs: false, recordOutputs: true },
+    {
+      audience: "public",
+      explicit: false,
+      recordInputs: false,
+      recordOutputs: true,
+      providerContent: { recordInputs: false, recordOutputs: true },
+    },
+    {
+      audience: "public",
+      explicit: false,
+      recordInputs: true,
+      recordOutputs: false,
+      providerContent: { recordInputs: true, recordOutputs: false },
+    },
   ] as const)(
     "round-trips the normalized $audience v4 trace forest through OTLP (explicit=$explicit, inputs=$recordInputs, outputs=$recordOutputs)",
-    async ({ audience, explicit, recordInputs, recordOutputs }) => {
+    async (testCase) => {
+      const { audience, explicit, recordInputs, recordOutputs } = testCase;
+      const includesIds = audience === "public" && (!explicit || (recordInputs && recordOutputs));
       const runtime = createRuntime(
         explicit ? () => ({ emit: true, recordInputs, recordOutputs }) : undefined,
+        "providerContent" in testCase ? testCase.providerContent : undefined,
       );
       let parent = contextFor(audience);
       parent.set(ConversationIdKey, "original-conversation");
+      parent.set(SessionTitleKey, "private initial title");
       const scope = scopeFor("parent", audience);
       const hooks = runtime.hooks.forTrace!(traceContext("parent", audience));
       const actionKey = actionIdempotencyKey("parent", "turn_0", "workflow");
@@ -972,13 +995,22 @@ describe("exported agent telemetry contract", () => {
       }
       expect(parsed.filter(isAgentTurnSpan)).toHaveLength(4);
       for (const activation of parsed.filter(isAgentTurnSpan)) {
+        expect(activation.attributes).toMatchObject({
+          "agent.trace.content.input": recordInputs,
+          "agent.trace.content.output": recordOutputs,
+        });
+        expect(activation.attributes["agent.session.title"]).toBe(
+          activation.attributes["agent.run.id"] === "parent" && recordInputs
+            ? "private initial title"
+            : undefined,
+        );
         expect(activation.attributes["agent.principal.current.type"]).toBe("service");
         expect(activation.attributes["agent.principal.initiator.type"]).toBe("user");
         expect(activation.attributes["agent.principal.current.id"]).toBe(
-          audience === "public" ? "current-user" : undefined,
+          includesIds ? "current-user" : undefined,
         );
         expect(activation.attributes["agent.principal.initiator.id"]).toBe(
-          audience === "public" ? "initiator-user" : undefined,
+          includesIds ? "initiator-user" : undefined,
         );
       }
       expect(new TextDecoder().decode(bytes)).not.toContain("auth-only-secret");
@@ -1041,6 +1073,12 @@ describe("exported agent telemetry contract", () => {
         parsed.map((span) => [span.name, span.name]),
       );
       expect(metadata).not.toContain("private ");
+      for (const activation of metadataSpans.filter(isAgentTurnSpan)) {
+        expect(activation.attributes).toMatchObject({
+          "agent.trace.content.input": false,
+          "agent.trace.content.output": false,
+        });
+      }
       const serialized = new TextDecoder().decode(bytes);
       for (const text of ["private instructions", "private input"]) {
         if (recordInputs) expect(serialized).toContain(text);
@@ -1111,21 +1149,22 @@ describe("exported agent telemetry contract", () => {
   });
 
   it.each([
-    ["private", false, false],
-    ["private", true, true],
-    ["public", false, true],
-    ["public", true, false],
-    ["public", true, true],
+    ["private", false, false, "public"],
+    ["private", true, true, "public"],
+    ["public", false, true, "public"],
+    ["public", true, false, "public"],
+    ["public", true, true, "public"],
+    ["public", true, true, "private"],
   ] as const)(
-    "bounds public-channel principal IDs by origin %s and input/output ceiling %s/%s",
-    async (originAudience, recordInputs, recordOutputs) => {
+    "bounds principal IDs and content markers by origin %s, input/output ceiling %s/%s, and live audience %s",
+    async (originAudience, recordInputs, recordOutputs, liveAudience) => {
       const logs = captureLogRecords();
       const runtime = createRuntime();
-      const hooks = runtime.hooks.forTrace!(traceContext("child", "public"));
+      const hooks = runtime.hooks.forTrace!(traceContext("child", liveAudience));
       const registered = vi
         .spyOn(runtimeGlobal, "getInstrumentationRuntime")
         .mockReturnValue(runtime);
-      let ctx = contextFor("public");
+      let ctx = contextFor(liveAudience);
       ctx.set(ParentTraceContextKey, {
         forwardedTracePolicy: {
           ceiling: { recordInputs, recordOutputs },
@@ -1135,7 +1174,8 @@ describe("exported agent telemetry contract", () => {
         traceFlags: 1,
         traceId: "d".repeat(32),
       });
-      const includesIds = originAudience === "public" && recordInputs && recordOutputs;
+      const includesIds =
+        liveAudience === "public" && originAudience === "public" && recordInputs && recordOutputs;
       try {
         instrumentation.initializeSessionInstrumentation({ agentName: "child", ctx });
         expect(logs.records).toContainEqual(
@@ -1182,6 +1222,12 @@ describe("exported agent telemetry contract", () => {
         const spans = runtime.exporter.getFinishedSpans();
         expect(spans).toHaveLength(2);
         for (const span of spans) {
+          expect(span.attributes).toMatchObject({
+            "agent.trace.content.input":
+              liveAudience === "public" && originAudience === "public" && recordInputs,
+            "agent.trace.content.output":
+              liveAudience === "public" && originAudience === "public" && recordOutputs,
+          });
           expect(span.attributes["agent.principal.current.type"]).toBe("service");
           expect(span.attributes["agent.principal.initiator.type"]).toBe("user");
           expect(span.attributes["agent.principal.current.id"]).toBe(

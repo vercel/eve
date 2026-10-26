@@ -25,6 +25,7 @@ Important naming note:
 | Package a procedure the agent loads only when it applies | [Skills](./skills.mdx)                                                                 |
 | Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)         |
 | Run commands or untrusted code in isolation              | [Sandboxes](./sandbox/index.mdx)                                                       |
+| Answer voice notes and other audio attachments           | [Voice Notes](./patterns/voice-notes.md)                                               |
 | Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                     |
 | Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                           |
 | Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                         |

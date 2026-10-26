@@ -24,7 +24,7 @@ import {
   requestLimit,
   requireSignIn,
 } from "./approvals.js";
-import { checkSessionUsageLimit } from "./budget.js";
+import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
 import { retireActiveCandidates } from "./candidates.js";
 import { isEmptyInput } from "./delivery.js";
 import { holdForInput } from "./intake.js";
@@ -88,17 +88,16 @@ export async function parkOnApprovals(
 }
 
 /**
- * A call the model step ran needs a sign-in: the calls that need it stop, and the model calls
- * them again once it completes.
+ * A call the model step ran needs a sign-in: the calls that need it stop and wait in their
+ * steps, and run once it completes.
  */
 export async function stopForToolSignIn(
   step: Step,
   interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
 ): Promise<StepResult> {
-  step.session = { ...step.session, history: validateHarnessModelMessages(interrupt.history) };
   await step.apply(
     requireSignIn(step.view(), {
-      callIdsByName: interrupt.callIdsByName,
+      calls: interrupt.calls,
       challenges: interrupt.challenges,
     }),
     step.session.history,
@@ -117,6 +116,7 @@ export async function enforceBudget(
 ): Promise<StepResult | undefined> {
   const limit = checkSessionUsageLimit({
     canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
+    limit: step.config.sessionUsageLimit ?? DEFAULT_SESSION_USAGE_LIMIT,
     session: step.session,
     turnSequence: step.position().sequence,
   });
@@ -206,4 +206,5 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
   };
 }
 
-export { readHitlState, holdsHitlRequests } from "./requests.js";
+export { readHitlState } from "./requests.js";
+export { holdsHitlRequests } from "./view.js";

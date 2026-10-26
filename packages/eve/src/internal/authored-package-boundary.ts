@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
@@ -59,7 +60,10 @@ export function createGenerationPackageBoundaryPlugin(input: {
       if (input.extensionSpecifiers?.has(source)) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
         if (input.extensionSpecifiers?.has(source)) return undefined;
-        return { external: true, id: resolveFrameworkRuntimeImport(source) };
+        return {
+          external: true,
+          id: toExternalModuleId(resolveFrameworkRuntimeImport(source), options.kind),
+        };
       }
 
       // Package-private imports must be resolved before this bundle is moved
@@ -85,7 +89,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
       return {
         external: true,
         id: input.resolveExternalPaths
-          ? normalizeEsmImportSpecifier(externalModule.resolvedId)
+          ? toExternalModuleId(normalizeEsmImportSpecifier(externalModule.resolvedId), options.kind)
           : source,
       };
     },
@@ -115,7 +119,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       if (isFrameworkRuntimeImport(source, importer)) {
         return {
           external: true,
-          id: resolveRuntimeLoaderFrameworkImport(source),
+          id: toExternalModuleId(resolveRuntimeLoaderFrameworkImport(source), options.kind),
         };
       }
 
@@ -129,7 +133,13 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
         if (resolvedPackageImport !== undefined) {
           return isFrameworkPackagePath(resolvedPackageImport)
-            ? { external: true, id: normalizeEsmImportSpecifier(resolvedPackageImport) }
+            ? {
+                external: true,
+                id: toExternalModuleId(
+                  normalizeEsmImportSpecifier(resolvedPackageImport),
+                  options.kind,
+                ),
+              }
             : { id: resolvedPackageImport };
         }
       }
@@ -147,7 +157,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
 
         return {
           external: true,
-          id: normalizeEsmImportSpecifier(resolvedId),
+          id: toExternalModuleId(normalizeEsmImportSpecifier(resolvedId), options.kind),
         };
       }
 
@@ -312,7 +322,8 @@ export function normalizeExternalDependencies(
   return [...new Set(externalDependencies)].sort();
 }
 
-function resolveConfiguredExternalDependency(
+/** Returns the configured external that `source` imports (the entry itself or one of its subpaths). */
+export function resolveConfiguredExternalDependency(
   source: string,
   externalDependencies: readonly string[],
 ): string | undefined {
@@ -321,7 +332,8 @@ function resolveConfiguredExternalDependency(
   );
 }
 
-function packageImportName(source: string): string {
+/** Returns the package part of a bare specifier: `@acme/db/x` → `@acme/db`, `pg/native` → `pg`. */
+export function packageImportName(source: string): string {
   return source.startsWith("@") ? source.split("/", 2).join("/") : source.split("/", 1)[0]!;
 }
 
@@ -375,6 +387,14 @@ let canonicalFrameworkPackageRoot: string | undefined;
 function isFrameworkPackagePath(path: string): boolean {
   canonicalFrameworkPackageRoot ??= toCanonicalPath(resolvePackageRoot());
   return nearestPackageRoot(path) === canonicalFrameworkPackageRoot;
+}
+
+/**
+ * ESM imports need `file:` URLs for Windows absolute paths, but CommonJS
+ * `require()` rejects URLs, so a `require()` of an external keeps its path.
+ */
+function toExternalModuleId(id: string, kind: string): string {
+  return kind === "require-call" && id.startsWith("file:") ? fileURLToPath(id) : id;
 }
 
 function resolveExistingExternalFilePath(id: string): string | undefined {
@@ -462,6 +482,33 @@ function resolveRuntimeLoaderFrameworkImport(source: string): string {
 
 export function isNodeModulesPath(path: string): boolean {
   return path.replaceAll("\\", "/").includes("/node_modules/");
+}
+
+export function resolveAuthoredPackageRoot(modulePath: string): string {
+  const packageRoot = findAuthoredPackageRoot(dirname(modulePath));
+  if (packageRoot === undefined) {
+    throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
+  }
+  return packageRoot;
+}
+
+/** Returns the nearest directory at or above `directory` that has a `package.json`. */
+export function findAuthoredPackageRoot(directory: string): string | undefined {
+  let currentDirectory = directory;
+
+  while (true) {
+    if (existsSync(join(currentDirectory, "package.json"))) {
+      return realpathSync(currentDirectory);
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
 }
 
 function toCanonicalPath(path: string): string {

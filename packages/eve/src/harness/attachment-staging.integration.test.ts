@@ -9,7 +9,6 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockTool } from "#internal/testing/mocks/mock-tool.js";
 import {
-  ATTACHMENTS_ROOT,
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
   stageToolResultMedia,
@@ -189,7 +188,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(staged).toHaveLength(2);
     const filePart = staged[1] as FilePart;
     expect(filePart.filename).toMatch(
-      new RegExp(`^${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/report\\.csv$`),
+      /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/report\.csv$/,
     );
     // `data` is replaced with an eve-sandbox: ref — the bytes live in
     // the sandbox and are rehydrated at the model call site. The
@@ -1098,6 +1097,76 @@ describe("hydrateSandboxAttachments (integration)", () => {
       expect.objectContaining({
         level: "warn",
         message: "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+      }),
+    );
+  });
+
+  it("degrades tool-result refs to text when the session sandbox cannot be resumed (#4833)", async () => {
+    const logs = captureLogRecords();
+    const runtime = await createTestRuntime();
+    const staged = await runtime.runAsSession(
+      { sandbox: mockSandbox({ id: "sbx_lost_stage" }) },
+      async () =>
+        stageToolResultMedia([
+          {
+            content: [
+              {
+                output: {
+                  type: "content",
+                  value: [
+                    {
+                      data: { data: smallImageBytes.toString("base64"), type: "data" },
+                      filename: "shot.png",
+                      mediaType: "image/png",
+                      type: "file",
+                    },
+                  ],
+                },
+                toolCallId: "shot-1",
+                toolName: "screenshot",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ] satisfies ModelMessage[]),
+    );
+    const [stagedResult] = staged[0]!.content as ToolResultPart[];
+    const stagedFile = (stagedResult!.output as { value: { data: { url: URL } }[] }).value[0]!;
+    const stagedPath = decodeSandboxRef(stagedFile.data.url).path;
+
+    // A follow-up turn on another replica: the just-bash session root lives
+    // on the replica that staged the file, so resuming the sandbox throws.
+    const lost = mockSandbox({ id: "sbx_lost" });
+    const hydrated = await runtime.runAsSession(
+      {
+        sandboxAccess: {
+          ...lost.access,
+          async get() {
+            throw new Error('just-bash session root "/tmp/sessions/lost" no longer exists.');
+          },
+          async open() {
+            throw new Error('just-bash session root "/tmp/sessions/lost" no longer exists.');
+          },
+        },
+      },
+      async () => hydrateSandboxAttachments(staged),
+    );
+
+    const [result] = hydrated[0]!.content as ToolResultPart[];
+    expect(result!.output).toEqual({
+      type: "content",
+      value: [
+        {
+          text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
+          type: "text",
+        },
+      ],
+    });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "session sandbox unavailable, degrading attachments to text",
       }),
     );
   });

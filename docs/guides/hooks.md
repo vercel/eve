@@ -50,7 +50,27 @@ export default githubChannel({
 
 A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer's handler keeps Slack's default by calling `next()` and replaces it by skipping `next`.
 
-Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
+Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For a channel with event handlers, such as `githubChannel`, `slackChannel`, and the other built-ins, the kind is the path-derived identity. `agent/channels/github.ts` reports `channel:github`, so `ctx.channel.kind === "github"` never matches. Import the channel definition and compare it with `isChannel` from `eve/channels`:
+
+```ts title="agent/hooks/github-only.ts"
+import { isChannel } from "eve/channels";
+import { defineHook } from "eve/hooks";
+
+import github from "../channels/github";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      if (!isChannel(ctx.channel, github)) return;
+      // GitHub-owned turns only.
+    },
+  },
+});
+```
+
+A route-only `defineChannel` with no event handlers keeps the kind `"http"`, so `isChannel` does not match it in a hook. Compare `ctx.channel.kind === "http"` for those channels instead.
+
+For typed channel metadata in dynamic resolvers or instrumentation, narrow with `isChannel` the same way; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
 
 ## Hook structure and context
 
@@ -218,6 +238,10 @@ export default defineHook({
 ```
 
 The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
+
+A plain-text message that answers a pending question, such as one from `ask_question`, is recorded as `message.received` before eve delivers it. Calling `ctx.cancel()` from that event's hook cancels the turn instead: the question resolves as `cancelled`, and the waiting tool call never receives the text.
+
+The same goes for the `action.partial` a workflow tool reports while the turn waits on it: `ctx.cancel()` from its hook cancels the turn, and the run's result never reaches the model.
 
 `ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
 

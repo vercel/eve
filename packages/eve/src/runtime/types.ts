@@ -1,3 +1,5 @@
+import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
+import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -31,7 +33,11 @@ import type {
   MarkdownSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type { InternalAgentDefinition, AgentToolExposure } from "#shared/agent-definition.js";
+import type {
+  AgentLimitsDefinition,
+  InternalAgentDefinition,
+  AgentToolExposure,
+} from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
@@ -99,7 +105,17 @@ export type ResolvedScheduleDefinition = Readonly<
  * Both `authorization` and `headers` are optional — a connection to a
  * server that requires no authentication (e.g. localhost) may omit both.
  */
+/** A connection's event watching, checked once when the connection resolves. */
+export interface ResolvedConnectionEvents {
+  readonly callbacks: Experimental_ConnectionEvents;
+  /** The static Connect authorization every watch subscribes and runs under. */
+  readonly authorization: Readonly<AuthorizationDefinition>;
+  readonly connector: string;
+  readonly backend: ConnectionEventsBackend;
+}
+
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
+  readonly experimental_events?: ResolvedConnectionEvents;
   readonly protocolVersionDiscovery?: boolean;
   /** MCP only: send the turn's principals in `eve-forwarded-principal`. */
   readonly forwardPrincipal?: boolean;
@@ -325,7 +341,11 @@ export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSource
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
-type ResolvedAgentDefinitionBase = Omit<InternalAgentDefinition, "build" | "model" | "source"> & {
+type ResolvedAgentDefinitionBase = Omit<
+  InternalAgentDefinition,
+  "build" | "limits" | "model" | "source"
+> & {
+  limits?: AgentLimitsDefinition;
   source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
 };
 

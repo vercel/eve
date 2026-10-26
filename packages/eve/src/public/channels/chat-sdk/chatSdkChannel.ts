@@ -7,6 +7,10 @@ import type {
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -34,7 +38,11 @@ import type {
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
 import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
 import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
-import { decodeInputAction, renderInputRequests } from "#public/channels/chat-sdk/input-actions.js";
+import {
+  decodeInputAction,
+  renderInputRequests,
+  renderRetiredInputRequest,
+} from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
@@ -90,6 +98,8 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
   usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
+  /** Id of the latest message someone other than the bot sent in the thread. */
+  latestMessageId?: string;
   streamStepIndex?: number | null;
 }
 
@@ -164,10 +174,22 @@ interface ChatSdkThreadOptions {
  */
 export interface ChatSdkSendOptions extends ChatSdkThreadOptions, Omit<ChannelSendOptions, "auth"> {
   /**
+   * Answers the input request on the card eve posted as `messageId` with
+   * `optionId`, when that card is still waiting on it. Otherwise eve delivers
+   * the message as usual.
+   */
+  readonly inputAnswer?: ChatSdkInputAnswer;
+  /**
    * Controls how this input interacts with an active eve turn on the same
    * thread. Defaults to the channel's `turnPolicy`, then `"steer"`.
    */
   readonly turnPolicy?: TurnPolicy;
+}
+
+/** An option chosen for the input request card posted as `messageId`. */
+export interface ChatSdkInputAnswer {
+  readonly messageId: string;
+  readonly optionId: string;
 }
 
 /** Options for `bridge.respond`: channel respond options plus the thread. */
@@ -293,15 +315,30 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   bot.onAction(async (event: ActionEvent) => {
     const response = decodeInputAction(event.actionId, inputActionPrefix, event.value);
     if (!response) return;
-    if (!event.thread) {
+    const { thread } = event;
+    if (!thread) {
       throw new Error(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    await bridgeRespond(bot, [response], {
-      auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-      thread: event.thread.toJSON(),
-    });
+    const auth = config.resolveInputAuth ? await config.resolveInputAuth(event) : null;
+    const answer = await respondOrRetireInactivePrompt(
+      () => bridgeRespond(bot, [response], { auth, thread: thread.toJSON() }),
+      {
+        retirePrompt: (label) => retireInputCard(thread, event.messageId, label),
+      },
+      log,
+    );
+    // Chat SDK stops its action handlers at a throw, as it did before inactive
+    // presses were told apart from other failures.
+    if (answer.outcome === "failed") throw answer.error;
+    if (answer.outcome === "delivered") return;
+    await Promise.all([
+      answer.retirement,
+      thread
+        .postEphemeral(event.user, { markdown: INACTIVE_REQUEST_NOTICE }, { fallbackToDM: true })
+        .catch((error: unknown) => log.error("inactive prompt notice failed", { error })),
+    ]);
   });
 
   const channel = defineChannel<
@@ -360,6 +397,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      recordLatestMessage(channel.state, payload);
+      const answer = resolveInputAnswer(channel.state, payload);
+      if (answer !== undefined) {
+        return { context: payload.context, inputResponses: parseInputResponses([answer]) };
+      }
       return defaultDeliverResult(payload);
     },
     events: mergedEvents,
@@ -387,7 +429,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   async function showPrompt(channel: EventChannel, request: InputRequest) {
     if (!channel.thread) return false;
     const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
-    if (!posted.id || channel.state.editSupported === false) return;
+    if (!posted.id) return;
+    // Tracked even without edit support, so an answer can name the card it is on.
     channel.state.pendingInputCards = {
       ...channel.state.pendingInputCards,
       [posted.id]: { requests: [request], resolved: {} },
@@ -415,6 +458,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       )
         ? rest
         : { ...rest, [messageId]: { requests: card.requests, resolved } };
+      if (channel.state.editSupported === false) continue;
       try {
         await thread.adapter.editMessage(
           thread.id,
@@ -427,8 +471,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
           continue;
         }
         channel.state.editSupported = false;
-        channel.state.pendingInputCards = {};
-        return;
       }
     }
   }
@@ -557,6 +599,23 @@ async function editMessage(thread: Thread, messageId: string, markdown: string):
 }
 
 /**
+ * Replaces a pressed request card with only `label`. The session that held the
+ * request is gone and a press carries no prompt text, so the prompt can't be
+ * kept; what matters is that the buttons stop being offered.
+ */
+async function retireInputCard(
+  thread: Pick<Thread, "adapter" | "id">,
+  messageId: string,
+  label: string,
+): Promise<void> {
+  try {
+    await thread.adapter.editMessage(thread.id, messageId, renderRetiredInputRequest(label));
+  } catch (error) {
+    if (!isNotImplemented(error)) throw error;
+  }
+}
+
+/**
  * Finalizes a completed assistant message. When a streamed anchor exists, edits
  * it in place so it shows the complete text instead of the last throttled
  * delta. When no anchor was streamed and `postWhenNoAnchor` is `true`, posts the
@@ -636,12 +695,14 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   options: ChatSdkSendOptions,
 ): Promise<Session> {
   const from = activeFrom("send");
-  const { adapterName, auth, thread: threadInput, ...sendOptions } = options;
+  const { adapterName, auth, inputAnswer, thread: threadInput, ...sendOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
+  const state: ChatSdkDeliveryState = { thread };
+  if (inputAnswer !== undefined) state.inputAnswer = inputAnswer;
   return from(thread.id).send(message, {
     ...sendOptions,
     auth: auth ?? null,
-    state: { thread },
+    state,
   });
 }
 
@@ -679,6 +740,44 @@ function recordPrincipalUser(
     ...state.usersByPrincipal,
     [caller.principalId]: recorded === undefined ? author.userId : null,
   };
+}
+
+/**
+ * Records the delivery's message as the thread's latest. Session state keeps
+ * the thread from the first delivery, so its `currentMessage` goes stale.
+ */
+function recordLatestMessage(state: ChatSdkChannelState, payload: DeliverPayload): void {
+  const message = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread
+    ?.currentMessage;
+  if (message === undefined || message.author.isMe) return;
+  state.latestMessageId = message.id;
+}
+
+/** Channel state a delivery carries. `inputAnswer` lives only on the delivery. */
+interface ChatSdkDeliveryState extends ChatSdkChannelState {
+  inputAnswer?: ChatSdkInputAnswer;
+}
+
+/**
+ * The response for a delivery's `inputAnswer`, when its card still waits on a
+ * request that offers the option. Matching the card keeps an answer meant for
+ * one prompt from settling a different request.
+ */
+function resolveInputAnswer(
+  state: ChatSdkChannelState,
+  payload: DeliverPayload,
+): InputResponse | undefined {
+  const answer = (payload.state as Partial<ChatSdkDeliveryState> | undefined)?.inputAnswer;
+  if (answer === undefined) return undefined;
+  const card = state.pendingInputCards?.[answer.messageId];
+  const request = card?.requests.find(
+    (candidate) =>
+      card.resolved[candidate.requestId] === undefined &&
+      candidate.options?.some((option) => option.id === answer.optionId) === true,
+  );
+  return request === undefined
+    ? undefined
+    : { optionId: answer.optionId, requestId: request.requestId };
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {

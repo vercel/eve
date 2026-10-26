@@ -325,6 +325,7 @@ describe("runCli", () => {
     expect(startProductionHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
       host: "127.0.0.1",
       port: 0,
+      schedules: true,
     });
   });
 
