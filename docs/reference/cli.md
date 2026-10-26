@@ -288,7 +288,7 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
 
-`localDev()` authenticates only callers on the same machine. When `--host` binds another interface, such as `0.0.0.0`, callers on other machines need an authenticator that runs before `localDev()` in the channel's `auth` list.
+`localDev()` refuses callers whose connection comes from another machine. When `--host` binds another interface, such as `0.0.0.0`, those callers need another authenticator in the channel's `auth` list. A tunnel or reverse proxy on the same machine, such as ngrok, cloudflared, or a local nginx, connects from this machine, so every caller it forwards still gets `local-dev`. Put an authenticator in front of any dev server you expose that way.
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 

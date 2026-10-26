@@ -11,8 +11,7 @@ import { decodeJwt } from "#compiled/jose/index.js";
 import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { readTrustedDevelopmentPeer } from "#internal/nitro/dev-client-address.js";
 import { createLogger } from "#internal/logging.js";
 import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
@@ -835,9 +834,11 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * neither flag, so `localDev()` authenticates nothing there. Layer a real
  * authenticator on those hosts.
  *
- * On `eve dev`, `localDev()` also refuses callers on other machines, such as
- * LAN clients of a server started with `--host 0.0.0.0`. Expose a development
- * server only behind an authenticator that runs before `localDev()`.
+ * On `eve dev`, `localDev()` also refuses callers whose connection comes from
+ * another machine, such as LAN clients of a server started with
+ * `--host 0.0.0.0`. A tunnel or reverse proxy on this machine still forwards
+ * its callers as `local-dev`, so expose a development server that way only
+ * behind an authenticator that runs before `localDev()`.
  */
 export function localDev(): AuthFn<Request> {
   return (request) =>
@@ -852,11 +853,7 @@ export function localDev(): AuthFn<Request> {
  * refused however it sets the request's headers.
  */
 function isFromRemotePeer(request: Request): boolean {
-  const address = readTrustedDevelopmentClientAddress(
-    request.headers,
-    process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
-  );
-  return address !== undefined && !isLoopbackHostname(address);
+  return readTrustedDevelopmentPeer(request.headers) === "remote";
 }
 
 function isLocalDevelopmentServer(): boolean {

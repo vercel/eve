@@ -1,6 +1,13 @@
 import { exportSPKI, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  networkInterfaces: () => ({
+    en0: [{ address: "192.168.1.5", family: "IPv4", internal: false }],
+  }),
+}));
+
 import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-issuer.js";
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
@@ -365,6 +372,9 @@ describe("localDev", () => {
     ["refuses", "2001:db8::20", null],
     ["accepts", "127.0.0.1", "local-dev"],
     ["accepts", "::ffff:127.0.0.1", "local-dev"],
+    // `eve dev --host 192.168.1.5`: the developer's own TUI connects from the LAN address.
+    ["accepts", "192.168.1.5", "local-dev"],
+    ["accepts", "::ffff:192.168.1.5", "local-dev"],
   ])("%s an `eve dev` caller whose socket address is %s", async (_verb, address, principalType) => {
     vi.stubEnv("EVE_DEV", "1");
     vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "transport-secret");

@@ -105,7 +105,7 @@ Exercise caution for agents that process non-public, sensitive, regulated, or pr
 
 Authenticates a synthetic `local-dev` principal, but only while the process is a local development server: `eve dev` (which sets `EVE_DEV=1`) or `vercel dev` (detected by `VERCEL=1` and `VERCEL_ENV=development` together). This is a property of the deployment, not the request, so no request header can flip it. A production deployment (`eve start`, a Vercel deployment, or any container host) sets neither flag, so `localDev()` authenticates nothing there and every request falls through to the next entry.
 
-On `eve dev`, `localDev()` also refuses callers on other machines. A server started with `eve dev --host 0.0.0.0` accepts LAN connections, but those callers do not get the `local-dev` principal.
+On `eve dev`, `localDev()` also refuses callers whose connection comes from another machine. A server started with `eve dev --host 0.0.0.0` accepts LAN connections, but those callers do not get the `local-dev` principal. A tunnel or reverse proxy on the same machine, such as ngrok or a local nginx, connects from this machine, so the callers it forwards still get `local-dev`.
 
 Because it never opens a production deployment, `localDev()` is safe to leave in the walk. Still put a real authenticator ahead of it so production traffic has something to match.
 
