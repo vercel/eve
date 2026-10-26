@@ -13,6 +13,9 @@ interface FixtureBootstrap {
   readonly setupIds: readonly string[];
 }
 
+/** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
+export const JUST_BASH_VERSION = "3.6.0";
+
 export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
   readonly revision: string;
@@ -62,7 +65,7 @@ export function createNativeAuthoringSetup(options: {
     // is unavailable. Supply its optional peer before the model runs.
     await run(
       sandbox,
-      "npm install --save-dev --save-exact just-bash@3.1.0",
+      `npm install --save-dev --save-exact just-bash@${JUST_BASH_VERSION}`,
       "local sandbox dependency",
     );
 
