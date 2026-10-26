@@ -187,6 +187,36 @@ describe("renderInputRequestBlocks", () => {
     });
   });
 
+  it("renders options with long labels or descriptions as radio buttons", () => {
+    for (const options of [
+      [
+        { id: "repo", label: "Attach the repository for inspection" },
+        { id: "logs", label: "Share logs" },
+      ],
+      [
+        { id: "a", label: "A", description: "The first approach." },
+        { id: "b", label: "B" },
+      ],
+    ]) {
+      const blocks = renderInputRequestBlocks(makeRequest({ options }));
+      const widget = (blocks.at(-1) as { elements: Array<{ type: string }> }).elements[0]!;
+      expect(widget.type).toBe("radio_buttons");
+    }
+  });
+
+  it("renders more options than a card holds as radio buttons", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({
+        options: ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() })),
+      }),
+    );
+
+    const widget = (blocks.at(-1) as { elements: Array<{ options: unknown[]; type: string }> })
+      .elements[0]!;
+    expect(widget.type).toBe("radio_buttons");
+    expect(widget.options).toHaveLength(4);
+  });
+
   it("shows tool input for confirmation approval requests in a collapsible container", () => {
     const request = makeRequest({
       action: {
