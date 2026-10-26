@@ -13,14 +13,21 @@
 //
 // The run keeps the source run's id and attempt, the measurement's own time
 // (`planned_at`), and the release merge commit (`sha`, and the fixture digest
-// there); the manifest's `source` names the archive. Published runs are
-// immutable, so re-runs skip them; a metrics version change derives every
-// release again under a new root.
+// there); the manifest's `source` names the archive. A build whose measured
+// merge ref has a different tree from the release merge commit is rejected,
+// since main moved before the release merged. Published runs are immutable,
+// so re-runs skip them; a metrics version change derives every release again
+// under a new root.
+//
+// e2e-vercel uploads the archive only when the run succeeded, so imported
+// runs carry no failed attempts and their reliability metrics are not
+// comparable with the benchmark's own runs.
 //
 // Usage: node scripts/eval-benchmark/import-stress-artifacts.mjs [--dry-run] [--repo vercel/eve] [--branch changeset-release/main]
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN (read even with --dry-run), a
-// GitHub token (GITHUB_TOKEN, GH_TOKEN, or `gh auth login`), and the release
-// merge commits in the local git history.
+// GitHub token (GITHUB_TOKEN, GH_TOKEN, or `gh auth login`), the release
+// merge commits in the local git history, and an `origin` remote to fetch each
+// measured merge ref from.
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,7 +58,7 @@ export function selectReleaseBuilds(mirrored, mergedByHead) {
   const byPull = new Map();
   for (const metadata of mirrored) {
     const pull = mergedByHead.get(metadata.workflow_run.head_sha);
-    if (pull === undefined) continue;
+    if (pull === undefined || !Number.isInteger(metadata.workflow_run.attempt)) continue;
     const chosen = byPull.get(pull.number);
     if (
       chosen === undefined ||
@@ -72,6 +79,22 @@ function evalIdsAt(sha) {
     .filter((path) => path.endsWith(".eval.ts"))
     .map((path) => path.slice(evalsDir.length, -".eval.ts".length))
     .sort();
+}
+
+/**
+ * Why the run did not measure the release merge commit's code, if it did not.
+ * The run checked out its pull_request merge ref; if main moved before the
+ * release merged, the release labels would name code the run never ran.
+ */
+function measurementMismatch(measuredSha, sha) {
+  if (!measuredSha) return "the archive does not name the commit it measured";
+  // Merge refs are not on main, so fetch the measured commit by id.
+  execFileSync("git", ["fetch", "--quiet", "--no-tags", "origin", measuredSha]);
+  const tree = (rev) =>
+    execFileSync("git", ["rev-parse", `${rev}^{tree}`], { encoding: "utf8" }).trim();
+  if (tree(measuredSha) !== tree(sha))
+    return `the measured commit ${measuredSha} and the release merge commit ${sha} have different trees`;
+  return undefined;
 }
 
 /** Lays out one archive as the benchmark's downloaded leg directory. */
@@ -212,7 +235,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     `${mirrored.length} mirrored archives; ${builds.length} are release builds of a merged PR's final head.`,
   );
 
-  const counts = { imported: 0, skipped: 0, failed: 0 };
+  const counts = { imported: 0, skipped: 0, rejected: 0, failed: 0 };
   for (const { metadata, pull } of builds) {
     const { id: runId, attempt } = metadata.workflow_run;
     const label = `eve ${metadata.eve_version} (PR #${pull.number}, run ${runId}/${attempt})`;
@@ -224,6 +247,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         continue;
       }
       const sha = pull.merge_commit_sha;
+      const mismatch = measurementMismatch(metadata.workflow_run.merge_sha, sha);
+      if (mismatch !== undefined) {
+        counts.rejected += 1;
+        console.error(`${label}: rejected: ${mismatch}`);
+        continue;
+      }
       const evalIds = evalIdsAt(sha);
       const plan = planFor({ metadata, sha, evalIds });
       const archive = await store.read(
@@ -273,7 +302,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
   }
   console.error(
-    `${dryRun ? "Would import" : "Imported"} ${counts.imported}, skipped ${counts.skipped}, failed ${counts.failed}.`,
+    `${dryRun ? "Would import" : "Imported"} ${counts.imported}, skipped ${counts.skipped}, rejected ${counts.rejected}, failed ${counts.failed}.`,
   );
   if (counts.failed > 0) process.exitCode = 1;
 }

@@ -10,15 +10,6 @@ on:
   schedule:
     - cron: "41 6 * * *"
   workflow_dispatch:
-  # TEMPORARY: lets this PR mirror archives that expire before it can merge.
-  # Same-repo pull_request runs receive repository secrets, so this hands the
-  # Blob token to PR code; the job's `if` limits it to this branch. Remove
-  # before merge.
-  pull_request:
-    paths:
-      - .github/workflows/mirror-stress-artifacts.yml
-      - scripts/eval-benchmark/mirror-stress-artifacts.mjs
-      - scripts/eval-benchmark/import-stress-artifacts.mjs
 
 concurrency:
   group: mirror-stress-artifacts
@@ -31,10 +22,15 @@ permissions:
 jobs:
   mirror:
     name: mirror
-    if: github.event_name != 'pull_request' || github.head_ref == 'prha/historic-stress-artifacts'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Stress imports publish only from refs/heads/main (got ${GITHUB_REF})."
+          exit 1
+
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,12 +51,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Mirror release-PR stress artifacts
+        id: mirror
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
         run: node scripts/eval-benchmark/mirror-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY"
 
       - name: Import release builds as benchmark runs
+        # One archive that failed to mirror should not hold back the rest, but
+        # the import must not run when an earlier step skipped the mirror.
+        if: ${{ !cancelled() && steps.mirror.outcome != 'skipped' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
