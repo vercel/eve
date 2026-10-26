@@ -2,7 +2,8 @@
 // neither the model nor the tools. Definitions follow durable-harness's
 // /compare page (packages/demo-ui/src/compare-glossary.ts at
 // METRIC_DEFINITIONS.commit in standard.mjs), so a value here means what the
-// same name means there. fixtures/durable-harness/ holds the conformance data.
+// same name means there, except as noted below. fixtures/durable-harness/
+// holds the conformance data.
 //
 // One deliberate difference: /compare subtracts every tool's full duration,
 // so time that concurrent tools share is subtracted once per tool, and a

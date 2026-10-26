@@ -169,8 +169,8 @@ export function listMarks(marks) {
 
 /**
  * A turn's tool calls, grouped by the model step that requested them. eve
- * streams one `actions.requested` per call, so a step's calls arrive as
- * several events. Calls keep the turn's start order, so a batch's first call
+ * may stream one `actions.requested` per call, so a step's calls can arrive
+ * as several events. Calls keep the turn's start order, so a batch's first call
  * started first.
  */
 export function toolBatches(turn) {

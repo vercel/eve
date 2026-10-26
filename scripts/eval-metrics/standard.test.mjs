@@ -500,6 +500,23 @@ test("concurrent tools count once in turn overhead, and a batch is one tool hop"
   // One hop for the batch, from model.done at 400 to the next request at 950.
   assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [50]);
   assert.deepEqual(metrics["overhead.tool_call_ms"].samples, [50]);
+
+  // The next model call waits for every call, so a batch with an unfinished
+  // call has no hop to measure.
+  const unfinished = { ...artifact, result: { ...artifact.result } };
+  unfinished.result.sessions = [
+    {
+      ...artifact.result.sessions[0],
+      events: events.map((e) =>
+        e.type === "action.result" && e.data.result.callId === "b"
+          ? { ...e, type: "action.partial" }
+          : e,
+      ),
+    },
+  ];
+  const partial = deriveAttemptMetrics(unfinished).metrics;
+  assert.equal(partial["overhead.tool_hop_ms"].reason, "no-tool-hops");
+  assert.equal(partial["overhead.tool_call_ms"].reason, "no-tool-hops");
 });
 
 test("a session created with its first message times that turn from the create request", () => {
