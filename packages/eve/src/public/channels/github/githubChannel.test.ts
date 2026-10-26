@@ -5,6 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
@@ -14,6 +15,9 @@ import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
+import type { SandboxRunOptions } from "#public/definitions/sandbox.js";
+import type { SandboxAccess } from "#sandbox/state.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
@@ -69,7 +73,7 @@ function stubAccessor() {
   return accessor;
 }
 
-function createAlsContext(sandbox?: MockSandbox): ContextContainer {
+function createAlsContext(sandbox?: Pick<MockSandbox, "access">): ContextContainer {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionKey, {
     auth: { current: null, initiator: null },
@@ -86,7 +90,7 @@ function callEvent(
   adapter: ChannelAdapter,
   event: UnstampedMessageStreamEvent,
   ctx: any,
-  sandbox?: MockSandbox,
+  sandbox?: Pick<MockSandbox, "access">,
 ): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(
     sandbox === undefined ? stubAlsContext : createAlsContext(sandbox),
@@ -99,6 +103,85 @@ function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   data: unknown,
 ): UnstampedMessageStreamEvent {
   return { data, type } as UnstampedMessageStreamEvent;
+}
+
+const CHECKOUT_HEAD_SHA = "a".repeat(40);
+
+/**
+ * A real session over mock primitives, opened with `networkPolicy`. Only the
+ * provider's policy setter is faked: it records every write and the policy in
+ * force when `git fetch` runs.
+ */
+function networkPolicySandbox(input: {
+  readonly fetchExitCode?: number;
+  readonly networkPolicy: SandboxNetworkPolicy;
+}) {
+  let inForce = input.networkPolicy;
+  const writes: SandboxNetworkPolicy[] = [];
+  const fetchPolicies: SandboxNetworkPolicy[] = [];
+  const primitives = mockSandbox({
+    run(options: SandboxRunOptions) {
+      if (options.command.includes("git rev-parse HEAD 2>/dev/null")) {
+        return { exitCode: 128, stderr: "", stdout: "" };
+      }
+      if (options.command.includes("git rev-parse HEAD")) {
+        return { exitCode: 0, stderr: "", stdout: `${CHECKOUT_HEAD_SHA}\n` };
+      }
+      if (options.command.includes("git fetch")) {
+        fetchPolicies.push(inForce);
+        const exitCode = input.fetchExitCode ?? 0;
+        return { exitCode, stderr: exitCode === 0 ? "" : "fatal: could not read", stdout: "" };
+      }
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+  }).session;
+  const session = buildSandboxSession(primitives, async (policy) => {
+    writes.push(policy);
+    inForce = policy;
+  });
+  const access: SandboxAccess = {
+    async captureState() {
+      return { session: null };
+    },
+    async get() {
+      return session;
+    },
+    async stop() {},
+  };
+  return {
+    access,
+    fetchPolicies,
+    inForce: () => inForce,
+    writes,
+  };
+}
+
+async function runCheckoutTurn(sandbox: Pick<MockSandbox, "access">) {
+  const adapter = withState(
+    getAdapter(
+      githubChannel({
+        credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+      }),
+    ),
+    {
+      conversationKind: "issue",
+      headSha: CHECKOUT_HEAD_SHA,
+      installationId: 55,
+      issueNumber: 5,
+      owner: "vercel",
+      repo: "eve",
+      repositoryId: 123,
+    },
+  );
+  const ctx = buildAdapterContext(adapter, stubAccessor());
+  await callEvent(adapter, makeEvent("turn.started", { sequence: 0, turnId: "t1" }), ctx, sandbox);
+  return ctx;
+}
+
+function checkoutFailureMessages(records: readonly { message: string; fields?: unknown }[]) {
+  return records
+    .filter((record) => record.message === "GitHub checkout failed — swallowed")
+    .map((record) => JSON.stringify(record.fields));
 }
 
 function signedRequest(event: string, payload: Record<string, unknown>): Request {
@@ -1116,5 +1199,52 @@ describe("githubChannel", () => {
     expect(sandbox.commandLog).toContain(
       `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${headSha}'`,
     );
+  });
+});
+
+// #3506: the configured network policy is the limit. Checkout may only attach
+// its credential to GitHub hosts the policy already allows, and never leaves it behind.
+describe("GitHub checkout network policy", () => {
+  const gitHubHosts: SandboxNetworkPolicy = {
+    allow: { "codeload.github.com": [], "github.com": [] },
+  };
+
+  it.fails("refuses to check out under deny-all without writing a policy", async () => {
+    const logs = captureLogRecords();
+    const sandbox = networkPolicySandbox({ networkPolicy: "deny-all" });
+
+    await runCheckoutTurn(sandbox);
+
+    expect(sandbox.writes).toEqual([]);
+    expect(sandbox.fetchPolicies).toEqual([]);
+    const [failure] = checkoutFailureMessages(logs.records);
+    expect(failure).toContain("github.com");
+    expect(failure).toContain("codeload.github.com");
+  });
+
+  it.fails("fetches with the credential on allowed GitHub hosts only", async () => {
+    const sandbox = networkPolicySandbox({ networkPolicy: gitHubHosts });
+
+    const ctx = await runCheckoutTurn(sandbox);
+
+    expect(ctx.state.headSha).toBe(CHECKOUT_HEAD_SHA);
+    expect(sandbox.fetchPolicies).toHaveLength(1);
+    const fetchPolicy = sandbox.fetchPolicies[0];
+    const allow = typeof fetchPolicy === "object" ? fetchPolicy.allow : undefined;
+    expect(allow).not.toBeInstanceOf(Array);
+    expect(Object.keys(allow ?? {}).sort()).toEqual(["codeload.github.com", "github.com"]);
+    expect(JSON.stringify(allow)).toContain("Authorization");
+    expect(sandbox.inForce()).toEqual(gitHubHosts);
+  });
+
+  it.fails("restores the configured policy when the fetch fails", async () => {
+    const logs = captureLogRecords();
+    const sandbox = networkPolicySandbox({ fetchExitCode: 128, networkPolicy: gitHubHosts });
+
+    await runCheckoutTurn(sandbox);
+
+    expect(sandbox.fetchPolicies).toHaveLength(1);
+    expect(checkoutFailureMessages(logs.records)).toHaveLength(1);
+    expect(sandbox.inForce()).toEqual(gitHubHosts);
   });
 });
