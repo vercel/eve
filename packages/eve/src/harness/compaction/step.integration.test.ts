@@ -405,10 +405,8 @@ describe("announcements after a compaction during a turn", () => {
   });
 });
 
-// #5350: the summary call's error escaped the step, so the workflow retried the whole step and
-// then ended the session.
 describe("a compaction that fails during a turn", () => {
-  it.fails("fails the turn and keeps the history when the summary call is rate limited", async () => {
+  it("fails the turn and keeps the history when the summary call is rate limited", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});

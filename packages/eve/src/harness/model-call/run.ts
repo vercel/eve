@@ -133,8 +133,9 @@ export async function runModelStep(
   try {
     result = await caller.call({ suppressStepStartedEmission: true });
   } catch (error) {
-    caller.throwIfCompactionFailed();
     throwIfTurnAborted(step.config.abortSignal);
+    const compaction = caller.failedCompaction();
+    if (compaction !== undefined) return reportModelCallFailure(step, compaction.error);
     if (generation.interrupted) return caller.steered();
     const recovery = await recoverModelCall({
       call: (options) => caller.call(options),
@@ -142,7 +143,6 @@ export async function runModelStep(
       sessionId: step.session.sessionId,
       turnId: step.position().turnId,
     });
-    caller.throwIfCompactionFailed();
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     if (!("result" in recovery)) return reportModelCallFailure(step, recovery.error);

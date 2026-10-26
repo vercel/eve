@@ -24,6 +24,11 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
+The summary call retries transient provider errors like any model call. If it
+still fails, eve reports it as it would a failed model call: the turn fails with
+`MODEL_CALL_FAILED` and the history stays uncompacted. A transient error such as
+a 429 leaves the session waiting for the next message.
+
 First-class [memory](../memory) participates in a separate lifecycle. eve asks
 providers to capture before compaction, excludes attributed recalled records
 from the summarizer, keeps their canonical latest values, and recalls again
