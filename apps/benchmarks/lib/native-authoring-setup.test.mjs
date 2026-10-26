@@ -5,15 +5,17 @@ import { test } from "node:test";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { JUST_BASH_VERSION, createNativeAuthoringSetup } = await jiti.import(
+const { JUST_BASH_VERSION, VITEST_VERSION, createNativeAuthoringSetup } = await jiti.import(
   new URL("./native-authoring-setup.ts", import.meta.url).pathname,
 );
 
-test("installs the just-bash version eve tests against", () => {
+test("installs the just-bash and vitest versions eve tests against", () => {
   const eve = JSON.parse(
     readFileSync(new URL("../../../packages/eve/package.json", import.meta.url)),
   );
   assert.equal(JUST_BASH_VERSION, eve.devDependencies["just-bash"]);
+  const catalog = readFileSync(new URL("../../../pnpm-workspace.yaml", import.meta.url), "utf8");
+  assert.ok(catalog.includes(`\n  vitest: "${VITEST_VERSION}"\n`));
 });
 
 test("bootstraps the selected source before a native agent starts", async () => {
@@ -52,7 +54,10 @@ test("bootstraps the selected source before a native agent starts", async () => 
     commands[2].args[1],
     /AI_AGENT=claude EVE_INIT_PACKAGE_SPEC=.* eve init \. --model openai\/gpt-5\.5/u,
   );
-  assert.match(commands[3].args[1], /npm install --save-dev --save-exact just-bash@3\.6\.0/u);
+  assert.match(
+    commands[3].args[1],
+    /npm install --save-dev --save-exact just-bash@3\.6\.0 vitest@5\.0\.2/u,
+  );
   assert.match(commands[4].args[1], /mkdir -p agent\/lib/u);
   assert.match(commands[5].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
   assert.match(commands[6].args[1], /npm run typecheck && npm run build/u);

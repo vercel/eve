@@ -15,6 +15,8 @@ interface FixtureBootstrap {
 
 /** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
 export const JUST_BASH_VERSION = "3.6.0";
+/** Matches the workspace catalog, so it accepts the `vite` version eve's peer range requires. */
+export const VITEST_VERSION = "5.0.2";
 
 export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
@@ -62,11 +64,14 @@ export function createNativeAuthoringSetup(options: {
     }
 
     // DefaultSandbox selects just-bash inside the Linux eval container, where Docker
-    // is unavailable. Supply its optional peer before the model runs.
+    // is unavailable. Supply its optional peer before the model runs. The grader
+    // needs vitest too: agent-eval only installs its fallback `vitest@^3` when the
+    // workspace has none, and that fallback fails silently against eve's vite peer.
+    // Saving it keeps it through the agent's own `npm install`s.
     await run(
       sandbox,
-      `npm install --save-dev --save-exact just-bash@${JUST_BASH_VERSION}`,
-      "local sandbox dependency",
+      `npm install --save-dev --save-exact just-bash@${JUST_BASH_VERSION} vitest@${VITEST_VERSION}`,
+      "local sandbox and grader dependencies",
     );
 
     const context = setupContext(sandbox, bootstrap.projectDirectory);
