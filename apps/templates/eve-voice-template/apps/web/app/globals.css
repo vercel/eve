@@ -32,6 +32,92 @@
   --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
 }
 
+/* The parts of shadcn/tailwind.css that Trace uses. */
+@theme inline {
+  --animate-accordion-down: accordion-down 200ms ease-out;
+  --animate-accordion-up: accordion-up 200ms ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height, auto);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height, auto);
+    }
+    to {
+      height: 0;
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+}
+
+@custom-variant data-open {
+  &:where([data-state="open"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-closed {
+  &:where([data-state="closed"]) {
+    @slot;
+  }
+}
+
+@property --shimmer-image {
+  syntax: "*";
+  inherits: false;
+}
+
+@property --shimmer-text-fill {
+  syntax: "*";
+  inherits: false;
+}
+
+@utility shimmer {
+  --_spread: calc(3ch + 40px);
+  --_highlight: oklch(from currentColor l c h / calc(alpha * 0.2));
+  background-image: var(
+    --shimmer-image,
+    linear-gradient(
+      110deg,
+      currentColor calc(50% - var(--_spread)),
+      color-mix(in oklch, var(--_highlight), currentColor 50%) calc(50% - var(--_spread) * 0.5),
+      var(--_highlight) 50%,
+      color-mix(in oklch, var(--_highlight), currentColor 50%) calc(50% + var(--_spread) * 0.5),
+      currentColor calc(50% + var(--_spread))
+    )
+  );
+  background-repeat: no-repeat;
+  background-size: calc(200% + var(--_spread) * 2) 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: var(--shimmer-text-fill, transparent);
+  animation: shimmer 2s linear infinite;
+
+  @variant dark {
+    --_highlight: oklch(from currentColor max(0.8, calc(l + 0.4)) c h / calc(alpha + 0.4));
+  }
+}
+
+@utility shimmer-none {
+  --shimmer-image: none;
+  --shimmer-text-fill: currentColor;
+}
+
 :root {
   color-scheme: light;
   /* Soft neutral page with white elevated surfaces so cards/composer pop. */

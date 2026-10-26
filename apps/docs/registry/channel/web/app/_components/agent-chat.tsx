@@ -1,9 +1,9 @@
 "use client";
 
 import type { UserContent } from "ai";
-import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { toolCallState, useEveAgent } from "eve/react";
+import { AlertCircleIcon, PlusIcon, SquareIcon } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -19,10 +19,10 @@ import {
   PromptInputTextarea,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
-import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
+import { Trace } from "@/components/ui/trace";
 import { cn } from "@/lib/utils";
-import { AgentMessage } from "./agent-message";
+import { AgentMessage, StepLine } from "./agent-message";
 import { WEB_CHAT_AGENT } from "@/app/eve-agent";
 
 const DEFAULT_AGENT_NAME = "eve-agent";
@@ -90,6 +90,8 @@ export function AgentChat({
     Object.values(agent.data.inputs).filter(
       (input) => input.request.kind === "question" && input.request.action.callId === callId,
     );
+  const callState = (callId: string) => toolCallState(agent.conversation, callId);
+  const reasoningDurations = useMemo(() => getReasoningDurations(agent.events), [agent.events]);
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -169,6 +171,7 @@ export function AgentChat({
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
                 <AgentMessage
+                  callState={callState}
                   canRespond={canRespond}
                   isStreaming={
                     agent.status === "streaming" && index === agent.data.messages.length - 1
@@ -176,6 +179,7 @@ export function AgentChat({
                   key={message.id}
                   message={message}
                   questionsFor={questionsFor}
+                  reasoningDurations={reasoningDurations}
                   onInputResponses={(inputResponses) => {
                     setCancellationError(undefined);
                     return agent.respond(inputResponses);
@@ -285,13 +289,35 @@ function PendingThinking() {
   return (
     <Message aria-live="polite" from="assistant">
       <MessageContent>
-        <div className="mb-4 flex w-full items-center gap-2 text-muted-foreground text-sm">
-          <BrainIcon className="size-4" />
-          <Shimmer duration={1}>Thinking</Shimmer>
-        </div>
+        <Trace>
+          <StepLine status="running" title="Thinking" />
+        </Trace>
       </MessageContent>
     </Message>
   );
+}
+
+/**
+ * How long each reasoning block took, keyed by its part id: the id of the event that opened it.
+ * Event times are stamped once on the server, so a resumed session reads the same durations.
+ */
+function getReasoningDurations(events: ReturnType<typeof useEveAgent>["events"]) {
+  const open = new Map<string, { readonly at: string; readonly id: string }>();
+  const durations: Record<string, number> = {};
+  for (const event of events) {
+    if (event.type !== "reasoning.appended" && event.type !== "reasoning.completed") {
+      continue;
+    }
+    const key = `${event.data.turnId}:${event.data.stepIndex}`;
+    const start = open.get(key) ?? { at: event.meta.at, id: event.meta.id };
+    if (event.type === "reasoning.appended") {
+      open.set(key, start);
+      continue;
+    }
+    open.delete(key);
+    durations[start.id] = Date.parse(event.meta.at) - Date.parse(start.at);
+  }
+  return durations;
 }
 
 function toErrorMessage(error: unknown): string {

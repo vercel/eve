@@ -6,7 +6,7 @@ import {
 } from "@ai-sdk/openai";
 import { experimental_useRealtime as useRealtime } from "@ai-sdk/react";
 import type { Experimental_RealtimeServerEvent as RealtimeServerEvent } from "ai";
-import { type EveMessage, useEveAgent } from "eve/react";
+import { type EveMessage, toolCallState, useEveAgent } from "eve/react";
 import { LoaderCircleIcon, MicIcon, MicOffIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AgentMessage } from "@/app/_components/agent-message";
@@ -199,6 +199,7 @@ export function VoiceCall() {
       .filter((message) => message.parts.length > 0)
       .map((message) => (
         <AgentMessage
+          callState={(callId) => toolCallState(agent.conversation, callId)}
           canRespond={canRespond}
           isStreaming={false}
           key={message.id}
