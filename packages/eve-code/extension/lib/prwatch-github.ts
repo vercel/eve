@@ -207,12 +207,11 @@ function githubHeaders(token: string): Record<string, string> {
   };
 }
 
-function githubTokenParams(org: string, repoName: string) {
+function githubTokenParams(repo: string) {
   return {
     authorizationDetails: [
       {
-        org,
-        repositories: [repoName],
+        repositories: [repo],
         type: "github_app_installation" as const,
       },
     ],
@@ -223,13 +222,13 @@ function githubTokenParams(org: string, repoName: string) {
 async function mintWatchToken(repo: string): Promise<string> {
   const github = extension.config.github;
   if (github === undefined) throw new Error("GitHub is not configured for this agent.");
-  const parts = repoParts(repo);
-  if (parts.owner !== github.org.toLowerCase()) {
-    throw new Error(`Repository ${repo} is outside ${github.org}.`);
-  }
-  const token = await getToken(github.connector, githubTokenParams(github.org, parts.name));
+  const token = await getToken(github.connector, githubTokenParams(repo));
   if (token.length === 0) {
     throw new Error(`Connect returned an empty GitHub token for ${repo}.`);
+  }
+  // Watches run outside any session, so there is no caller to pass.
+  if (github.authorize && !(await github.authorize({ auth: null, repository: repo, token }))) {
+    throw new Error(`Pull request watch is not authorized to access ${repo}.`);
   }
   return token;
 }
@@ -237,8 +236,7 @@ async function mintWatchToken(repo: string): Promise<string> {
 async function invalidateWatchToken(repo: string): Promise<void> {
   const github = extension.config.github;
   if (github === undefined) return;
-  const parts = repoParts(repo);
-  deleteTokenCacheEntry(github.connector, githubTokenParams(github.org, parts.name));
+  deleteTokenCacheEntry(github.connector, githubTokenParams(repo));
 }
 
 async function githubJson(url: string, token: string): Promise<unknown> {

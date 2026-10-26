@@ -13,16 +13,16 @@ test("accepts no connectors", () => {
 test("applies firewall defaults independently", () => {
   const broker = async () => {};
   extension({
-    github: { connector: "github/acme-bot", org: "acme", broker },
+    github: { connector: "github/acme-bot", broker },
     vercel: { connector: "vercel/acme-bot" },
   });
-  assert.deepEqual(extension.config.github, { connector: "github/acme-bot", org: "acme", broker });
+  assert.deepEqual(extension.config.github, { connector: "github/acme-bot", broker });
   assert.equal(extension.config.vercel?.delivery, "firewall");
 });
 
-test("rejects empty connector names and organizations", () => {
+test("rejects empty connector names", () => {
   assert.throws(
-    () => extension({ github: { connector: "", org: "", broker: async () => {} } }),
+    () => extension({ github: { connector: "", broker: async () => {} } }),
     /Invalid extension config/u,
   );
   assert.throws(() => extension({ vercel: { connector: "" } }), /Invalid extension config/u);

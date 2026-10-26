@@ -53,7 +53,6 @@ export interface GitHubConfig {
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
   readonly connector: string;
-  readonly org: string;
 }
 
 /** What an `authorize` callback sees before a `gh` command runs. */
@@ -127,15 +126,14 @@ export async function executeGitHubShell(
   );
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
-  const repositories = repositoryNames(declaredRepositories, config.org);
+  const repository = declaredRepository(declaredRepositories);
   const tokenParams: ConnectTokenParams = {
-    authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
+    authorizationDetails: [{ type: "github_app_installation", repositories: [repository] }],
     subject: { type: "app" },
   };
   const token = await (dependencies.getConnectToken ?? getToken)(config.connector, tokenParams);
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
-  const repository = declaredRepositories[0]!;
   if (
     config.authorize &&
     !(await config.authorize({ auth: dependencies.auth ?? null, repository, token }))
@@ -428,19 +426,13 @@ function canonicalRepository(value: string): string {
   return normalized;
 }
 
-function repositoryNames(repositories: readonly string[], configuredOrg: string): string[] {
+function declaredRepository(repositories: readonly string[]): string {
   if (repositories.length !== 1) throw new Error("Exactly one GitHub repository is required.");
-  const names = new Set<string>();
-  for (const repository of repositories) {
-    const match = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/u.exec(repository);
-    if (!match) throw new Error(`Invalid GitHub repository ${JSON.stringify(repository)}.`);
-    if (match[1]?.toLowerCase() !== configuredOrg.toLowerCase()) {
-      throw new Error(`Repository ${JSON.stringify(repository)} is outside ${configuredOrg}.`);
-    }
-    names.add(match[2]!);
+  const repository = repositories[0]!;
+  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/u.test(repository)) {
+    throw new Error(`Invalid GitHub repository ${JSON.stringify(repository)}.`);
   }
-  if (names.size !== 1) throw new Error("Exactly one GitHub repository is required.");
-  return [...names];
+  return repository;
 }
 
 function executablePath(executable: string): string {

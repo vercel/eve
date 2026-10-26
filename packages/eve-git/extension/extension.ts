@@ -21,7 +21,13 @@ export default defineExtension({
     github: z
       .object({
         connector: z.string().min(1),
-        org: z.string().min(1),
+        /** Removed. Restrict organizations with `authorize`. */
+        org: z
+          .undefined({
+            error:
+              'was removed. The GitHub App installation is now the boundary; restrict organizations with authorize, e.g. authorize: ({ repository }) => repository.startsWith("acme/").',
+          })
+          .optional(),
         broker: fn<GitHubLeaseBroker>(),
         /**
          * Resolves the person each turn publishes for. Their
@@ -31,10 +37,12 @@ export default defineExtension({
         /**
          * Called before each `gh` command with the session's caller, the
          * declared repository, and its scoped token. Return `false` to deny.
-         * Without it, the GitHub App installation is the only boundary.
+         * Without it, the GitHub App installation is the only boundary: every
+         * repository the app can access, in any organization, is reachable.
          */
         authorize: fn<GitHubAuthorize>().optional(),
       })
+      .strict()
       .optional(),
   }),
 });

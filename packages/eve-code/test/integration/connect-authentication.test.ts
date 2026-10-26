@@ -15,7 +15,7 @@ const { authenticateTurn } = await import("../../extension/lib/connect-authentic
 test("does not broker GitHub credentials at turn start", async () => {
   let requestedSandbox = false;
   await authenticateTurn(
-    { github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } },
+    { github: { connector: "github/acme-bot", broker: async () => {} } },
     async () => {
       requestedSandbox = true;
       return fakeSandbox([]);
@@ -32,7 +32,7 @@ test("authenticates only the Vercel connector at turn start", async () => {
   const policies: { allow: Record<string, unknown> }[] = [];
   await authenticateTurn(
     {
-      github: { connector: "github/acme-bot", org: "acme", broker: async () => {} },
+      github: { connector: "github/acme-bot", broker: async () => {} },
       vercel: { connector: "vercel/acme-bot", delivery: "firewall" },
     },
     async () => fakeSandbox(policies),

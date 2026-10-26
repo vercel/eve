@@ -95,14 +95,26 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | Option               | Required      | Effect                                                                                            |
 | -------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
 | `github.connector`   | With `github` | Connector that mints a GitHub token                                                               |
-| `github.org`         | With `github` | Organization whose repositories the `gh` tool can access                                          |
 | `github.broker`      | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules        |
 | `github.authorize`   | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
 | `github.attribution` | No            | `attribution(ctx)` callback that returns the `{ name, email }` co-author for this turn            |
 
-The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
+The `gh` tool requests a token scoped to exactly one `owner/name` repository for each invocation. Connect mints it from the GitHub App installation in that owner, so without `github.authorize` every repository the app can access, in any organization, is reachable. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
 `github.authorize` runs during each `gh` tool execution, not when the session starts. The order is: validate the command and repository, mint the repository-scoped app token, await `authorize({ auth, repository, token })`, install the credential lease, then run the command. `auth` is the session's current caller at tool invocation, or `null`. Returning `false` stops execution before the lease is installed or the command runs. The decision applies to that invocation only; it is neither cached for the session nor repeated for each GitHub API request.
+
+To limit the agent to certain organizations, check the repository owner:
+
+```ts
+git({
+  github: {
+    connector: "github/my-agent",
+    broker,
+    authorize: ({ repository }) =>
+      ["acme", "acme-labs"].includes(repository.split("/")[0]!.toLowerCase()),
+  },
+});
+```
 
 For example, use the token to check collaborator status (allowed commands still use the app token's permissions, not the collaborator's):
 
@@ -114,7 +126,6 @@ import { brokerGitHubLease } from "../lib/github";
 export default git({
   github: {
     connector: "github/my-agent",
-    org: "acme",
     broker: brokerGitHubLease,
     // GitHub channel sessions carry the commenter's login as `auth.subject`.
     async authorize({ auth, repository, token }) {
@@ -135,7 +146,6 @@ Commits made by the `gh` tool are authored by the GitHub App. To credit the pers
 git({
   github: {
     connector: "github",
-    org: "acme",
     broker,
     attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
   },

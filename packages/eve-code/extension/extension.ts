@@ -2,7 +2,7 @@ import { defineExtension } from "eve/extension";
 import type { SandboxSession } from "eve/sandbox";
 import { z } from "zod";
 
-import type { GitHubConfig } from "eve/extensions/git/sandbox";
+import type { GitHubAuthorize, GitHubConfig } from "eve/extensions/git/sandbox";
 
 export type CredentialPolicyBroker = (
   sandbox: SandboxSession,
@@ -10,6 +10,7 @@ export type CredentialPolicyBroker = (
 ) => Promise<void>;
 
 export type { GitHubLeaseRule } from "eve/extensions/git/sandbox";
+export type { GitHubAuthorize, GitHubAuthorizeRequest } from "eve/extensions/git/sandbox";
 
 export type GitHubLeaseBroker = GitHubConfig["broker"];
 export type GitHubAttribution = NonNullable<GitHubConfig["attribution"]>;
@@ -29,10 +30,18 @@ export default defineExtension({
     github: z
       .object({
         connector: z.string().min(1),
-        org: z.string().min(1),
+        /** Removed. Restrict organizations with `authorize`. */
+        org: z
+          .undefined({
+            error:
+              'was removed. The GitHub App installation is now the boundary; restrict organizations with authorize, e.g. authorize: ({ repository }) => repository.startsWith("acme/").',
+          })
+          .optional(),
         broker: fn<GitHubLeaseBroker>(),
         attribution: fn<GitHubAttribution>().optional(),
+        authorize: fn<GitHubAuthorize>().optional(),
       })
+      .strict()
       .optional(),
     vercel: z
       .object({
