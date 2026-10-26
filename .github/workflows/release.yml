@@ -114,6 +114,8 @@ jobs:
           echo "build=$([[ "$ghcr" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
           echo "copy-to-vcr=$([[ "$vcr" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
 
+      # These build settings are not part of the content tag. Changing them
+      # republishes nothing until the Dockerfile also changes.
       - name: Build and publish the sandbox image to GitHub Container Registry
         if: github.ref == 'refs/heads/main' && steps.image-state.outputs.build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -169,24 +171,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # `latest` only serves authors who reference the image directly; eve
-      # itself pins the content tag. Move it after npm publish succeeds so it
-      # never points at an image no released eve uses.
-      - name: Point latest sandbox image tags at the released image
-        if: github.ref == 'refs/heads/main' && steps.changesets.outputs.published == 'true'
-        env:
-          GHCR_TAG: ${{ steps.image-tags.outputs.ghcr-tag }}
-          VCR_TAG: ${{ steps.image-tags.outputs.vcr-tag }}
-          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.published-packages }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$(jq -r '.[] | select(.name == "eve") | .version' <<<"$PUBLISHED_PACKAGES")" ]]; then
-            exit 0
-          fi
-          skopeo copy --all --preserve-digests "docker://${GHCR_TAG}" "docker://${GHCR_IMAGE}:latest"
-          skopeo copy --all --preserve-digests "docker://${VCR_TAG}" "docker://${VCR_IMAGE}:latest"
-
       - name: Mark eve as the latest GitHub release
         if: steps.changesets.outputs.published == 'true'
         env:
@@ -197,3 +181,51 @@ jobs:
           if [[ -n "$version" ]]; then
             gh release edit "eve@$version" --latest
           fi
+
+      # `latest` serves authors who reference the image directly; eve pins its
+      # own tag. The tag comes from the published eve package, not this commit,
+      # so `latest` never points at an unreleased image. Every main run
+      # converges, so a failed move heals on the next push.
+      - name: Point latest sandbox image tags at the released eve image
+        if: github.ref == 'refs/heads/main'
+        env:
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.published-packages }}
+        run: |
+          set -euo pipefail
+
+          version="$(jq -r '.[]? | select(.name == "eve") | .version' <<<"${PUBLISHED_PACKAGES:-[]}")"
+          if [[ -z "$version" ]]; then
+            version="$(npm view eve version)"
+          fi
+          # A version published moments ago can take a short time to appear.
+          for attempt in $(seq 1 12); do
+            if tarball="$(npm view "eve@${version}" dist.tarball 2>/dev/null)" && [[ -n "$tarball" ]]; then
+              break
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              echo "::error::eve@${version} is not visible on npm; rerun this job to move the latest sandbox image tags." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          tag="$(curl -fsSL "$tarball" | tar -xzO --wildcards 'package/dist/*.js' | { grep -aoE 'dockerfile-[0-9a-f]{12}' || true; } | sort -u)"
+          if [[ -z "$tag" ]]; then
+            echo "eve@${version} predates content-tagged sandbox images; leaving latest unchanged."
+            exit 0
+          fi
+          if [[ "$tag" == *$'\n'* ]]; then
+            echo "::error::eve@${version} contains more than one sandbox image tag: ${tag//$'\n'/, }" >&2
+            exit 1
+          fi
+
+          for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
+            wanted="$(docker buildx imagetools inspect --raw "${image}:${tag}" | sha256sum)"
+            current="$(docker buildx imagetools inspect --raw "${image}:latest" 2>/dev/null | sha256sum || true)"
+            if [[ "$wanted" == "$current" ]]; then
+              echo "${image}:latest already serves ${tag}."
+            else
+              skopeo copy --all --preserve-digests "docker://${image}:${tag}" "docker://${image}:latest"
+              echo "Moved ${image}:latest to ${tag} (eve@${version})."
+            fi
+          done

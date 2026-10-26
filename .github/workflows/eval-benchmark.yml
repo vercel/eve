@@ -409,6 +409,11 @@ jobs:
           pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
 
           token_args=(--token "$VERCEL_TOKEN")
+          # Set only when the pinned image is unpublished; see .github/actions/sandbox-image.
+          image_env_args=()
+          if [ -n "${EVE_SANDBOX_IMAGE_TAG:-}" ]; then
+            image_env_args=(--env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG")
+          fi
           vercel link --yes --project "$VERCEL_PROJECT_ID" --team "$VERCEL_ORG_ID" "${token_args[@]}"
           vercel env pull --yes --environment=preview "${token_args[@]}"
           VERCEL_OIDC_TOKEN="$(node --env-file=.env.local -p 'process.env.VERCEL_OIDC_TOKEN ?? ""')"
@@ -418,7 +423,7 @@ jobs:
             pnpm exec eve build
           DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
-            --env "EVE_SANDBOX_IMAGE_TAG=${EVE_SANDBOX_IMAGE_TAG:-}" \
+            "${image_env_args[@]}" \
             "${token_args[@]}" | tail -n 1)"
           echo "Deployed $DEPLOYMENT_URL"
 

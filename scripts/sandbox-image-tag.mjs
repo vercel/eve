@@ -3,6 +3,10 @@
 // exactly one image definition. eve pins the tag in source; the release
 // workflow publishes it once and never rebuilds an existing tag.
 //
+// Build settings in .github/workflows/release.yml (platforms, compression,
+// labels) and the floating `# syntax=` frontend are not hashed. Changing them
+// does not produce a new tag; also edit the Dockerfile to publish a new image.
+//
 //   node scripts/sandbox-image-tag.mjs           print the tag
 //   node scripts/sandbox-image-tag.mjs --check   fail when the pinned tag is stale
 //   node scripts/sandbox-image-tag.mjs --write   update the pinned tag
@@ -19,11 +23,11 @@ const pinnedTagPattern = /const EVE_SANDBOX_IMAGE_TAG = "([^"]*)";/;
 
 const dockerfile = (await readFile(dockerfilePath, "utf8")).replaceAll("\r\n", "\n");
 
-// Only the Dockerfile is hashed. Copying build-context files into the image
-// would let its contents change without changing the tag.
-if (/^\s*(COPY|ADD)\s/im.test(dockerfile)) {
+// Only the Dockerfile is hashed. Reading build-context files (COPY, ADD, or a
+// RUN --mount) would let the image change without changing the tag.
+if (/^\s*(COPY|ADD)\s|--mount=/im.test(dockerfile)) {
   fail(
-    "packages/eve/Dockerfile uses COPY or ADD. Include the copied files in the hash in scripts/sandbox-image-tag.mjs.",
+    "packages/eve/Dockerfile reads build-context files (COPY, ADD, or RUN --mount). Include those files in the hash in scripts/sandbox-image-tag.mjs.",
   );
 }
 

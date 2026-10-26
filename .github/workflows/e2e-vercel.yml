@@ -167,6 +167,11 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
             scope_args=(--scope "$VERCEL_ORG_ID")
           fi
+          # Set only when the pinned image is unpublished; see .github/actions/sandbox-image.
+          image_env_args=()
+          if [ -n "${EVE_SANDBOX_IMAGE_TAG:-}" ]; then
+            image_env_args=(--env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG")
+          fi
 
           vercel link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           vercel env pull --yes --environment=preview "${token_args[@]}"
@@ -181,7 +186,7 @@ jobs:
             pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
           DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
-            --env "EVE_SANDBOX_IMAGE_TAG=${EVE_SANDBOX_IMAGE_TAG:-}" \
+            "${image_env_args[@]}" \
             "${token_args[@]}" | tail -n 1)"
 
           wait_for_target() {
