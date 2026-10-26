@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuth } from "#context/keys.js";
-import type { Approval } from "#public/definitions/approval.js";
+import type { ToolApproval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
@@ -119,7 +119,7 @@ export interface MemoryToolsContext extends DynamicResolveContext {
 }
 
 export interface MemoryToolDefinition {
-  readonly approval?: Approval<never>;
+  readonly approval?: ToolApproval<never>;
   readonly description: string;
   execute(input: never, context: ToolContext): unknown | Promise<unknown> | AsyncIterable<unknown>;
   readonly inputSchema: unknown;

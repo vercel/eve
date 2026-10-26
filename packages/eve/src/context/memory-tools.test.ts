@@ -18,7 +18,7 @@ import {
   TurnMemoryLocksKey,
 } from "#context/keys.js";
 import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
-import { resolveApprovalPolicy } from "#approval/definition.js";
+import { resolveApprovalPolicy, type ToolApproval } from "#approval/definition.js";
 import { defineTool } from "#tools/definition.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
@@ -65,6 +65,7 @@ function createContext(scope: string, lockedTurn: MemoryTurnContext = turn) {
 function resolver(
   version: () => number,
   onTools?: (context: MemoryToolsContext) => void,
+  approval: ToolApproval<{ scope: string }> = always(),
 ): ResolvedDynamicToolResolver {
   const definition = defineMemory({
     description: "Manage the profile.",
@@ -74,7 +75,7 @@ function resolver(
         onTools?.(context);
         return {
           save: defineTool({
-            approval: always(),
+            approval,
             description: "Save a field.",
             execute: async () => `${version()}:${String(context.memory.scope.value)}`,
             inputSchema: z.object({
@@ -212,6 +213,38 @@ describe("memory provider tools", () => {
     expect(seen).toEqual([history]);
     const [metadata] = ctx.require(TurnDynamicToolMetadataKey);
     expect(JSON.stringify(metadata)).not.toContain("hello");
+  });
+
+  it("keeps a provider tool with an approval prompt and replays the prompt after a restart", async () => {
+    const ctx = createContext("user_1");
+    const compiledResolver = resolver(() => 1, undefined, {
+      prompt: ({ input }) => `Save ${input.scope}?`,
+      request: always(),
+    });
+    await contextStorage.run(
+      ctx,
+      async () =>
+        await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [compiledResolver] }),
+    );
+    clearDurableDynamicCallbacks(ctx.require(SessionIdKey));
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event,
+      messages: [],
+      resolvers: [compiledResolver],
+    });
+
+    const [replayed] = buildDynamicTools(ctx);
+    if (replayed?.approval === undefined || typeof replayed.approval === "function") {
+      throw new Error("Expected replayed approval configuration.");
+    }
+    expect(
+      replayed.approval.prompt?.({
+        callId: "call_1",
+        input: { scope: "user_1" },
+        toolName: "profile__save",
+      }),
+    ).toBe("Save user_1?");
   });
 
   it("offers provider tools on a turn whose input carries a staged attachment", async () => {
