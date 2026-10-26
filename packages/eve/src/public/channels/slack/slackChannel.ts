@@ -1513,6 +1513,9 @@ async function deliverSlackMessage(input: {
     const title = input.isPrivateConversation
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
+    // The envelope stays model-visible; pending input matches what the person typed.
+    // With typed answers off, empty text keeps the envelope itself from answering.
+    const typedText = input.resolvesTypedInput ? slackTypedText(message.text, input.botUserId) : "";
     const sendOptions: SlackSendOptions = attachInputText(
       {
         auth: input.result.auth,
@@ -1520,10 +1523,7 @@ async function deliverSlackMessage(input: {
         ...(channelContext.length > 0 && { context: channelContext }),
         ...(history !== undefined && { history }),
       },
-      // The envelope stays model-visible; pending input matches what the person typed.
-      input.resolvesTypedInput && fileParts.length === 0
-        ? slackTypedText(message.text, input.botUserId)
-        : undefined,
+      fileParts.length === 0 ? typedText : undefined,
     );
 
     await input.sessionOperations.send(turnMessage, sendOptions);

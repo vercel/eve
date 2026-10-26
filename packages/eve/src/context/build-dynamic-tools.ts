@@ -154,6 +154,8 @@ export function replayDynamicTools(
       "toModelOutput",
       entry.callbacks.toModelOutput,
     );
+    const endsTurn =
+      entry.endsTurn ?? bindDynamicCallback(entry, owner, "endsTurn", entry.callbacks.endsTurn);
 
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
@@ -162,7 +164,7 @@ export function replayDynamicTools(
       deferred: entry.deferred,
       frameworkTool: entry.frameworkTool,
       description: entry.description,
-      endsTurn: entry.endsTurn,
+      endsTurn,
       execute: createToolExecuteWithAuth({
         scope: entry.name,
         execute: (input, context) => {

@@ -14,6 +14,8 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
  * per turn.
  */
 export interface SessionTimeoutControl {
+  /** Current idle deadline, including activity since the durable timer was armed. */
+  getDeadline(): Date;
   dispose(): Promise<void>;
   /**
    * Answers this owner's elapsed timer: `expired` once the session has been
@@ -28,6 +30,8 @@ export interface SessionTimeoutControl {
 
 /** Creates the idle timeout for one owner run, or `undefined` when timeouts are disabled. */
 export function createSessionTimeoutControl(input: {
+  /** Preserve the idle window when proactively moving an existing session. */
+  readonly deadline?: Date;
   readonly sessionId: string;
   readonly timeoutMs: number | false;
 }): SessionTimeoutControl | undefined {
@@ -36,7 +40,8 @@ export function createSessionTimeoutControl(input: {
   // Workflow's clock is replay-stable. An owner boots right after activity:
   // the session's creation, the delivery a successor runs, or the turn that
   // compacted before a successor took over.
-  let lastActivityAt = Date.now();
+  let lastActivityAt =
+    input.deadline === undefined ? Date.now() : input.deadline.getTime() - timeoutMs;
   let active: { readonly runId: string } | undefined;
   let startup: Promise<void> | undefined;
 
@@ -52,6 +57,10 @@ export function createSessionTimeoutControl(input: {
   };
 
   return {
+    getDeadline(): Date {
+      return new Date(lastActivityAt + timeoutMs);
+    },
+
     async dispose(): Promise<void> {
       try {
         await startup;

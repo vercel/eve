@@ -12,8 +12,9 @@ import { resumeAuthorizationCallback } from "#execution/legacy-session/authoriza
  * 1. Parses the inbound request into a JSON-serializable
  *    {@link AuthorizationCallback} (params only — never request headers).
  * 2. Calls `resumeHook(token, payload)` to wake the suspended workflow.
- * 3. Renders the standard "Authorization complete" landing page so the
- *    user sees a friendly UI instead of an empty `202 Accepted`.
+ * 3. Renders a static landing page so the user sees a friendly UI
+ *    instead of an empty `202 Accepted`: "Authorization complete", or
+ *    "Authorization not completed" when the IdP returned an OAuth `error`.
  *
  * Owning this route in the framework - instead of routing the IdP at the
  * workflow runtime's raw `/.well-known/workflow/v1/webhook/:token` -
@@ -60,7 +61,10 @@ export async function handleConnectionCallbackRequest(
     return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
   }
 
-  return buildAuthorizationCompletePage();
+  // RFC 6749 section 4.1.2.1: the IdP reports denied consent and other failures with `error`.
+  return buildAuthorizationCompletePage(
+    callback.params.error === undefined ? "authorized" : "failed",
+  );
 }
 
 /**

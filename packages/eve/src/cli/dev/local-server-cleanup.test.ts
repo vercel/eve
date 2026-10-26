@@ -44,7 +44,7 @@ describe("local server cleanup intents", () => {
     });
     try {
       await reconcileCleanupIntents("/tmp/app");
-      expect(mocks.stop).toHaveBeenCalledWith({ appRoot: "/tmp/app", devRunId: "stale-run" });
+      expect(mocks.stop).toHaveBeenCalledWith({ devRunId: "stale-run" });
       expect(mocks.rm).toHaveBeenCalled();
     } finally {
       kill.mockRestore();

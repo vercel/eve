@@ -203,6 +203,7 @@ export type SessionCommand =
       readonly kind: "cancel";
       readonly turnId?: string;
     }
+  | { readonly kind: "prewarm"; readonly targetDeploymentId?: string }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };
@@ -221,15 +222,17 @@ export type ResetSessionResult =
   | { readonly status: "no_active_session" };
 
 export type SessionCommandResult<TCommand extends SessionCommand = SessionCommand> =
-  TCommand extends { readonly kind: "send" }
-    ? SessionSendCommandResult
-    : TCommand extends { readonly kind: "cancel" }
-      ? CancelTurnResult
-      : TCommand extends { readonly kind: "compact" }
-        ? CompactSessionResult
-        : TCommand extends { readonly kind: "clear" }
-          ? ClearSessionResult
-          : ResetSessionResult;
+  TCommand extends { readonly kind: "prewarm" }
+    ? import("#protocol/prewarm-session.js").PrewarmSessionResult
+    : TCommand extends { readonly kind: "send" }
+      ? SessionSendCommandResult
+      : TCommand extends { readonly kind: "cancel" }
+        ? CancelTurnResult
+        : TCommand extends { readonly kind: "compact" }
+          ? CompactSessionResult
+          : TCommand extends { readonly kind: "clear" }
+            ? ClearSessionResult
+            : ResetSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
@@ -642,8 +645,9 @@ export interface Runtime {
    * parameter unchanged.
    *
    * A following read throws `SessionStrandedError` when the session's owner
-   * cannot execute here. A historical read (`follow: false`) never inspects
-   * or changes the session's lifecycle.
+   * cannot execute here, and rejects before returning when the session does
+   * not exist or its history has expired. A historical read (`follow: false`)
+   * never inspects or changes the session's lifecycle.
    */
   getEventStream(
     sessionId: string,

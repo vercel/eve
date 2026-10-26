@@ -484,6 +484,33 @@ export function isNodeModulesPath(path: string): boolean {
   return path.replaceAll("\\", "/").includes("/node_modules/");
 }
 
+export function resolveAuthoredPackageRoot(modulePath: string): string {
+  const packageRoot = findAuthoredPackageRoot(dirname(modulePath));
+  if (packageRoot === undefined) {
+    throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
+  }
+  return packageRoot;
+}
+
+/** Returns the nearest directory at or above `directory` that has a `package.json`. */
+export function findAuthoredPackageRoot(directory: string): string | undefined {
+  let currentDirectory = directory;
+
+  while (true) {
+    if (existsSync(join(currentDirectory, "package.json"))) {
+      return realpathSync(currentDirectory);
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+}
+
 function toCanonicalPath(path: string): string {
   try {
     return realpathSync(path);

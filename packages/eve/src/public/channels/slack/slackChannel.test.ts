@@ -3268,9 +3268,9 @@ describe("slackChannel() inbound mention pipeline", () => {
 
   it.each([
     ["default HITL config", {}, "approve"],
-    ["a custom input response hook", { onInputResponse: () => null }, undefined],
-    ["an approval channel", { approvalChannel: () => "thread" as const }, undefined],
-  ])("carries the typed text for pending input with %s", async (_, config, expected) => {
+    ["a custom input response hook", { onInputResponse: () => null }, ""],
+    ["an approval channel", { approvalChannel: () => "thread" as const }, ""],
+  ])("attaches the text pending input resolves against with %s", async (_, config, expected) => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onAppMention: () => ({ auth: null }),

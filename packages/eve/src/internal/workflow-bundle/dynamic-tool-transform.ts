@@ -27,6 +27,7 @@ type CallbackPhase =
   | "approvalPrompt"
   | "approvalRequest"
   | "approvalResponse"
+  | "endsTurn"
   | "execute"
   | "toModelOutput"
   | "inputSchema"
@@ -42,6 +43,7 @@ type CallbackPropertyName =
   | "response"
   | "complete"
   | "delta"
+  | "endsTurn"
   | "toModelOutput"
   | "inputSchema"
   | "outputSchema";
@@ -59,6 +61,8 @@ interface CallbackInfo {
   readonly propertyName: CallbackPropertyName;
   readonly propEnd: number;
   readonly propStart: number;
+  /** The identifier a reference callback names, as written. */
+  readonly referenceName?: string;
 }
 
 interface ScopeEntry {
@@ -214,6 +218,14 @@ function collectToolCallbacks(
     results,
     nestedScopes,
   );
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "endsTurn"),
+    "endsTurn",
+    "endsTurn",
+    results,
+    nestedScopes,
+  );
 
   for (const propertyName of ["inputSchema", "outputSchema"] as const) {
     const property = findProperty(tool, propertyName);
@@ -325,6 +337,7 @@ function collectCallbackProperty(
       propertyName,
       propEnd: property.end,
       propStart: property.start,
+      referenceName: source.slice(value.start, value.end),
     });
   }
 }
@@ -365,7 +378,10 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
     const stamped =
       callback.phase === "inputSchema" || callback.phase === "outputSchema"
         ? `__eveDefineDurableSchema({ schema: ${hoistedName}, closure: ${closure} })`
-        : `__eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure})`;
+        : callback.phase === "endsTurn" && callback.referenceName !== undefined
+          ? // `endsTurn` may name a boolean, which stays as written.
+            `typeof ${callback.referenceName} === "function" ? __eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure}) : ${callback.referenceName}`
+          : `__eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure})`;
     replacements.push({
       end: callback.propEnd,
       start: callback.propStart,

@@ -336,8 +336,9 @@ describe("shouldCompact", () => {
 //
 // - The tool-result cap heuristic is accepted only when the capped history
 //   PLUS the fixed compaction prompt envelope fits the threshold.
-//   `HEURISTICS_FORBIDDEN` sits below the envelope estimate, so no heuristic
-//   can be accepted and the summarization fallback always runs.
+//   `HEURISTICS_FORBIDDEN` leaves only a little room above the envelope, and
+//   `compact` prepends `OLD_BULK` to a history at that threshold, so no
+//   heuristic can be accepted and the summarization fallback always runs.
 // - `ROOMY` accepts capping whenever the history's bulk is tool output.
 //
 // Every result is checked against `expectWellFormedCompaction`: no orphaned
@@ -349,7 +350,11 @@ const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
-const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
+const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS) + 200;
+const OLD_BULK: ModelMessage[] = [
+  { content: "background ".repeat(150), role: "user" },
+  { content: "noted", role: "assistant" },
+];
 const ROOMY = 100_000;
 
 const CHECKPOINT_MARKER = "Summary of our conversation so far:";
@@ -420,6 +425,10 @@ function toolResultValue(message: ModelMessage | undefined): string {
   return output?.type === "text" ? output.value : "";
 }
 
+function isCheckpointHead(messages: readonly ModelMessage[]): boolean {
+  return messages[0]?.content === CHECKPOINT_MARKER;
+}
+
 function checkpointHead(text: string): ModelMessage[] {
   return [compactionMarker(CHECKPOINT_MARKER), assistant(text)];
 }
@@ -455,7 +464,11 @@ async function compact(
     recentWindowSize: overrides.recentWindowSize ?? 4,
     threshold: overrides.threshold ?? ROOMY,
   };
-  const result = await compactMessages(messages, compactionConfig, summarizer);
+  const history =
+    compactionConfig.threshold === HEURISTICS_FORBIDDEN && !isCheckpointHead(messages)
+      ? [...OLD_BULK, ...messages]
+      : messages;
+  const result = await compactMessages(history, compactionConfig, summarizer);
 
   expectWellFormedCompaction(result, compactionConfig.threshold);
   return { result, summarizer };
@@ -480,7 +493,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
         user("Continue the investigation."),
       ];
       const measuredConfig = {
-        lastKnownInputTokens: 30_000,
+        lastKnownInputTokens: 60_000,
         lastKnownPromptMessageCount: messages.length - 1,
         recentWindowSize: 1,
         threshold: 20_000,
@@ -534,30 +547,38 @@ describe("compactMessages: tool-result cap heuristic", () => {
       expect(summarizer).not.toHaveBeenCalled();
     },
   );
-  it("credits removed history against an explicit history-only token floor", async () => {
+  it("credits removed history against the provider count of the measured messages", async () => {
     const summarize = summarizeWith("summary");
     const [call, resultMsg] = toolExchange({ callId: "large", payloadChars: 40_000 });
     const messages = [user("investigate"), call, resultMsg, user("continue")];
     const result = await compactMessages(
       messages,
-      { threshold: 10_000, recentWindowSize: 1 },
+      {
+        lastKnownInputTokens: 15_000,
+        lastKnownPromptMessageCount: messages.length,
+        recentWindowSize: 1,
+        threshold: 10_000,
+      },
       summarize,
-      false,
-      15_000,
     );
     expect(summarize).not.toHaveBeenCalled();
     expect(estimateTokens(result)).toBeLessThan(2_000);
     expect(result.map((entry) => entry.role)).toEqual(messages.map((entry) => entry.role));
   });
 
-  it("summarizes when a no-op cannot satisfy the explicit history-only token floor", async () => {
+  it("summarizes when a no-op cannot satisfy the provider count of the measured messages", async () => {
     const summarize = summarizeWith("summary");
+    const messages = [user("earlier ".repeat(1_500)), assistant("reply"), user("continue")];
+    const history = estimateTokens(messages);
     await compactMessages(
-      [user("earlier"), assistant("reply"), user("continue")],
-      { threshold: 2_000, recentWindowSize: 0 },
+      messages,
+      {
+        lastKnownInputTokens: history * 2,
+        lastKnownPromptMessageCount: messages.length,
+        recentWindowSize: 0,
+        threshold: Math.floor(history * 1.5),
+      },
       summarize,
-      false,
-      8_000,
     );
     expect(summarize).toHaveBeenCalledOnce();
   });
@@ -974,7 +995,7 @@ describe("compactMessages: summarization fallback", () => {
     const previousCheckpoint = `${"completed work ".repeat(24)}${markerPast280}`;
     const messages = [
       ...checkpointHead(previousCheckpoint),
-      user("new evidence"),
+      user(`new evidence ${"findings ".repeat(60)}`),
       assistant("latest response"),
     ];
 
@@ -1023,9 +1044,10 @@ describe("compactMessages: summarization fallback", () => {
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 600 });
     const summary = "s".repeat(2_800);
     const head = checkpointHead(summary);
-    const threshold = Math.floor(
-      (estimateTokens([...head, task]) + estimateTokens([...head, call, resultMsg, task])) / 2,
-    );
+    const threshold =
+      Math.floor(
+        (estimateTokens([...head, task]) + estimateTokens([...head, call, resultMsg, task])) / 2,
+      ) + ENVELOPE_TOKENS;
     const { result } = await compact([user("old notes ".repeat(4_000)), task, call, resultMsg], {
       recentWindowSize: 2,
       summary,
@@ -1046,10 +1068,9 @@ describe("compactMessages: summarization fallback", () => {
     const tail = [user("do the thing"), recentCall, recentResult];
     const messages = [oldProse, ...tail];
 
-    // Derive a threshold between the stripped and verbatim tail sizes so the
-    // regime is explicit rather than encoded in magic numbers. The summary is
-    // sized to exceed the window-selection reserve, which is what makes the
-    // verbatim tail overshoot after the summary head is added.
+    // The threshold sits between the stripped and verbatim sizes, and half of
+    // it still holds the whole tail, so the window keeps it and only the
+    // summary head pushes the verbatim candidate over.
     const summary = "s".repeat(2_400);
     const summaryHead = [compactionMarker(CHECKPOINT_MARKER), assistant(summary)];
     const verbatimSize = estimateTokens([...summaryHead, ...tail]);
@@ -1058,9 +1079,10 @@ describe("compactMessages: summarization fallback", () => {
       user("do the thing"),
       assistant("Running the tool."),
     ]);
-    const threshold = Math.floor((verbatimSize + strippedSize) / 2);
+    const threshold = Math.floor(verbatimSize) - 50;
     expect(strippedSize).toBeLessThan(threshold);
     expect(verbatimSize).toBeGreaterThan(threshold);
+    expect(estimateTokens(tail)).toBeLessThanOrEqual(threshold / 2);
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 3,
@@ -1136,3 +1158,536 @@ describe("compactMessages: summarization fallback", () => {
     expect(result.filter((m) => m.content === "Continue.")).toHaveLength(0);
   });
 });
+
+describe("compactMessages: fixed kept-tail budget", () => {
+  const THRESHOLD = 10_000;
+  const BUDGET = THRESHOLD / 2;
+
+  function bigTaskText(): string {
+    return "task context line. ".repeat(1_370);
+  }
+
+  function config(history: readonly ModelMessage[], threshold = THRESHOLD): CompactionConfig {
+    return {
+      lastKnownInputTokens: Math.round(estimateTokens(history)),
+      lastKnownPromptMessageCount: history.length,
+      recentWindowSize: 4,
+      threshold,
+    };
+  }
+
+  it("keeps the start and end of an oversized request and says the middle was cut", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const history: ModelMessage[] = [
+      user("INSTRUCTION FIRST. " + bigTaskText().repeat(2) + "FINAL SENTINEL"),
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+
+    const result = await compactMessages(history, config(history), summarizer);
+
+    const kept = result.filter((message) => message.role === "user" && !isCheckpoint(message));
+    expect(kept).toHaveLength(1);
+    const content = String(kept[0]?.content);
+    expect(content).toContain("FINAL SENTINEL");
+    expect(content).toMatch(
+      /^INSTRUCTION FIRST\. [\s\S]*\[eve: \d+ characters from the middle of this message were cut/,
+    );
+    expect(estimateTokens(kept)).toBeLessThanOrEqual(BUDGET);
+    expect(summarizer).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a request that fits the budget untouched", async () => {
+    const task = user("Keep these requirements. ".repeat(40));
+    const history: ModelMessage[] = [
+      user("old notes ".repeat(4_000)),
+      task,
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+
+    const result = await compactMessages(history, config(history), summarizeWith("s"));
+
+    expect(result).toContainEqual(task);
+  });
+
+  it("keeps the start and end of a request and sends the cut middle to the summarizer", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task = user(
+      `START SENTINEL${"a".repeat(8_000)}MIDDLE MARKER${"b".repeat(26_000)}END SENTINEL`,
+    );
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, config(history), summarizer);
+
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("MIDDLE MARKER");
+    expect(prompt).not.toContain("START SENTINEL");
+    expect(prompt).not.toContain("END SENTINEL");
+    expect(JSON.stringify(result)).toContain("START SENTINEL");
+    expect(JSON.stringify(result)).toContain("END SENTINEL");
+    expect(JSON.stringify(result)).not.toContain("MIDDLE MARKER");
+  });
+
+  it("gives the summarizer as much of an oversized head as the budget holds", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task = user(`${"a ".repeat(5_000)}EARLY MARKER ${"b ".repeat(40_000)}END SENTINEL`);
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    await compactMessages(history, config(history), summarizer);
+
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("EARLY MARKER");
+    expect(prompt).not.toContain("END SENTINEL");
+  });
+
+  it("never splits a surrogate pair at either edge of the cut", async () => {
+    const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    // Padding shifts the pairs against the cut, so across the combinations the
+    // start and the end each land mid-pair at least once.
+    for (const before of ["", "a", "ab"]) {
+      for (const after of ["", "a", "ab"]) {
+        const summarizer = summarizeWith("checkpoint text");
+        const history: ModelMessage[] = [
+          user(`${before}${"\u{1F600}".repeat(20_000)}${after}`),
+          ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+        ];
+
+        const result = await compactMessages(history, config(history), summarizer);
+
+        const replayed = result.flatMap((message) =>
+          typeof message.content === "string"
+            ? [message.content]
+            : message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+        );
+        expect(replayed.some((text) => lone.test(text))).toBe(false);
+        expect(lone.test(String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content))).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it("cuts the text part of a request that carries an attachment", async () => {
+    const file = {
+      data: new URL("https://example.com/spec.pdf"),
+      mediaType: "application/pdf",
+      type: "file" as const,
+    };
+    const task: ModelMessage = {
+      content: [{ text: `${bigTaskText().repeat(2)}FINAL SENTINEL`, type: "text" }, file],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(
+      history,
+      config(history),
+      summarizeWith("checkpoint text"),
+    );
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const parts = Array.isArray(kept?.content) ? kept.content : [];
+    expect(parts.find((part) => part.type === "text")).toMatchObject({
+      text: expect.stringContaining("FINAL SENTINEL"),
+    });
+    expect(parts).toContainEqual(file);
+  });
+
+  it("cuts across every text part of a request", async () => {
+    const task: ModelMessage = {
+      content: [
+        { text: bigTaskText().repeat(2), type: "text" },
+        { text: `${bigTaskText()}FINAL SENTINEL`, type: "text" },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(
+      history,
+      config(history),
+      summarizeWith("checkpoint text"),
+    );
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const texts = (Array.isArray(kept?.content) ? kept.content : []).flatMap((part) =>
+      part.type === "text" ? [part.text] : [],
+    );
+    expect(texts[0]).toContain("were cut during context compaction");
+    expect(texts.join("")).toContain("FINAL SENTINEL");
+  });
+
+  it("keeps the start, the end and the file of a request with several text parts", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const file = {
+      data: new URL("https://example.com/spec.pdf"),
+      mediaType: "application/pdf",
+      type: "file" as const,
+    };
+    const task: ModelMessage = {
+      content: [
+        { text: "INSTRUCTION FIRST. ", type: "text" },
+        { text: `${"a ".repeat(3_000)}MIDDLE MARKER ${bigTaskText().repeat(2)}`, type: "text" },
+        file,
+        { text: "CLOSING LINE", type: "text" },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, config(history), summarizer);
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const parts = Array.isArray(kept?.content) ? kept.content : [];
+    const texts = parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
+    expect(texts[0]).toMatch(/^INSTRUCTION FIRST\. /);
+    expect(texts.join("")).toContain("CLOSING LINE");
+    expect(texts.join("")).not.toContain("MIDDLE MARKER");
+    expect(parts).toContainEqual(file);
+    expect(String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content)).toContain(
+      "MIDDLE MARKER",
+    );
+  });
+
+  it("sends all of a request's text to the summarizer when none of it fits beside its file", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const file = {
+      data: "A".repeat(24_000),
+      mediaType: "application/pdf",
+      type: "file" as const,
+    };
+    const task: ModelMessage = {
+      content: [{ text: `START SENTINEL ${bigTaskText()}END SENTINEL`, type: "text" }, file],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, config(history), summarizer);
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const texts = (Array.isArray(kept?.content) ? kept.content : []).flatMap((part) =>
+      part.type === "text" ? [part.text] : [],
+    );
+    expect(texts.join("")).not.toContain("START SENTINEL");
+    expect(texts.join("")).not.toContain("END SENTINEL");
+    expect(texts.join("")).toContain("were cut during context compaction");
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("START SENTINEL");
+  });
+
+  it("clips a summary that is over the threshold instead of throwing", async () => {
+    const history = [
+      ...OLD_BULK,
+      user("do the thing"),
+      assistant("working on it"),
+      user("still there?"),
+    ];
+    const summarizer = summarizeWith("s".repeat(400_000));
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
+      summarizer,
+    );
+
+    expect(summarizer).toHaveBeenCalledTimes(1);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(HEURISTICS_FORBIDDEN);
+    expect(JSON.stringify(result)).toContain("chars omitted");
+    expect(result.at(-1)).toEqual(user("still there?"));
+  });
+
+  it("clips the summary when compaction shrinks the history but leaves it over the threshold", async () => {
+    const history = [user("notes ".repeat(9_000)), assistant("ok"), user("go on")];
+
+    const summarizer = summarizeWith("s".repeat(45_000));
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: THRESHOLD },
+      summarizer,
+    );
+
+    expect(summarizer).toHaveBeenCalledTimes(1);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(THRESHOLD);
+    expect(result.at(-1)).toEqual(user("go on"));
+  });
+
+  it("swaps a file too big to fit in the request for a note and keeps the text", async () => {
+    const request: ModelMessage = {
+      content: [
+        { text: "Summarize this scan.", type: "text" },
+        { data: "A".repeat(200_000), mediaType: "application/pdf", type: "file" },
+      ],
+      role: "user",
+    };
+    const summarizer = summarizeWith("checkpoint text");
+
+    const result = await compactMessages(
+      [...OLD_BULK, assistant("ok"), request],
+      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN + 600 },
+      summarizer,
+    );
+
+    expect(estimateTokens(result)).toBeLessThanOrEqual(HEURISTICS_FORBIDDEN + 600);
+    const last = JSON.stringify(result.at(-1));
+    expect(last).toContain("Summarize this scan.");
+    expect(last).toContain("file in this message was omitted");
+    expect(last).not.toContain("AAAA");
+  });
+
+  it("swaps the file for a note when the request is only a file", async () => {
+    const request: ModelMessage = {
+      content: [{ data: "A".repeat(200_000), mediaType: "application/pdf", type: "file" }],
+      role: "user",
+    };
+
+    const result = await compactMessages(
+      [...OLD_BULK, assistant("ok"), request],
+      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN + 600 },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(estimateTokens(result)).toBeLessThanOrEqual(HEURISTICS_FORBIDDEN + 600);
+    expect(result.at(-1)?.role).toBe("user");
+    expect(JSON.stringify(result.at(-1))).toContain("file in this message was omitted");
+  });
+
+  it("fills the room it has with the clipped summary", async () => {
+    const threshold = 10_000;
+    const result = await compactMessages(
+      [user("old notes ".repeat(5_000)), assistant("ok"), user("go on")],
+      { recentWindowSize: 1, threshold },
+      summarizeWith("s".repeat(200_000)),
+    );
+
+    expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
+    expect(estimateTokens(result)).toBeGreaterThan(threshold * 0.95);
+  });
+
+  it("drops the tail before it clips the summary", async () => {
+    const summary = "the whole summary ".repeat(120);
+    const history = [
+      user("old notes ".repeat(2_000)),
+      assistant("a reply ".repeat(200)),
+      user("go on"),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 2, threshold: 900 },
+      summarizeWith(summary),
+    );
+
+    expect(JSON.stringify(result)).toContain(summary);
+    expect(JSON.stringify(result)).not.toContain("a reply a reply");
+    expect(result.at(-1)).toEqual(user("go on"));
+  });
+
+  it("compacts when the request is shorter than its cut note", async () => {
+    const result = await compactMessages(
+      [...OLD_BULK, assistant("ok"), user("hi")],
+      { recentWindowSize: 1, threshold: 60 },
+      summarizeWith("x"),
+      true,
+    );
+
+    expect(result.at(-1)).toEqual(user("hi"));
+    expect(estimateTokens(result)).toBeLessThanOrEqual(60);
+  });
+
+  it("keeps a file that fits beside the request", async () => {
+    const pdf = { data: "A".repeat(48_000), mediaType: "application/pdf", type: "file" as const };
+    const request: ModelMessage = {
+      content: [{ text: "Review this contract.", type: "text" }, pdf],
+      role: "user",
+    };
+    const threshold = 60_000;
+    expect(estimateTokens([request])).toBeLessThan(threshold / 2);
+
+    const result = await compactMessages(
+      [user("old notes ".repeat(30_000)), assistant("ok"), request, assistant("Reading it.")],
+      { recentWindowSize: 1, threshold },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(result).toContainEqual(request);
+  });
+
+  it("throws rather than return without the request when the room is below its note", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+
+    await expect(
+      compactMessages(
+        [...OLD_BULK, assistant("ok"), user("Review this contract. ".repeat(200))],
+        { recentWindowSize: 1, threshold: 60 },
+        summarizer,
+      ),
+    ).rejects.toThrow(/leave only ~60 tokens/);
+    expect(summarizer).not.toHaveBeenCalled();
+  });
+
+  it("throws before summarizing when the fixed part alone leaves no room", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+
+    await expect(
+      compactMessages([...OLD_BULK, user("hi")], { recentWindowSize: 1, threshold: 1 }, summarizer),
+    ).rejects.toThrow(/leave only ~1 tokens/);
+    expect(summarizer).not.toHaveBeenCalled();
+  });
+
+  it("shortens a huge tool result in the kept tail instead of cutting the request or throwing", async () => {
+    const request = user("Read the file and report what is in it.");
+    const history: ModelMessage[] = [
+      user("old notes ".repeat(6_000)),
+      assistant("Done."),
+      request,
+      ...toolExchange({ callId: "call-0", payloadChars: 100_000 }),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 4, threshold: 30_000 },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(result).toContainEqual(request);
+    expect(JSON.stringify(result)).toContain("Truncated by eve");
+    expect(JSON.stringify(result)).not.toContain("cut during context compaction");
+    expect(estimateTokens(result)).toBeLessThan(30_000);
+  });
+
+  it("keeps the newest tool result whole when no summary is needed", async () => {
+    const history: ModelMessage[] = [
+      user("go"),
+      ...toolExchange({ callId: "call-0", payloadChars: 45_000 }),
+      ...toolExchange({ callId: "call-1", payloadChars: 45_000 }),
+      ...toolExchange({ callId: "call-2", payloadChars: 30_000 }),
+    ];
+    const summarizer = summarizeWith("unused");
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 2, threshold: 30_000 },
+      summarizer,
+    );
+
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(JSON.stringify(result.at(-1))).not.toContain("Truncated by eve");
+  });
+
+  it("never keeps more than the budget word for word", async () => {
+    const history: ModelMessage[] = [
+      user("start"),
+      ...Array.from({ length: 12 }, (_, index) =>
+        toolExchange({ callId: `call-${index}`, payloadChars: 1_800 }),
+      ).flat(),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 40, threshold: 10_000 },
+      summarizeWith("checkpoint text"),
+      true,
+    );
+
+    expect(estimateTokens(result.slice(2))).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("replays the latest request, not an older oversized task, when the latest has no text", async () => {
+    const pdfRequest: ModelMessage = {
+      content: [
+        {
+          data: new URL("https://example.com/report.pdf"),
+          mediaType: "application/pdf",
+          type: "file",
+        },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [
+      { content: "OBSOLETE TASK ".repeat(4_000), role: "user" },
+      assistant("Done."),
+      pdfRequest,
+      assistant("Working"),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: 10_000 },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(JSON.stringify(result)).not.toContain("OBSOLETE TASK");
+    expect(result).toContainEqual(pdfRequest);
+  });
+
+  it.each([0.8, 0.9])(
+    "compacts a few times, not on every step, when the request takes %s of the threshold",
+    async (share) => {
+      const threshold = 40_000;
+      const summarizer = summarizeWith("checkpoint text");
+      let history: ModelMessage[] = [
+        user("large request ".repeat(Math.floor((threshold * share * 4) / 14))),
+      ];
+      let compactions = 0;
+
+      for (let step = 1; step <= 20; step += 1) {
+        history.push(
+          ...toolExchange({
+            callId: `call-${step}`,
+            payloadChars: Math.floor(threshold * 0.06 * 4),
+          }),
+        );
+        const stepConfig = config(history, threshold);
+        if (shouldCompact(history, stepConfig)) {
+          compactions += 1;
+          history = await compactMessages(history, stepConfig, summarizer);
+        }
+      }
+
+      expect(compactions).toBeLessThanOrEqual(5);
+    },
+  );
+
+  it("cuts the request when the previous checkpoint is what pushes the history over the limit", async () => {
+    const history: ModelMessage[] = [
+      ...checkpointHead("p".repeat(12_000)),
+      user("r".repeat(34_000)),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: 10_000 },
+      summarizeWith("z".repeat(8_000)),
+    );
+
+    expect(JSON.stringify(result)).toContain("were cut during context compaction");
+  });
+
+  it("replays a folded-away request whose content is an array of parts", async () => {
+    const request: ModelMessage = {
+      content: [{ text: "review the storefront", type: "text" }],
+      role: "user",
+    };
+    const history: ModelMessage[] = [request, assistant("Working on it.")];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: 10_000 },
+      summarizeWith("checkpoint text"),
+      true,
+    );
+
+    expect(result.at(-1)).toEqual(request);
+  });
+});
+
+function isCheckpoint(message: ModelMessage): boolean {
+  return message.content === CHECKPOINT_MARKER;
+}

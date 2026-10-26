@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -50,4 +52,37 @@ describe("production server output", () => {
       }
     },
   );
+
+  it("fails when another process already holds the requested port", async () => {
+    const occupant = createServer((_request, response) => response.end("not eve"));
+    await new Promise<void>((resolveListen) => occupant.listen(0, "127.0.0.1", resolveListen));
+    const { port } = occupant.address() as AddressInfo;
+    const { appRoot } = await createApp("eve-production-port-taken-", {
+      files: {
+        // Like srvx: a failed bind is logged and sets exitCode, while other
+        // work keeps the process alive.
+        ".output/server/index.mjs": [
+          'import { createServer } from "node:http";',
+          "createServer()",
+          "  .listen(Number(process.env.PORT), process.env.HOST)",
+          '  .once("error", (error) => {',
+          '    console.error("[srvx] Failed to start server:", error);',
+          "    process.exitCode = 1;",
+          "  });",
+          "setInterval(() => {}, 1_000);",
+        ].join("\n"),
+      },
+    });
+
+    const started = startProductionServer(appRoot, { host: "127.0.0.1", port });
+    try {
+      await expect(started).rejects.toThrow(`Port ${port} on 127.0.0.1 is already in use.`);
+    } finally {
+      await started.then(
+        (server) => server.close(),
+        () => undefined,
+      );
+      await new Promise((resolveClose) => occupant.close(resolveClose));
+    }
+  });
 });

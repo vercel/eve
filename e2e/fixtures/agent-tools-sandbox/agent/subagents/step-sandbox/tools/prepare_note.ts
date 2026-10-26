@@ -20,7 +20,7 @@ async function prepareNote(ctx: WorkflowStepToolContext) {
   // Writing the whole file keeps a retried step's write the same.
   await sandbox.writeTextFile({
     content: "step-sandbox-note-ok-H3R:prepared-in-step",
-    path: "/workspace/step-note.txt",
+    path: "step-note.txt",
   });
   return "prepared";
 }

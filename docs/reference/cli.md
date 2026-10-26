@@ -210,8 +210,13 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
-`-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
-keeps a channel's `server-only` imports on the same export used during compilation.
+`-C`, or `NODE_OPTIONS`, so compilation and the bundle resolve each package to the same export.
+For example, `NODE_OPTIONS="--conditions=react-server" eve build` selects the `react-server`
+export of packages that publish one.
+
+eve loads `server-only` and `client-only` imports as empty modules in every bundle it builds. Code
+shared with a Next.js app can keep these imports without a resolution condition, and your app does
+not need to depend on either package.
 
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
@@ -454,21 +459,23 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
-Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends. It runs beside an `eve dev` session for the same agent without attaching to it or changing it.
+Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends unless you pass `--keep-state`. A kept directory, including the server's Workflow data in `.workflow-data/`, stays until a later `eve eval` in the same app cleans it up. The local server runs beside an `eve dev` session for the same agent without attaching to it or changing it.
 
-| Flag                     | Type   | Default | Description                                                   |
-| ------------------------ | ------ | ------- | ------------------------------------------------------------- |
-| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                    |
-| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                 |
-| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                     |
-| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                |
-| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
-| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
-| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
-| `--json`                 | flag   | off     | Output results as JSON                                        |
-| `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
-| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
-| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
+| Flag                     | Type   | Default | Description                                                    |
+| ------------------------ | ------ | ------- | -------------------------------------------------------------- |
+| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                     |
+| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                  |
+| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                      |
+| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                 |
+| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them  |
+| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                               |
+| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                 |
+| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability                |
+| `--json`                 | flag   | off     | Output results as JSON                                         |
+| `--junit <path>`         | string | none    | Write JUnit XML results to a file                              |
+| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                  |
+| `--keep-state`           | flag   | off     | Keep the local eval server's state after the run (not `--url`) |
+| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout            |
 
 See [Evals](../evals/overview) for authoring evals.
 

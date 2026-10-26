@@ -53,6 +53,28 @@ describe("createSessionTimeoutControl", () => {
     });
   });
 
+  it("preserves an inherited idle deadline until real activity renews it", async () => {
+    const deadline = new Date(BOOT.getTime() + 20_000);
+    vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
+    const control = createSessionTimeoutControl({
+      deadline,
+      sessionId: "wrun_1",
+      timeoutMs: TIMEOUT_MS,
+    })!;
+    expect(control.getDeadline()).toEqual(deadline);
+    await control.start();
+    expect(startSessionTimeoutStep).toHaveBeenCalledWith(expect.objectContaining({ deadline }));
+    vi.setSystemTime(deadline);
+    await expect(control.handleTimerElapsed()).resolves.toBe("expired");
+
+    control.recordActivity();
+    expect(control.getDeadline()).toEqual(new Date(deadline.getTime() + TIMEOUT_MS));
+    await expect(control.handleTimerElapsed()).resolves.toBe("extended");
+    expect(startSessionTimeoutStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: new Date(deadline.getTime() + TIMEOUT_MS) }),
+    );
+  });
+
   it("extends the deadline from the latest activity instead of expiring", async () => {
     vi.mocked(startSessionTimeoutStep)
       .mockResolvedValueOnce({ runId: "timer-1" })

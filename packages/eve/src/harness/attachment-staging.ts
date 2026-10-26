@@ -7,14 +7,15 @@ import type { ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js
 import { getAdapterKind } from "#channel/adapter.js";
 import { buildSessionHandle } from "#channel/session.js";
 import { contextStorage, loadContext } from "#context/container.js";
-import { SandboxKey } from "#context/keys.js";
+import { SandboxKey, SessionIdKey } from "#context/keys.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
-import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
+import { verifyMediaType } from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
 import {
   DEFAULT_UPLOAD_POLICY,
   isMediaTypeAllowed,
@@ -33,12 +34,11 @@ import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 
 /**
- * Sandbox directory where eve stages message attachments and tool-result
- * files. It sits under eve's own dot-directory so it never collides with an
- * agent's `/workspace/attachments`. Authored canonical path —
- * {@link SandboxSession.writeFile} translates to the backend-native location.
+ * Directory, relative to the workspace root, where eve stages message
+ * attachments and tool-result files. It sits under eve's own dot-directory so
+ * it never collides with an agent's own `attachments/`.
  */
-export const ATTACHMENTS_ROOT = "/workspace/.eve/attachments";
+const ATTACHMENTS_ROOT = ".eve/attachments";
 
 const log = createLogger("harness.attachment-staging");
 
@@ -46,6 +46,19 @@ const UNSAFE_FILENAME_CHARS = /[^\w.-]+/g;
 const SHA_PREFIX_LENGTH = 16;
 
 const DEFAULT_MEDIA_TYPE = "application/octet-stream";
+
+/**
+ * Upper bound on the bytes this process keeps for inline refs, so warm
+ * processes hydrate images and PDFs without resuming the sandbox on every
+ * model call. Inline files are at most 3 MiB (images) or 20 MiB (PDFs), so
+ * 64 MiB holds a typical session's recent attachments without letting one
+ * process grow unbounded.
+ */
+const CACHED_REF_BYTES_LIMIT = 64 * 1024 * 1024;
+
+// Insertion order doubles as LRU order: a hit moves its entry to the end.
+const cachedRefBytes = new Map<string, Buffer>();
+let cachedRefBytesTotal = 0;
 
 // A staged name keeps or gains the extension its media type implies, so a
 // nameless file (an MCP image, say) can still be opened by path later.
@@ -179,6 +192,9 @@ export async function stageToolResultMedia<T extends ModelMessage>(
  * decision is pure in the ref, so each message renders identically on every
  * call and the provider's prompt cache stays valid. The returned messages
  * must not be written back to session history, which stays ref-only.
+ *
+ * Resuming a sandbox is slow and can be billed, so it happens only when a
+ * ref needs bytes this process does not already hold for the session.
  */
 export async function hydrateSandboxAttachments(
   input: readonly ModelMessage[],
@@ -188,24 +204,79 @@ export async function hydrateSandboxAttachments(
     return messages;
   }
 
-  const sandboxAccess = loadContext().get(SandboxKey);
-  if (sandboxAccess === undefined) {
-    throw new Error(
-      "Cannot hydrate sandbox-ref FilePart: no SandboxKey is bound on the active eve context. " +
-        "Hydration must run inside a step scope with the framework sandbox provider installed.",
-    );
-  }
-
-  const sandbox = await activeSandbox(sandboxAccess);
+  const context = loadContext();
+  const read = sandboxRefReader(context.get(SandboxKey), context.get(SessionIdKey));
   return Promise.all(
     messages.map(async (message) => {
       if (!messageContainsSandboxRef(message)) {
         return message;
       }
-      const content = await hydrateMessageContent(message.content, sandbox);
+      const content = await hydrateMessageContent(message.content, read);
       return { ...message, content } as ModelMessage;
     }),
   );
+}
+
+/** Verified bytes for an inline ref, or `null` when they are missing or changed. */
+type SandboxRefReader = (ref: SandboxRef) => Promise<Uint8Array | null>;
+
+/**
+ * Serves inline refs from the session's cached bytes and opens the sandbox
+ * at most once per hydration, on the first miss. Parts hydrate concurrently,
+ * so the open is shared as a promise.
+ */
+function sandboxRefReader(
+  access: SandboxAccess | undefined,
+  sessionId: string | undefined,
+): SandboxRefReader {
+  let sandbox: Promise<SandboxSession | null> | undefined;
+  return async (ref) => {
+    const key = cacheKey(sessionId, ref);
+    const cached = key === undefined ? undefined : readCachedRefBytes(key);
+    if (cached !== undefined) return cached;
+    if (access === undefined) {
+      throw new Error(
+        `Cannot hydrate attachment ${ref.path}: no SandboxKey is bound on the active eve context. ` +
+          "Hydration must run inside a step scope with the framework sandbox provider installed.",
+      );
+    }
+    sandbox ??= activeSandbox(access);
+    const bytes = await readSandboxRefBytes(ref, await sandbox);
+    if (bytes !== null && key !== undefined) cacheRefBytes(key, bytes);
+    return bytes;
+  };
+}
+
+/**
+ * Scoped to the session: a ref in one session's history can never reach bytes
+ * eve staged for another, even if a caller crafts one. The path carries the
+ * content hash, and the media type is the one eve verified at staging.
+ */
+function cacheKey(sessionId: string | undefined, ref: SandboxRef): string | undefined {
+  if (sessionId === undefined) return undefined;
+  return JSON.stringify([sessionId, ref.path, ref.size, ref.mediaType]);
+}
+
+function readCachedRefBytes(key: string): Buffer | undefined {
+  const bytes = cachedRefBytes.get(key);
+  if (bytes !== undefined) {
+    cachedRefBytes.delete(key);
+    cachedRefBytes.set(key, bytes);
+  }
+  return bytes;
+}
+
+/** Caches bytes eve staged or verified; callers must never pass unverified bytes. */
+function cacheRefBytes(key: string, bytes: Uint8Array): void {
+  if (bytes.byteLength > CACHED_REF_BYTES_LIMIT || cachedRefBytes.has(key)) return;
+  // A copy, so a caller reusing its buffer can't change what later calls send.
+  cachedRefBytes.set(key, Buffer.from(bytes));
+  cachedRefBytesTotal += bytes.byteLength;
+  for (const [oldestKey, oldest] of cachedRefBytes) {
+    if (cachedRefBytesTotal <= CACHED_REF_BYTES_LIMIT) break;
+    cachedRefBytes.delete(oldestKey);
+    cachedRefBytesTotal -= oldest.byteLength;
+  }
 }
 
 /**
@@ -217,7 +288,8 @@ export async function hydrateSandboxAttachments(
 async function activeSandbox(access: SandboxAccess | undefined): Promise<SandboxSession | null> {
   if (access === undefined) return null;
   try {
-    return await access.get();
+    // Attachments need only the connection, not the skill files queued behind the open.
+    return await access.open();
   } catch (error) {
     log.warn("session sandbox unavailable, degrading attachments to text", { error });
     return null;
@@ -350,10 +422,7 @@ function isSandboxRefFilePart(part: unknown): part is FilePart {
   );
 }
 
-async function hydrateMessageContent(
-  content: unknown,
-  sandbox: SandboxSession | null,
-): Promise<unknown> {
+async function hydrateMessageContent(content: unknown, read: SandboxRefReader): Promise<unknown> {
   if (!Array.isArray(content)) {
     return content;
   }
@@ -365,14 +434,14 @@ async function hydrateMessageContent(
         if (!inlinesSandboxRefAsBytes(ref)) {
           return [label];
         }
-        const bytes = await readSandboxRefBytes(ref, sandbox);
+        const bytes = await read(ref);
         return bytes === null
           ? [renderMissingSandboxRef(ref)]
           : [label, { ...part, data: bytes, mediaType: ref.mediaType }];
       }
       if ((part as { type?: unknown }).type === "tool-result") {
         const toolResult = part as ToolResultPart;
-        return [{ ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox) }];
+        return [{ ...toolResult, output: await hydrateToolOutput(toolResult.output, read) }];
       }
       return [part];
     }),
@@ -382,7 +451,7 @@ async function hydrateMessageContent(
 
 async function hydrateToolOutput(
   output: ToolResultOutput,
-  sandbox: SandboxSession | null,
+  read: SandboxRefReader,
 ): Promise<ToolResultOutput> {
   if (output.type !== "content" || !output.value.some(isToolOutputRefFile)) {
     return output;
@@ -393,7 +462,7 @@ async function hydrateToolOutput(
       const ref = decodeSandboxRef(part.data.url);
       const label = renderSandboxRefAsTextPart(ref);
       if (!inlinesSandboxRefAsBytes(ref)) return [label];
-      const bytes = await readSandboxRefBytes(ref, sandbox);
+      const bytes = await read(ref);
       if (bytes === null) return [renderMissingSandboxRef(ref)];
       return [
         label,
@@ -591,7 +660,8 @@ async function stageResolvedBytes(
 
 /**
  * Writes content-addressed bytes under {@link ATTACHMENTS_ROOT} and describes
- * them as a ref whose media type the bytes confirm.
+ * them as a ref whose media type the bytes confirm. Inline bytes are cached
+ * for the session so the next model calls need not read them back.
  */
 async function writeSandboxRef(
   bytes: Buffer,
@@ -603,7 +673,10 @@ async function writeSandboxRef(
   const sha = sha256Prefix(bytes);
   const authored = `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha, mediaType)}`;
   await sandbox.writeBinaryFile({ content: bytes, path: authored });
-  return { ...readMediaMetadata(bytes, mediaType), path: sandbox.resolvePath(authored) };
+  const ref = { ...readMediaMetadata(bytes, mediaType), path: sandbox.resolvePath(authored) };
+  const key = cacheKey(contextStorage.getStore()?.get(SessionIdKey), ref);
+  if (key !== undefined && inlinesSandboxRefAsBytes(ref)) cacheRefBytes(key, bytes);
+  return ref;
 }
 
 /**

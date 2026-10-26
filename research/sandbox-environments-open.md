@@ -1,10 +1,13 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-10-21"
+last_updated: "2026-10-22"
 ---
 
 # Sandbox environments and provider sessions
+
+> [!NOTE]
+> [`sandbox-provider-api.md`](./sandbox-provider-api.md) supersedes the provider contract, provider-handle lifecycle hooks, the rule that core never reserves `prepare`, and the native identity section of this plan. The environment `open()` model, immutable session state, and gone semantics still apply.
 
 ## Decision
 
@@ -44,7 +47,7 @@ Provider callbacks and runtime callback arguments are never stored in prepared a
 
 Authors use `ctx.session.id` for durable eve identity. Provider-native IDs and core artifact keys remain private. `resolvePath()` remains unchanged: relative paths resolve beneath `/workspace`, and absolute paths pass through.
 
-`setNetworkPolicy()` is required on the session types returned by dedicated Vercel, Docker, and microsandbox environments. just-bash and providers that reuse one native network boundary omit it from their session types and require policy at creation time.
+`setNetworkPolicy()` is required on the session types returned by dedicated Vercel and Docker environments. just-bash and providers that reuse one native network boundary omit it from their session types and require policy at creation time.
 
 ## Provider contract
 
@@ -183,7 +186,7 @@ Concurrent creation, initialization recovery, attachment accounting, active-hand
 
 ## Default selection
 
-`defineSandboxProvider()` has one implementation contract and no `select` escape hatch. `DefaultSandbox` is an explicit facade that probes the host and returns a concrete Vercel, Docker, microsandbox, or just-bash environment. Every concrete provider uses `defineSandboxProvider()`.
+`defineSandboxProvider()` has one implementation contract and no `select` escape hatch. `DefaultSandbox` is an explicit facade that probes the host and returns a concrete Vercel, Docker, or just-bash environment. Every concrete provider uses `defineSandboxProvider()`.
 
 Core exposes no public environment `kind`. Providers discover their own preparation inputs through the tracked filesystem.
 

@@ -10,6 +10,8 @@ import type {
 /** Context delivered when one eval is scheduled for execution. */
 export interface EveEvalStartEvent {
   readonly evaluation: EveEval;
+  /** 1-based attempt number, present only when the run repeats evals. */
+  readonly attempt?: number;
   readonly startedAt: string;
   readonly target: EveEvalTarget;
 }

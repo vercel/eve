@@ -1,6 +1,6 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-import { vercelOidc } from "#public/channels/auth.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   chatSdkChannel,
   type ChatSdkChannelBridge,
@@ -172,7 +172,8 @@ function normalizeCredentials(
   if (apiKey !== undefined) {
     config.credentials = createCredentialProvider(apiKey, signingSecret);
   }
-  const verifier = webhookVerifier ?? (signingSecret === undefined ? vercelOidc() : undefined);
+  const verifier =
+    webhookVerifier ?? (signingSecret === undefined ? sameEnvironmentVercelOidc() : undefined);
   if (verifier !== undefined) config.webhookVerifier = rejectFalsyResults(verifier);
   return config;
 }

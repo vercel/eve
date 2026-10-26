@@ -3,17 +3,9 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
-
-/**
- * Each sandbox write is a remote round trip (Vercel Sandbox also resolves the
- * path with a command first), so writing a package's files one at a time makes
- * a dynamic skill's first sync cost seconds.
- */
-const SANDBOX_WRITE_CONCURRENCY = 16;
 
 export interface NormalizedSkillPackageFile {
   readonly content: Buffer;
@@ -103,16 +95,17 @@ export async function writeSkillPackageToSandbox(input: {
   readonly sandbox: SandboxSession;
   readonly skill: MaterializableSkillPackage;
 }): Promise<void> {
-  await mapWithConcurrency(input.skill.files, SANDBOX_WRITE_CONCURRENCY, async (file) => {
-    await input.sandbox.writeBinaryFile({
+  const files = await Promise.all(
+    input.skill.files.map(async (file) => ({
       content: file.content,
       path: await resolveSandboxSkillWritePath({
         name: input.skill.name,
         relativePath: file.relativePath,
         sandbox: input.sandbox,
       }),
-    });
-  });
+    })),
+  );
+  await input.sandbox.writeFiles({ files });
 }
 
 /**

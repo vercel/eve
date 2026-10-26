@@ -1461,7 +1461,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setLogDisplayMode("debug");
     expect(screen.snapshot()).toContain("Debug detail");
     expect(screen.snapshot()).not.toContain("Unclassified stderr");
-    console.info('eve: built sandbox template "root" on backend "microsandbox".');
+    console.info('eve: built sandbox template "root" on backend "docker".');
     expect(screen.snapshot()).toContain('sandbox · built sandbox template "root"');
     renderer.setLogDisplayMode("all");
     expect(screen.snapshot()).toContain("Unclassified stderr");
@@ -1480,7 +1480,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       diagnostics: stub.diagnostics,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    process.stdout.write('eve: sandbox template "root" (microsandbox): apt-get update\n');
+    process.stdout.write('eve: sandbox template "root" (docker): apt-get update\n');
     renderer.shutdown();
     expect(stub.append).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1609,7 +1609,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on backend "docker".\n');
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -1629,14 +1629,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on backend "docker".\n');
     process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain(
-      'sandbox · built sandbox template "root" on backend "microsandbox".',
-    );
+    expect(snapshot).toContain('sandbox · built sandbox template "root" on backend "docker".');
     expect(snapshot).toContain("ordinary stdout log");
   });
 

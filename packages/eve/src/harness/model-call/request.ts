@@ -18,7 +18,8 @@ export type RequestMessages = ReturnType<typeof createCurrentMessages>;
 /**
  * The messages one model call sends: the durable prompt, then the step's system instructions and
  * announcements. Announcements persist ahead of the new input, or after earlier tool results on a
- * continuation, so later requests keep the full prefix.
+ * continuation, or ahead of the turn's surviving input after a compaction, so later requests keep
+ * the full prefix.
  */
 export function requestMessages(
   step: Step,

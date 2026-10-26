@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
 import { truncateDiagnostic } from "#evals/diagnostics.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import { formatAssertionFailureHeadline } from "#evals/runner/reporters/assertion-diagnostics.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
@@ -55,7 +56,7 @@ function renderJUnit(summary: EveEvalRunSummary, input: { readonly suiteName?: s
 }
 
 function renderTestCase(result: EveEvalResult): string {
-  const attrs = `classname="eve.eval" name="${escapeXml(result.id)}" time="${formatSeconds(durationSeconds(result))}"`;
+  const attrs = `classname="eve.eval" name="${escapeXml(formatAttemptLabel(result.id, result.attempt))}" time="${formatSeconds(durationSeconds(result))}"`;
 
   if (result.verdict === "passed") {
     return `  <testcase ${attrs}/>`;

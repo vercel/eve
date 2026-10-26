@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
@@ -8,8 +7,10 @@ import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
   createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
   resolveAuthoredTsConfigPath,
 } from "#internal/authored-module-build-options.js";
+import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import {
   createExtensionMountPlugin,
@@ -31,6 +32,7 @@ import {
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
   normalizeExternalDependencies,
+  resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord, interopAuthoredModuleNamespace } from "#internal/authored-module.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
@@ -211,7 +213,7 @@ export async function bundleAuthoredModuleCode(
       createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
-    sourcemap: "inline",
+    sourcemap: evaluatedBundleSourcemap(),
   });
 }
 
@@ -653,13 +655,7 @@ async function writeAuthoredModuleBundle(
     resolveAuthoredPackageRoot(modulePath),
     AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
   );
-  const bundlePath = join(bundleDirectoryPath, `${bundleHash}.mjs`);
-
-  if (!existsSync(bundlePath)) {
-    mkdirSync(bundleDirectoryPath, { recursive: true });
-    writeFileSync(bundlePath, code);
-  }
-
+  const bundlePath = writeAuthoredModuleCacheFile(bundleDirectoryPath, `${bundleHash}.mjs`, code);
   const instance = options.extension?.evaluationId ?? "";
   return `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`;
 }
@@ -671,22 +667,4 @@ function createInFlightModuleLoadKey(
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
   return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.extension?.evaluationId ?? ""}\0${options.appRoot ?? ""}`;
-}
-
-export function resolveAuthoredPackageRoot(modulePath: string): string {
-  let currentDirectory = dirname(modulePath);
-
-  while (true) {
-    if (existsSync(join(currentDirectory, "package.json"))) {
-      return realpathSync(currentDirectory);
-    }
-
-    const parentDirectory = dirname(currentDirectory);
-
-    if (parentDirectory === currentDirectory) {
-      throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
-    }
-
-    currentDirectory = parentDirectory;
-  }
 }

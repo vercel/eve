@@ -74,6 +74,7 @@ interface CreateExecutionNodeStepInput {
     readonly turnId: string;
   }) => Promise<void>;
   readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
+  readonly typedAnswers?: ToolLoopHarnessConfig["typedAnswers"];
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -112,6 +113,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation: sessionInstrumentation,
     prepareApprovalTurn: input.prepareApprovalTurn,
     signInCompletions: input.signInCompletions,
+    typedAnswers: input.typedAnswers,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,

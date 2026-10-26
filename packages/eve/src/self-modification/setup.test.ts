@@ -60,7 +60,6 @@ describe("self-modification setup", () => {
       connector: "github/selfmod-acme-agents",
       directory: "apps/support",
       repository: "github.com/acme/agents",
-      vercelBackend: true,
     });
     expect(source).toContain('repository: "github.com/acme/agents"');
     expect(source).toContain('directory: "apps/support"');
@@ -93,7 +92,6 @@ describe("self-modification setup", () => {
       connector: "github/selfmod-acme-agents",
       directory: ".",
       repository: "github.com/acme/agents",
-      vercelBackend: true,
     });
     const getToken = vi.fn().mockResolvedValue("github-token");
     const config = evaluateGeneratedConfig(source, getToken);
@@ -128,7 +126,6 @@ describe("self-modification setup", () => {
       connector: "github/selfmod-acme-agents",
       directory: ".",
       repository: "github.com/acme/agents",
-      vercelBackend: true,
     });
     const failure = new Error("connector is not attached");
     const config = evaluateGeneratedConfig(source, vi.fn().mockRejectedValue(failure));
@@ -164,7 +161,6 @@ describe("self-modification setup", () => {
       connector: "github/selfmod-acme-agents",
       directory: ".",
       repository: "github.com/acme/agents",
-      vercelBackend: true,
     });
     const config = evaluateGeneratedConfig(source);
     const authorize = config.authorize;
@@ -193,28 +189,10 @@ describe("self-modification setup", () => {
     expect(authorize({ channel: { kind: "http" }, principal: null })).toBe(false);
   });
 
-  it("renders no HTTP authorization branch without a Vercel backend", () => {
-    const source = renderSelfModificationConfig({
-      branch: "main",
-      channelNames: [],
-      connector: "github/selfmod-acme-agents",
-      directory: ".",
-      repository: "github.com/acme/agents",
-      vercelBackend: false,
-    });
-
-    expect(source).not.toContain('case "http"');
-    expect(source).not.toContain('case "channel:');
-    expect(source).not.toContain("VERCEL_PROJECT_ID");
-    expect(source).toContain(
-      "switch (channel.kind) {\n      default:\n        // Add another branch when you add a trusted channel.",
-    );
-  });
-
   it("refuses altered generated configuration as authored", () => {
     expect(
       classifySelfModificationConfig(
-        `${renderSelfModificationConfig({ branch: "main", channelNames: [], connector: "github/selfmod-acme-agents", directory: ".", repository: "github.com/acme/agents", vercelBackend: false })}\n// edited`,
+        `${renderSelfModificationConfig({ branch: "main", channelNames: [], connector: "github/selfmod-acme-agents", directory: ".", repository: "github.com/acme/agents" })}\n// edited`,
       ),
     ).toBe("authored");
   });

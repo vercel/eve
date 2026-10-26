@@ -26,7 +26,7 @@
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:webchat": "pnpm --filter eve run test:webchat",
-    "test:eval-benchmark": "node --test scripts/eval-benchmark/*.test.mjs",
+    "test:eval-benchmark": "node --test scripts/eval-metrics/*.test.mjs scripts/eval-benchmark/*.test.mjs",
     "test:framework-fixtures": "pnpm --filter eve run test:framework-fixtures",
     "test:integration": "turbo run test:integration --filter=eve && turbo run test:integration --filter=\"!eve\"",
     "test:scenario": "turbo run test:scenario",
@@ -37,19 +37,19 @@
     "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs"
   },
   "devDependencies": {
-    "@changesets/cli": "3.0.1",
-    "@microsoft/api-extractor": "7.59.0",
+    "@changesets/cli": "3.0.3",
+    "@microsoft/api-extractor": "7.59.4",
     "@types/node": "catalog:",
-    "@vercel/blob": "2.8.0",
-    "js-yaml": "4.3.2",
-    "oxfmt": "0.66.0",
-    "oxlint": "1.81.0",
+    "@vercel/blob": "2.8.2",
+    "js-yaml": "5.5.0",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
     "syncpack": "15.3.3",
-    "turbo": "2.10.12",
+    "turbo": "2.11.10",
     "typescript": "catalog:"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.7.0"
+  "packageManager": "pnpm@12.14.0"
 }

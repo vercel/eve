@@ -5,7 +5,14 @@
 //   max_parallel, evals_per_leg
 //                the registry's concurrency caps, which bound gateway load
 //                and keep evals from sharing a runner
-//   mock_matrix  fixture × mock world legs, one attempt each
+//   mock_matrix  attempt × mock fixture × mock world legs (`mockAttempts` each:
+//                one sample is exact for durable-work counters, but too few
+//                for timing trends) on a local server
+//   hosted_matrix  the mock legs on a hosted world (a preview deployment
+//                each), run one at a time so they don't contend for the
+//                same deployment backend
+//   dev_startup  `eve dev` startup probe settings (runs and named agents) for
+//                the dev-startup job, or null when the registry has none
 //   plan.json    the resolved registry snapshot (models pinned to their AI
 //                Gateway release, fixture digests, expected eval ids) plus
 //                every leg,
@@ -30,6 +37,10 @@ const NAME = /^[a-z0-9-]+$/;
 const MAX_ATTEMPTS = 10;
 const MAX_PARALLEL_LEGS = 50;
 const MAX_EVALS_PER_LEG = 16;
+const MAX_STARTUP_RUNS = 10;
+// Agents packages/eve/scripts/benchmark-startup.mjs generates, by registry name.
+const STARTUP_SCRIPT = "packages/eve/scripts/benchmark-startup.mjs";
+const STARTUP_SUBJECTS = { minimal: { tools: 0 } };
 
 /**
  * Validate the registry and apply dispatch narrowing. Pure apart from the
@@ -45,6 +56,12 @@ const MAX_EVALS_PER_LEG = 16;
 export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) {
   const models = namedEntries(registry?.models, "models");
   const attempts = positiveInteger(registry?.attempts, 'e2e/benchmark.json: "attempts"');
+  const mockAttempts = positiveInteger(
+    registry?.mockAttempts,
+    'e2e/benchmark.json: "mockAttempts"',
+  );
+  const devStartup =
+    registry?.devStartup === undefined ? null : readDevStartup(registry.devStartup);
   const concurrency = {
     legs: boundedInteger(
       registry?.concurrency?.legs,
@@ -58,20 +75,16 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
     ),
   };
   const fixtureNames = names(registry?.fixtures, "fixtures");
-  const mockWorlds = names(registry?.mockWorlds ?? [], "mockWorlds", { allowEmpty: true });
-  const matrixWorlds = new Map((matrix?.worlds ?? []).map((world) => [world.name, world]));
-  for (const world of mockWorlds) {
-    // Mock legs boot a local server, so a non-local world must be a package
-    // the fixture can select (EVE_E2E_WORKFLOW_WORLD), not a deploy target.
-    if (world !== "local" && matrixWorlds.get(world)?.package === undefined) {
-      const packaged = [...matrixWorlds.values()].filter((w) => w.package).map((w) => w.name);
-      throw new Error(
-        `e2e/benchmark.json: mock world "${world}" must be "local" or a world with a package in e2e/matrix.json (${packaged.join(", ")}).`,
-      );
-    }
-  }
+  // A fixture whose evals all need a real model runs nothing on a mock leg;
+  // one scripted for the mock model (agent-workflow-stress) runs only there.
+  const mockFixtureNames =
+    registry?.mockFixtures === undefined
+      ? fixtureNames
+      : names(registry.mockFixtures, "mockFixtures", { allowEmpty: true });
+  const mockWorlds = readMockWorlds(registry?.mockWorlds ?? [], matrix, mockFixtureNames);
 
-  const fixtures = fixtureNames.map((name) => {
+  const plannedNames = [...new Set([...fixtureNames, ...mockFixtureNames])];
+  const fixtures = plannedNames.map((name) => {
     const found = findFixture(name);
     if (found === undefined) {
       throw new Error(
@@ -85,6 +98,7 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
 
   const selectedModels = narrowNames(models, narrow.models, "model");
   const selectedFixtures = narrowNames(fixtures, narrow.fixtures, "fixture");
+  const selectedNames = new Set(selectedFixtures.map(({ name }) => name));
   const selectedAttempts =
     narrow.attempts === undefined || narrow.attempts === ""
       ? attempts
@@ -92,15 +106,65 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
 
   return {
     attempts: selectedAttempts,
+    mockAttempts,
+    devStartup,
     concurrency,
     models: selectedModels,
-    fixtures: selectedFixtures,
-    mockWorlds: mockWorlds.map((name) => ({ name, package: matrixWorlds.get(name)?.package })),
+    fixtures: fixtures.filter(({ name }) => selectedNames.has(name) && fixtureNames.includes(name)),
+    mockFixtures: fixtures.filter(
+      ({ name }) => selectedNames.has(name) && mockFixtureNames.includes(name),
+    ),
+    mockWorlds,
   };
 }
 
+/**
+ * Mock worlds are `local`, a world package from e2e/matrix.json that a local
+ * production server selects (EVE_E2E_WORKFLOW_WORLD), or a matrix world with
+ * no package, which is a deploy target (`hosted`: `vercel`). An entry may be
+ * `{ name, fixtures }` to run only some mock fixtures there; each hosted leg
+ * is a deployment, so hosted worlds usually list a few.
+ */
+function readMockWorlds(entries, matrix, mockFixtureNames) {
+  if (!Array.isArray(entries))
+    throw new Error('e2e/benchmark.json: "mockWorlds" must be an array.');
+  const matrixWorlds = new Map((matrix?.worlds ?? []).map((world) => [world.name, world]));
+  const worlds = entries.map((entry) => {
+    const { name, fixtures } = typeof entry === "string" ? { name: entry } : (entry ?? {});
+    if (typeof name !== "string" || !NAME.test(name))
+      throw new Error(
+        'e2e/benchmark.json: every "mockWorlds" entry needs a lowercase-dashed name.',
+      );
+    if (name !== "local" && !matrixWorlds.has(name))
+      throw new Error(
+        `e2e/benchmark.json: mock world "${name}" must be "local" or a world in e2e/matrix.json (${[...matrixWorlds.keys()].join(", ")}).`,
+      );
+    if (fixtures !== undefined) {
+      const unknown = names(fixtures, `mockWorlds.${name}.fixtures`).filter(
+        (fixture) => !mockFixtureNames.includes(fixture),
+      );
+      if (unknown.length > 0)
+        throw new Error(
+          `e2e/benchmark.json: mock world "${name}" fixtures must be mock fixtures (${unknown.join(", ")}).`,
+        );
+    }
+    const pkg = matrixWorlds.get(name)?.package;
+    return { name, package: pkg, hosted: name !== "local" && pkg === undefined, fixtures };
+  });
+  if (new Set(worlds.map((world) => world.name)).size !== worlds.length)
+    throw new Error('e2e/benchmark.json: "mockWorlds" contains duplicates.');
+  return worlds;
+}
+
 /** Expand a selection into run legs. Leg ids are stable artifact-name suffixes. */
-export function planLegs({ models, fixtures, attempts, mockWorlds }) {
+export function planLegs({
+  models,
+  fixtures,
+  attempts,
+  mockAttempts = 1,
+  mockFixtures = fixtures,
+  mockWorlds,
+}) {
   // GitHub starts matrix legs in order and cannot cap concurrency per model,
   // so model-innermost order keeps each wave of legs spread across models and
   // each eval's attempts spread over time.
@@ -115,20 +179,23 @@ export function planLegs({ models, fixtures, attempts, mockWorlds }) {
     }
   }
   const mock = [];
-  for (const fixture of fixtures) {
-    const selectedWorlds = fixture.packageJson?.e2e?.worlds;
-    for (const world of mockWorlds) {
-      // `local` is the default world every fixture boots on; other worlds
-      // follow the fixture's own e2e.worlds selection.
-      if (
-        world.name !== "local" &&
-        Array.isArray(selectedWorlds) &&
-        !selectedWorlds.includes(world.name)
-      )
-        continue;
-      mock.push(
-        leg({ kind: "mock", fixture, model_name: "mock", model_id: "mock", world, attempt: 1 }),
-      );
+  for (let attempt = 1; attempt <= mockAttempts; attempt += 1) {
+    for (const fixture of mockFixtures) {
+      const selectedWorlds = fixture.packageJson?.e2e?.worlds;
+      for (const world of mockWorlds) {
+        if (world.fixtures !== undefined && !world.fixtures.includes(fixture.name)) continue;
+        // `local` is the default world every fixture boots on; other worlds
+        // follow the fixture's own e2e.worlds selection.
+        if (
+          world.name !== "local" &&
+          Array.isArray(selectedWorlds) &&
+          !selectedWorlds.includes(world.name)
+        )
+          continue;
+        mock.push(
+          leg({ kind: "mock", fixture, model_name: "mock", model_id: "mock", world, attempt }),
+        );
+      }
     }
   }
   return { live, mock };
@@ -145,8 +212,33 @@ function leg({ kind, fixture, model_name, model_id, world = { name: "local" }, a
     model_id,
     world: world.name,
     world_package: world.package ?? "",
+    hosted: world.hosted === true,
     attempt,
   };
+}
+
+/**
+ * Startup probe subjects are agents the startup script generates, by name.
+ * Run 1 of each starts from an empty project (cold); later runs reuse its
+ * caches (warm), so `runs` must leave at least one warm run.
+ */
+function readDevStartup(value) {
+  const runs = boundedInteger(
+    value?.runs,
+    MAX_STARTUP_RUNS,
+    'e2e/benchmark.json: "devStartup.runs"',
+  );
+  if (runs < 2)
+    throw new Error(
+      'e2e/benchmark.json: "devStartup.runs" must include a warm run after the cold one.',
+    );
+  const subjects = names(value?.subjects, "devStartup.subjects");
+  const unknown = subjects.filter((name) => !Object.hasOwn(STARTUP_SUBJECTS, name));
+  if (unknown.length > 0)
+    throw new Error(
+      `e2e/benchmark.json: unknown "devStartup.subjects" ${unknown.join(", ")}; choose from ${Object.keys(STARTUP_SUBJECTS).join(", ")}.`,
+    );
+  return { runs, subjects: subjects.map((name) => ({ name, ...STARTUP_SUBJECTS[name] })) };
 }
 
 function namedEntries(entries, key) {
@@ -249,6 +341,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     planned_at: new Date().toISOString(),
     registry: {
       attempts: selection.attempts,
+      mock_attempts: selection.mockAttempts,
+      // The startup script defines its agents, so its blob id is their digest.
+      dev_startup:
+        selection.devStartup === null
+          ? null
+          : {
+              ...selection.devStartup,
+              subjects: selection.devStartup.subjects.map((subject) => ({
+                ...subject,
+                digest: execFileSync("git", ["rev-parse", `${sha}:${STARTUP_SCRIPT}`], {
+                  encoding: "utf8",
+                }).trim(),
+              })),
+            },
       // Concurrency changes measured latency, so every manifest records it.
       concurrency: {
         legs: selection.concurrency.legs,
@@ -256,7 +362,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       },
       models,
       mock_worlds: selection.mockWorlds.map((world) => world.name),
-      fixtures: selection.fixtures.map(({ name, dir, evalIds }) => ({
+      mock_fixtures: selection.mockFixtures.map((fixture) => fixture.name),
+      // Live and mock fixtures alike; records read each one's digest here.
+      fixtures: [
+        ...new Map(
+          [...selection.fixtures, ...selection.mockFixtures].map((fixture) => [
+            fixture.name,
+            fixture,
+          ]),
+        ).values(),
+      ].map(({ name, dir, evalIds }) => ({
         name,
         dir,
         digest: fixtureDigest(sha, dir),
@@ -268,7 +383,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const lines = [
     `live_matrix=${JSON.stringify(live)}`,
-    `mock_matrix=${JSON.stringify(mock)}`,
+    `mock_matrix=${JSON.stringify(mock.filter((leg) => !leg.hosted))}`,
+    `hosted_matrix=${JSON.stringify(mock.filter((leg) => leg.hosted))}`,
+    `dev_startup=${JSON.stringify(selection.devStartup)}`,
     `max_parallel=${selection.concurrency.legs}`,
     `evals_per_leg=${selection.concurrency.evalsPerLeg}`,
   ];

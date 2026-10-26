@@ -2,8 +2,9 @@ name: Eval Benchmark
 
 # Tracks correctness, latency, and cost of fixture evals across models and eve
 # versions, and publishes records to private Blob. Runs only on trusted
-# `main` revisions and never on pull requests. Run legs hold model credentials
-# only; the publish job is the only one that holds the Blob token.
+# `main` revisions and never on pull requests. Run legs hold model or Vercel
+# deployment credentials, never the Blob token: the publish job is the only
+# one that holds it.
 on:
   schedule:
     # Nightly; skipped when main has not moved since the last successful
@@ -43,8 +44,10 @@ jobs:
       sha: ${{ steps.skip.outputs.sha }}
       live_matrix: ${{ steps.plan.outputs.live_matrix }}
       mock_matrix: ${{ steps.plan.outputs.mock_matrix }}
+      hosted_matrix: ${{ steps.plan.outputs.hosted_matrix }}
       max_parallel: ${{ steps.plan.outputs.max_parallel }}
       evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
+      dev_startup: ${{ steps.plan.outputs.dev_startup }}
     steps:
       - name: Require main
         if: github.ref != 'refs/heads/main'
@@ -152,8 +155,17 @@ jobs:
         run: |
           pnpm run --if-present e2e:prepare
           pnpm exec eve eval --list --json > "$RUNNER_TEMP/expected.json"
-          if ! pnpm exec eve eval --verbose --max-concurrency "$EVALS_PER_LEG"; then
+          # --keep-state leaves the eval server's Workflow data for the world probe.
+          if ! pnpm exec eve eval --verbose --keep-state --max-concurrency "$EVALS_PER_LEG"; then
             echo "::warning::Some evals failed; failures are recorded as benchmark data."
+          fi
+
+      - name: Export world probe
+        working-directory: ${{ matrix.dir }}
+        run: |
+          if ! node "$GITHUB_WORKSPACE/scripts/eval-benchmark/export-world.mjs" . "$RUNNER_TEMP/world"; then
+            echo "::warning::World probe export failed; durability metrics are recorded as unavailable."
+            rm -rf "$RUNNER_TEMP/world"
           fi
 
       - name: Stage leg artifact
@@ -177,10 +189,12 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Mock-model legs: one per fixture and workflow world. With no model latency
-  # or cost, their timings are close to pure eve overhead.
+  # Mock-model legs: fixture × workflow world × e2e/benchmark.json
+  # `mockAttempts`. With no model latency or cost, their timings are close to
+  # pure eve overhead: the primary framework-overhead signal. Legs on a
+  # production server also record build and start probes.
   run-mock:
-    name: run-mock (${{ matrix.fixture }}, ${{ matrix.world }})
+    name: run-mock (${{ matrix.fixture }}, ${{ matrix.world }}, ${{ matrix.attempt }})
     needs: plan
     if: needs.plan.outputs.run == 'true' && needs.plan.outputs.mock_matrix != '[]'
     runs-on: ubuntu-latest
@@ -247,7 +261,7 @@ jobs:
         run: |
           pnpm run --if-present e2e:prepare
           pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
-          if ! pnpm exec eve eval --verbose --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG"; then
+          if ! pnpm exec eve eval --verbose --keep-state --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG"; then
             echo "::warning::Some evals failed; failures are recorded as benchmark data."
           fi
 
@@ -259,25 +273,31 @@ jobs:
           pnpm run --if-present e2e:prepare
           pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
           if [ "$WORLD" = "postgres" ]; then pnpm exec bootstrap; fi
-          pnpm exec eve build
+          mkdir -p "$RUNNER_TEMP/probes"
+          pnpm exec eve build --profile "$RUNNER_TEMP/probes/build-profile.json"
           server_log="$RUNNER_TEMP/server.log"
-          EVE_DEV=1 pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
+          # The start probe times eve itself, so it skips `pnpm exec`.
+          start_ms="$(date +%s%3N)"
+          EVE_DEV=1 ./node_modules/.bin/eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null || true' EXIT
+          # Polls every 50 ms, so the probe resolves readiness to about that.
           ready=false
-          for _ in {1..120}; do
+          for _ in {1..1200}; do
             if curl --fail --silent http://127.0.0.1:3000/eve/v1/health >/dev/null; then
               ready=true
               break
             fi
             if ! kill -0 "$server_pid" 2>/dev/null; then cat "$server_log"; exit 1; fi
-            sleep 0.5
+            sleep 0.05
           done
           if [ "$ready" != "true" ]; then
             cat "$server_log"
             echo "::error::Timed out waiting for the eve server."
             exit 1
           fi
+          jq -n --argjson ready_ms "$(($(date +%s%3N) - start_ms))" '{readyMs: $ready_ms}' \
+            >"$RUNNER_TEMP/probes/start.json"
           if ! pnpm exec eve eval --verbose --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG" \
             --url http://127.0.0.1:3000; then
             echo "::warning::Some evals failed; failures are recorded as benchmark data."
@@ -287,6 +307,18 @@ jobs:
           # Only non-local legs select a world; fixtures read an empty value
           # as a package name, so local legs must leave it unset.
           EVE_E2E_WORKFLOW_WORLD: ${{ matrix.world_package }}
+
+      - name: Export world probe
+        working-directory: ${{ matrix.dir }}
+        run: |
+          # Local legs read the kept eval server's data; others the leg's world.
+          if [ -n "$WORLD_PACKAGE" ]; then export EVE_E2E_WORKFLOW_WORLD="$WORLD_PACKAGE"; fi
+          if ! node "$GITHUB_WORKSPACE/scripts/eval-benchmark/export-world.mjs" . "$RUNNER_TEMP/world"; then
+            echo "::warning::World probe export failed; durability metrics are recorded as unavailable."
+            rm -rf "$RUNNER_TEMP/world"
+          fi
+        env:
+          WORLD_PACKAGE: ${{ matrix.world_package }}
 
       - name: Stage leg artifact
         if: always()
@@ -309,11 +341,183 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Mock-model legs on a hosted world: each deploys its fixture to a Vercel
+  # preview and runs the evals against it, so the timings include hosted
+  # Workflow queueing and invocation round trips that local servers never pay.
+  # One leg at a time, so concurrent legs don't contend for the same project.
+  # No world probe (the World's event log isn't local) and no build or start
+  # probes (they would measure Vercel's build and deploy, not eve).
+  run-hosted:
+    name: run-hosted (${{ matrix.fixture }}, ${{ matrix.world }}, ${{ matrix.attempt }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.hosted_matrix != '[]'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.hosted_matrix) }}
+    env:
+      EVE_E2E_MODEL: mock
+      EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
+      EVE_SANDBOX_IMAGE_TAG: latest
+    steps:
+      - name: Checkout planned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install Vercel CLI
+        run: pnpm add --global vercel@latest && vercel --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve package
+        # Full build, not build:js: deployed bundles carry the stamped version.
+        run: pnpm --filter eve run build
+
+      - name: Deploy fixture and run evals
+        working-directory: ${{ matrix.dir }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1"
+        # Mirrors e2e-vercel.yml's deploy and readiness wait.
+        run: |
+          set -euo pipefail
+          pnpm run --if-present e2e:prepare
+          pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
+
+          token_args=(--token "$VERCEL_TOKEN")
+          vercel link --yes --project "$VERCEL_PROJECT_ID" --team "$VERCEL_ORG_ID" "${token_args[@]}"
+          vercel env pull --yes --environment=preview "${token_args[@]}"
+          VERCEL_OIDC_TOKEN="$(node --env-file=.env.local -p 'process.env.VERCEL_OIDC_TOKEN ?? ""')"
+          # Do not add VERCEL_TEAM_ID: sandbox templates must key identically
+          # at build and runtime, and runtime has no team variable.
+          VERCEL=1 VERCEL_ENV=preview VERCEL_TARGET_ENV=preview VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
+            pnpm exec eve build
+          DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
+            --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
+            --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
+            "${token_args[@]}" | tail -n 1)"
+          echo "Deployed $DEPLOYMENT_URL"
+
+          ready=false
+          for attempt in $(seq 1 15); do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              --header "Authorization: Bearer $VERCEL_OIDC_TOKEN" \
+              --header "x-vercel-trusted-oidc-idp-token: $VERCEL_OIDC_TOKEN" \
+              --max-time 3 "$DEPLOYMENT_URL/eve/v1/health" || true)"
+            if [ "$status" = "200" ]; then ready=true; break; fi
+            echo "Deployment not ready (attempt $attempt/15, health status ${status:-transport-error})"
+            sleep 1
+          done
+          if [ "$ready" != "true" ]; then
+            echo "::error::Timed out waiting for $DEPLOYMENT_URL."
+            exit 1
+          fi
+          if ! pnpm exec eve eval --verbose --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG" \
+            --url "$DEPLOYMENT_URL"; then
+            echo "::warning::Some evals failed; failures are recorded as benchmark data."
+          fi
+
+      - name: Stage leg artifact
+        if: always()
+        env:
+          LEG_ID: ${{ matrix.leg_id }}
+          FIXTURE_DIR: ${{ matrix.dir }}
+          PLANNED_SHA: ${{ needs.plan.outputs.sha }}
+          MODEL_ID: ${{ matrix.model_id }}
+          WORLD: ${{ matrix.world }}
+          ATTEMPT: ${{ matrix.attempt }}
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: bash .github/scripts/stage-benchmark-leg.sh
+
+      - name: Upload leg artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-leg-${{ matrix.leg_id }}
+          path: ${{ runner.temp }}/leg
+          if-no-files-found: error
+          retention-days: 1
+
+  # `eve dev` startup for the benchmark agents in e2e/benchmark.json
+  # `devStartup`, recorded as run-level framework records.
+  dev-startup:
+    name: dev-startup
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.dev_startup != 'null'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - name: Checkout planned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve package
+        run: pnpm --filter eve run build
+
+      - name: Run startup benchmark
+        env:
+          DEV_STARTUP: ${{ needs.plan.outputs.dev_startup }}
+          PLANNED_SHA: ${{ needs.plan.outputs.sha }}
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
+          mkdir -p "$out"
+          jq -n --arg sha "$PLANNED_SHA" --arg runner_os "$RUNNER_OS_NAME" \
+            '{sha: $sha, runner_os: $runner_os}' >"$out/meta.json"
+          runs="$(jq -r '.runs' <<<"$DEV_STARTUP")"
+          while read -r name tools; do
+            if ! node packages/eve/scripts/benchmark-startup.mjs packages/eve "$runs" "$tools" >"$out/$name.jsonl"; then
+              echo "::warning::Startup benchmark for $name failed; its runs are recorded as missing."
+            fi
+          done < <(jq -r '.subjects[] | "\(.name) \(.tools)"' <<<"$DEV_STARTUP")
+
+      - name: Upload startup results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-dev-startup
+          path: ${{ runner.temp }}/dev-startup
+          if-no-files-found: error
+          retention-days: 1
+
   # Runs trusted code from the planned main commit, never code a leg uploaded.
   # Planned legs without an artifact become `missing` records.
   publish:
     name: publish
-    needs: [plan, run-live, run-mock]
+    needs: [plan, run-live, run-mock, run-hosted, dev-startup]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -352,10 +556,23 @@ jobs:
           pattern: benchmark-leg-*
           path: ${{ runner.temp }}/legs
 
+      - name: Download startup results
+        # Absent when the dev-startup job did not upload; its records are marked missing.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: benchmark-dev-startup
+          path: ${{ runner.temp }}/dev-startup
+
       - name: Derive records
-        run: node scripts/eval-benchmark/records.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" "$RUNNER_TEMP/records.jsonl"
+        run: |
+          node scripts/eval-benchmark/records.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" "$RUNNER_TEMP/records.jsonl"
+          node scripts/eval-benchmark/framework-records.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" \
+            "$RUNNER_TEMP/dev-startup" "$RUNNER_TEMP/framework-records.jsonl"
 
       - name: Publish to Blob
         env:
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
-        run: node scripts/eval-benchmark/publish.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" "$RUNNER_TEMP/records.jsonl"
+        run: |
+          node scripts/eval-benchmark/publish.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" \
+            "$RUNNER_TEMP/records.jsonl" "$RUNNER_TEMP/dev-startup" "$RUNNER_TEMP/framework-records.jsonl"

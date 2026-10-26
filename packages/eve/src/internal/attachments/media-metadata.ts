@@ -23,20 +23,6 @@ const MAX_IMAGE_TOKENS = 4_784;
 // page is the upper end of that range.
 const PDF_PAGE_TOKENS = 3_000;
 
-/** Reads the dimensions or page count of a payload, as far as its header allows. */
-export function readMediaMetadata(bytes: Uint8Array, mediaType: string): MediaMetadata {
-  const metadata = { mediaType, size: bytes.byteLength };
-  if (mediaType.startsWith("image/")) {
-    const dimensions = readImageDimensions(bytes);
-    return dimensions === undefined ? metadata : { ...metadata, ...dimensions };
-  }
-  if (mediaType === "application/pdf") {
-    const pages = countPdfPages(bytes);
-    return pages === undefined ? metadata : { ...metadata, pages };
-  }
-  return metadata;
-}
-
 /**
  * Estimates the input tokens a provider bills for one file. Images and PDFs
  * use provider-style costs; anything else falls back to the size of its
@@ -171,14 +157,6 @@ function readJpegDimensions(
     offset += 2 + view.getUint16(offset + 2);
   }
   return undefined;
-}
-
-function countPdfPages(bytes: Uint8Array): number | undefined {
-  const text = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1");
-  // Page objects in compressed object streams are invisible here; the
-  // estimate then falls back to the payload size.
-  const pages = text.match(/\/Type\s*\/Page(?![A-Za-z])/g)?.length ?? 0;
-  return pages > 0 ? pages : undefined;
 }
 
 function readAscii(bytes: Uint8Array, start: number, end: number): string {

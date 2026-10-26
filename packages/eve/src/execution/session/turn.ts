@@ -85,6 +85,7 @@ export interface SessionExecutionInput {
  */
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
+  private observedHandoverAttemptKey: string | undefined;
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
@@ -105,20 +106,14 @@ export class SessionExecution {
       readonly control?: TurnControl;
     } = {},
   ): Promise<TurnOutcome> {
-    let turn: ActiveTurn;
-    try {
-      turn = new ActiveTurn(
-        this.input,
-        {
-          caller: options.caller,
-          principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
-        },
-        options.control,
-      );
-    } catch (error) {
-      options.control?.dispose();
-      throw error;
-    }
+    const turn = new ActiveTurn(
+      this.input,
+      {
+        caller: options.caller,
+        principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+      },
+      options.control,
+    );
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
       // Tasks run beside the turn, and a run can open a session after its call
@@ -189,15 +184,20 @@ export class SessionExecution {
       const { cursor } = this.input;
       const caller = bindCaller;
       bindCaller = undefined;
+      const observation = this.input.inbox.handoverObservation;
+      const handover =
+        observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
       const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
+          handover,
           abortSignal: turn.signal,
           caller,
           input: nextStepInput,
           steeringSignal: turn.steeringSignal,
         }),
       );
+      if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;

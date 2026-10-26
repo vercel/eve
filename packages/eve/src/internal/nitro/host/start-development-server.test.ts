@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => {
     close: vi.fn(async () => undefined),
     discardCandidate: vi.fn(async () => undefined),
     listen: vi.fn(() => listenerServer),
+    prepareSpareWorker: vi.fn(),
+    recycleWorker: vi.fn(async () => undefined),
     replaceWorker: vi.fn(async () => undefined),
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
@@ -370,7 +372,6 @@ describe("createDevelopmentServer", () => {
     await server.close();
 
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledWith({
-      appRoot: "/tmp/eve-test",
       devRunId: expect.any(String),
       log: expect.any(Function),
     });

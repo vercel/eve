@@ -121,6 +121,23 @@ describe("startProductionServer", () => {
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
+  it("stops a built server that stays alive after its port turned out to be taken", async () => {
+    const { startProductionServer } = await import("./start-production-server.js");
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const child = createChildProcess();
+    (child.stderr as PassThrough).write(
+      "[srvx] Failed to start server: Error: listen EADDRINUSE: address already in use 127.0.0.1:4321\n",
+    );
+    mocks.spawn.mockReturnValueOnce(child);
+
+    await expect(
+      startProductionServer("/tmp/app", { host: "127.0.0.1", port: 4321 }),
+    ).rejects.toThrow(
+      "Port 4321 on 127.0.0.1 is already in use. Another process is listening there; stop it or choose another port with --port or the PORT environment variable.",
+    );
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it.each([
     { schedules: undefined, inherited: undefined, expected: undefined },
     { schedules: false, inherited: undefined, expected: "1" },

@@ -6,6 +6,14 @@ import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
 import { EveCodeBenchmark } from "./eve-code-benchmark";
+import {
+  Capabilities,
+  Capability,
+  TemplateCard,
+  TemplateCards,
+  UseCaseSummaries,
+  UseCaseSummary,
+} from "./use-cases";
 
 const localComponents: MDXComponents = {
   a: ({ href, ...props }) =>
@@ -24,9 +32,15 @@ const localComponents: MDXComponents = {
   Flag,
   Folder,
   AgentRuntimeDiagram,
+  Capabilities,
+  Capability,
   EveCodeBenchmark,
   Step,
   Steps,
+  TemplateCard,
+  TemplateCards,
+  UseCaseSummaries,
+  UseCaseSummary,
 };
 
 export const getMDXComponents = (components?: MDXComponents): MDXComponents =>

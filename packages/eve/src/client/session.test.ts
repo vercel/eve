@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
+import { getMessageResponseReceipt } from "#client/message-response.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
 import {
@@ -102,6 +103,20 @@ function createBoundedStreamResponse(events: readonly unknown[]) {
 }
 
 describe("ClientSession", () => {
+  it("prepares the fixed session with a bodyless POST to its existing input endpoint", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true, status: "accepted" }, { status: 202 }));
+    const session = createSession({ sessionId: "session/1", streamIndex: 4 });
+
+    await expect(session.prewarm()).resolves.toEqual({ status: "accepted" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://eve.test/eve/v1/session/session%2F1");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(session.state).toEqual({ sessionId: "session/1", streamIndex: 4 });
+  });
+
   it("cancels an accepted turn before its stream settles with freshly resolved auth", async () => {
     let headerResolution = 0;
     const requests: Array<{ headers: Headers; method: string; url: string }> = [];
@@ -340,6 +355,7 @@ describe("ClientSession", () => {
     );
 
     vi.useFakeTimers();
+    const startedAt = Date.now();
     try {
       const sent = session.send("ready soon");
       await vi.advanceTimersByTimeAsync(0);
@@ -363,7 +379,15 @@ describe("ClientSession", () => {
       await vi.advanceTimersByTimeAsync(1_999);
       expect(fetchMock).toHaveBeenCalledTimes(4);
       await vi.advanceTimersByTimeAsync(1);
-      await expect(sent).resolves.toMatchObject({ sessionId: "session_1" });
+      const response = await sent;
+      expect(response).toMatchObject({ sessionId: "session_1" });
+      // The retries are the session starting, reported apart from the accepted send.
+      expect(getMessageResponseReceipt(response)).toEqual({
+        deliveryId: "delivery_1",
+        startedAt,
+        notReadyMs: 3_750,
+        acceptedAt: startedAt + 3_750,
+      });
     } finally {
       vi.useRealTimers();
     }

@@ -607,7 +607,42 @@ describe("executeTask", () => {
     expect(result.derived.usage).toEqual(usage(30, 1));
   });
 
-  it("sums cost over the counted sessions that reported one", async () => {
+  it("keeps a recaptured session's latest usage by time, not by capture order", async () => {
+    // The second capture is an earlier snapshot of the same session: fewer events, so its
+    // `session.waiting` is stamped before the first capture's.
+    const server = createScriptedServer([], {
+      streams: [
+        {
+          sessionId: "scheduled",
+          events: [
+            turnStarted("turn_1"),
+            messageCompleted("first", "turn_1"),
+            turnStarted("turn_2"),
+            messageCompleted("second", "turn_2"),
+            sessionWaiting(usage(30, 1, 0.3)),
+          ],
+        },
+        {
+          sessionId: "scheduled",
+          events: [turnStarted("turn_1"), sessionWaiting(usage(10, 1, 0.1))],
+        },
+      ],
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.target.attachSession("scheduled");
+        await t.target.attachSession("scheduled");
+      }, "stale-recapture-usage"),
+    });
+
+    expect(result.derived.usage).toEqual(usage(30, 1, 0.3));
+  });
+
+  it("reports tokens but no cost when a counted session reported no cost", async () => {
     const server = createScriptedServer([
       {
         sessionId: "priced",
@@ -637,7 +672,9 @@ describe("executeTask", () => {
       }, "partial-cost"),
     });
 
-    expect(result.derived.usage?.costUsd).toBe(0.5);
+    // 0.5 would read as the eval's cost while one session's spend is unknown.
+    expect(result.derived.usage).toEqual({ ...usage(12, 2), costUsd: undefined });
+    expect(result.derived.usage && "costUsd" in result.derived.usage).toBe(false);
   });
 
   it("reports no usage when a counted session reported none", async () => {
