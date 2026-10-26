@@ -252,7 +252,13 @@ describe("workflowEntry integration", () => {
           output.lines.filter((line) => line.startsWith(`${HANDOFF_LOG} ${prefix}`)),
         ).toHaveLength(1);
       }
-      expect(output.unexpected(workflowSdkNotice.unpinnedDelivery, HANDOFF_LOG)).toEqual([]);
+      expect(
+        output.unexpected(
+          workflowSdkNotice.unpinnedDelivery,
+          workflowSdkNotice.queueRedelivery,
+          HANDOFF_LOG,
+        ),
+      ).toEqual([]);
     });
 
     it("remembers a successor that claims ordinarily as unable to take over", async () => {
@@ -293,7 +299,13 @@ describe("workflowEntry integration", () => {
       expect(
         output.lines.filter((line) => line.startsWith(`${HANDOFF_LOG} session handoff failed`)),
       ).toHaveLength(1);
-      expect(output.unexpected(workflowSdkNotice.unpinnedDelivery, HANDOFF_LOG)).toEqual([]);
+      expect(
+        output.unexpected(
+          workflowSdkNotice.unpinnedDelivery,
+          workflowSdkNotice.queueRedelivery,
+          HANDOFF_LOG,
+        ),
+      ).toEqual([]);
     });
 
     it("takes the session back from a successor that fails partway through its claims", async () => {

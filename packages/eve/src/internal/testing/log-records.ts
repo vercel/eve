@@ -22,18 +22,20 @@ export const workflowSdkNotice = {
   fatalStep: "[workflow-sdk] Encountered FatalError while executing step",
   ignoredLatestDeployment: "[workflow-sdk] deploymentId: 'latest' has no effect in this world",
   maxRetries: "[workflow-sdk] Max retries reached, bubbling error to parent workflow",
+  // The SDK rethrows transient conflicts for redelivery under load, but this
+  // line is also the only trace of a handler crash, so tests opt in narrowly.
+  queueRedelivery: "[world-local] Queue message failed (attempt ",
   unpinnedDelivery:
     "[workflow-sdk] Queue message was delivered to a deployment it was not pinned to",
 } as const;
 
 // Notices of self-healing races whose presence depends on load: the workflow
 // SDK reports a duplicate in-process delivery when redelivery races a slow
-// step, rethrows a transient conflict so the local queue retries the message,
-// and restores a run_created event whose write is still in flight.
+// step, and world-local restores a run_created event whose write is still in
+// flight.
 const LOAD_DEPENDENT_NOTICES = [
-  /^\[workflow-sdk\] Step execution already in flight in this process/u,
-  /^\[world-local\] Queue message failed \(attempt \d+, HTTP 500\)$/u,
-  /^\[world-local\] restored missing run_created for /u,
+  "[workflow-sdk] Step execution already in flight in this process",
+  "[world-local] restored missing run_created for ",
 ] as const;
 
 /**
@@ -65,8 +67,7 @@ export function captureConsoleOutput(): {
     unexpected: (...expected) =>
       lines.filter(
         (line) =>
-          !LOAD_DEPENDENT_NOTICES.some((notice) => notice.test(line)) &&
-          !expected.some((prefix) => line.startsWith(prefix)),
+          ![...LOAD_DEPENDENT_NOTICES, ...expected].some((prefix) => line.startsWith(prefix)),
       ),
   };
 }
