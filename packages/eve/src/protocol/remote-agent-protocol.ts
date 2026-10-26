@@ -13,6 +13,35 @@ export const REMOTE_AGENT_PROTOCOL_MISMATCH = "REMOTE_AGENT_PROTOCOL_MISMATCH";
 export const UNVERSIONED_REMOTE_AGENT_PROTOCOL = 1;
 
 /**
+ * Protocol of eve before v27 sessions. Its children relay people's input as v26 requests and take
+ * answers as v26 `inputResponses`, which this deployment translates both ways.
+ */
+export const V26_INPUT_REMOTE_AGENT_PROTOCOL = 2;
+
+/**
+ * Query parameter of the callback URL a parent gives a remote child on an earlier protocol: the
+ * protocol it agreed with that child. A callback route reads an earlier protocol's input callback
+ * only for a parent that agreed to it. A parent run from before v27, which a child's callback can
+ * reach once the deployment upgrades, never set it, so its children's input still fails visibly.
+ */
+const CALLBACK_PROTOCOL_QUERY = "eveRemoteProtocol";
+
+/** The callback URL for a child that speaks `version`, marked when it is an earlier one. */
+export function callbackUrlForProtocol(url: string, version: number): string {
+  if (version === REMOTE_AGENT_PROTOCOL_VERSION) return url;
+  const marked = new URL(url);
+  marked.searchParams.set(CALLBACK_PROTOCOL_QUERY, String(version));
+  return marked.toString();
+}
+
+/** The earlier protocol a callback URL says its parent agreed with the child, if any. */
+export function readCallbackProtocol(url: string): number | undefined {
+  const value = URL.parse(url)?.searchParams.get(CALLBACK_PROTOCOL_QUERY);
+  if (value === null || value === undefined || !/^[1-9]\d*$/.test(value)) return undefined;
+  return Number(value);
+}
+
+/**
  * Whether a remote agent serves a caller on this protocol version. It serves every version back
  * to the unversioned one, but relays requests and streams only to a caller on its own version.
  */

@@ -26,6 +26,8 @@ import {
   respondToRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
 import { routeDeliverPayload, type RoutedDeliverPayload } from "#subagents/hitl-proxy.js";
+import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol.js";
+import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
@@ -275,12 +277,24 @@ async function routeProxiedDeliver(
           resolverId: remote.resolverId,
           url: remote.url,
         });
+        const responses = coalesceDeliverPayloads(child.payloads).answers ?? [];
         await respondToRemoteAgentSession({
           remote,
           headers,
           auth: sourceDelivery.auth,
-          responses: coalesceDeliverPayloads(child.payloads).answers ?? [],
+          responses,
         });
+        // A protocol 2 child relays how its approvals settle, but never its questions or budget
+        // prompts: this session settles those as the child takes their answers, as its own
+        // protocol did.
+        if (remote.earlierProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL) {
+          for (const answer of protocolTwoAnswersSettledOnForward({
+            answers: responses,
+            decidedHere: parentAction?.answer.interactionId,
+            kindOf: (interactionId) => tables.interactions[interactionId]?.request.kind,
+          }))
+            decided.push({ answer, outcome: "accepted" });
+        }
       } else {
         await resumeSessionInbox(
           child.childSessionInbox ?? child.childContinuationToken,

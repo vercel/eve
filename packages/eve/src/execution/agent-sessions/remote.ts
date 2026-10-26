@@ -9,7 +9,9 @@ import {
   REMOTE_AGENT_PROTOCOL_VERSION,
   formatRemoteAgentProtocolMismatch,
   readRemoteAgentProtocolVersion,
+  callbackUrlForProtocol,
   servesRemoteAgentCaller,
+  V26_INPUT_REMOTE_AGENT_PROTOCOL,
 } from "#protocol/remote-agent-protocol.js";
 import {
   createEveCallbackRoutePath,
@@ -219,6 +221,8 @@ export async function startRemoteAgentSession(input: {
     rejected.version < REMOTE_AGENT_PROTOCOL_VERSION
   ) {
     requestBody.protocolVersion = rejected.version;
+    // The same callback, marked so its route reads that protocol's input callbacks.
+    requestBody.callback.url = callbackUrlForProtocol(requestBody.callback.url, rejected.version);
     response = await post();
     rejected = response.ok ? undefined : await readProtocolRejection(response);
   }
@@ -309,7 +313,16 @@ export async function respondToRemoteAgentSession(input: {
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
       body: JSON.stringify({
-        answers: input.responses,
+        // A protocol 2 child takes answers as v26 responses, each naming the request it answers.
+        ...(input.remote.earlierProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL
+          ? {
+              inputResponses: input.responses.map(({ interactionId, optionId, text }) => ({
+                requestId: interactionId,
+                ...(optionId !== undefined && { optionId }),
+                ...(text !== undefined && { text }),
+              })),
+            }
+          : { answers: input.responses }),
         ...(input.remote.forwardPrincipal === true &&
           input.auth != null && {
             forwardedPrincipal: { current: input.auth },
@@ -349,7 +362,13 @@ export async function continueRemoteAgentSession(input: {
     message: MessageContent<string | URL>;
     outputSchema?: JsonObject;
   } = {
-    callback: input.callback,
+    callback:
+      input.earlierProtocol === undefined
+        ? input.callback
+        : {
+            ...input.callback,
+            url: callbackUrlForProtocol(input.callback.url, input.earlierProtocol),
+          },
     message: input.message,
     outputSchema: input.outputSchema,
   };

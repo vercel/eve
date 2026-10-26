@@ -345,7 +345,16 @@ describe("startRemoteAgentSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string));
     expect(bodies.map((body) => body.protocolVersion)).toEqual([3, 2]);
-    expect(bodies[1]).toEqual({ ...bodies[0], protocolVersion: 2 });
+    // The same create and callback, its URL marked so the callback route reads protocol 2 input.
+    expect(bodies[1]).toEqual({
+      ...bodies[0],
+      callback: {
+        ...bodies[0].callback,
+        url: `${bodies[0].callback.url}?eveRemoteProtocol=2`,
+      },
+      protocolVersion: 2,
+    });
+    expect(bodies[1].operationId).toBe("stable-create");
     expect(fetchMock.mock.calls.map(([, options]) => options.headers.authorization)).toEqual([
       "Bearer fixture-1",
       "Bearer fixture-2",
@@ -1094,6 +1103,43 @@ describe("respondToRemoteAgentSession", () => {
       { answers: input.responses },
     ]);
   });
+
+  it("answers a protocol 2 child with the v26 responses it takes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const responder: SessionAuthContext = {
+      attributes: {},
+      authenticator: "fixture",
+      principalId: "alice",
+      principalType: "user",
+    };
+    await respondToRemoteAgentSession({
+      auth: responder,
+      headers: { authorization: "Bearer remote-token" },
+      remote: {
+        earlierProtocol: 2,
+        forwardPrincipal: true,
+        name: "research",
+        sessionId: "remote-session",
+        url: "https://remote.example.com",
+      },
+      responses: [
+        { interactionId: "approval-1", optionId: "approve" },
+        { interactionId: "question-1", text: "iad1" },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/eve/v1/session/remote-session",
+      expect.objectContaining({ method: "POST", redirect: "error" }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      forwardedPrincipal: { current: responder },
+      inputResponses: [
+        { optionId: "approve", requestId: "approval-1" },
+        { requestId: "question-1", text: "iad1" },
+      ],
+    });
+  });
 });
 
 describe("continueRemoteAgentSession", () => {
@@ -1130,7 +1176,8 @@ describe("continueRemoteAgentSession", () => {
               callId: "call-next",
               subagentName: "research",
               token: "parent-inbox",
-              url: "https://caller.example.com/eve/v1/callback/parent-inbox",
+              // Marked with the protocol it agreed, so its route reads that protocol's input.
+              url: `https://caller.example.com/eve/v1/callback/parent-inbox?eveRemoteProtocol=${earlierProtocol}`,
             },
             message: "follow up",
             outputSchema: { type: "object" },

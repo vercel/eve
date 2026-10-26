@@ -24,11 +24,12 @@ import {
 } from "#protocol/session-events/envelope.js";
 import type { Fact } from "#protocol/session-events/facts.js";
 import type { Capability, CallOutcome } from "#protocol/session-events/families/call.js";
-import type {
-  InteractionOption,
-  InteractionOutcome,
-  InteractionRequest,
-} from "#protocol/session-events/families/interaction.js";
+import {
+  v26InteractionOutcome,
+  v26InteractionRequest,
+  v26SignInOutcome,
+  v26SignInRequest,
+} from "#protocol/v26-interactions.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { createEventReader } from "#protocol/session-lines.js";
@@ -616,7 +617,7 @@ class Translator {
         this.interactionCalls.set(interactionId, callId);
       return [
         {
-          data: { interactionId, request: interactionRequest(request), subject },
+          data: { interactionId, request: v26InteractionRequest(request), subject },
           type: "interaction.opened",
         },
       ];
@@ -657,7 +658,7 @@ class Translator {
       const value: { optionId?: string; text?: string } = {};
       if (typeof answer.optionId === "string") value.optionId = answer.optionId;
       if (typeof answer.text === "string") value.text = answer.text;
-      const outcome = interactionOutcome(resolution.outcome);
+      const outcome = v26InteractionOutcome(resolution.outcome);
       const responseId = `response_${deliveryId}_${String(index)}`;
       answered = true;
       facts.push(
@@ -695,32 +696,7 @@ class Translator {
           ? { turnId }
           : undefined;
     if (subject === undefined) return [];
-    const challenge = isRecord(data.authorization) ? data.authorization : {};
-    const name = str(data.name) ?? "sign-in";
-    const url = str(challenge.url);
-    const request: InteractionRequest = {
-      kind: "sign-in",
-      link: url === undefined ? undefined : { url },
-      prompt: str(data.description) ?? `Sign in to ${name}.`,
-      signIn: {
-        callbackUrl: str(data.webhookUrl),
-        displayName: str(challenge.displayName),
-        expiresAt: str(challenge.expiresAt),
-        grant: str(data.grant),
-        instructions: str(challenge.instructions),
-        name,
-        principal:
-          isRecord(data.principal) && typeof data.principal.type === "string"
-            ? {
-                id: str(data.principal.id),
-                issuer: str(data.principal.issuer),
-                type: data.principal.type,
-              }
-            : undefined,
-        url,
-        userCode: str(challenge.userCode),
-      },
-    };
+    const request = v26SignInRequest(data);
     const principalId = str(data.principalId);
     return [
       {
@@ -739,14 +715,7 @@ class Translator {
     const interactionId = str(data.attemptId);
     if (interactionId === undefined || this.view.interactions[interactionId]?.status !== "open")
       return [];
-    const outcome: InteractionOutcome =
-      data.outcome === "authorized"
-        ? "accepted"
-        : data.outcome === "declined"
-          ? "declined"
-          : data.outcome === "timed-out"
-            ? "expired"
-            : "failed";
+    const outcome = v26SignInOutcome(data.outcome);
     return [
       {
         data: {
@@ -885,60 +854,6 @@ function capabilityOf(action: Data, label: string | undefined): Capability {
       const name = str(action.toolName) ?? str(action.name) ?? "tool";
       return { kind: name.startsWith("eve__task_") ? "control" : "tool", name, ...withLabel };
     }
-  }
-}
-
-function interactionRequest(request: Data): InteractionRequest {
-  const kind =
-    request.kind === "tool-approval"
-      ? "approval"
-      : request.kind === "session-limit"
-        ? "budget"
-        : "question";
-  const options = Array.isArray(request.options)
-    ? request.options.flatMap((option): InteractionOption[] =>
-        isRecord(option) && typeof option.id === "string" && typeof option.label === "string"
-          ? [
-              {
-                id: option.id,
-                label: option.label,
-                description: str(option.description),
-                style:
-                  option.style === "primary" ||
-                  option.style === "danger" ||
-                  option.style === "default"
-                    ? option.style
-                    : undefined,
-              },
-            ]
-          : [],
-      )
-    : undefined;
-  const display = request.display;
-  return {
-    allowFreeform: typeof request.allowFreeform === "boolean" ? request.allowFreeform : undefined,
-    display:
-      display === "confirmation" || display === "select" || display === "text"
-        ? display
-        : undefined,
-    kind,
-    options: options,
-    prompt: str(request.prompt) ?? "",
-  };
-}
-
-function interactionOutcome(outcome: unknown): InteractionOutcome {
-  switch (outcome) {
-    case "answered":
-    case "approved":
-      return "accepted";
-    case "denied":
-      return "declined";
-    case "invalid":
-      return "invalid";
-    default:
-      // `cancelled` and `ignored`: the request was withdrawn without an answer.
-      return "withdrawn";
   }
 }
 

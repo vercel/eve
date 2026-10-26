@@ -189,6 +189,10 @@ class RunAgentSession implements AgentSession {
                           resolverId: address.resolverId,
                           url: address.url,
                           sessionId: address.sessionId,
+                          // Answers go back in the protocol the child speaks.
+                          ...(address.earlierProtocol !== undefined && {
+                            earlierProtocol: address.earlierProtocol,
+                          }),
                           ...(address.dynamicBinding !== undefined && {
                             dynamicBinding: parseJsonValue(
                               JSON.parse(JSON.stringify(address.dynamicBinding)),

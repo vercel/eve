@@ -75,6 +75,12 @@ function parseRemoteAgentBinding(
   const sessionId = Reflect.get(value, "sessionId");
   // The parent's own step wrote it: the record its credentials render from.
   const dynamicBinding = Reflect.get(value, "dynamicBinding") as JsonValue | undefined;
+  const earlierProtocol = Reflect.get(value, "earlierProtocol");
+  if (
+    earlierProtocol !== undefined &&
+    (typeof earlierProtocol !== "number" || !Number.isInteger(earlierProtocol))
+  )
+    return undefined;
   if (typeof name !== "string" || !name || typeof url !== "string" || !url) return undefined;
   if (typeof sessionId !== "string" || !sessionId) return undefined;
   if (resolverId !== undefined && (typeof resolverId !== "string" || !resolverId)) return undefined;
@@ -86,6 +92,7 @@ function parseRemoteAgentBinding(
     ...(resolverId !== undefined && { resolverId }),
     ...(forwardPrincipal !== undefined && { forwardPrincipal }),
     ...(dynamicBinding !== undefined && { dynamicBinding }),
+    ...(earlierProtocol !== undefined && { earlierProtocol }),
   };
 }
 

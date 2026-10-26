@@ -230,25 +230,32 @@ questions, or sign-ins to them. A turn that needs a person fails with upgrade gu
 waiting on an unreachable prompt. Upgrade remote agents before their callers; see
 [Upgrade remote agents before their callers](../tools/tasks-upgrade#upgrade-remote-agents-before-their-callers).
 A protocol-3 parent also accepts earlier remotes' results and failures, but cannot follow their
-live streams or receive their human-input requests. Unsupported versions fail at start with an
-error naming both versions.
+live streams. It relays a protocol-2 remote's approvals, questions, and sign-ins to the person it
+serves, as described below; a protocol-1 remote's still fail. Unsupported versions fail at start
+with an error naming both versions.
 
 A receiver on an earlier supported protocol can reject a new caller's create request
 before admission. After an explicit `409 REMOTE_AGENT_PROTOCOL_MISMATCH` rejection,
 eve makes one request with that receiver's supported version and fresh credentials.
 It does not negotiate after an accepted response, an unreadable receipt, a rejection
-that names a session, or an unsupported version. Result-only compatibility does not
-add older peers' live streams or human-input relays. In particular, a protocol-2
-child that needs approval, a question, or sign-in sends a callback kind this parent
-does not accept. Its turn can fail with `Remote input callback failed with HTTP
-400`, not an actionable parent prompt. Upgrade those children before their callers;
-result-only negotiation is not an in-flight human-wait continuity mechanism.
+that names a session, or an unsupported version.
+
+A parent that negotiated protocol 2 relays that child's approvals, questions, and
+sign-ins like a protocol-3 child's. The person answers them in the parent's session,
+and their answers return in the form the child accepts. The child still decides who
+may answer: an answer it turns away, such as one from a responder its approval policy
+refuses, leaves the approval open. The child reports how its approvals and sign-ins
+settle. It doesn't report how a question or budget prompt settles, so the parent
+settles those once the child accepts the answer. Cancelling the parent's call withdraws
+what it mirrored. A parent marks the callback URL it gives such a child with the
+protocol they agreed, and reads that protocol's input callbacks only on a marked URL.
 
 Upgrade a parent and its remote children together, or let the children's in-flight work finish
 before you upgrade the parent. A remote child callback goes to the parent's current production
 deployment, not to the deployment that started the call. So a child on an earlier eve that asks
 for an approval, a question, or a sign-in after the parent upgrades sends a callback this release
-rejects, and the request never reaches the parent. This differs from the parent's own sessions,
+rejects, and the request never reaches the parent. That includes a protocol-2 child: the parent
+run that started it predates the agreement, so its callback URL carries no mark. This differs from the parent's own sessions,
 which stay on the deployment that started them.
 
 A failed start fails the call immediately. After a remote starts, a terminal failure callback

@@ -7,6 +7,15 @@ import type { ResponseOutcome } from "#protocol/session-events/families/response
 import { interactionSchemas } from "#protocol/session-events/families/interaction.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
+import {
+  PROTOCOL_TWO_INPUT_CALLBACK_KINDS,
+  readProtocolTwoInputCallback,
+} from "#subagents/protocol-two-callback.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
+import {
+  readCallbackProtocol,
+  V26_INPUT_REMOTE_AGENT_PROTOCOL,
+} from "#protocol/remote-agent-protocol.js";
 
 // The callback token grants access to the pending turn. Validate remote input
 // before handing it to the parent; the child session ID is not authority.
@@ -90,25 +99,50 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
-  const kind = callbackKind(body);
-  const forwarded =
-    kind === "subagent-interaction" ? sessionInteractionCallbackSchema.safeParse(body) : undefined;
-  if (forwarded !== undefined && !forwarded.success) {
+  const forwarded = readInteractionCallback(body, readCallbackProtocol(request.url));
+  if (forwarded === null) {
     return Response.json({ error: "Invalid session input callback.", ok: false }, { status: 400 });
   }
+  // A protocol 2 callback that records nothing to mirror, such as an approval's own settlement.
+  if (forwarded?.events.length === 0) return Response.json({ ok: true }, { status: 202 });
   const result = forwarded === undefined ? projectSessionCallbackResult(body) : undefined;
   if (result instanceof Response) return result;
 
   try {
     await resumeRunnableHook(
       token,
-      forwarded?.success ? forwarded.data : { kind: "runtime-action-result", results: [result] },
+      forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
   } catch {
     return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+/**
+ * A child's input callback as the interaction facts it relays: `undefined` when the body is not
+ * one, and `null` when it claims to be but doesn't parse. A child on remote agent protocol 2
+ * relays its input in that protocol's own kinds.
+ */
+function readInteractionCallback(
+  body: unknown,
+  agreedProtocol: number | undefined,
+): SubagentInteractionHookPayload | null | undefined {
+  const kind = callbackKind(body);
+  if (kind === "subagent-interaction") {
+    const parsed = sessionInteractionCallbackSchema.safeParse(body);
+    // The envelope schemas validate each fact's data, though zod infers it as `unknown`.
+    return parsed.success ? (parsed.data as SubagentInteractionHookPayload) : null;
+  }
+  // Only a parent that agreed to protocol 2 reads its callbacks. A parent run from before v27
+  // would drop the v27 relay, so its child's input fails here instead of waiting unseen.
+  if (
+    PROTOCOL_TWO_INPUT_CALLBACK_KINDS.has(kind) &&
+    agreedProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL
+  )
+    return readProtocolTwoInputCallback(body) ?? null;
+  return undefined;
 }
 
 function callbackKind(value: unknown): unknown {
