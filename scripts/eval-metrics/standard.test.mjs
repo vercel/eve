@@ -486,15 +486,19 @@ test("concurrent tools count once in turn overhead, and a batch is one tool hop"
     event("step.completed", 1100, second),
     event("turn.completed", 1200, { turnId: "t" }),
   ];
-  const artifact = synthetic(events);
   const zero = Date.parse(at(0));
   // Every event reaches the client 10 ms after it is written.
-  artifact.result.sessions[0].clock = {
-    receivedAt: events.map((e) => Date.parse(e.meta.at) + 10),
-    sends: [
-      { kind: "message", deliveryId: "d", startedAt: zero - 20, notReadyMs: 0, acceptedAt: zero },
-    ],
+  const clocked = (streamed) => {
+    const artifact = synthetic(streamed);
+    artifact.result.sessions[0].clock = {
+      receivedAt: streamed.map((e) => Date.parse(e.meta.at) + 10),
+      sends: [
+        { kind: "message", deliveryId: "d", startedAt: zero - 20, notReadyMs: 0, acceptedAt: zero },
+      ],
+    };
+    return artifact;
   };
+  const artifact = clocked(events);
   const { metrics } = deriveAttemptMetrics(artifact);
   // The tools ran from 400 to 900: 500 ms, not the 770 ms their durations add
   // up to. The rest is sent→first request (130), last tool→next request (50),
@@ -520,6 +524,35 @@ test("concurrent tools count once in turn overhead, and a batch is one tool hop"
   const partial = deriveAttemptMetrics(unfinished).metrics;
   assert.equal(partial["overhead.tool_hop_ms"].reason, "no-tool-hops");
   assert.equal(partial["overhead.tool_call_ms"].reason, "no-tool-hops");
+
+  // Two batches: one event requesting two calls, then a step whose first
+  // output is its own call. The second hop starts at the later of that step's
+  // model.done and the first batch's tool ends.
+  const third = { turnId: "t", stepIndex: 2 };
+  const twoBatches = clocked([
+    started,
+    event("step.started", 100, first),
+    event("actions.requested", 400, {
+      ...first,
+      actions: ["a", "b"].map((callId) => ({ kind: "tool-call", callId })),
+    }),
+    event("step.completed", 410, first),
+    event("action.result", 500, { ...first, result: { callId: "a" } }),
+    event("action.result", 600, { ...first, result: { callId: "b" } }),
+    event("step.started", 650, second),
+    event("actions.requested", 700, { ...second, actions: [{ kind: "tool-call", callId: "c" }] }),
+    event("step.completed", 710, second),
+    event("action.result", 800, { ...second, result: { callId: "c" } }),
+    event("step.started", 850, third),
+    event("message.appended", 900, { ...third, messageDelta: "done" }),
+    event("step.completed", 950, third),
+    event("turn.completed", 1000, { turnId: "t" }),
+  ]);
+  const both = deriveAttemptMetrics(twoBatches).metrics;
+  // 1030 from send to idle, less 400 of model and 300 of tools.
+  assert.deepEqual(both["overhead.turn_ms"].samples, [330]);
+  assert.deepEqual(both["overhead.tool_hop_ms"].samples, [50, 50]);
+  assert.deepEqual(both["overhead.tool_call_ms"].samples, [50, 50]);
 });
 
 test("a session created with its first message times that turn from the create request", () => {

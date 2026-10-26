@@ -230,13 +230,13 @@ function measureTurn(turn, sent, arrival, offset) {
   }
 
   for (const batch of toolBatches(turn)) {
-    const step = stepKey(batch[0].start.via);
+    const batchStep = stepKey(batch[0].start.via);
     const startAt = arrival(batch[0].start.via);
     const end = batchEnd(batch);
     if (end === undefined || !inWindow(startAt)) continue;
     // The requesting step can still stream between its calls (its later
     // requests, text flushed before each one); the next output is past it.
-    const nextOut = outputs.find(({ at, event }) => at >= startAt && stepKey(event) !== step);
+    const nextOut = outputs.find(({ at, event }) => at >= startAt && stepKey(event) !== batchStep);
     if (nextOut === undefined) continue;
     const next =
       calls.find(({ step, reqAt }) => step.request.t >= end && reqAt <= nextOut.at) ??

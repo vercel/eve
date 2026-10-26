@@ -48,12 +48,19 @@ export const METRICS_VERSION = 3;
 
 /**
  * Where the framework definitions come from. The conformance data in
- * fixtures/durable-harness/ was generated from this commit.
+ * fixtures/durable-harness/ was generated from this commit. `deviations`
+ * ships in every manifest, so a reader comparing with /compare sees where
+ * eve's values mean something else (see framework.mjs).
  */
 export const METRIC_DEFINITIONS = Object.freeze({
   repository: "vercel-labs/durable-harness",
   path: "packages/demo-ui/src/compare-glossary.ts",
   commit: "ea8aa4060cf4fb8cd39737ce8ab21c4e0f40c741",
+  deviations: Object.freeze({
+    "overhead.turn_ms": "concurrent tool time counts once",
+    "overhead.tool_hop_ms": "one sample per batch of calls a model step requested",
+    "overhead.tool_call_ms": "one sample per batch of calls a model step requested",
+  }),
 });
 
 const model = (unit, direction) => ({ unit, direction, scope: "model" });
