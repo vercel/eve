@@ -337,8 +337,9 @@ describe("workflowEntry integration", () => {
           }
           const [candidateId] = world.candidates.keys();
           const backend = await getWorld();
-          await vi.waitFor(async () =>
-            expect((await backend.runs.get(candidateId!)).status).toBe("completed"),
+          await vi.waitFor(
+            async () => expect((await backend.runs.get(candidateId!)).status).toBe("completed"),
+            { timeout: 10_000 },
           );
         } finally {
           world.restore();

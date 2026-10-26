@@ -31,9 +31,9 @@ export const workflowSdkNotice = {
 // step, rethrows a transient conflict so the local queue retries the message,
 // and restores a run_created event whose write is still in flight.
 const LOAD_DEPENDENT_NOTICES = [
-  "[workflow-sdk] Step execution already in flight in this process",
-  "[world-local] Queue message failed (attempt ",
-  "[world-local] restored missing run_created for ",
+  /^\[workflow-sdk\] Step execution already in flight in this process/u,
+  /^\[world-local\] Queue message failed \(attempt \d+, HTTP 500\)$/u,
+  /^\[world-local\] restored missing run_created for /u,
 ] as const;
 
 /**
@@ -65,7 +65,8 @@ export function captureConsoleOutput(): {
     unexpected: (...expected) =>
       lines.filter(
         (line) =>
-          ![...LOAD_DEPENDENT_NOTICES, ...expected].some((prefix) => line.startsWith(prefix)),
+          !LOAD_DEPENDENT_NOTICES.some((notice) => notice.test(line)) &&
+          !expected.some((prefix) => line.startsWith(prefix)),
       ),
   };
 }
