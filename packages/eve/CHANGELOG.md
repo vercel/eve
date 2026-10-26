@@ -1,5 +1,46 @@
 # eve
 
+## 0.84.0
+
+### Minor Changes
+
+- 4a4951e: Tools and connections now share the `Approval` policy contract; `approvalKey` and `ApprovalContext.approvedTools` are removed. `once()` remembers the latest approval or denial per resolved tool for the session; custom policies must return its decision unchanged to reuse or record consent.
+- 4a4951e: Session commands now return `Delivery` receipts with independent `stream()` and `result()` reads; the eve HTTP message route accepts `idempotencyKey` for retries within a session's recent-key window. Session creation returns `{ session, delivery }` when a message is supplied and `{ session }` otherwise; import shared contracts from `eve/sessions`.
+- 4a4951e: Public APIs now use eve-owned contracts for history, decisions, channel integrations, and sandboxes; legacy aliases and internal helpers are no longer exported. `decide` takes `signal` instead of `abortSignal` and returns only `answers` and `usage`; update other imports using the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events).
+- 4a4951e: Define dynamic capabilities with `defineDynamic(ctx => value)` instead of lifecycle maps, and use ordinary functions and schemas instead of `defineDurableCallback` and `defineDurableSchema`. Cache external JSON observations with `ctx.memo(key, fn)`.
+- 4a4951e: Extension distributions now record the eve version they were built with and a distribution generation instead of per-capability epochs. Extensions built with the old epoch-based manifest must be rebuilt with this release and republished; eve rejects old manifests with rebuild guidance before loading extension code.
+- 4a4951e: Recalled memory is supplied to the model outside durable conversation history, and dynamic user instructions are added only when their content changes. Memory no longer supports compaction recall or `visibility`, and compaction fails if memory capture fails.
+- 4a4951e: Sends, channels, and schedules now accept eve-owned `MessageContent`; images use file parts, and Chat SDK's `messageToUserContent` is renamed to `messageContentOf`. File parts sent through `ctx.agent().send()` must contain HTTP(S) URLs, not inline bytes or base64.
+- 4a4951e: `SessionStore` replaces `EveAgentStore`, and clients and frontend bindings use `baseUrl` instead of `host`. Frontend bindings expose `view`, `messages`, and `agents` directly with native tool and interaction parts; use `followWhile(view)` instead of `followIdle`, and `activeTurn(view)` rather than busy status for Stop controls.
+- 4a4951e: `followAgents: true` now observes child sessions recursively, including workflow-created children, with predicate selection, bounded traversal, and per-session positions and progress. `SessionStore.observe()` supports headless capture; child readers require source-positioned opening events to verify each hop through its parent.
+- 69346ff: Remote agents no longer serve callers on eve 0.66 through 0.68 (remote agent protocol 1), and callers no longer accept remote agents on those releases. Calls in either direction now fail at start with `REMOTE_AGENT_PROTOCOL_MISMATCH`; upgrade both deployments to the same eve release. The `/eve/v1/task-input/:token` route is gone. It accepted unauthenticated answers that settled approvals and added turn input as the session's current user.
+- 4a4951e: Replace `eve remote invoke` and its resumable JSON workflow with `eve remote connect --print <prompt>` for one-shot requests that print the final assistant text and exit. Interactive `eve remote connect` is unchanged; use `eve/client` for scripted multi-turn sessions and input responses.
+- 8efe110: eve's default sandbox image is now tagged by its Dockerfile contents instead of the eve version, so upgrading eve reuses existing sandbox templates unless the image itself changed. Expect one template rebuild on the first upgrade to this release.
+  
+  The default sandbox image no longer includes pnpm or pip, which makes it smaller. Install them in your sandbox `prepare` callback when your agent needs them: run `npm install -g pnpm` for pnpm, and use a Python virtual environment for pip.
+- 4a4951e: The eve HTTP channel now rejects unknown top-level fields on session creation, message, and control requests with HTTP 400 and a list of accepted fields. Correct unsupported options and misspellings instead of relying on them being ignored.
+- 4a4951e: Channel delivery hooks now receive typed `ChannelDelivery` payloads and return replacements; use `channel.state` for state changes. `kindHint` is removed; use path-derived `channel:<name>` identities, `audience()` visibility classification, and the renamed CORS options described in the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events).
+- 4a4951e: Slack's `renderers.taskCard` now receives `TaskCard` instead of `TaskCardView`; use `callState` and `callLabel` from `eve/events` for call rendering. Teams channel state replaces `pendingAuthActivityId` with `pendingAuthActivityIds`.
+- 4a4951e: Evals now use v27 facts and interaction projections, with call matchers such as `turn.waitForToolCall()` and renamed helpers such as `calledAgent()` and `awaitingInput()`. The `remoteUrl` field and matcher are removed; use the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events) to migrate legacy assertions.
+- 4a4951e: Hooks and channel handlers now receive v27 facts with coordinates in `event.scope` and session state in `ctx.view`. Update channel handlers to `(event, ctx)` with `ctx.channel`, and migrate instrumentation providers to `InstrumentationEvent<K>` and the new lifecycle names.
+- 4a4951e: Approvals, questions, sign-ins, and budget prompts now share the `Interaction` model, with answers shaped as `{ interactionId, optionId?, text? }` and approval choices `approve` / `deny`. Turns pause only for human input, and cancelling an agent task retires it.
+- 4a4951e: Remote agents now use protocol 3 and can still relay approvals, questions, and sign-ins from protocol-2 children. Upgrade callers before their remote agents, or both together: protocol-3 children cannot relay human-input requests to older callers.
+- 4a4951e: Session streams now use v27 facts, line-based cursors, and immutable `SessionView` snapshots queried through `eve/events`. Checkpoints require version 18; keep older sessions on their original deployments and follow the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events) before updating event consumers or restoring persisted history.
+
+### Patch Changes
+
+- 4a4951e: Deliver concurrent messages to the same `ctx.agent()` session in send order, preventing out-of-order delivery from leaving calls waiting indefinitely for a reply.
+- 4a4951e: Parent session streams now record accepted child deliveries as `child.sent`; use `agentCallActivity(state, callId)` from `eve/client` to inspect per-call child activity, including shared turns.
+- 4a4951e: An unhandled hook error now fails the running turn instead of only being logged. Cancellation requested with `ctx.cancel()` takes effect only if the handler returns successfully.
+- caa9172: The bundled `eve dev` self-modification subagent is now offered only to the local developer: sessions authenticated by `localDev()` or by the linked project's Vercel development token. Chat users and principals from authored authenticators, including HTTP Basic operators, no longer get the editor and must edit files directly; there is no local authorization override, and callers forwarded by a same-machine tunnel can still get the editor if the channel uses `localDev()`.
+- 4a4951e: Remote child sessions no longer fail solely because the parent has already consumed their result or stopped waiting for it, such as after a lost acknowledgement.
+- 4a4951e: Remote session stream proxies now reject unexpected content types and prevent upstream responses from being served as executable content. Error responses with unexpected content types are replaced with generic JSON while preserving the error status.
+- e7453f1: Session callbacks now reach only public addresses. The eve channel rejects callback URLs with a non-HTTP scheme or a loopback host, and callback delivery refuses to connect when a callback hostname resolves to a loopback, private, link-local, or reserved address. Loopback callbacks still work on local development servers (`eve dev` and `vercel dev`).
+- 4a4951e: Built-in channels keep sign-in links and codes out of shared messages; when private delivery is unavailable, they show a credential-free status instead.
+- 4a4951e: Interrupted durable steps recover from recorded outcomes without automatically replaying observed tool calls. Exhausted step retries fail the turn without closing the session, but external effects with unrecorded outcomes still require application-level idempotency.
+- 4a4951e: v27 deployments can read v26 session history through the v27 client and stream APIs. Convert previously saved legacy events with `convertLegacyEvents` from `eve/internal/legacy-events`, a temporary migration aid.
+- 4a4951e: `eve dev` now validates session event lines before writing them and rejects lines larger than 8 MiB. Set `EVE_CHECK_SESSION_EVENTS=0` to disable validation or `=1` to enable it outside development.
+
 ## 0.83.3
 
 ### Patch Changes
