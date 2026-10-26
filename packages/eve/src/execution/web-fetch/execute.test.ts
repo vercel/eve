@@ -104,6 +104,19 @@ describe("extractTextFromHtml", () => {
 
     expect(text).toContain("Line 1\nLine 2");
   });
+
+  it("drops everything after an unclosed script element", () => {
+    expect(extractTextFromHtml("<p>Before</p><script>var x = 1;")).toBe("Before");
+  });
+
+  // Pre-fix, each of these inputs took seconds at this size (quadratic
+  // backtracking); a linear pass finishes in milliseconds.
+  it.each(["<script x", "<", "<a"])("processes 256 KiB of repeated %j in linear time", (chunk) => {
+    const html = chunk.repeat(Math.ceil((256 * 1024) / chunk.length));
+    const start = performance.now();
+    extractTextFromHtml(html);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
 });
 
 describe("executeWebFetchTool", () => {
