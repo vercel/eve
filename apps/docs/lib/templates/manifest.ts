@@ -422,7 +422,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "bell-stack",
-    title: "BELL Stack Template",
+    title: "BELL Stack",
     setupPrompt:
       "Set up the BELL stack template in my current workspace using https://github.com/browserbase/bell-stack as the source. Follow its README and integration guides, and preserve the existing project if the workspace is not empty. Configure local browsing with OpenAI and Browserbase first. Explain the optional Linq messaging, Stripe Link payments, 1Password, and Baselayer setup separately. Keep personal 1Password Agentic Autofill disabled as documented upstream. Before deployment, explain the authentication and durable storage requirements for this single-operator sample app. Do not request secrets in chat or commit credentials.",
     description:
