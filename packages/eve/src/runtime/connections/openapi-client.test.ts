@@ -5,6 +5,9 @@ import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
+import type { JsonObject } from "#shared/json.js";
+import { defineJsonSchema } from "#tools/schema.js";
+import { renderToolSignature } from "#tools/signature.js";
 
 const EXECUTE_OPTIONS = { callId: "call-1" } as const;
 
@@ -120,6 +123,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** The tool's input schema and a function returning the issues it reports for an input. */
+async function inputContract(spec: Record<string, unknown>, toolName: string) {
+  const client = new OpenApiConnectionClient(
+    makeConnection({ spec, url: "https://api.example.com" }),
+  );
+  const tool = (await client.getToolMetadata()).find((m) => m.name === toolName)!;
+  const schema = defineJsonSchema(tool.inputSchema as JsonObject)["~standard"];
+  return {
+    inputSchema: tool.inputSchema,
+    issues: async (input: unknown) => (await schema.validate(input)).issues,
+  };
+}
+
 describe("OpenApiConnectionClient", () => {
   it("maps operations to tools keyed on operationId", async () => {
     const client = new OpenApiConnectionClient(makeConnection());
@@ -209,30 +225,18 @@ describe("OpenApiConnectionClient", () => {
     });
   });
 
-  it("dereferences a $ref request body under the body property", async () => {
-    const client = new OpenApiConnectionClient(makeConnection());
-    const metadata = await client.getToolMetadata();
-    const createProject = metadata.find((m) => m.name === "createProject");
+  it.each([
+    ["an OpenAPI 3 request body", SPEC, "createProject"],
+    ["a Swagger 2.0 body parameter", SWAGGER_SPEC, "createSwaggerItem"],
+  ])("resolves %s $ref under the body property", async (_, spec, toolName) => {
+    const { inputSchema, issues } = await inputContract(spec, toolName);
 
-    expect(createProject?.inputSchema).toMatchObject({
-      properties: {
-        body: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
-      },
-      required: ["body"],
-    });
-  });
-
-  it("dereferences Swagger 2.0 body parameters under the body property", async () => {
-    const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
-    const metadata = await client.getToolMetadata();
-    const createItem = metadata.find((m) => m.name === "createSwaggerItem");
-
-    expect(createItem?.inputSchema).toMatchObject({
-      properties: {
-        body: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
-      },
-      required: ["body"],
-    });
+    expect(renderToolSignature({ name: toolName, inputSchema })).toBe(
+      `${toolName}(input: { body: { name: string } }): Promise<unknown>`,
+    );
+    expect(await issues({ body: { name: "eve" } })).toBeUndefined();
+    expect(await issues({ body: {} })).toBeDefined();
+    expect(await issues({})).toBeDefined();
   });
 
   it("down-converts OpenAPI 3.0 nullable to draft 2020-12", async () => {
@@ -569,11 +573,10 @@ describe("OpenApiConnectionClient", () => {
     }
   });
 
-  it("keeps deeply recursive schemas valid (no truncation of type/required/oneOf)", async () => {
+  it("validates recursive schemas at every depth", async () => {
     const spec: Record<string, unknown> = {
       openapi: "3.0.3",
       info: { title: "T", version: "1" },
-      servers: [{ url: "https://api.example.com" }],
       paths: {
         "/nodes": {
           post: {
@@ -593,49 +596,132 @@ describe("OpenApiConnectionClient", () => {
             required: ["kind"],
             properties: {
               kind: { oneOf: [{ type: "string" }, { type: "number" }] },
-              value: { type: ["string", "null"] },
               children: { type: "array", items: { $ref: "#/components/schemas/Node" } },
             },
           },
         },
       },
     };
-    const client = new OpenApiConnectionClient(makeConnection({ spec }));
-    const createNode = (await client.getToolMetadata()).find((m) => m.name === "createNode");
-    expect(createNode).toBeDefined();
-    const inputSchema = createNode!.inputSchema as {
-      properties: { body: Record<string, unknown> };
-    };
-    const body = inputSchema.properties.body;
+    const { issues } = await inputContract(spec, "createNode");
+    const tree = (depth: number, leafKind: unknown): Record<string, unknown> =>
+      depth === 0 ? { kind: leafKind } : { kind: depth, children: [tree(depth - 1, leafKind)] };
 
-    expect(body).toMatchObject({
-      type: "object",
-      required: ["kind"],
-      properties: {
-        kind: { oneOf: [{ type: "string" }, { type: "number" }] },
-        value: { type: ["string", "null"] },
-        children: { type: "array" },
+    expect(await issues({ body: tree(20, "leaf") })).toBeUndefined();
+    expect(await issues({ body: tree(20, true) })).toBeDefined();
+  });
+
+  // Regression for https://github.com/vercel/eve/issues/3267
+  it("keeps nested union constraints so valid deep input validates", async () => {
+    const property = {
+      oneOf: [
+        {
+          type: "object",
+          required: ["title"],
+          properties: {
+            title: { type: "array", items: { $ref: "#/components/schemas/RichText" } },
+          },
+        },
+        { type: "object", required: ["number"], properties: { number: { type: "number" } } },
+      ],
+    };
+    const spec: Record<string, unknown> = {
+      openapi: "3.1.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/v1/pages": {
+          post: {
+            operationId: "createPage",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["properties"],
+                    properties: {
+                      properties: { type: "object", additionalProperties: property },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
       },
+      components: {
+        schemas: {
+          Text: {
+            type: "object",
+            required: ["text"],
+            properties: {
+              text: {
+                type: "object",
+                required: ["content"],
+                properties: { content: { type: "string" } },
+              },
+            },
+          },
+          Equation: {
+            type: "object",
+            required: ["equation"],
+            properties: { equation: { type: "string" } },
+          },
+          RichText: {
+            allOf: [
+              { type: "object" },
+              {
+                oneOf: [
+                  { $ref: "#/components/schemas/Text" },
+                  { $ref: "#/components/schemas/Equation" },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+    const { issues } = await inputContract(spec, "createPage");
+    const page = (content: unknown) => ({
+      body: { properties: { Name: { title: [{ text: { content } }] } } },
     });
 
-    // Truncation must never corrupt array-valued keywords or scalar entries
-    // at any depth — the bug that produced `oneOf: {}` / `required: [{}]`.
-    const visit = (node: unknown): void => {
-      if (Array.isArray(node)) {
-        for (const item of node) visit(item);
-        return;
-      }
-      if (node === null || typeof node !== "object") return;
-      const obj = node as Record<string, unknown>;
-      for (const key of ["oneOf", "anyOf", "allOf", "required"]) {
-        if (key in obj) expect(Array.isArray(obj[key])).toBe(true);
-      }
-      if (Array.isArray(obj.required)) {
-        for (const entry of obj.required) expect(typeof entry).toBe("string");
-      }
-      for (const value of Object.values(obj)) visit(value);
+    expect(await issues(page("Upload attendee data"))).toBeUndefined();
+    expect(await issues(page(123))).toBeDefined();
+  });
+
+  it("keeps the input schema linear in the size of shared, non-cyclic $refs", async () => {
+    const levels = 8;
+    const fanOut = 10;
+    const schemas = Object.fromEntries(
+      Array.from({ length: levels }, (_, level) => {
+        const child =
+          level + 1 < levels ? { $ref: `#/components/schemas/S${level + 1}` } : { type: "string" };
+        const properties = Object.fromEntries(
+          Array.from({ length: fanOut }, (_, index) => [`p${index}`, child]),
+        );
+        return [`S${level}`, { type: "object", properties }];
+      }),
+    );
+    const spec: Record<string, unknown> = {
+      openapi: "3.1.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/trees": {
+          post: {
+            operationId: "createTree",
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/S0" } } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+      components: { schemas },
     };
-    visit(inputSchema);
+    const { inputSchema } = await inputContract(spec, "createTree");
+
+    expect(JSON.stringify(inputSchema).length).toBeLessThan(JSON.stringify(spec).length * 2);
   });
 
   it("derives the base URL from the spec servers when baseUrl is omitted", async () => {

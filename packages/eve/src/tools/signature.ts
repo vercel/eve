@@ -146,7 +146,7 @@ function renderObject(schema: Schema, context: RenderContext): string {
   const fields = Object.entries(properties).map(([key, value]) => {
     const name = IDENTIFIER.test(key) ? key : JSON.stringify(key);
     const optional = required.has(key) ? "" : "?";
-    const comment = isObject(value) ? propertyComment(value, context.descriptions) : "";
+    const comment = isObject(value) ? propertyComment(value, context) : "";
     return `${name}${optional}: ${renderType(value, next(context))}${comment}`;
   });
   const extra = schema.additionalProperties;
@@ -157,10 +157,13 @@ function renderObject(schema: Schema, context: RenderContext): string {
   return `{ ${fields.join("; ")} }`;
 }
 
-function propertyComment(schema: Schema, descriptions: boolean): string {
+function propertyComment(property: Schema, context: RenderContext): string {
+  // A referenced property is described by its target; keywords beside the `$ref` win.
+  const target = typeof property.$ref === "string" ? resolveRef(property.$ref, context) : undefined;
+  const schema = isObject(target) ? { ...target, ...property } : property;
   const parts: string[] = [];
   const description =
-    descriptions && typeof schema.description === "string"
+    context.descriptions && typeof schema.description === "string"
       ? schema.description
           .replaceAll(/\s+/gu, " ")
           .replace(/[\s.;,:]+$/u, "")

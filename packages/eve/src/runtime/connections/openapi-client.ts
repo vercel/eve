@@ -14,11 +14,12 @@ import {
 } from "#runtime/connections/openapi-operations.js";
 import {
   buildInputSchema,
+  createSchemaConverter,
   deref,
-  derefSchema,
   isArray,
   type OpenApiParameter,
   type OpenApiRequestBody,
+  type SchemaConverter,
 } from "#runtime/connections/openapi-schema.js";
 import { applySecurity, resolveSecurity } from "#runtime/connections/openapi-security.js";
 import { extractServerUrl, parseSpecDocument } from "#runtime/connections/openapi-spec.js";
@@ -32,6 +33,8 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const log = createLogger("runtime.connections.openapi-client");
+
+type SchemaConvert = SchemaConverter["convert"];
 
 interface OpenApiToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
@@ -276,11 +279,13 @@ export class OpenApiConnectionClient implements ConnectionClient {
 
         const opParams = isArray(operationValue.parameters) ? operationValue.parameters : [];
         const rawParameters = [...sharedParams, ...opParams];
-        const parameters = this.#resolveParameters(document, rawParameters);
+        const { convert, defs } = createSchemaConverter(document);
+        const parameters = this.#resolveParameters(document, rawParameters, convert);
         const requestBody = this.#resolveRequestBody(
           document,
           operationValue.requestBody,
           rawParameters,
+          convert,
         );
 
         operations.push({
@@ -290,7 +295,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
           description: operationDescription(operationValue),
           parameters,
           requestBody,
-          inputSchema: buildInputSchema(parameters, requestBody),
+          inputSchema: buildInputSchema(parameters, requestBody, defs),
           security: resolveSecurity(document, operationValue),
         });
       }
@@ -302,6 +307,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
   #resolveParameters(
     document: Record<string, unknown>,
     raw: readonly unknown[],
+    convert: SchemaConvert,
   ): OpenApiParameter[] {
     const params: OpenApiParameter[] = [];
     for (const entry of raw) {
@@ -321,7 +327,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       if (typeof resolved.name !== "string") {
         continue;
       }
-      const schema = this.#resolveParameterSchema(document, resolved);
+      const schema = this.#resolveParameterSchema(resolved, convert);
       params.push({
         name: resolved.name,
         location,
@@ -336,7 +342,8 @@ export class OpenApiConnectionClient implements ConnectionClient {
   #resolveRequestBody(
     document: Record<string, unknown>,
     raw: unknown,
-    rawParameters: readonly unknown[] = [],
+    rawParameters: readonly unknown[],
+    convert: SchemaConvert,
   ): OpenApiRequestBody | undefined {
     if (isObject(raw)) {
       const resolved = deref(document, raw);
@@ -348,7 +355,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
           const media = content[contentType];
           const schema =
             isObject(media) && isObject(media.schema)
-              ? (derefSchema(document, media.schema) as Record<string, unknown>)
+              ? (convert(media.schema) as Record<string, unknown>)
               : {};
           return {
             required: resolved.required === true,
@@ -358,15 +365,15 @@ export class OpenApiConnectionClient implements ConnectionClient {
         }
       }
     }
-    return this.#resolveSwaggerBodyParameter(document, rawParameters);
+    return this.#resolveSwaggerBodyParameter(document, rawParameters, convert);
   }
 
   #resolveParameterSchema(
-    document: Record<string, unknown>,
     parameter: Record<string, unknown>,
+    convert: SchemaConvert,
   ): Record<string, unknown> {
     if (isObject(parameter.schema)) {
-      return derefSchema(document, parameter.schema) as Record<string, unknown>;
+      return convert(parameter.schema) as Record<string, unknown>;
     }
 
     const schema: Record<string, unknown> = {};
@@ -375,12 +382,13 @@ export class OpenApiConnectionClient implements ConnectionClient {
         schema[key] = parameter[key];
       }
     }
-    return derefSchema(document, schema) as Record<string, unknown>;
+    return convert(schema) as Record<string, unknown>;
   }
 
   #resolveSwaggerBodyParameter(
     document: Record<string, unknown>,
     rawParameters: readonly unknown[],
+    convert: SchemaConvert,
   ): OpenApiRequestBody | undefined {
     for (const entry of rawParameters) {
       const resolved = isObject(entry) ? deref(document, entry) : entry;
@@ -388,7 +396,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
         continue;
       }
       const schema = isObject(resolved.schema)
-        ? (derefSchema(document, resolved.schema) as Record<string, unknown>)
+        ? (convert(resolved.schema) as Record<string, unknown>)
         : {};
       return {
         required: resolved.required === true,
