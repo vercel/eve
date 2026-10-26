@@ -452,7 +452,7 @@ async receive({ message, target, ...send }, { from }) {
 },
 ```
 
-`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`.
+Route handlers, [handler-form schedules](../schedules#handler-form-run), and [tools](../tools#start-channel-sessions-ctxto) provide `to(...)`; other platform callbacks don't.
 
 For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
 

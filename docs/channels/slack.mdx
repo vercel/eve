@@ -738,7 +738,7 @@ The private authorization button uses the label **Sign in**, so long connection 
 
 ### Proactive sessions
 
-Start a Slack conversation from a [webhook on another channel](./custom#cross-channel-hand-off) or a [schedule](../schedules#handler-form-run), without waiting for someone to message the app.
+Start a Slack conversation from a [webhook on another channel](./custom#cross-channel-hand-off), a [schedule](../schedules#handler-form-run), or a [tool](../tools#start-channel-sessions-ctxto), without waiting for someone to message the app. To copy an existing conversation into a new thread or someone's direct messages, see [Fork conversations into a new thread](../patterns/fork-conversations-into-new-threads).
 
 Pass `{ channelId }` as the target to start a new thread. The agent's first post becomes the thread's root message. You can also set these target fields:
 

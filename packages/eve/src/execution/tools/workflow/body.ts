@@ -7,6 +7,8 @@ import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
 import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { WorkflowSharedContext, WorkflowToolContext } from "#tools/workflow-definition.js";
 import {
   ask,
@@ -295,7 +297,18 @@ export function createSharedContext(
         "requireAuth()",
         'pass ctx directly to a "use step" helper to request authorization',
       ),
+    to: () => unavailable("to()", 'pass ctx directly to a "use step" helper to send to a channel'),
+    channel: workflowToolChannel(input.agentContext),
     toolName: input.toolName,
+  };
+}
+
+/** `ctx.channel` for a call: the channel that serves the calling session. */
+export function workflowToolChannel(context: AgentSessionContext): InstrumentationChannel {
+  const projection = context.channelMetadata;
+  return {
+    kind: normalizeInstrumentationChannelKind(projection?.kind),
+    metadata: projection?.metadata ?? {},
   };
 }
 

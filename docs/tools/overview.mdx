@@ -254,12 +254,46 @@ examples.
 - `ctx.messages`: the model input for the step that requested this call, the same messages a [dynamic capability's](/docs/guides/dynamic-capabilities) `ctx.messages()` returns before that call.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
+- `ctx.channel`: the channel serving the session, as [hooks](/docs/guides/hooks) and [dynamic resolvers](/docs/guides/dynamic-capabilities) read it: `kind`, `continuationToken`, and `metadata`, what the channel's `metadata(state)` hook projects, such as a Slack thread's `channelId` and `threadTs`.
+- `ctx.to(channel, target)`: starts or continues a session on one of the agent's channels. See [Start channel sessions](#start-channel-sessions-ctxto).
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it calls gets executed. Completed steps replay their recorded result. An interrupted step runs again from its checkpoint, but a call it already started does not run again: the model reads that the call may have taken effect, and decides whether to call it again.
 
 Use operation-specific idempotency keys for external writes such as charges or emails. Approval records consent; it does not deduplicate an operation. See [Crash recovery](/docs/concepts/execution-model-and-durability#resuming-after-a-crash).
+
+### Start channel sessions: `ctx.to`
+
+`ctx.to(channel, target).send(message, options)` starts a session on one of the agent's channels, or continues the one at that target, through the channel's `receive` hook. It's the same call as a route handler's [cross-channel hand-off](/docs/channels/custom#cross-channel-hand-off), with the same [options](/docs/channels/custom#cross-channel-hand-off), and returns the delivery, whose `sessionId` names the session. Use it when the model decides that work should continue somewhere people can follow it, such as a new Slack thread:
+
+```ts title="agent/tools/escalate.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import slack from "../channels/slack";
+
+export default defineTool({
+  description: "Hand this investigation to the on-call channel in Slack.",
+  inputSchema: z.object({ summary: z.string() }),
+  async execute({ summary }, ctx) {
+    const delivery = await ctx
+      .to(slack, { channelId: "C0123ABC" })
+      .send("Take over this investigation.", {
+        auth: ctx.session.auth.current,
+        history: [{ role: "user", text: summary }],
+        idempotencyKey: ctx.callId,
+      });
+    return { sessionId: delivery.sessionId };
+  },
+});
+```
+
+- The session belongs to the channel. People on that channel continue it, it has no parent, and it keeps running after the tool returns.
+- It runs the root agent with the `auth` you pass. Pass `ctx.session.auth.current` to start it as the caller.
+- A tool call that retries runs the tool again. Pass `idempotencyKey: ctx.callId`, and the session at the target gets the message once. Built-in channels map a retry to the same session, including a Slack target with only a `channelId`. A platform post made before the session exists, such as an `initialMessage`, repeats.
+- `ctx.to()` throws in a delegated session: a subagent, a root copy, or a remote agent call. A session it started would outlive the delegation and act for the caller, so return the result and send from a tool on the root agent.
+
+See [Fork conversations into a new thread](/docs/patterns/fork-conversations-into-new-threads) for a tool that copies the current conversation into a new Slack thread.
 
 ## When a tool throws
 

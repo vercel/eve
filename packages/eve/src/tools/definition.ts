@@ -7,6 +7,8 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { Approval } from "#approval/definition.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
@@ -201,6 +203,23 @@ export type ToolContext = SessionContext & {
    * token returned by {@link getToken}.
    */
   requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
+  /**
+   * Starts or continues a session on one of the agent's channels, as a route
+   * handler's `ctx.to()` does: `ctx.to(slack, target).send(message, options)`
+   * runs the channel's `receive()` hook and returns the delivery. The session
+   * belongs to the channel, not this one, and keeps running after the tool
+   * returns. The tool runs again when its step retries, so pass
+   * `idempotencyKey: ctx.callId` to deliver once. Throws in a delegated
+   * session: a subagent, a root copy, or a remote agent call.
+   */
+  readonly to: CrossChannelToFn;
+  /**
+   * The channel serving the calling session, as hooks and dynamic resolvers
+   * read it: the channel's `kind`, the session's `continuationToken` there, and
+   * what the channel's `metadata(state)` hook projects, such as a Slack
+   * thread's `channelId` and `threadTs`.
+   */
+  readonly channel: InstrumentationChannel;
   /**
    * The person who approved this call. Present only when the call runs after a
    * person approved it; absent for calls that needed no approval.

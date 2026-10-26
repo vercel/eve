@@ -1,3 +1,6 @@
+import { hasDelegatedCaller } from "#execution/session/delegated-caller.js";
+import { createToolChannelTo } from "#execution/tools/channel-to.js";
+import { channelOf } from "#reactions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { HandleEventFn } from "#harness/types.js";
@@ -25,6 +28,7 @@ import {
   ChannelDeliveryKey,
   ChannelInstrumentationKey,
   HandleEventKey,
+  ToolChannelKey,
   StaticModelReferenceKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
@@ -661,6 +665,13 @@ async function runSessionStepBody(
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
+            ctx.setVirtualContext(ToolChannelKey, {
+              channel: channelOf(ctx),
+              to: createToolChannelTo({
+                delegated: hasDelegatedCaller(ctx),
+                loadBundle: () => ctx.require(BundleKey),
+              }),
+            });
             const schemaSession =
               firstCall && resolved?.outputSchema !== undefined
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }

@@ -60,7 +60,14 @@ export interface AgentSessionOptions {
  */
 export type WorkflowStepToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getSandbox" | "getToken" | "requireAuth"
+  | "abortSignal"
+  | "callId"
+  | "session"
+  | "toolName"
+  | "getSandbox"
+  | "getToken"
+  | "requireAuth"
+  | "to"
 >;
 
 /** Options for one message to a `ctx.agent` session. */
@@ -112,12 +119,12 @@ export interface AgentSession {
 
 /**
  * Members the context of every workflow tool entry point shares.
- * `getSandbox`, `getToken`, and `requireAuth` work only after `ctx` is passed
- * to a `"use step"` helper; the workflow body throws when it calls them.
+ * `getSandbox`, `getToken`, `requireAuth`, and `to` work only after `ctx` is
+ * passed to a `"use step"` helper; the workflow body throws when it calls them.
  */
 export type WorkflowSharedContext = Pick<
   ToolContext,
-  "session" | "toolName" | "getSandbox" | "getToken" | "requireAuth"
+  "channel" | "session" | "toolName" | "getSandbox" | "getToken" | "requireAuth" | "to"
 > & {
   /**
    * Returns a new session with the agent of this invocation name. Nothing

@@ -89,3 +89,18 @@ it.each([
   const output = outcome.status === "completed" ? outcome.output : null;
   expect(output !== null && Object.hasOwn(output as object, "text")).toBe(false);
 });
+
+it("gives ctx.channel the calling session's channel kind and metadata", async () => {
+  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => ctx.channel);
+  const started = startCallBody({
+    ...input,
+    agentContext: {
+      ...agentContext,
+      channelMetadata: { kind: "channel:slack-prod", metadata: { channelId: "C1" } },
+    },
+  });
+  await expect(started.outcome).resolves.toMatchObject({
+    output: { kind: "channel:slack-prod", metadata: { channelId: "C1" } },
+    status: "completed",
+  });
+});

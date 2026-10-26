@@ -13,6 +13,7 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowStepToolContext, WorkflowToolContext } from "#tools/workflow-definition.js";
+import { defineChannel, POST } from "#public/channels/index.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
@@ -333,4 +334,24 @@ export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolCon
 export async function failingServeWorkflow(): Promise<never> {
   "use workflow";
   throw new Error("Live serve workflow must not execute.");
+}
+
+/** Sends from a step, then waits durably, so the body replays past the recorded step. */
+export async function sendThenSleepWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const delivered = await sendSummary(ctx, input.service);
+  await workflowSleep(1);
+  return delivered;
+}
+
+async function sendSummary(ctx: WorkflowStepToolContext, userId: string) {
+  "use step";
+  // A step loads its own copy of a channel module; eve matches it to the
+  // registered channel by its routes.
+  const dm = defineChannel({ routes: [POST("/dm", async () => new Response("ok"))] });
+  const delivery = await ctx.to(dm, { userId }).send("Here is the summary.", {
+    auth: ctx.session.auth.current,
+    idempotencyKey: `${ctx.callId}:summary`,
+  });
+  return { sessionId: delivery.sessionId };
 }

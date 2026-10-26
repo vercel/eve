@@ -138,6 +138,8 @@ function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext 
     baseUrl: "https://agent.example",
     token: `callback-${user}`,
     authorizationResults: [],
+    delegated: false,
+    channel: { kind: "unknown", metadata: {} },
     abortSignal: new AbortController().signal,
     session: {
       id: "session-1",
@@ -246,6 +248,13 @@ describe("workflow step authorization", () => {
     // The step's connection neither replaced nor dropped the session's.
     expect(connections).toHaveLength(2);
     expect(stopped).toEqual([sessionConnection]);
+  });
+
+  it("refuses ctx.to() when a parent delegated the calling session", async () => {
+    const channel = { __kind: "eve:channel", routes: [] };
+    await expect(
+      runStep((ctx) => ctx.to(channel as never, {} as never), { ...context(), delegated: true }),
+    ).rejects.toThrow("ctx.to() isn't available in a delegated session");
   });
 
   it("fails ctx.getSandbox() without retrying once its step has returned", async () => {

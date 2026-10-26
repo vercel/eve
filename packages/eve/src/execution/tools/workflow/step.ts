@@ -1,3 +1,4 @@
+import { workflowToolChannel } from "#execution/tools/workflow/body.js";
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -129,6 +130,8 @@ async function invokeAuthorizedStep(input: {
     baseUrl: getWorkflowMetadata().url,
     token: callbackToken,
     authorizationResults,
+    delegated: run.agentContext.delegated === true,
+    channel: workflowToolChannel(run.agentContext),
     sandbox: {
       bundle: run.agentContext.bundle,
       sessionId: run.agentContext.sandbox.sessionId,
