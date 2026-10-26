@@ -19,6 +19,8 @@ Add a tool that converts temperatures between Celsius and Fahrenheit.
 
 The self-modification subagent changes the authored files in your project. Review the diff and test the new behavior as you would for any other source change. `eve dev` reloads changes while you work.
 
+The subagent is offered only to you, the developer running `eve dev`: sessions authenticated by [`localDev()`](./auth-and-route-protection) or by the Vercel development token the dev TUI sends for a linked project. Other callers of the same server, such as Slack users reaching it through a tunnel or principals from your own authenticators, do not see it.
+
 ## Change the self-modification model
 
 The subagent uses your agent's model by default. To give it a different model or reasoning level, ask for it directly:

@@ -31,9 +31,8 @@ export const LOCAL_DEV_INTERACTIVE_CLIENT_HEADER = "x-eve-dev-interactive-client
  * Host facilities available to authored code running on an `eve dev` server.
  *
  * Absence means this host has no authored tree to mutate or watcher to pause.
- * When present, the capability is available to every execution on that host;
- * callers admitted to the development server are trusted with enabled local
- * editing tools.
+ * Presence describes the host, not the caller: code that edits the authored
+ * tree on a caller's behalf must authorize that caller separately.
  */
 export interface LocalDevCapability {
   /**
