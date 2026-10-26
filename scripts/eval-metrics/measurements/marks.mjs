@@ -176,7 +176,8 @@ export function listMarks(marks) {
 export function toolBatches(turn) {
   const batches = new Map();
   for (const tool of turn.tools) {
-    const key = stepKey(tool.start.via) ?? tool.start.via;
+    // Every tool start has a step key: sessionMarks skips keyless outputs.
+    const key = stepKey(tool.start.via);
     const batch = batches.get(key) ?? [];
     batch.push(tool);
     batches.set(key, batch);

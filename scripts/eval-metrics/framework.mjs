@@ -17,7 +17,7 @@
 // attempts. An occurrence the definition does not cover (a tool that ended
 // its turn has no next model call) is left out, never estimated.
 import { notApplicable, selectEvents, timestamp, unavailable } from "./measurements/events.mjs";
-import { coveredLengthBetween } from "./measurements/intervals.mjs";
+import { coveredLengthBetween, stepKey } from "./measurements/intervals.mjs";
 import { hopStart, toolBatches } from "./measurements/marks.mjs";
 
 /** Time at least one of `tools` was running, so concurrent calls count once. */
@@ -230,12 +230,13 @@ function measureTurn(turn, sent, arrival, offset) {
   }
 
   for (const batch of toolBatches(turn)) {
-    const requests = new Set(batch.map((tool) => tool.start.via));
+    const step = stepKey(batch[0].start.via);
     const startAt = arrival(batch[0].start.via);
     const end = batchEnd(batch);
     if (end === undefined || !inWindow(startAt)) continue;
-    // The batch's own requests are outputs too; the next one is past them.
-    const nextOut = outputs.find(({ at, event }) => at >= startAt && !requests.has(event));
+    // The requesting step can still stream between its calls (its later
+    // requests, text flushed before each one); the next output is past it.
+    const nextOut = outputs.find(({ at, event }) => at >= startAt && stepKey(event) !== step);
     if (nextOut === undefined) continue;
     const next =
       calls.find(({ step, reqAt }) => step.request.t >= end && reqAt <= nextOut.at) ??

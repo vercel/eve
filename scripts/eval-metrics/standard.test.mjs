@@ -467,13 +467,16 @@ test("concurrent tools count once in turn overhead, and a batch is one tool hop"
   const events = [
     started,
     event("step.started", 100, first),
-    // eve streams one actions.requested per call of the step.
-    ...["a", "b", "c"].map((callId, i) =>
+    // eve may stream one actions.requested per call, flushing text before each.
+    ...["a", "b", "c"].flatMap((callId, i) => [
+      ...(i === 0
+        ? []
+        : [event("message.appended", 395 + i * 10, { ...first, messageDelta: "." })]),
       event("actions.requested", 400 + i * 10, {
         ...first,
         actions: [{ kind: "tool-call", callId }],
       }),
-    ),
+    ]),
     event("step.completed", 430, first),
     event("action.result", 500, { ...first, result: { callId: "a" } }),
     event("action.result", 600, { ...first, result: { callId: "c" } }),
