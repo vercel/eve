@@ -19,7 +19,9 @@ Add a tool that converts temperatures between Celsius and Fahrenheit.
 
 The self-modification subagent changes the authored files in your project. Review the diff and test the new behavior as you would for any other source change. `eve dev` reloads changes while you work.
 
-The subagent is offered only to you, the developer running `eve dev`: sessions authenticated by [`localDev()`](./auth-and-route-protection) or by the Vercel development token the dev TUI sends for a linked project. Other callers of the same server, such as Slack users reaching it through a tunnel or principals from your own authenticators, do not see it.
+The subagent is offered only to sessions authenticated by [`localDev()`](./auth-and-route-protection#localdev) or by the Vercel development token the dev TUI sends for a linked project. Sessions authenticated as Slack users or by your own authenticators, including HTTP Basic operator credentials, do not see it. The local mount has no `authorize` override; edit the authored files directly when using those authenticators.
+
+A tunnel or reverse proxy running on the same machine can forward callers that `localDev()` accepts as the synthetic local developer. Those callers can use the editor. Before exposing `eve dev` through a tunnel, require authentication at the tunnel or proxy, or remove `localDev()` from the exposed channel's auth chain. Putting another authenticator before `localDev()` does not reject callers that it skips: they can still fall through to `localDev()`.
 
 ## Change the self-modification model
 
