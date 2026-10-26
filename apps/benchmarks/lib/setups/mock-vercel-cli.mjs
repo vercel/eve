@@ -15,7 +15,33 @@ const state = existsSync(statePath)
 
 record("vercel.invoked", { args, nonInteractive });
 
-if (args[0] === "link") {
+if (args[0] === "whoami") {
+  console.log("benchmark");
+} else if (args[0] === "teams" && args[1] === "ls") {
+  console.log(JSON.stringify({ teams: [{ name: "Benchmark", slug: "benchmark", current: true }] }));
+} else if (
+  args[0] === "api" &&
+  args[1]?.startsWith("/v9/projects/") &&
+  !args.includes("--method")
+) {
+  // eve looks the project up by name before linking, and reads its production
+  // alias after deploying to report the URL.
+  const requested = decodeURIComponent(args[1].slice("/v9/projects/".length).split("?")[0]);
+  if (!state.linked || ![state.project, `prj_${state.project}`].includes(requested)) {
+    console.log(JSON.stringify({ error: { code: "not_found", message: "Project not found" } }));
+    process.exit(1);
+  }
+  console.log(
+    JSON.stringify({
+      id: `prj_${state.project}`,
+      name: state.project,
+      framework: null,
+      targets: state.deployed
+        ? { production: { alias: [`${state.project}.example.test`] } }
+        : undefined,
+    }),
+  );
+} else if (args[0] === "link") {
   const project = option("--project");
   if (!nonInteractive || project === undefined) {
     fail("vercel link requires --project <name> --yes --non-interactive.");
@@ -40,6 +66,9 @@ if (args[0] === "link") {
   if (!state.linked || !nonInteractive || !args.includes("--prod")) {
     fail("vercel deploy requires a linked project, --prod, and --non-interactive.");
   }
+  state.deployed = true;
+  writeFileSync(statePath, JSON.stringify(state));
+  console.log(`https://${state.project}.example.test`);
   record("project.deployed", {
     project: state.project,
     url: `https://${state.project}.example.test`,

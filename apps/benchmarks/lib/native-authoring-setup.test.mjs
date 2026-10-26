@@ -66,6 +66,31 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
 });
 
+test("fails a case whose setup the native runner does not know", async () => {
+  const setup = createNativeAuthoringSetup({
+    packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
+    revision: "commit",
+    treatment: "guided",
+  });
+  await assert.rejects(
+    setup({
+      async readFile() {
+        return JSON.stringify({
+          startingPoint: "scaffolded",
+          revision: "commit",
+          setupIds: ["unregistered-v1"],
+        });
+      },
+      async writeFiles() {},
+      async runCommand() {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+      getWorkingDirectory: () => "/workspace",
+    }),
+    /Setup "unregistered-v1" is not registered with the native runner/u,
+  );
+});
+
 test("rejects a broken starting workspace before handing it to the model", async () => {
   const setup = createNativeAuthoringSetup({
     packageSpec: "https://pkg.eve.dev/commit/eve.tgz",

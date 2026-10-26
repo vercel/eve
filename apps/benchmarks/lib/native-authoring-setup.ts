@@ -3,8 +3,13 @@ import type { Sandbox } from "@vercel/agent-eval";
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
 import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
+import { vercelSetup } from "./setups/vercel.js";
 
-const sessionSetups: readonly AuthoringSetup[] = [inventoryOpenApiSetup, northstarFulfillmentSetup];
+const sessionSetups: readonly AuthoringSetup[] = [
+  inventoryOpenApiSetup,
+  northstarFulfillmentSetup,
+  vercelSetup,
+];
 
 interface FixtureBootstrap {
   readonly startingPoint: "scaffolded" | "empty";
@@ -84,8 +89,15 @@ export function createNativeAuthoringSetup(options: {
   };
 }
 
+// A case whose setup is skipped would hand the model a workspace without its fixture.
 function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
-  return sessionSetups.filter((setup) => ids.includes(setup.id));
+  return ids.map((id) => {
+    const setup = sessionSetups.find((candidate) => candidate.id === id);
+    if (setup === undefined) {
+      throw new Error(`Setup ${JSON.stringify(id)} is not registered with the native runner.`);
+    }
+    return setup;
+  });
 }
 
 function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSetupContext {
