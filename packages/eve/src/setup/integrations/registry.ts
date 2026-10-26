@@ -5,7 +5,7 @@ import { LINEAR_SETUP } from "./linear/setup.js";
 import { LINQ_SETUP } from "./linq/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
 import {
-  SELF_MODIFICATION_PRODUCTION_SETUP,
+  SELF_MODIFICATION_DEPLOYED_SETUP,
   SELF_MODIFICATION_SETUP,
 } from "./self-modification/setup.js";
 import { SHOPIFY_SETUP } from "./shopify/setup.js";
@@ -27,7 +27,7 @@ const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   TEAMS_SETUP,
   SHOPIFY_SETUP,
   SELF_MODIFICATION_SETUP,
-  SELF_MODIFICATION_PRODUCTION_SETUP,
+  SELF_MODIFICATION_DEPLOYED_SETUP,
 ];
 
 /** Resolves one built-in setup integration by its registry setup name. */

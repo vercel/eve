@@ -15,7 +15,7 @@ const createAppRoot = useTemporaryAppRoots();
 describe("deployed self-modification prewarm", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("prepares the remote child's sandbox off Vercel without Vercel credentials", async () => {
+  it("prewarms off Vercel without preparing a Vercel snapshot", async () => {
     vi.stubEnv("EVE_DEV", undefined);
     for (const name of Object.keys(process.env)) {
       if (name.startsWith("VERCEL")) vi.stubEnv(name, undefined);
@@ -27,9 +27,7 @@ describe("deployed self-modification prewarm", () => {
         [DEPLOYED_SELF_MODIFICATION_CONFIG_PATH]: [
           'import selfModification from "eve/self-modification/remote";',
           "export default selfModification({",
-          '  source: { git: { repository: "github.com/acme/agent", directory: "." } },',
-          '  target: { branch: "main" },',
-          "  credentials: { pat: true },",
+          '  github: { repository: "acme/agent", connector: "github/selfmod-acme-agent" },',
           "  authorize: () => false,",
           "});",
           "",
@@ -43,7 +41,7 @@ describe("deployed self-modification prewarm", () => {
       },
       startPath: appRoot,
     });
-    const vercelArtifacts: unknown[] = [];
+    const vercelPreparations: unknown[] = [];
 
     await prewarmAppSandboxes({
       appRoot,
@@ -53,15 +51,13 @@ describe("deployed self-modification prewarm", () => {
         ),
       }),
       // The root agent's default sandbox would build a local Docker image here;
-      // only the remote child's Vercel preparation is under test.
-      dispatch: async ({ context, provider }) => {
-        if (provider.providerName !== "vercel") return {};
-        const artifact = await provider.implementation.prepare(context);
-        vercelArtifacts.push(artifact);
-        return artifact;
+      // only whether the remote child requests Vercel preparation is under test.
+      dispatch: async ({ provider }) => {
+        if (provider.providerName === "vercel") vercelPreparations.push(provider);
+        return {};
       },
     });
 
-    expect(vercelArtifacts).toEqual([{}]);
+    expect(vercelPreparations).toEqual([]);
   });
 });

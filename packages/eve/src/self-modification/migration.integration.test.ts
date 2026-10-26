@@ -51,6 +51,7 @@ afterEach(async () => {
 function setupOperations(): SelfModificationSetupOperations {
   return {
     attachConnector: vi.fn(),
+    checkBranchProtection: vi.fn(async () => "unknown" as const),
     detectChannelNames: vi.fn(async () => []),
     detectGitRepository: vi.fn(async () => ({ remoteKind: "missing" as const })),
     findOrCreateConnector: vi.fn(async () => "github/example"),

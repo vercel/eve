@@ -42,9 +42,9 @@ describe("setup integrations", () => {
       kind: "self-modification",
       label: "Self-modification",
     });
-    expect(setupIntegration("self-modification-production")).toMatchObject({
-      kind: "self-modification-production",
-      label: "Self-modification production",
+    expect(setupIntegration("self-modification-remote")).toMatchObject({
+      kind: "self-modification-remote",
+      label: "Self-modification deployed",
     });
   });
   it("rejects unknown integrations", () => {
