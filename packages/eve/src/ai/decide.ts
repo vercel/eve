@@ -5,6 +5,7 @@ import {
 } from "ai";
 
 import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
+import { decideWithTracing } from "#instrumentation/decide.js";
 import { localGatewayDecisionModel } from "#internal/model-auth/transport.js";
 
 export const DEFAULT_DECISION_MODEL = "typesafe-ai/jev";
@@ -18,7 +19,7 @@ export function decide<const Questions extends Record<string, DecisionQuestion>>
   model?: DecisionModel;
 }) {
   ensureAiSdkWarningLogger();
-  return decideWithAiSdk({
+  return decideWithTracing({
     ...options,
     model:
       typeof model === "string" && Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") == null

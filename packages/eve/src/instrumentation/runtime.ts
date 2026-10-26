@@ -1,7 +1,6 @@
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
   InstrumentationAttemptScope,
@@ -50,17 +49,11 @@ import {
   type MemoryInstrumentation,
 } from "#instrumentation/memory.js";
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
-import type { ConversationContext } from "#shared/conversation-context.js";
 import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
 import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
-import {
-  isSampledTrace,
-  resolveTracePolicy,
-  resolveTracePolicyDecision,
-} from "#shared/trace-policy.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
-import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
@@ -75,7 +68,6 @@ import { createGatewayTraceContextHeaders } from "#tracing/eve/gateway.js";
 export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
-import type { SessionTraceSeed } from "#context/keys.js";
 import type { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 interface InstrumentedStepSession {
@@ -155,6 +147,10 @@ export interface InstrumentationRuntime {
   readonly prepareTurnTrace?: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readonly readTurnTraceContext?: (
+    sessionId: string,
+    turnId: string,
+  ) => Promise<InstrumentationTraceContext | undefined>;
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
@@ -295,7 +291,7 @@ export function bindInstrumentationRuntime(
         const policyContext = readSessionContext();
         const hooks = bindHooks(policyContext);
         const settings = executionRuntime.otelSettings;
-        const decision = resolveStepInstrumentationDecision(
+        const decision = resolveInstrumentationTraceDecision(
           settings,
           boundSession.agentName,
           policyContext.conversation,
@@ -590,25 +586,6 @@ export function bindSessionInstrumentation(input: {
     sessionId: input.sessionId,
   };
   return bindInstrumentationRuntime(getInstrumentationRuntime(), input.ctx, session);
-}
-
-function resolveStepInstrumentationDecision(
-  settings: OtelHarnessSettings | undefined,
-  agentName: string,
-  conversation: ConversationContext,
-  traceSeed: SessionTraceSeed | undefined,
-  persisted: InstrumentationDecision | undefined,
-): InstrumentationDecision | undefined {
-  if (settings === undefined) return undefined;
-  if (traceSeed?.decision !== undefined) return readInstrumentationDecision(traceSeed.decision);
-  if (persisted !== undefined) return persisted;
-  if (traceSeed !== undefined) {
-    return resolveTracePolicyDecision(isSampledTrace(traceSeed), conversation);
-  }
-  return resolveTracePolicy(settings.tracePolicy, {
-    agentName,
-    ...conversation,
-  });
 }
 
 function isValidSpanContext(spanContext: {

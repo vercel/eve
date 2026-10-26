@@ -23,6 +23,7 @@ import type {
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,
+  InstrumentationTraceContext,
   InstrumentationSessionTransitionEvent,
   InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
@@ -62,6 +63,10 @@ interface AgentOtelInstrumentation {
   readonly prepareTurnTrace: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readonly readTurnTraceContext: (
+    sessionId: string,
+    turnId: string,
+  ) => Promise<InstrumentationTraceContext | undefined>;
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -258,6 +263,7 @@ export function createAgentOtelInstrumentation(
     },
     prepareSessionTrace,
     prepareTurnTrace,
+    readTurnTraceContext: sessionTracing.readTurnTraceContext,
     async runInContext(operation, execute) {
       if (operation.type === "memory.operation") return memory.runInContext(operation, execute);
       const ceiling = { emit: true, ...(await capturePolicy.forOperation(operation.scope)) };

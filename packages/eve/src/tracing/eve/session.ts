@@ -58,6 +58,7 @@ interface EveSessionTracing {
   readonly prepareTurnTrace: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readTurnTraceContext(sessionId: string, turnId: string): Promise<SpanContext | undefined>;
   /** Hydrates a turn this process or an earlier one started. */
   turnFor(sessionId: string, turnId: string, context?: Context): Promise<TurnOperation | undefined>;
   /** Whether the trace policy dropped this turn, so its work must not record spans. */
@@ -104,6 +105,10 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
 
   const turnKey = (sessionId: string, turnId: string) => JSON.stringify([sessionId, turnId]);
 
+  async function readTurnTraceContext(sessionId: string, turnId: string) {
+    return (await input.stateStore.get("turn", turnKey(sessionId, turnId)))?.context;
+  }
+
   async function turnFor(sessionId: string, turnId: string, context?: Context) {
     const turn = await input.stateStore.get("turn", turnKey(sessionId, turnId));
     if (turn === undefined || !isSampledTrace(turn.context)) return undefined;
@@ -118,8 +123,8 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
   }
 
   async function dropped(sessionId: string, turnId: string): Promise<boolean> {
-    const turn = await input.stateStore.get("turn", turnKey(sessionId, turnId));
-    return turn !== undefined && !isSampledTrace(turn.context);
+    const trace = await readTurnTraceContext(sessionId, turnId);
+    return trace !== undefined && !isSampledTrace(trace);
   }
 
   const prepareTurnTrace = async (
@@ -206,6 +211,7 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     ensureSessionContext,
     prepareSessionTrace,
     prepareTurnTrace,
+    readTurnTraceContext,
     turnFor,
     dropped,
     async turnTerminal(event) {

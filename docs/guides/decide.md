@@ -177,6 +177,17 @@ You can also call `decide` outside a tool; it does not require an active eve
 session. Each call performs its own decision. `auto` uses this function
 and adds the per-turn routing behavior described below.
 
+With [OpenTelemetry configured](/docs/observability/otel), each `decide` call emits a
+`decision <model>` span under the active operation, or under the prepared turn when
+model routing runs before inference. The span records the model, token usage,
+Gateway cost when available, and failures. It follows the session's trace policy;
+decision state, questions, and answers are not recorded. Set
+`telemetry: { isEnabled: false }` to disable the span for one call.
+
+The operation name follows the [proposed decision-model semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/pull/596).
+A model's explicit refusal does not mark the `decision` span as failed, though
+`decide` still rejects with the AI SDK refusal error.
+
 ## Judge eval results
 
 Eval authors can use `t.judge(...)` to turn decision answers into scored assertions, including batches of questions sharing one state. It uses this same `decide` implementation and default model. See [Judge](../evals/judge) for criteria, rubrics, and thresholds.
