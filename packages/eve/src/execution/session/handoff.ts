@@ -92,6 +92,7 @@ interface SessionHandoffInput {
   readonly inbox: SessionInboxHandle;
   readonly isInitialOwner: boolean;
   readonly sessionId: string;
+  readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
 export function sessionAnchorToken(sessionId: string): string {
@@ -328,6 +329,7 @@ export class SessionHandoff {
           attemptKey,
           checkpoint: { ...this.input.checkpoint, ...state, version: SESSION_CHECKPOINT_VERSION },
           hookTokens,
+          sessionWritable: this.input.sessionWritable,
           sourceRunId: ownerRunId,
           targetDeploymentId,
         });
