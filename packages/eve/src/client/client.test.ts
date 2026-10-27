@@ -149,6 +149,32 @@ describe("Client request policy", () => {
     },
   );
 
+  it("fails fast when a stream redirect is rejected by policy", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(
+          new TypeError("fetch failed", { cause: new Error("unexpected redirect") }),
+        );
+      const client = new Client({ baseUrl: "https://eve.test" });
+      const failed = client.sessions
+        .attach("session-1")
+        .stream({ follow: false })
+        [Symbol.asyncIterator]()
+        .next()
+        .catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+
+      expect(await failed).toMatchObject({
+        message: expect.stringContaining("refused a redirect"),
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("expands vercelOidc auth into the bearer and trusted-oidc headers", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

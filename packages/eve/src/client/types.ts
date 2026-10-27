@@ -96,7 +96,8 @@ export interface ClientOptions {
   /**
    * Redirect policy for every request, including streams. Defaults to
    * `"error"` and overrides a per-request `RequestInit.redirect`. Use
-   * `"manual"` to inspect redirect responses without following them.
+   * `"manual"` to stop at redirects. Browsers expose an opaque response;
+   * Node.js exposes the redirect status and headers.
    * `"follow"` explicitly permits forwarding custom headers on redirects.
    */
   readonly redirect?: ClientRedirectPolicy;
