@@ -74,18 +74,31 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(/takes only a function; unknown key\(s\): reasoning/);
   });
 
-  it("rejects a dynamic compaction model", () => {
+  it("names the removed compaction.model and points at fixedTail", () => {
     expect(() =>
       normalizeAgentDefinition(
-        {
-          compaction: {
-            model: defineDynamic(() => "openai/gpt-5.5-mini"),
-          },
-          model: "openai/gpt-5.5",
-        },
+        { compaction: { model: "openai/gpt-5.5-mini" }, model: "openai/gpt-5.5" },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('"compaction.model" does not support defineDynamic');
+    ).toThrow('"compaction.model" was removed: pass `model` to `fixedTail({ model })`');
+  });
+
+  it("names the removed compaction.modelContextWindowTokens and points at the top-level setting", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { compaction: { modelContextWindowTokens: 8_192 }, model: "openai/gpt-5.5" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow("never changed the compaction limit");
+  });
+
+  it("names the removed compaction.thresholdPercent", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { compaction: { thresholdPercent: 0.7 }, model: "openai/gpt-5.5" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.thresholdPercent" was removed');
   });
 
   it("accepts Anthropic prompt cache options", () => {

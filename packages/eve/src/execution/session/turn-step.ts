@@ -239,9 +239,6 @@ async function runSessionStepBody(
   if (requester !== undefined) ctx.set(AuthKey, requester);
   let initialSession: HarnessSession = {
     ...hydrateDurableSession({
-      compactionOverrides: {
-        thresholdPercent: effectiveAgent.thresholdPercent,
-      },
       durable: durableSession,
       turnAgent: effectiveAgent.turnAgent,
     }),
@@ -610,9 +607,6 @@ async function runSessionStepBody(
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const refreshedSession = refreshSessionFromTurnAgent({
-        compactionOverrides: {
-          thresholdPercent: effectiveAgent.thresholdPercent,
-        },
         session: lifecycleSession,
         turnAgent: effectiveAgent.turnAgent,
       });

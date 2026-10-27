@@ -283,53 +283,6 @@ async function writeRuntimeLoaderTsconfigAliasFixture(input: {
 }
 
 describe("runtime compiled artifact loaders", () => {
-  it("loads resolved compaction config from compiled authored artifacts", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-runtime-loaders-compaction-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await writeFile(
-      join(agentRoot, "agent.mjs"),
-      [
-        "export default {",
-        '  model: "openai/gpt-5.4",',
-        "  compaction: {",
-        '    model: "openai/gpt-5.4-mini",',
-        "    thresholdPercent: 0.75,",
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-    await writeFile(
-      join(agentRoot, "instructions.md"),
-      "You are a precise runtime loader test agent.\n",
-    );
-
-    await compileAgent({
-      startPath: appRoot,
-    });
-
-    const resolved = await loadResolvedCompiledAgent({
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
-    });
-
-    expect(resolved.config).toMatchObject({
-      compaction: {
-        model: {
-          contextWindowTokens: expect.any(Number),
-          id: "openai/gpt-5.4-mini",
-        },
-        thresholdPercent: 0.75,
-      },
-      model: {
-        contextWindowTokens: expect.any(Number),
-        id: "openai/gpt-5.4",
-      },
-    });
-  });
-
   it("loads the compiled manifest and module map from disk-backed compiler artifacts", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-runtime-loaders-", APP_ROOT_OPTIONS);
     await writeRuntimeLoaderFixture(agentRoot);
@@ -356,7 +309,6 @@ describe("runtime compiled artifact loaders", () => {
     const resolvedChannel = resolvedAgent.channels.find((channel) => channel.name === "slack");
 
     expect(manifest.config).toEqual({
-      compaction: {},
       model: {
         contextWindowTokens: expect.any(Number),
         id: "openai/gpt-5.4",

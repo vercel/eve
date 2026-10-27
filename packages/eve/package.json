@@ -118,6 +118,11 @@
       "import": "./dist/src/public/tools/approval/index.js",
       "default": "./dist/src/public/tools/approval/index.js"
     },
+    "./compaction": {
+      "types": "./dist/src/public/compaction/index.d.ts",
+      "import": "./dist/src/public/compaction/index.js",
+      "default": "./dist/src/public/compaction/index.js"
+    },
     "./memory": {
       "types": "./dist/src/public/memory/index.d.ts",
       "import": "./dist/src/public/memory/index.js",

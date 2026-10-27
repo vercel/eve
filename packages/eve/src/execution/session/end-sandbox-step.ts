@@ -34,7 +34,6 @@ export async function endSessionSandboxStep(input: {
   const durable = readDurableSession(input.sessionState);
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
   const session = hydrateDurableSession({
-    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
     durable,
     turnAgent: effectiveAgent.turnAgent,
   });

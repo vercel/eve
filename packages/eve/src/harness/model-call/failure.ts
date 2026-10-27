@@ -4,7 +4,10 @@ import {
   extractModelCallErrorDetails,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
-import type { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import type {
+  CompactionInvalidResultError,
+  CompactionOverLimitError,
+} from "#harness/compaction/over-limit-error.js";
 import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
@@ -111,7 +114,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
  */
 export async function reportCompactionFailure(
   step: Step,
-  error: CompactionOverLimitError,
+  error: CompactionOverLimitError | CompactionInvalidResultError,
 ): Promise<StepResult> {
   const { sessionId } = step.session;
   log.error(error.message, { sessionId, turnId: step.position().turnId });

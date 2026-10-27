@@ -67,6 +67,9 @@ export type SkillSourceRef =
  */
 export type ToolSourceRef = ModuleSourceRef;
 
+/** Compaction strategy source reference: the authored `compaction.<ext>` module. */
+export type CompactionSourceRef = ModuleSourceRef;
+
 export interface MemorySourceRef extends ModuleSourceRef {
   readonly slot: string;
 }
@@ -216,6 +219,7 @@ export interface AgentSourceManifest {
   resolvedExtensions: ResolvedExtensionMount[];
   hooks: ModuleSourceRef[];
   memories: MemorySourceRef[];
+  compaction: CompactionSourceRef | null;
   lib: LibSourceRef[];
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
   /**
@@ -263,6 +267,7 @@ export interface CreateAgentSourceManifestInput {
   resolvedExtensions?: readonly ResolvedExtensionMount[];
   hooks?: readonly ModuleSourceRef[];
   memories?: readonly MemorySourceRef[];
+  compaction?: CompactionSourceRef | null;
   lib?: readonly LibSourceRef[];
   /**
    * Optional package name read from the app root's package.json.
@@ -340,6 +345,7 @@ export function createAgentSourceManifest(
     resolvedExtensions: [...(input.resolvedExtensions ?? [])],
     hooks: [...(input.hooks ?? [])],
     memories: [...(input.memories ?? [])],
+    compaction: input.compaction ?? null,
     instructions: [...(input.instructions ?? [])],
     lib: [...(input.lib ?? [])],
     kind: AGENT_SOURCE_MANIFEST_KIND,

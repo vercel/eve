@@ -1,3 +1,4 @@
+import { overflowThreshold } from "#harness/compaction/measure.js";
 import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguageModel } from "ai";
 
 import type { CompactionConfig, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -113,11 +114,6 @@ function updateCompactionThresholdForModelReference(input: {
 
   return {
     ...input.compaction,
-    threshold: Math.max(
-      1,
-      Math.floor(
-        input.modelReference.contextWindowTokens * (input.compaction.thresholdPercent ?? 0.9),
-      ),
-    ),
+    threshold: overflowThreshold(input.modelReference.contextWindowTokens),
   };
 }

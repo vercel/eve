@@ -27,6 +27,7 @@ describe("agent source manifest", () => {
       agentRoot,
       appRoot,
       channels: [],
+      compaction: null,
       connections: [],
       diagnosticsSummary: {
         errors: 0,

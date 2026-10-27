@@ -37,7 +37,7 @@ import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { withPromptMeasurement } from "#harness/compaction/engine.js";
+import { withPromptMeasurement } from "#harness/compaction/measure.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("harness.tool-loop");

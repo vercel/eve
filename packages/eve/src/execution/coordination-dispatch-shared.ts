@@ -158,9 +158,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });

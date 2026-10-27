@@ -21,7 +21,6 @@ export type {
   AgentWorkflowWorldDefinition,
   PublicAgentModelDefinition as AgentModelDefinition,
   PublicAgentStaticModelDefinition as AgentStaticModelDefinition,
-  PublicAgentCompactionDefinition as AgentCompactionDefinition,
 } from "#shared/agent-definition.js";
 
 /**

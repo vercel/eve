@@ -76,21 +76,21 @@ async function runHandler(call: {
     sessionId,
   });
   const requested: Command[] = [];
-  const command =
-    (type: Command["type"]) =>
-    (reason?: string): void => {
-      if (settled) {
-        throw new Error(
-          `Hook "${label}" called ctx.${type}() after its handler settled. Await the work that calls it before the handler returns.`,
-        );
-      }
-      requested.push(reason === undefined ? { type } : { reason, type });
-    };
+  const request = (command: Command): void => {
+    if (settled) {
+      throw new Error(
+        `Hook "${label}" called ctx.${command.type}() after its handler settled. Await the work that calls it before the handler returns.`,
+      );
+    }
+    requested.push(command);
+  };
   const hookContext: HookContext = {
     ...base,
     ...frame,
     agent: agentOf(ctx),
-    cancel: command("cancel"),
+    cancel: (reason) =>
+      request(reason === undefined ? { type: "cancel" } : { reason, type: "cancel" }),
+    compact: () => request({ type: "compact" }),
     memo: memos.memo,
     occurrence: { abortSignal, idempotencyKey },
     position: call.position,
@@ -107,9 +107,21 @@ async function runHandler(call: {
         ? call.input.cancelBeforeTurn
         : undefined;
     if (beforeTurn === undefined) queueCommands(ctx, id, idempotencyKey, requested);
-    else
-      for (const { reason } of requested)
-        beforeTurn({ hook: label, ...(reason !== undefined && { reason }) });
+    else {
+      queueCommands(
+        ctx,
+        id,
+        idempotencyKey,
+        requested.filter((command) => command.type === "compact"),
+      );
+      for (const command of requested) {
+        if (command.type !== "cancel") continue;
+        beforeTurn({
+          hook: label,
+          ...(command.reason !== undefined && { reason: command.reason }),
+        });
+      }
+    }
   } catch (error) {
     mergeMemos(ctx, memoScope, memos.used());
     reportReactionFailure(ctx, call.reaction, error, idempotencyKey);

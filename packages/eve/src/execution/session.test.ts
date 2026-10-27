@@ -16,9 +16,6 @@ function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): Runti
   return {
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
-    compactionModel: {
-      id: "summary-model",
-    },
     model: { id: "test-model" },
     tools: [
       {
@@ -48,20 +45,6 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 180_000,
-      thresholdPercent: 0.9,
-    });
-  });
-
-  it("uses the authored threshold percent when provided", () => {
-    expect(
-      createCompactionConfig({
-        contextWindowTokens: 200_000,
-        thresholdPercent: 0.5,
-      }),
-    ).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
     });
   });
 
@@ -69,7 +52,6 @@ describe("createCompactionConfig", () => {
     expect(createCompactionConfig()).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
-      thresholdPercent: 0.9,
     });
   });
 });
@@ -84,7 +66,6 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent({ reasoning: "high" }),
     });
 
-    expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
     expect(session.agent.modelReference).toEqual({ id: "test-model" });
     expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
@@ -192,45 +173,6 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
-      thresholdPercent: 0.9,
-    });
-  });
-
-  it("honors compactionOverrides.thresholdPercent", () => {
-    const session = createSession({
-      compactionOverrides: { thresholdPercent: 0.5 },
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        model: { id: "test-model", contextWindowTokens: 200_000 },
-      }),
-    });
-
-    expect(session.compaction).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
-    });
-  });
-
-  it("copies the compaction model into the refreshed session", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      turnAgent: createTestTurnAgent({
-        compactionModel: {
-          id: "updated-summary-model",
-        },
-      }),
-    });
-
-    expect(refreshed.agent.compactionModelReference).toEqual({
-      id: "updated-summary-model",
     });
   });
 
@@ -340,9 +282,6 @@ describe("refreshSessionFromTurnAgent", () => {
     expect(refreshed.history).toEqual([
       { content: "previous message", kind: "user", role: "user" },
     ]);
-    expect(refreshed.agent.compactionModelReference).toEqual({
-      id: "summary-model",
-    });
     expect(refreshed.agent.modelReference).toEqual({
       contextWindowTokens: 200_000,
       id: "updated-model",
@@ -374,9 +313,6 @@ describe("refreshSessionFromTurnAgent", () => {
       }),
     });
     const refreshed = refreshSessionFromTurnAgent({
-      compactionOverrides: {
-        thresholdPercent: 0.5,
-      },
       session: {
         ...session,
         compaction: {
@@ -396,8 +332,7 @@ describe("refreshSessionFromTurnAgent", () => {
       lastKnownPromptMessageCount: 7,
       requestEnvelopeTokens: 42,
       recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
+      threshold: 180_000,
     });
     const restored = hydrateDurableSession({
       durable: structuredClone(projectToDurableSession(refreshed)),

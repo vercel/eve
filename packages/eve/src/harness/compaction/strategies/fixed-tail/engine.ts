@@ -10,7 +10,7 @@ import {
   sliceUtf16Safe,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
-} from "#harness/compaction/prompt.js";
+} from "#harness/compaction/strategies/fixed-tail/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
@@ -25,6 +25,11 @@ import type { CompactionConfig } from "#harness/types.js";
  */
 const KEPT_TAIL_TOKENS = 20_000;
 
+/** The session's compaction config, plus how many tokens of the latest conversation to keep. */
+export interface FixedTailConfig extends CompactionConfig {
+  readonly recentTokens?: number;
+}
+
 /**
  * Element type of a non-string `ModelMessage.content` array.
  */
@@ -37,86 +42,6 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
-
-/**
- * Best available input-token count: the model-reported count from the last
- * step, plus a rough character-based estimate of whatever messages have been
- * appended since.
- */
-export function getInputTokenCount(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-  requestEnvelopeTokens = 0,
-  previousEnvelopeTokens = 0,
-): number {
-  const prior = config.lastKnownInputTokens;
-  const priorCount = config.lastKnownPromptMessageCount;
-
-  if (
-    prior === undefined ||
-    priorCount === undefined ||
-    !Number.isInteger(priorCount) ||
-    priorCount < 0 ||
-    priorCount > messages.length
-  ) {
-    return estimateTokens(messages) + requestEnvelopeTokens;
-  }
-
-  const appended = messages.slice(priorCount);
-  return (
-    prior +
-    (appended.length === 0 ? 0 : estimateTokens(appended)) +
-    Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
-  );
-}
-
-/** The settings without the last measured prompt, which a rewritten history no longer matches. */
-export function withoutPromptMeasurement(config: CompactionConfig): CompactionConfig {
-  const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
-  return rest;
-}
-
-/**
- * The settings with a model-reported prompt measurement and the envelope around it. Without a
- * usable measurement, the next count is an estimate, and no envelope baseline applies.
- */
-export function withPromptMeasurement(
-  config: CompactionConfig,
-  measured: {
-    readonly inputTokens?: number;
-    readonly promptMessageCount?: number;
-    readonly requestEnvelopeTokens?: number;
-  },
-): CompactionConfig {
-  const { requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
-  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return next;
-  return {
-    ...next,
-    lastKnownInputTokens: measured.inputTokens,
-    lastKnownPromptMessageCount: measured.promptMessageCount,
-    ...(measured.requestEnvelopeTokens !== undefined && {
-      requestEnvelopeTokens: measured.requestEnvelopeTokens,
-    }),
-  };
-}
-
-/**
- * Returns true when the message history and fixed compaction-prompt envelope
- * exceed the compaction threshold.
- */
-export function shouldCompact(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-  requestEnvelopeTokens = 0,
-  previousEnvelopeTokens = 0,
-): boolean {
-  return (
-    messages.length > 0 &&
-    getInputTokenCount(messages, config, requestEnvelopeTokens, previousEnvelopeTokens) +
-      COMPACTION_PROMPT_OVERHEAD_TOKENS >
-      config.threshold
-  );
-}
 
 /** Summarizes one compaction prompt with the compaction model, returning the summary text. */
 export type CompactionSummarizer = (prompt: {
@@ -216,10 +141,10 @@ function evaluateThreshold(
  */
 export async function compactMessages(
   messages: ModelMessage[],
-  config: CompactionConfig,
+  config: FixedTailConfig,
   summarize: CompactionSummarizer,
-  forceSummary = false,
-  historyInputTokenCount?: number,
+  forceSummary: boolean,
+  historyInputTokenCount: number,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const budget = keptTailBudget(config);
@@ -254,10 +179,7 @@ export async function compactMessages(
     // Capping preserves most of the measured prompt. Retain any known
     // underestimate while crediting only the estimated tokens it removes.
     // A new summary replaces that prompt, so it uses its own estimate below.
-    const tokenEstimateAdjustment = Math.max(
-      0,
-      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
-    );
+    const tokenEstimateAdjustment = Math.max(0, historyInputTokenCount - estimateTokens(messages));
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
         config,
@@ -711,8 +633,8 @@ function assistantMessageText(message: ModelMessage): string {
     .trim();
 }
 
-function keptTailBudget(config: CompactionConfig): number {
-  return Math.min(KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
+function keptTailBudget(config: FixedTailConfig): number {
+  return Math.min(config.recentTokens ?? KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
 }
 
 function selectRecentWindowSize(

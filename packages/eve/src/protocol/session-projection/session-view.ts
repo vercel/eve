@@ -7,6 +7,13 @@ declare const sessionViewBrand: unique symbol;
 /** An immutable observation snapshot. Persist events and cursors, not its backing representation. */
 export interface SessionView {
   readonly [sessionViewBrand]: true;
+  /** What the model last saw. */
+  readonly context: {
+    /** The input tokens of the latest settled model call; absent before the first one. */
+    readonly inputTokens?: number;
+    /** The input tokens a request may carry before the history is compacted. */
+    readonly limit?: number;
+  };
 }
 
 interface Snapshot {
@@ -20,6 +27,16 @@ interface Snapshot {
 const KEY = Symbol.for("eve.session-view-registry.v1");
 type Shared = typeof globalThis & { [KEY]?: WeakMap<SessionView, Snapshot> };
 const snapshots = ((globalThis as Shared)[KEY] ??= new WeakMap());
+const contexts = new WeakMap<object, SessionView["context"]>();
+// `context` lives on the prototype so a snapshot has no own keys: it stays an opaque handle.
+const snapshotPrototype = Object.freeze(
+  Object.defineProperty({}, "context", {
+    enumerable: true,
+    get(this: object) {
+      return contexts.get(this);
+    },
+  }),
+);
 const immutableRows = new WeakMap<object, object>();
 
 function immutable<T>(value: T): T {
@@ -56,8 +73,10 @@ export function snapshotOf(
   view: Tables,
   previews: SessionPreviews = emptyPreviews(),
   pending: readonly ReceivedEvent[] = [],
+  limit?: number,
 ): SessionView {
-  const snapshot = Object.freeze({}) as SessionView;
+  const snapshot = Object.freeze(Object.create(snapshotPrototype)) as SessionView;
+  contexts.set(snapshot, Object.freeze({ inputTokens: view.lastInputTokens, limit }));
   snapshots.set(snapshot, {
     tables: Object.freeze({
       position: view.position,
@@ -74,6 +93,7 @@ export function snapshotOf(
       turns: table(view.turns),
       usage: immutable(view.usage),
       selection: immutable(view.selection),
+      lastInputTokens: view.lastInputTokens,
     }),
     previews: Object.freeze({ calls: table(previews.calls), parts: table(previews.parts) }),
     pending: immutable(pending),

@@ -290,7 +290,10 @@ function foldFact(
       if (!isObject(owner)) return;
       if ("runId" in owner) {
         const run = view.runs[owner.runId];
-        if (run !== undefined) view.runs[run.runId] = { ...run, usage: addUsage(run.usage, usage) };
+        if (run !== undefined) {
+          view.runs[run.runId] = { ...run, usage: addUsage(run.usage, usage) };
+          if (run.step !== undefined) view.lastInputTokens = usage.inputTokens;
+        }
       } else if ("callId" in owner) {
         const call = view.calls[owner.callId];
         if (call !== undefined) {

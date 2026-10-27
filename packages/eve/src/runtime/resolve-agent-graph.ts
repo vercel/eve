@@ -96,6 +96,7 @@ export async function resolveRuntimeAgentGraph(
     manifest: input.manifest,
     nodesByNodeId,
   });
+  attachInheritedCompaction({ manifest: input.manifest, nodesByNodeId });
 
   return {
     nodesByNodeId,
@@ -385,6 +386,29 @@ function resolveRemoteAgentHeaders(value: unknown): HeadersValue | undefined {
   }
 
   return headers;
+}
+
+/** A subagent without its own `compaction.ts` compacts with the nearest ancestor's strategy. */
+function attachInheritedCompaction(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly nodesByNodeId: ReadonlyMap<string, ResolvedAgentGraphBundle["root"]>;
+}): void {
+  const parentNodeIdByChildNodeId = new Map(
+    input.manifest.subagents.map((subagent) => [
+      toRuntimeNodeId(subagent.nodeId),
+      toRuntimeNodeId(subagent.parentNodeId),
+    ]),
+  );
+  for (const [nodeId, node] of input.nodesByNodeId) {
+    let ancestorId = parentNodeIdByChildNodeId.get(nodeId);
+    while (node.agent.compaction === undefined && ancestorId !== undefined) {
+      const ancestor = input.nodesByNodeId.get(ancestorId);
+      if (ancestor?.agent.compaction !== undefined) {
+        (node.agent as { compaction?: unknown }).compaction = ancestor.agent.compaction;
+      }
+      ancestorId = parentNodeIdByChildNodeId.get(ancestorId);
+    }
+  }
 }
 
 function attachInheritedSandboxWorkspaceResources(input: {

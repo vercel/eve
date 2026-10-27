@@ -255,10 +255,7 @@ function compactionCapture(memory: ResolvedMemoryDefinition): CommitReaction | u
               ...buildCallbackContext(),
               abortSignal: ctx.abortSignal,
               compaction: {
-                modelId:
-                  ctx.ctx.get(BundleKey)?.turnAgent.compactionModel?.id ??
-                  effectiveModelId(ctx.ctx) ??
-                  "unknown",
+                modelId: effectiveModelId(ctx.ctx) ?? "unknown",
                 usageInputTokens: started.data.trigger?.inputTokens ?? null,
               },
               memory: { scope, slot: memory.slot },

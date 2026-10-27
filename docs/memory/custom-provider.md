@@ -103,7 +103,7 @@ Phase-specific fields:
 
 - `turn.started` and `turn.completed` add `turn` with the turn `id`, `input`
   messages, and `sequence`.
-- `compaction.requested` adds `compaction.modelId` and
+- `compaction.requested` adds `compaction.modelId` (the session's model, not the strategy's summary model) and
   `compaction.usageInputTokens`, the input tokens that crossed the threshold or
   `null` for a requested compaction. Its `turn` is the turn the compaction runs
   in, or `null` for a compaction between turns.

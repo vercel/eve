@@ -128,3 +128,9 @@ it("projects interactions without exposing callback URLs through waiting or acti
     ]),
   ).not.toContain("private.example");
 });
+
+it("keeps a snapshot an opaque handle with no own keys", () => {
+  const view = events.emptySessionView();
+  expect(Reflect.ownKeys(view)).toEqual([]);
+  expect(view.context).toEqual({ inputTokens: undefined, limit: undefined });
+});

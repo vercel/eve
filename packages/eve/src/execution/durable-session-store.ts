@@ -38,8 +38,7 @@ export interface DurableSessionState {
  * Durable projection of {@link HarnessSession} embedded in state
  * snapshots.
  *
- * Omits `agent.modelReference`, `agent.tools`,
- * `agent.compactionModelReference`, and the `compaction` thresholds —
+ * Omits `agent.modelReference`, `agent.tools`, and the `compaction` thresholds —
  * those are rebuilt every turn from `bundle.turnAgent` by
  * {@link import("#execution/session.js").hydrateDurableSession}.
  * Omits `history` too: the session workflow carries it as its own value, so

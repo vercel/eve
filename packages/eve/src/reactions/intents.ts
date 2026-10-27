@@ -8,13 +8,12 @@ import { readReactionsState, writeReactionsState, type PendingIntent } from "./s
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. Repeated requests add nothing.
+// A compact request waits for the next model call, between turns too. Cancellation targets the running turn, never a later one. Repeated requests add nothing.
 
 /** A command a hook asked for, before it's queued. */
-export interface Command {
-  readonly type: "cancel";
-  readonly reason?: string;
-}
+export type Command =
+  | { readonly type: "cancel"; readonly reason?: string }
+  | { readonly type: "compact" };
 
 /**
  * Adds cancellations to the session's queue. Requests between turns are dropped.
@@ -31,6 +30,13 @@ export function queueCommands(
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
+    if (command.type === "compact") {
+      // A compaction acts once, whichever turn is next to call the model.
+      if (intents.some((queued) => queued.type === "compact")) continue;
+      intents.push({ occurrence, reactionId, type: "compact" });
+      changed = true;
+      continue;
+    }
     if (turnId === undefined || state.cancelledTurnId === turnId) continue;
     if (intents.some((queued) => queued.type === "cancel" && queued.turnId === turnId)) continue;
     intents.push({
@@ -103,4 +109,16 @@ export function takeTurnFailure(ctx: ContextContainer | undefined): string | und
     (intent) => intent.type === "fail" && intent.turnId === turnId,
   );
   return failure?.reason;
+}
+
+/**
+ * Takes the compaction hooks asked for, so the next model call compacts once. Returns the hook
+ * that asked first, or undefined when none did.
+ */
+export function takeCompactRequest(
+  ctx: ContextContainer | undefined,
+): { readonly hook: string } | undefined {
+  if (ctx === undefined) return undefined;
+  const [first] = takeIntents(ctx, (intent) => intent.type === "compact");
+  return first === undefined ? undefined : { hook: first.reactionId };
 }

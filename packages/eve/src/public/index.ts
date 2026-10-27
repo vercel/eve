@@ -3,7 +3,6 @@
  */
 
 export {
-  type AgentCompactionDefinition,
   type AgentDefinition,
   type AgentExperimentalDefinition,
   type AgentLimitsDefinition,

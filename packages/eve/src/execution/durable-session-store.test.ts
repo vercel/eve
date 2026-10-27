@@ -57,9 +57,6 @@ function buildSession(input: {
 }): HarnessSession {
   return {
     agent: {
-      compactionModelReference: input.withRefreshableAgent
-        ? { id: "compaction-model", contextWindowTokens: 200_000 }
-        : undefined,
       modelReference: { id: "test-model", contextWindowTokens: 200_000 },
       system: "test system",
       tools: input.withRefreshableAgent

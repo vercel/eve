@@ -79,7 +79,6 @@ describe("compiler model catalog", () => {
     );
 
     expect(result.manifest.config).toMatchObject({
-      compaction: {},
       model: {
         contextWindowTokens: 123_456,
         id: "example/default-compaction-model",
@@ -106,7 +105,7 @@ describe("compiler model catalog", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("hydrates compiled compaction limits from AI Gateway and persists the cache", async () => {
+  it("hydrates compiled model limits from AI Gateway and persists the cache", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-fetch-",
       APP_ROOT_OPTIONS,
@@ -114,15 +113,7 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "example/primary-model",',
-        "  compaction: {",
-        '    model: "example/summary-model",',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "example/primary-model",', "};", ""].join("\n"),
     );
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
@@ -162,12 +153,6 @@ describe("compiler model catalog", () => {
     expect(result.manifest.config.model).toMatchObject({
       contextWindowTokens: 123_456,
       id: "example/primary-model",
-    });
-    expect(result.manifest.config.compaction).toMatchObject({
-      model: {
-        contextWindowTokens: 65_536,
-        id: "example/summary-model",
-      },
     });
     expect(cache).toMatchObject({
       kind: "eve-model-catalog-cache",
@@ -243,7 +228,7 @@ describe("compiler model catalog", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("hydrates compaction limits when model IDs end in -thinking", async () => {
+  it("hydrates model limits when model IDs end in -thinking", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-thinking-",
       APP_ROOT_OPTIONS,
@@ -251,15 +236,7 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "example/primary-model-thinking",',
-        "  compaction: {",
-        '    model: "example/summary-model-thinking",',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "example/primary-model-thinking",', "};", ""].join("\n"),
     );
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
@@ -297,12 +274,6 @@ describe("compiler model catalog", () => {
       contextWindowTokens: 123_456,
       id: "example/primary-model-thinking",
     });
-    expect(result.manifest.config.compaction).toMatchObject({
-      model: {
-        contextWindowTokens: 65_536,
-        id: "example/summary-model-thinking",
-      },
-    });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -314,15 +285,7 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "example/stale-primary-model",',
-        "  compaction: {",
-        '    model: "example/stale-summary-model",',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "example/stale-primary-model",', "};", ""].join("\n"),
     );
     await mkdir(join(appRoot, ".eve", "cache"), {
       recursive: true,
@@ -375,12 +338,6 @@ describe("compiler model catalog", () => {
     expect(result.manifest.config.model).toMatchObject({
       contextWindowTokens: 111_111,
       id: "example/stale-primary-model",
-    });
-    expect(result.manifest.config.compaction).toMatchObject({
-      model: {
-        contextWindowTokens: 22_222,
-        id: "example/stale-summary-model",
-      },
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
@@ -577,48 +534,6 @@ describe("compiler model catalog", () => {
         sourceKind: "module",
         logicalPath: "agent.ts",
         sourceId: "agent.ts",
-      },
-    });
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("uses authored compaction modelContextWindowTokens and skips the AI Gateway lookup", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-model-catalog-authored-compaction-window-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await writeFile(
-      join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "example/unlisted-primary-model",',
-        "  modelContextWindowTokens: 128_000,",
-        "  compaction: {",
-        '    model: "example/unlisted-summary-model",',
-        "    modelContextWindowTokens: 64_000,",
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("fetch should not be called"));
-
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.config.model).toMatchObject({
-      contextWindowTokens: 128_000,
-      id: "example/unlisted-primary-model",
-    });
-    expect(result.manifest.config.compaction).toMatchObject({
-      model: {
-        contextWindowTokens: 64_000,
-        id: "example/unlisted-summary-model",
       },
     });
     expect(fetchSpy).not.toHaveBeenCalled();

@@ -92,6 +92,7 @@ interface HookContext extends SessionContext {
   readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
   readonly memo: Memo;
   cancel(reason?: string): void;
+  compact(): void;
 }
 ```
 
@@ -223,6 +224,10 @@ Hooks always run after the line is durably recorded, so if a hook throws, the st
 An unhandled error fails the running turn before its next model call or as it would settle. Between turns there is no active turn to fail, so eve logs the error without changing an earlier outcome. Catch errors from optional audit or metrics work if the turn should continue. To stop without a failure, call [`ctx.cancel(reason?)`](#cancel-the-running-turn-from-a-hook).
 
 A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If a published fact outlives its step's checkpoint, the step's retry does not run the hook again.
+
+## Compact the history from a hook
+
+Call `ctx.compact()` to compact the history before the next model call: the running turn's next call, or the first call of the next turn when no turn is running. Asking twice before it runs compacts once. How the history is shortened is the agent's [compaction strategy](../concepts/compaction-strategies). `ctx.view.context.inputTokens` is the input tokens of the latest settled model call, for hooks that decide by size.
 
 ## Cancel the running turn from a hook
 

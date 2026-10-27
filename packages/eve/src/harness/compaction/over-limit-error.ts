@@ -5,3 +5,11 @@
 export class CompactionOverLimitError extends Error {
   override readonly name = "CompactionOverLimitError";
 }
+
+/**
+ * A strategy returned a history the harness cannot use: it dropped a tool call or result, or does
+ * not start with a user message. A retry would run the strategy on the same history again.
+ */
+export class CompactionInvalidResultError extends Error {
+  override readonly name = "CompactionInvalidResultError";
+}

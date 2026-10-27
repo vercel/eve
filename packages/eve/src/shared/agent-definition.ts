@@ -84,8 +84,6 @@ export type InternalAgentModelDefinition = {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
-  /** Field of the `source` agent config export that holds this model; absent means `model`. */
-  sourceField?: "compaction.model";
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
 };
@@ -132,50 +130,6 @@ export function isDynamicModelDefinition(
 export type PublicAgentModelDefinition =
   | PublicAgentStaticModelDefinition
   | PublicAgentDynamicModelDefinition;
-
-export interface InternalAgentCompactionDefinition {
-  /**
-   * Optional model used only for generating compaction summaries.
-   *
-   * When omitted, eve uses the active turn model for the summary call.
-   */
-  model?: InternalAgentModelDefinition;
-  /**
-   * Fraction of the primary model context window that triggers compaction.
-   *
-   * eve defaults to `0.9` when this is omitted.
-   */
-  thresholdPercent?: number;
-}
-
-/**
- * Configures conversation compaction: when the model context window fills past
- * `thresholdPercent`, eve summarizes earlier turns to reclaim space. Every
- * field is optional; omit the block to use eve's defaults.
- */
-export interface PublicAgentCompactionDefinition {
-  /**
-   * Optional override for the compaction summary model's context window size,
-   * in tokens.
-   *
-   * Same escape hatch as the agent-level `modelContextWindowTokens`. When set,
-   * eve uses this value verbatim and skips the AI Gateway lookup for the
-   * compaction summary model.
-   */
-  readonly modelContextWindowTokens?: number;
-  /**
-   * Optional model used only for generating compaction summaries.
-   *
-   * When omitted, eve uses the active turn model for the summary call.
-   */
-  readonly model?: PublicAgentStaticModelDefinition;
-  /**
-   * Fraction of the primary model context window that triggers compaction.
-   *
-   * eve defaults to `0.9` when this is omitted.
-   */
-  readonly thresholdPercent?: number;
-}
 
 /**
  * Configures framework-owned runtime limits for this agent's runs.
@@ -339,7 +293,6 @@ export type InternalAgentDefinition = {
   name: string;
   description?: string;
   build?: AgentBuildDefinition;
-  compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
@@ -373,7 +326,6 @@ type PublicAgentDefinitionBase = {
    */
   readonly description?: string;
   readonly build?: AgentBuildDefinition;
-  readonly compaction?: PublicAgentCompactionDefinition;
   /**
    * Whether eve automatically adds its optional default tools. Defaults to `true`.
    * Required connection tooling and tools authored under `agent/tools/` remain

@@ -13,6 +13,8 @@ import type { SessionFrame } from "#dynamic/definition.js";
 import { currentView } from "#harness/session-machine/current.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
+import { compactionThreshold } from "#harness/compaction/measure.js";
+import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
@@ -58,6 +60,11 @@ export function sessionFrameOf(
       schedule: readSessionSchedule(ctx),
     },
     turn: latestTurn(view),
-    view: snapshotOf(view),
+    view: snapshotOf(
+      view,
+      undefined,
+      undefined,
+      compactionThreshold(getEffectiveModelSelection(ctx)?.reference.contextWindowTokens),
+    ),
   };
 }

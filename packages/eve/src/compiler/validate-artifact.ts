@@ -354,6 +354,7 @@ function collectReferencedModuleSources(
   for (const value of node.dynamicTools) add(value);
   for (const value of node.hooks) add(value);
   for (const value of node.memories) add(value);
+  if (node.compaction !== null) add(node.compaction);
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
   for (const value of node.skills) if (value.sourceKind === "module") add(value);
   for (const value of node.schedules) if (value.sourceKind === "module") add(value);

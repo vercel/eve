@@ -222,6 +222,8 @@ export interface SessionView {
   readonly children: Table<ChildRow>;
   readonly changes: Table<ChangeRow>;
   readonly usage: UsageTotals;
+  /** The input tokens of the latest model call a turn made. */
+  readonly lastInputTokens?: number;
   /**
    * The conversation's selected turn, when a context change chose one: `null` after a clear.
    * Absent means the newest turn.

@@ -58,9 +58,6 @@ export async function createSessionStep(input: {
   );
 
   const session = createSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
     continuationToken: input.continuationToken,
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,

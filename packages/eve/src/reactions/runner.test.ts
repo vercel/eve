@@ -2,7 +2,12 @@ import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ChannelInstrumentationKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  ChannelInstrumentationKey,
+  SessionIdKey,
+  SessionKey,
+  StaticModelReferenceKey,
+} from "#context/keys.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { evaluateApproval, type ApprovalMemory } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
@@ -22,7 +27,7 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineTool } from "#tools/definition.js";
 import { runApprovedCalls } from "#harness/hitl/approved-calls.js";
-import { takeTurnFailure } from "./intents.js";
+import { takeCompactRequest, takeTurnFailure } from "./intents.js";
 import { takeUserInstructionMessages } from "./kinds/instructions.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { evaluateValues, isReactionFailedError, restoreReactions, runReactions } from "./runner.js";
@@ -30,7 +35,13 @@ import { MEMOS_CAP, forgetSessionLive, memoBytes, readReactionsState, slotsOf } 
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
 
-function written(line: number, type = "turn.started", data: object = {}, progress = false) {
+function written(
+  line: number,
+  type = "turn.started",
+  data: object = {},
+  progress = false,
+  view: object = initialSessionProjection().view,
+) {
   return [
     {
       event: {
@@ -40,7 +51,7 @@ function written(line: number, type = "turn.started", data: object = {}, progres
       },
       position: { index: 0, line },
       progress,
-      view: initialSessionProjection().view,
+      view,
     },
   ] as never;
 }
@@ -563,6 +574,65 @@ describe("runReactions", () => {
     });
     expect(cancels).toEqual([]);
     expect(readReactionsState(ctx).intents ?? []).toEqual([]);
+  });
+
+  it("keeps a compact request made between turns for the next model call, once", async () => {
+    const ctx = session(noTools, [hook("trim", { "*": (_event, ctx) => ctx.compact() })]);
+    await commit(ctx, { written: written(1, "session.started") });
+    await commit(ctx, { written: written(2, "session.started") });
+
+    expect((readReactionsState(ctx).intents ?? []).map(({ type }) => type)).toEqual(["compact"]);
+    expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
+    expect(takeCompactRequest(ctx)).toBeUndefined();
+  });
+
+  it("lets a hook read the latest call's input tokens and ask for a compaction", async () => {
+    const ctx = session(noTools, [
+      hook("trim", {
+        "*": (_event, ctx) => {
+          if ((ctx.view.context.inputTokens ?? 0) > 60_000) ctx.compact();
+        },
+      }),
+    ]);
+    const small = written(1, "session.started");
+    await commit(ctx, { written: small });
+    expect(takeCompactRequest(ctx)).toBeUndefined();
+
+    const view = { ...initialSessionProjection().view, lastInputTokens: 61_000 };
+    await commit(ctx, { written: written(2, "session.started", {}, false, view) });
+    expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
+  });
+
+  it("lets a hook compare the input tokens with the compaction limit", async () => {
+    const seen: unknown[] = [];
+    const ctx = session(noTools, [
+      hook("limit", {
+        "*": (_event, ctx) => {
+          seen.push(ctx.view.context.limit);
+        },
+      }),
+    ]);
+    ctx.set(StaticModelReferenceKey, { id: "m", contextWindowTokens: 100_000 });
+    await commit(ctx, { written: written(1, "session.started") });
+    expect(seen).toEqual([90_000]);
+  });
+
+  it("keeps a compact request made during a turn, and a cancel does not take it", async () => {
+    const ctx = session(noTools, [
+      hook("trim", {
+        "*": (_event, ctx) => {
+          ctx.compact();
+          ctx.cancel("Stop.");
+        },
+      }),
+    ]);
+    turnRunning(ctx);
+    const cancels: unknown[] = [];
+    await commit(ctx, { written: written(1) });
+    await commit(ctx, { cancelTurn: (cancel) => cancels.push(cancel), written: written(2) });
+
+    expect(cancels).toHaveLength(1);
+    expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
   });
 
   it("throws for a command after the handler settled", async () => {

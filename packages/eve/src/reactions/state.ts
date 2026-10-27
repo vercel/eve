@@ -54,7 +54,7 @@ export interface PendingIntent {
   /** The occurrence it acts for, for diagnostics. */
   readonly occurrence: string;
   /** `fail` is eve's own: a hook failed during the turn, which fails at its next boundary. */
-  readonly type: "cancel" | "fail";
+  readonly type: "cancel" | "compact" | "fail";
   readonly reason?: string;
   /** For a cancel or failure, the turn running when the hook ran: never a later one. */
   readonly turnId?: string;

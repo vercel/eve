@@ -8,11 +8,10 @@ import type {
   SessionAgent,
   SessionToolDefinition,
 } from "#harness/types.js";
+import { compactionThreshold } from "#harness/compaction/measure.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
-const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
-const FALLBACK_COMPACTION_THRESHOLD = 100_000;
 
 /**
  * Creates the durable compaction configuration used by one harness session.
@@ -21,28 +20,19 @@ export function createCompactionConfig(
   input: {
     readonly contextWindowTokens?: number;
     readonly previous?: CompactionState;
-    readonly thresholdPercent?: number;
   } = {},
 ): CompactionConfig {
-  const thresholdPercent = input.thresholdPercent ?? DEFAULT_COMPACTION_THRESHOLD_PERCENT;
-  const threshold =
-    input.contextWindowTokens === undefined
-      ? FALLBACK_COMPACTION_THRESHOLD
-      : Math.max(1, Math.floor(input.contextWindowTokens * thresholdPercent));
+  const threshold = compactionThreshold(input.contextWindowTokens);
 
   return {
     ...input.previous,
     recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
     threshold,
-    thresholdPercent,
   };
 }
 
 interface CreateSessionInput {
   readonly continuationToken: string;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
   /**
    * Optional root session id passed in by the runtime when this
    * session is a delegated subagent child. `undefined` for top-level
@@ -65,7 +55,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     agent: createSessionAgent(turnAgent, createSessionSystemPrompt(turnAgent), tools),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
     history: [...(turnAgent.initialMessages ?? [])],
@@ -88,7 +77,6 @@ function createSessionAgent(
   tools: readonly SessionToolDefinition[],
 ): SessionAgent {
   const base = {
-    compactionModelReference: turnAgent.compactionModel,
     reasoning: turnAgent.reasoning,
     system,
     tools,
@@ -111,9 +99,6 @@ function createSessionAgent(
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
 }): HarnessSession {
   return {
     ...input.session,
@@ -125,7 +110,6 @@ export function refreshSessionFromTurnAgent(input: {
     compaction: createCompactionConfig({
       contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
       previous: input.session.compaction,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
 }
@@ -154,12 +138,7 @@ export function mintSubagentContinuationToken(suffix?: string): string {
  * informed after rehydration.
  */
 export function projectToDurableSession(session: HarnessSessionBase): DurableSession {
-  const {
-    threshold: _threshold,
-    thresholdPercent: _percent,
-    recentWindowSize: _size,
-    ...measured
-  } = session.compaction;
+  const { threshold: _threshold, recentWindowSize: _size, ...measured } = session.compaction;
   return {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
@@ -180,9 +159,6 @@ export function projectToDurableSession(session: HarnessSessionBase): DurableSes
 export function hydrateDurableSession(input: {
   readonly durable: DurableSession;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
 }): HarnessSessionBase {
   const { durable, turnAgent } = input;
   const { agent, compaction, ...saved } = durable;
@@ -192,7 +168,6 @@ export function hydrateDurableSession(input: {
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       previous: compaction,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
 }

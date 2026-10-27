@@ -40,12 +40,6 @@ interface RuntimeTurnAgentBase {
   readonly id: string;
   readonly instructions: readonly string[];
   readonly initialMessages?: readonly HarnessModelMessage[];
-  /**
-   * Optional model used only for compaction summaries.
-   *
-   * When omitted, the harness uses the active turn model for compaction.
-   */
-  readonly compactionModel?: RuntimeModelReference;
   readonly nodeId?: string;
   readonly reasoning?: ResolvedAgentDefinition["reasoning"];
   readonly tools: readonly PreparedRuntimeTool[];
@@ -106,7 +100,6 @@ export function createResolvedRuntimeTurnAgent(input: {
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),
-    compactionModel: config?.compaction?.model,
     nodeId: input.nodeId,
     reasoning: config?.reasoning,
     tools: [...input.tools],

@@ -1,12 +1,22 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
+import {
+  exceedsLimit,
+  getInputTokenCount,
+  withoutPromptMeasurement,
+} from "#harness/compaction/measure.js";
+import type { CompactionContext, CompactionStrategy } from "#harness/compaction/strategy.js";
+import { resolveMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
+import { cloneMessages } from "#harness/compaction/clone-messages.js";
+import { fixedTail } from "#harness/compaction/strategies/fixed-tail/index.js";
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import {
+  CompactionInvalidResultError,
+  CompactionOverLimitError,
+} from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
 import {
-  type CompactionConfig,
   type HarnessSession,
   requireSessionModelReference,
   type StepResult,
@@ -26,12 +36,6 @@ import {
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
-import {
-  compactMessages,
-  type CompactionSummarizer,
-  getInputTokenCount,
-  shouldCompact,
-} from "#harness/compaction/engine.js";
 import { contextStorage } from "#context/container.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -112,16 +116,12 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const runId = nextRunId(step.view().projection);
   let outcome: "applied" | "failed" = "applied";
   try {
-    await step.apply([runRequested({ changeId }, runId)], messages);
     const resolvedModel = await resolveEffectiveRuntimeModel({
       config,
       ctx: step.ctx,
       session: step.session,
     });
     step.session = resolvedModel.session;
-    const summaryModel =
-      step.session.agent.compactionModelReference ?? requireSessionModelReference(step.session);
-    await step.publish(runStarted({ attempt: 0, modelId: summaryModel.id, runId }));
     const compacted = await maybeCompact({
       abortSignal: config.abortSignal,
       auth: step.ctx?.get(AuthKey) ?? null,
@@ -140,6 +140,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       session: step.session,
       prepareTelemetry: (runId) =>
         step.instrumentation?.prepareAttempt({ runId, attempt: 0 }).telemetry,
+      strategy: config.compactionStrategy,
       traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
     });
     step.session = compacted.session;
@@ -243,7 +244,7 @@ async function compactOnce(input: {
   readonly betweenTurns?: boolean;
   /**
    * The change a compaction makes, and the run that writes its summary. `announced` when the
-   * caller already published the change's start and the run's request and start.
+   * caller already published the change's start. The summary run opens with its first call.
    */
   readonly change: {
     readonly changeId: string;
@@ -266,68 +267,99 @@ async function compactOnce(input: {
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
+  readonly strategy?: CompactionStrategy;
   readonly telemetry?: TelemetryOptions;
   readonly prepareTelemetry?: (runId: string) => TelemetryOptions | undefined;
   readonly traceContextHeaders?: () => Record<string, string> | undefined;
 }): Promise<{
   readonly compacted: boolean;
+  /** The request was over the limit, so a failed compaction cannot let the model call go on. */
+  readonly overLimit?: boolean;
   /** The summary failed; `session` still counts the summary calls that finished. */
   readonly failure?: { readonly error: unknown };
   readonly messages: HarnessModelMessage[];
   readonly session: HarnessSession;
 }> {
   const { emissionState, publish } = input;
+  const strategy = input.strategy ?? fixedTail();
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
   const projectedPromptMessages = validateHarnessModelMessages(promptMessages);
-  const needsSummary =
-    input.force === true ||
-    shouldCompact(
+  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
+  const ordinary = validateHarnessModelMessages(messages);
+  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
+  const protectedTokens = Math.max(
+    0,
+    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
+  );
+  const measured = {
+    inputTokens: getInputTokenCount(
       projectedPromptMessages,
       session.compaction,
       input.requestEnvelopeTokens,
       session.compaction.requestEnvelopeTokens,
-    );
+    ),
+    recentWindowSize: session.compaction.recentWindowSize,
+    requestEnvelopeTokens: requestEnvelopeTokens + protectedTokens,
+    threshold: session.compaction.threshold,
+  };
+  const overLimit = projectedPromptMessages.length > 0 && exceedsLimit(measured);
+  const needsSummary = input.force === true || overLimit;
   if (!needsSummary) {
     return { compacted: false, messages, session };
   }
 
-  const modelReference = requireSessionModelReference(session);
-  const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
-  const model =
-    compactionModelReference === modelReference
-      ? input.model
-      : await input.resolveModel(compactionModelReference);
-  const profile = resolveModelProfile(model);
-  const providerOptions = resolveCallProviderOptions({
-    auth: input.auth,
-    profile,
-    providerOptions: compactionModelReference.providerOptions,
-    session,
-  }) as Parameters<typeof streamText>[0]["providerOptions"];
-  const call = {
-    abortSignal: input.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
-    providerOptions,
-    telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+  // Resolved on the first summary, so a strategy that never summarizes needs no compaction model.
+  const summaryCalls = new Map<
+    string | LanguageModel | undefined,
+    Promise<SummaryCall & { readonly modelId: string }>
+  >();
+  const resolveSummaryCall = (choice: string | LanguageModel | undefined) => {
+    let call = summaryCalls.get(choice);
+    if (call === undefined) {
+      call = (async () => {
+        const model =
+          choice === undefined
+            ? input.model
+            : typeof choice === "string"
+              ? await input.resolveModel({ id: choice })
+              : (resolveMockAuthoredRuntimeModel({ id: choice.modelId }) ?? choice);
+        const profile = resolveModelProfile(model);
+        const providerOptions = resolveCallProviderOptions({
+          auth: input.auth,
+          profile,
+          providerOptions:
+            choice === undefined
+              ? requireSessionModelReference(session).providerOptions
+              : undefined,
+          session,
+        }) as Parameters<typeof streamText>[0]["providerOptions"];
+        return {
+          abortSignal: input.abortSignal,
+          headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
+          model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
+          modelId: gatewayModelId(model) ?? "unknown",
+          providerOptions,
+          telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+        };
+      })();
+      summaryCalls.set(choice, call);
+    }
+    return call;
   };
   let summaryTelemetry: TelemetryOptions | undefined;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const { change } = input;
   // The summary run starts with its first call: `compactMessages` can keep the history without one.
-  let summaryRunOpen = change.announced === true;
-  const summarize = async (prompt: CompactionSummaryPrompt) => {
+  let summaryRunOpen = false;
+  const summarize = async ({ model: choice, ...prompt }: CompactionSummaryPrompt) => {
+    const { modelId, ...call } = await resolveSummaryCall(choice);
     if (!summaryRunOpen) {
       summaryRunOpen = true;
       await publish([
         runRequested({ changeId: change.changeId }, change.summaryRunId),
-        runStarted({
-          attempt: 0,
-          modelId: gatewayModelId(model) ?? "unknown",
-          runId: change.summaryRunId,
-        }),
+        runStarted({ attempt: 0, modelId, runId: change.summaryRunId }),
       ]);
     }
     const summary = await runModelCallWithRetries(
@@ -349,49 +381,22 @@ async function compactOnce(input: {
     return summary.text;
   };
 
-  {
-    if (change.announced !== true) {
-      const inputTokens = getInputTokenCount(
-        projectedPromptMessages,
-        session.compaction,
-        input.requestEnvelopeTokens,
-        session.compaction.requestEnvelopeTokens,
-      );
-      await publish(
-        contextStarted({
-          cause: change.cause,
-          changeId: change.changeId,
-          kind: "compaction",
-          trigger: input.force === true || inputTokens === null ? undefined : { inputTokens },
-          turnId: change.turnId,
-        }),
-        projectedPromptMessages,
-      );
-    }
+  if (change.announced !== true) {
+    await publish(
+      contextStarted({
+        cause: change.cause,
+        changeId: change.changeId,
+        kind: "compaction",
+        trigger: input.force === true ? undefined : { inputTokens: measured.inputTokens },
+        turnId: change.turnId,
+      }),
+      projectedPromptMessages,
+    );
   }
 
   if (needsSummary) summaryTelemetry = input.prepareTelemetry?.(change.summaryRunId);
 
-  const ordinary = validateHarnessModelMessages(messages);
-  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
-  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
-  const protectedTokens = Math.max(
-    0,
-    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
-  );
-  const historyCompaction: CompactionConfig = {
-    ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens - protectedTokens),
-    lastKnownInputTokens:
-      session.compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            session.compaction.lastKnownInputTokens -
-              Math.min(session.compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
-          ),
-  };
-  let compactedOrdinary: ModelMessage[] = [...ordinary];
+  let compactedOrdinary: readonly HarnessModelMessage[] = ordinary;
   // A memory capture before compaction ran in the commit that started it. When it failed, the
   // compaction fails before it rewrites the history the capture couldn't keep.
   const captureFailure = takeCompactionCaptureFailure(input.ctx);
@@ -404,25 +409,31 @@ async function compactOnce(input: {
         requestEnvelopeTokens,
         threshold: session.compaction.threshold,
       });
-      compactedOrdinary = await compactMessages(
-        [...ordinary],
-        historyCompaction,
+      const context: CompactionContext = {
+        ...measured,
+        forced: input.force === true,
+        abortSignal: input.abortSignal,
+        estimateTokens,
         summarize,
-        input.force === true,
-        input.requestEnvelopeTokens === undefined
-          ? undefined
-          : Math.max(
-              0,
-              getInputTokenCount(
-                projectedPromptMessages,
-                session.compaction,
-                requestEnvelopeTokens,
-                session.compaction.requestEnvelopeTokens,
-              ) -
-                requestEnvelopeTokens -
-                protectedTokens,
-            ),
-      );
+      };
+      compactedOrdinary = await strategy.compact(cloneMessages(ordinary), context);
+      validateCompactionResult(ordinary, compactedOrdinary);
+      // Judged on the estimate alone: the provider's count can't say which messages its excess
+      // belongs to. A compaction that was needed because the history is over its limit must
+      // shrink it; one that doesn't would only run again on the next step.
+      const originalEstimate = estimateTokens(ordinary);
+      const resultEstimate = estimateTokens(compactedOrdinary);
+      if (overLimit && resultEstimate >= originalEstimate) {
+        throw new CompactionOverLimitError(
+          `The compacted history is no smaller than the history (about ${resultEstimate} tokens), which is over the limit.`,
+        );
+      }
+      const resultTokens = resultEstimate + context.requestEnvelopeTokens;
+      if (exceedsLimit({ inputTokens: resultTokens, threshold: context.threshold })) {
+        throw new CompactionOverLimitError(
+          `The compacted history is still over the limit (about ${resultTokens} of ${context.threshold} tokens).`,
+        );
+      }
     }
   } catch (error) {
     failure = { error };
@@ -441,7 +452,7 @@ async function compactOnce(input: {
         ...(usage !== undefined && { spent: { runId, usage } }),
       }),
     );
-    return { compacted: false, failure, messages: input.messages, session };
+    return { compacted: false, failure, messages: input.messages, overLimit, session };
   }
   messages = validateHarnessModelMessages(compactedOrdinary);
 
@@ -474,7 +485,11 @@ export function compactedTurnInput<Message extends ModelMessage>(
   return messages.findLast((message) => isUserModelMessage(message) && message.kind === "user");
 }
 
-type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
+type CompactionSummaryPrompt = Parameters<CompactionContext["summarize"]>[0];
+type SummaryCall = Pick<
+  Parameters<typeof streamText>[0],
+  "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+>;
 
 /**
  * Calls the compaction model the way a step calls its model: streamed, with stream errors
@@ -507,4 +522,59 @@ async function streamCompactionSummary(
     text,
     usage: extractTokenUsageDelta({ costUsd: extractGatewayCostUsd(providerMetadata), usage }),
   };
+}
+
+/**
+ * A strategy's result must keep every tool call beside its result, keep the calls the turn is
+ * waiting on, and start with a user message, or the next provider call rejects the history.
+ */
+function validateCompactionResult(
+  original: readonly HarnessModelMessage[],
+  result: readonly HarnessModelMessage[],
+): void {
+  const calls = (messages: readonly HarnessModelMessage[]) => toolPartIds(messages, "tool-call");
+  const results = (messages: readonly HarnessModelMessage[]) =>
+    toolPartIds(messages, "tool-result");
+  const keptCalls = calls(result);
+  const keptResults = results(result);
+  for (const id of keptCalls) {
+    if (!keptResults.has(id) && results(original).has(id)) {
+      throw new CompactionInvalidResultError(
+        `The compacted history dropped the result of tool call ${id}.`,
+      );
+    }
+  }
+  for (const id of keptResults) {
+    if (!keptCalls.has(id)) {
+      throw new CompactionInvalidResultError(
+        `The compacted history kept the result of tool call ${id} without its call.`,
+      );
+    }
+  }
+  const waiting = [...calls(original)].filter((id) => !results(original).has(id));
+  for (const id of waiting) {
+    if (!keptCalls.has(id)) {
+      throw new CompactionInvalidResultError(
+        `The compacted history dropped tool call ${id}, which is still waiting.`,
+      );
+    }
+  }
+  const first = result[0];
+  if (first !== undefined && first.role !== "user") {
+    throw new CompactionInvalidResultError("The compacted history must start with a user message.");
+  }
+}
+
+function toolPartIds(
+  messages: readonly HarnessModelMessage[],
+  type: "tool-call" | "tool-result",
+): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === type && "toolCallId" in part) ids.add(part.toolCallId);
+    }
+  }
+  return ids;
 }

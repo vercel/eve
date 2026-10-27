@@ -1,13 +1,54 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
-import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
+import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/strategies/fixed-tail/prompt.js";
+import {
+  exceedsLimit as exceedsThreshold,
+  getInputTokenCount,
+} from "#harness/compaction/measure.js";
+import { compactMessages as compactWithMeasure } from "#harness/compaction/strategies/fixed-tail/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
+
+/** The strategy's trigger over a history: the core measures, `exceedsThreshold` decides. */
+function shouldCompact(
+  messages: readonly ModelMessage[],
+  config: CompactionConfig,
+  requestEnvelopeTokens = 0,
+  previousEnvelopeTokens = 0,
+): boolean {
+  return (
+    messages.length > 0 &&
+    exceedsThreshold({
+      inputTokens: getInputTokenCount(
+        messages,
+        config,
+        requestEnvelopeTokens,
+        previousEnvelopeTokens,
+      ),
+      threshold: config.threshold,
+    })
+  );
+}
+
+/** Compacts with the history's own token count, as the strategy does when nothing was measured. */
+function compactMessages(
+  messages: ModelMessage[],
+  config: CompactionConfig,
+  summarize: Parameters<typeof compactWithMeasure>[2],
+  forceSummary = false,
+) {
+  return compactWithMeasure(
+    messages,
+    config,
+    summarize,
+    forceSummary,
+    getInputTokenCount(messages, config),
+  );
+}
 
 const config: CompactionConfig = {
   recentWindowSize: 2,
@@ -260,34 +301,6 @@ describe("shouldCompact", () => {
   it("returns true when over threshold", () => {
     const messages: ModelMessage[] = [{ content: "a".repeat(500), role: "user" }];
     expect(shouldCompact(messages, config)).toBe(true);
-  });
-
-  it("uses the fixed prompt envelope in threshold accounting", () => {
-    const messages: ModelMessage[] = [{ content: "Continue the investigation.", role: "user" }];
-    const compaction: CompactionConfig = {
-      lastKnownInputTokens: 200,
-      lastKnownPromptMessageCount: messages.length,
-      recentWindowSize: 2,
-      threshold: 1_000,
-    };
-    const activeInputTokens = getInputTokenCount(messages, compaction);
-    const promptEnvelopeTokens = estimateTokens([
-      { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
-      createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
-    ] satisfies ModelMessage[]);
-
-    expect(
-      shouldCompact(messages, {
-        ...compaction,
-        threshold: activeInputTokens + promptEnvelopeTokens,
-      }),
-    ).toBe(false);
-    expect(
-      shouldCompact(messages, {
-        ...compaction,
-        threshold: activeInputTokens + promptEnvelopeTokens - 1,
-      }),
-    ).toBe(true);
   });
 
   it("does not compact an empty history based on prompt overhead alone", () => {

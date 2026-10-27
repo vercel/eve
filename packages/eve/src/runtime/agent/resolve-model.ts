@@ -107,14 +107,11 @@ async function loadSourceBackedRuntimeModelReference(
     definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
   );
-  const model =
-    reference.sourceField === "compaction.model"
-      ? normalizedDefinition.compaction?.model
-      : normalizedDefinition.model;
+  const model = normalizedDefinition.model;
 
   if (model === undefined) {
     throw new Error(
-      `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a runtime model at "${reference.sourceField ?? "model"}".`,
+      `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a runtime model at "model".`,
     );
   }
 

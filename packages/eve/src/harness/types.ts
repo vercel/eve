@@ -1,5 +1,6 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
+import type { CompactionStrategy } from "#harness/compaction/strategy.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel } from "ai";
 import type { MessageContent } from "#shared/message-content.js";
@@ -43,19 +44,12 @@ export interface CompactionState {
 export interface CompactionConfig extends CompactionState {
   readonly recentWindowSize: number;
   readonly threshold: number;
-  readonly thresholdPercent?: number;
 }
 
 /**
  * Serializable agent configuration stored on the session.
  */
 interface SessionAgentBase {
-  /**
-   * Optional model used only for compaction summaries.
-   *
-   * When omitted, the harness uses the active turn model for compaction.
-   */
-  readonly compactionModelReference?: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
@@ -316,6 +310,8 @@ export interface ToolLoopHarnessConfig {
   readonly compactOnly?: boolean;
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
+  /** How the history is compacted. The built-in fixed-tail strategy when omitted. */
+  readonly compactionStrategy?: CompactionStrategy;
   readonly handleEvent?: HandleEventFn;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.

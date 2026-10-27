@@ -256,7 +256,6 @@ async function publishInSessionScope<T>(
   });
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
   const hydrated = hydrateDurableSession({
-    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
     durable: step.durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });

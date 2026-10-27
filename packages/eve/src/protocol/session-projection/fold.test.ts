@@ -75,6 +75,15 @@ function folded(lines: readonly StoredLine[], retention?: "operational") {
 }
 
 describe("the shared fold", () => {
+  it("keeps the last model call's input tokens after its run settles and into the next turn", () => {
+    const lines = [...turnLines(0, { opensSession: true }), ...turnLines(1)];
+    expect(folded(lines.slice(0, 3)).lastInputTokens).toBe(spent.inputTokens);
+    expect(folded(lines, "operational").lastInputTokens).toBe(spent.inputTokens);
+    // The next turn's first model call has not reported usage yet.
+    const next = folded(lines.slice(0, 4 + 1));
+    expect(next.lastInputTokens).toBe(spent.inputTokens);
+  });
+
   it("keeps the first introduction, valid status update, and terminal for a retained delivery", () => {
     const view = folded([
       {

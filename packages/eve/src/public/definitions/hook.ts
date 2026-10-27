@@ -58,6 +58,12 @@ export interface HookContext extends SessionContext, Omit<SessionFrame, "session
    * Throws after the handler has settled.
    */
   cancel(reason?: string): void;
+  /**
+   * Compacts the history with the agent's strategy (`compaction.ts`) before the next model call:
+   * the running turn's next call, or the first call of the next turn when no turn is running.
+   * Asking again before it runs is safe. Throws after the handler has settled.
+   */
+  compact(): void;
 }
 
 /**

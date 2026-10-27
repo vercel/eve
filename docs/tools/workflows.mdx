@@ -600,7 +600,7 @@ const response = await reviewer.send("Review the migration plan.", {
 ```
 
 The override changes only the model. The child keeps the target agent's instructions, tools, skills,
-connections, sandbox behavior, limits, reasoning, and explicit compaction model. Pass a selection
+connections, sandbox behavior, limits, reasoning, and compaction strategy. Pass a selection
 object to override model-specific settings too:
 
 ```ts

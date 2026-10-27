@@ -1,0 +1,12 @@
+[
+  "CompactionContext",
+  "CompactionMessage",
+  "CompactionOverLimitError",
+  "CompactionStrategy",
+  "DefinedCompaction",
+  "FixedTailOptions",
+  "HarnessModelMessage",
+  "createCompactionUserMessage",
+  "defineCompaction",
+  "fixedTail"
+]

@@ -31,6 +31,6 @@ const model = mockModel({
 export default defineAgent({
   ...e2eAgentConfig(),
   model,
-  modelContextWindowTokens: 100_000,
-  compaction: { thresholdPercent: 0.2 },
+  // eve compacts at 90% of the window: a 20,000-token limit.
+  modelContextWindowTokens: 22_223,
 });

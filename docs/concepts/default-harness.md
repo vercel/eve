@@ -7,22 +7,15 @@ The default harness is eve's built-in agent loop. It manages model calls, compac
 
 ## Compaction
 
-The harness keeps a long session from overflowing the model's context window. Before comparing the conversation with `thresholdPercent` (`0.9` by default), it adds the estimated fixed envelope of the checkpoint prompt used for compaction. It then summarizes the older turns and keeps going. The prompt asks the compaction model to distinguish completed progress and decisions from remaining work and to retain the constraints, preferences, data, and references needed to continue. When eve compacts again, it passes the previous checkpoint separately and without the transcript's per-message truncation, then replaces it with the updated checkpoint. The summary uses the active turn model unless you override it. After compacting, the harness keeps the most recent messages word for word next to the summary, up to 20,000 tokens (or half of the threshold, if that is smaller), with tool results shortened to 2,000 characters. The current user message is always part of that, so when it alone is larger than the budget the harness keeps only its start and its end, with a note where the middle was cut, and summarizes the cut-out middle with the older turns. If a compaction cannot bring the history under the threshold, the session fails with an error instead of compacting again, and the step is not retried: start a new session or send a smaller message. Tune when and how it kicks in under [`compaction`](../agent-config#compaction) in `agent.ts`:
-
-```ts title="agent/agent.ts"
-export default defineAgent({
-  model: "anthropic/claude-opus-5.5",
-  compaction: {
-    thresholdPercent: 0.75,
-  },
-});
-```
+The harness keeps a long session from overflowing the model's context window. Before comparing the conversation with 90% of the context window, it adds the estimated fixed envelope of the checkpoint prompt used for compaction. It then summarizes the older turns and keeps going. The prompt asks the compaction model to distinguish completed progress and decisions from remaining work and to retain the constraints, preferences, data, and references needed to continue. When eve compacts again, it passes the previous checkpoint separately and without the transcript's per-message truncation, then replaces it with the updated checkpoint. The summary uses the session's model unless you pass `model` to `fixedTail()`. After compacting, the harness keeps the most recent messages word for word next to the summary, up to 20,000 tokens (or half of the threshold, if that is smaller), with tool results shortened to 2,000 characters. The current user message is always part of that, so when it alone is larger than the budget the harness keeps only its start and its end, with a note where the middle was cut, and summarizes the cut-out middle with the older turns. If a compaction cannot bring the history under the threshold, the session fails with an error instead of compacting again, and the step is not retried: start a new session or send a smaller message. Set the summary model with `fixedTail({ model })` in [`compaction.ts`](../agent-config#compaction).
 
 Before summarizing, eve tries to shorten oversized tool results in older history.
 It checks whether that reduction is sufficient using the last provider-reported
 input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
+
+To change how the history is shortened, export your own strategy from `compaction.ts`. See [Compaction strategies](./compaction-strategies).
 
 First-class [memory](../memory) stays outside history, so the summarizer never
 sees it. eve asks providers to capture before compaction rewrites history, and

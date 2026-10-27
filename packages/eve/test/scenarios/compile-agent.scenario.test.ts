@@ -134,7 +134,6 @@ describe("compiler artifacts", () => {
     const withoutConfig = await compileAgent({ startPath: appRoot });
 
     expect(withoutConfig.manifest.config).toMatchObject({
-      compaction: {},
       model: {
         contextWindowTokens: expect.any(Number),
         id: DEFAULT_AGENT_MODEL_ID,
@@ -318,7 +317,6 @@ describe("compiler artifacts", () => {
       agentRoot: "<app-root>/agent",
       appRoot: "<app-root>",
       config: {
-        compaction: {},
         model: {
           contextWindowTokens: expect.any(Number),
           id: "openai/gpt-5.4",

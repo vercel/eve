@@ -707,7 +707,6 @@ describe("compileAgentManifest source graph", () => {
         specificationVersion: "v3",
       }) as never;
     const turnModel = directModel("turn-model");
-    const summaryModel = directModel("summary-model");
     const sourceRegistry = registry([
       {
         logicalPath: "agent.ts",
@@ -715,7 +714,6 @@ describe("compileAgentManifest source graph", () => {
           default: defineAgent({
             model: turnModel,
             modelContextWindowTokens: 8_192,
-            compaction: { model: summaryModel, modelContextWindowTokens: 8_192 },
           }),
         }),
       },
@@ -737,9 +735,6 @@ describe("compileAgentManifest source graph", () => {
       await expect(resolveRuntimeModelReference(resolved.config!.model!, scope)).resolves.toBe(
         turnModel,
       );
-      await expect(
-        resolveRuntimeModelReference(resolved.config!.compaction!.model!, scope),
-      ).resolves.toBe(summaryModel);
     } finally {
       vi.unstubAllEnvs();
     }

@@ -22,7 +22,6 @@ import {
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
-  type PublicAgentStaticModelDefinition,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
@@ -93,7 +92,7 @@ export function normalizeAgentDefinition(
   }
 
   if (record.compaction !== undefined) {
-    definition.compaction = normalizeAgentCompactionDefinition(record.compaction, message);
+    rejectRemovedAgentCompactionFields(record.compaction, message);
   }
 
   if (record.build !== undefined) {
@@ -316,46 +315,24 @@ export function normalizeAgentPromptCache(
   return { anthropic: { ttl: ttl as AnthropicPromptCacheTtl } };
 }
 
-function normalizeAgentCompactionDefinition(
-  value: unknown,
-  message: string,
-): NonNullable<NormalizedAgentDefinition["compaction"]> {
+function rejectRemovedAgentCompactionFields(value: unknown, message: string): void {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "thresholdPercent"], message);
-  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
-
-  if (record.model !== undefined) {
-    if (isDynamicSentinel(record.model)) {
-      throw new Error(
-        `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
-      );
-    }
-    normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
-  }
-
-  if (record.modelContextWindowTokens !== undefined) {
-    normalizedDefinition.modelContextWindowTokens = expectPositiveInteger(
-      record.modelContextWindowTokens,
-      message,
+  if (record.thresholdPercent !== undefined) {
+    throw new Error(
+      `${message} "compaction.thresholdPercent" was removed: eve compacts at 90% of the context window, and a hook can call ctx.compact() to compact sooner. See docs/concepts/compaction-strategies.`,
     );
   }
-
-  if (record.thresholdPercent !== undefined) {
-    const thresholdPercent = record.thresholdPercent;
-
-    if (
-      typeof thresholdPercent !== "number" ||
-      !Number.isFinite(thresholdPercent) ||
-      thresholdPercent < 0 ||
-      thresholdPercent > 1
-    ) {
-      throw new Error(message);
-    }
-
-    normalizedDefinition.thresholdPercent = thresholdPercent;
+  if (record.model !== undefined) {
+    throw new Error(
+      `${message} "compaction.model" was removed: pass \`model\` to \`fixedTail({ model })\` in compaction.ts instead. See docs/concepts/compaction-strategies.`,
+    );
   }
-
-  return normalizedDefinition;
+  if (record.modelContextWindowTokens !== undefined) {
+    throw new Error(
+      `${message} "compaction.modelContextWindowTokens" was removed: it never changed the compaction limit, which comes from the model's context window. Set top-level \`modelContextWindowTokens\` in agent.ts to change that window.`,
+    );
+  }
+  expectOnlyKnownKeys(record, [], message);
 }
 
 /**

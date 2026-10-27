@@ -8,6 +8,7 @@
     "upgrade-to-v27-events",
     "state",
     "default-harness",
+    "compaction-strategies",
     "built-in-tools",
     "context-control",
     "security-model"

@@ -40,7 +40,6 @@ async function prewarmSession(input: SessionPrewarmInput): Promise<{
     const ctx = await deserializeContext(input.serializedContext);
     const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
     const session = hydrateDurableSession({
-      compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
       durable: readDurableSession(input.sessionState),
       turnAgent: effectiveAgent.turnAgent,
     });

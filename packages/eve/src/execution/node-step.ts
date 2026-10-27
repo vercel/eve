@@ -92,6 +92,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
     controlDelivery: input.controlDelivery,
+    compactionStrategy: input.node.agent.compaction?.strategy,
     handleEvent: input.handleEvent,
     instrumentation: sessionInstrumentation,
     signInCompletions: input.signInCompletions,

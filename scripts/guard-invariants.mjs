@@ -159,6 +159,10 @@
  *             `eve/events`; the client) never import a schema module by
  *             value: schemas serve tests and development only.
  *
+ *   rule 56 — Compaction strategies are closed behind their entry. Outside
+ *             `harness/compaction/strategies/`, a strategy is reached only
+ *             through its `index.js`; its engine, prompt and other internals
+ *             stay private, so a strategy can change without core edits.
  *   rule 55 — Public named exports match checker-generated per-entry lists.
  *
  * Baselines for rules with pre-existing violations live in
@@ -167,7 +171,7 @@
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, posix as pathPosix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { checkPublicExports } from "./public-exports.mjs";
@@ -282,6 +286,7 @@ function isTsLike(relPath) {
  *   rule51: Violation[];
  *   rule52: Violation[];
  *   rule53: Violation[];
+ *   rule56: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -364,6 +369,7 @@ async function scanRepo(state) {
       });
     }
     checkRule53(posix, lines, state.rule53);
+    checkRule56(posix, lines, state.rule56);
   }
 }
 
@@ -426,6 +432,41 @@ function checkLegacySessionImports(posix, lines, violations) {
         message:
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
+  });
+}
+
+// ---------- Rule 56: compaction strategies are reached through their index ----------
+
+const COMPACTION_STRATEGIES_DIR = "packages/eve/src/harness/compaction/strategies/";
+const COMPACTION_STRATEGY_SPECIFIER_RE = /(?:from\s+|import\s*\()["']([^"']+)["']/;
+
+/** The import's target inside the strategies directory, from an alias or relative specifier. */
+function strategyInternalTarget(posix, line) {
+  const specifier = COMPACTION_STRATEGY_SPECIFIER_RE.exec(line)?.[1];
+  if (specifier === undefined) return undefined;
+  const resolved = specifier.startsWith("#harness/")
+    ? `packages/eve/src/harness/${specifier.slice("#harness/".length)}`
+    : specifier.startsWith(".")
+      ? pathPosix.normalize(pathPosix.join(pathPosix.dirname(posix), specifier))
+      : undefined;
+  if (resolved === undefined || !resolved.startsWith(COMPACTION_STRATEGIES_DIR)) return undefined;
+  const inside = resolved.slice(COMPACTION_STRATEGIES_DIR.length).split("/");
+  return inside.length >= 2 && inside.at(-1) !== "index.js" ? resolved : undefined;
+}
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule56(posix, lines, violations) {
+  if (posix.startsWith(COMPACTION_STRATEGIES_DIR)) return;
+  if (/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
+  lines.forEach((line, index) => {
+    if (strategyInternalTarget(posix, line) === undefined) return;
+    violations.push({
+      rule: 56,
+      file: posix,
+      line: index + 1,
+      message:
+        "Compaction strategies are reached only through their index.js; their engine, prompt and helpers are private so a strategy can change without core edits.",
+    });
   });
 }
 
@@ -1830,6 +1871,7 @@ async function main() {
     rule51: /** @type {Violation[]} */ ([]),
     rule52: /** @type {Violation[]} */ ([]),
     rule53: /** @type {Violation[]} */ ([]),
+    rule56: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1940,6 +1982,7 @@ async function main() {
   violations.push(...state.rule51);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
+  violations.push(...state.rule56);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
