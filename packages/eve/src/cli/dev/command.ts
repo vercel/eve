@@ -111,22 +111,22 @@ export function registerRemoteCommands(input: {
     .option("--input <text>", "Pre-fill the prompt input")
     .option("--print", "Send a prompt, print the final assistant text, and exit")
     .option(
-      "--tools <mode>",
+      "--show-tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
     .option(
-      "--reasoning <mode>",
+      "--show-reasoning <mode>",
       "How reasoning renders: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
     .option(
-      "--subagents <mode>",
+      "--show-subagents <mode>",
       "How subagent tasks render: full | collapsed | hidden",
       parseSubagentDisplayMode,
     )
     .option(
-      "--connection-auth <mode>",
+      "--show-connection-auth <mode>",
       "How connection authorization renders: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
@@ -231,22 +231,22 @@ export function registerDevelopmentCommand(input: {
     .option("--input <text>", "Pre-fill the prompt input")
     .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
     .option(
-      "--tools <mode>",
+      "--show-tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
     .option(
-      "--reasoning <mode>",
+      "--show-reasoning <mode>",
       "How reasoning renders: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
     .option(
-      "--subagents <mode>",
+      "--show-subagents <mode>",
       "How subagent tasks render: full | collapsed | hidden",
       parseSubagentDisplayMode,
     )
     .option(
-      "--connection-auth <mode>",
+      "--show-connection-auth <mode>",
       "How connection authorization renders: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )

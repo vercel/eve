@@ -282,10 +282,10 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                     |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                  |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                             |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                             |
-| `--subagents <mode>`                | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
+| `--show-tools <mode>`               | enum   | `auto-collapsed`   | Tool-call rendering                                             |
+| `--show-reasoning <mode>`           | enum   | `auto-collapsed`   | Reasoning rendering                                             |
+| `--show-subagents <mode>`           | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
+| `--show-connection-auth <mode>`     | enum   | `full`             | Connection-authorization rendering                              |
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
@@ -344,6 +344,11 @@ eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
 
 Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. `--print` starts a new conversation each time and does not answer pending requests; to answer that session's pending request or script multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
+
+Interactive `connect` accepts the same `--show-tools`, `--show-reasoning`,
+`--show-subagents`, and `--show-connection-auth` display flags as `eve dev`.
+These flags control rendering, not model reasoning effort; set effort with
+`eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
 
