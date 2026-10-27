@@ -240,7 +240,7 @@ describe("classifyModelCallError", () => {
   });
 
   // Issue #5427: the gateway reuses `insufficient_funds` when it only throttled the balance check.
-  it.fails("retries an AI Gateway 402 that asks to retry shortly instead of reporting exhausted credits", () => {
+  it("retries an AI Gateway 402 that asks to retry shortly instead of reporting exhausted credits", () => {
     const err = gatewayModelCallError({
       gatewayName: "GatewayInternalServerError",
       gatewayType: "internal_server_error",
