@@ -12,7 +12,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
@@ -35,7 +35,7 @@ type CompiledConnectionEntry =
  * during `eve build`.
  *
  * The wire protocol is read from the marker stamped by the `define*`
- * factory, defaulting to MCP, and selects which normalizer validates
+ * factory and selects which normalizer validates
  * the authored shape. `url` carries the MCP server endpoint for MCP
  * connections and the API base URL for OpenAPI connections, so the rest
  * of the connection pipeline (auth context, tool-result narrowing,
@@ -76,7 +76,12 @@ export async function compileConnectionDefinition(
     );
   }
 
-  const protocol = readConnectionProtocol(loaded);
+  const protocol = readStampedConnectionProtocol(loaded);
+  if (protocol === undefined) {
+    throw new Error(
+      `Export defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "${source.logicalPath}".`,
+    );
+  }
 
   const shared = {
     connectionName: source.connectionName,

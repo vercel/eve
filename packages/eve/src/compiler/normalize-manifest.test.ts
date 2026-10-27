@@ -903,6 +903,25 @@ describe("compileAgentManifest source graph", () => {
     ).rejects.toThrow("Provider tools can't be deferred");
   });
 
+  it("rejects a static connection without a protocol helper", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "connections/issues.ts",
+        loadNamespace: async () => ({
+          default: {
+            description: "Issues.",
+            url: "https://issues.example/mcp",
+          },
+        }),
+      },
+    ]);
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Export defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "connections/issues.ts"',
+    );
+  });
+
   describe("connection name ownership", () => {
     const linear = {
       logicalPath: "connections/linear.ts",

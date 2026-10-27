@@ -91,6 +91,22 @@ export async function discoverSandboxSource(input: {
     };
   }
 
+  const rootCandidates = collectFlatSlotCandidates(input.rootEntries, {
+    moduleBaseName: SANDBOX_DEFINITION_BASE_NAME,
+  });
+  if (rootCandidates.moduleFileNames.length > 0) {
+    diagnostics.push(
+      createDiscoverErrorDiagnostic({
+        code: DISCOVER_MODULE_SLOT_COLLISION,
+        message:
+          `Found both ${rootCandidates.moduleFileNames.map((name) => `"${name}"`).join(", ")} and "sandbox/". ` +
+          'Move the definition to "sandbox/sandbox.ts".',
+        sourcePath: directoryPath,
+      }),
+    );
+    return { diagnostics, sandbox: null, sandboxWorkspace: null };
+  }
+
   const folderEntries = await readSortedDirectoryEntries(input.source, directoryPath);
   const sandboxModuleCandidates = collectFolderSandboxModuleCandidates(folderEntries);
   const workspaceFolderEntry = folderEntries.find(
