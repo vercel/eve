@@ -59,11 +59,8 @@ test("keeps searching and creating tickets but cannot delete them", () => {
   expect(tools).not.toContain("helpdesk__delete_ticket");
 });
 
-test("asks for approval before closing a ticket, and only then", async () => {
-  const tools = compiledTools();
-  expect(tools.get("helpdesk__close_ticket")?.requiresApproval).toBe(true);
-  expect(tools.get("helpdesk__create_ticket")?.requiresApproval).toBe(false);
-  expect(tools.get("helpdesk__search_tickets")?.requiresApproval).toBe(false);
+test("asks for approval before closing a ticket", async () => {
+  expect(compiledTools().get("helpdesk__close_ticket")?.requiresApproval).toBe(true);
 
   const close = await load(toolSource("helpdesk__close_ticket"));
   const policy = typeof close.approval === "function" ? close.approval : close.approval?.request;

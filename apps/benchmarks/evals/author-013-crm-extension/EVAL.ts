@@ -92,7 +92,7 @@ test("lookup_customer reads the customer with the mounted key", async () => {
   expect(call!.headers.get("authorization")).toBe("Bearer test-crm-key");
 });
 
-test("add_note posts the note and always asks for approval", async () => {
+test("add_note posts the note with the mounted key", async () => {
   await bindMount();
   const fetch = stubFetch({ id: "note_1" });
   const tool = await loadTool("add_note");
@@ -103,7 +103,11 @@ test("add_note posts the note and always asks for approval", async () => {
   expect(call!.url).toBe(`${defaultBaseUrl}/v1/customers/cus_1/notes`);
   expect(call!.headers.get("authorization")).toBe("Bearer test-crm-key");
   expect(JSON.parse(call!.body)).toEqual({ note: "Prefers email." });
+});
 
+// In the package, so every agent that mounts it asks, and in this agent's compiled tool.
+test("add_note always asks for approval", async () => {
+  const tool = await loadTool("add_note");
   const policy = typeof tool.approval === "function" ? tool.approval : tool.approval?.request;
   expect(typeof policy).toBe("function");
   for (const toolInput of [
@@ -113,16 +117,22 @@ test("add_note posts the note and always asks for approval", async () => {
     const decision = await policy({ callId: "call-1", session: {}, toolInput, toolName: "x" });
     expect(requiresApproval(decision)).toBe(true);
   }
+  const manifest = readJson(eveInfo().artifacts.compiledManifest);
+  // oxlint-disable-next-line typescript/no-explicit-any -- the manifest is eve-internal.
+  const compiled = manifest.tools.find((candidate: any) => candidate.name === "crm__add_note");
+  expect(compiled?.requiresApproval).toBe(true);
 });
 
 test("honors a configured base URL", async () => {
   const handle = await loadExtension();
   handle({ apiKey: "test-crm-key", baseUrl: "https://crm.internal.example" });
   const fetch = stubFetch({ id: "cus_1" });
-  const tool = await loadTool("lookup_customer");
-  await tool.execute(parse(tool, { email: "ada@example.com" }), {});
-  const [call] = await requests(fetch);
-  expect(new URL(call!.url).origin).toBe("https://crm.internal.example");
+  const lookup = await loadTool("lookup_customer");
+  await lookup.execute(parse(lookup, { email: "ada@example.com" }), {});
+  const addNote = await loadTool("add_note");
+  await addNote.execute(parse(addNote, { customerId: "cus_1", note: "Prefers email." }), {});
+  const origins = (await requests(fetch)).map((call) => new URL(call.url).origin);
+  expect(origins).toEqual(["https://crm.internal.example", "https://crm.internal.example"]);
 });
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded files are untyped.
