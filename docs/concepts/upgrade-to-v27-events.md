@@ -8,12 +8,12 @@ This guide covers breaking changes to agent definitions, approvals, channels, cl
 ## Before you upgrade
 
 - Rebuild and republish installed extensions. Earlier epoch-based distributions cannot be loaded by this release; see [Extensions](../extensions).
-- Keep the deployments that own existing sessions available. This release requires checkpoint version 18 and cannot take over sessions with earlier checkpoint formats. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
+- Keep the deployments that own existing sessions available. An idle session whose deployment runs eve 0.83 moves to the new deployment with its next message. Its recorded history stays in v26 lines, and new turns are recorded in v27 after it. A session that is mid-turn, waiting for an answer or sign-in, running tools, tasks, or subagents, or driven by a parent or remote caller stays on its current deployment. Sessions on deployments that run releases before 0.83 always stay. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
 - Update event consumers, frontend persistence, and custom channel handlers using the mappings below. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
 ## Restore saved history
 
-New sessions use v27. Sessions started on an earlier deployment keep their stored stream format, but a current deployment can serve their recorded history as v27 events.
+New sessions use v27. Sessions started on an earlier deployment keep their stored stream format, but a current deployment can serve their recorded history as v27 events, followed by the v27 turns recorded after the session moved.
 
 Don't pass event arrays saved before the upgrade as `initialEvents`. When the session's stream is still available, read it again from position 0 and replace what you saved. Saved cursors still count the same stored lines.
 

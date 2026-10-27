@@ -4,16 +4,25 @@ import {
   DELIVERY_IDEMPOTENCY_WINDOW,
   MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH,
 } from "#channel/delivery-idempotency.js";
+import { upgradeV26Checkpoint, type V26CarriedState } from "#execution/session/v26-checkpoint.js";
 
 /**
- * Oldest checkpoint a successor accepts: the first that writes v27 session events. A session
- * whose stream began in the earlier shape stays on the deployment that owns it, since its
- * stream's lines, projection, and private records of running work changed shape together.
+ * Oldest checkpoint a successor accepts: eve 0.83's, the last whose stream holds v26 lines. An
+ * idle one moves: v27 reads its stream, and the successor rebuilds the projection from it. Older
+ * sessions stay on the deployment that owns them.
  */
-export const MIN_SESSION_CHECKPOINT_VERSION = 18;
+export const MIN_SESSION_CHECKPOINT_VERSION = 17;
 
 export type SessionCheckpointMigration =
-  | { readonly kind: "current"; readonly checkpoint: SessionCheckpoint }
+  | {
+      readonly kind: "current";
+      readonly checkpoint: SessionCheckpoint;
+      /**
+       * Present for a checkpoint a v26 owner wrote: its projection is absent, and the successor
+       * rebuilds it from the session's stream with what the owner counted.
+       */
+      readonly v26?: V26CarriedState;
+    }
   | { readonly kind: "incompatible"; readonly detail: string };
 
 type CheckpointRecord = Record<string, unknown>;
@@ -26,8 +35,19 @@ type CheckpointRecord = Record<string, unknown>;
  * keeps the session.
  */
 const CHECKPOINT_UPGRADES: Readonly<
-  Record<number, (checkpoint: CheckpointRecord) => CheckpointRecord>
-> = {};
+  Record<number, (checkpoint: CheckpointRecord, effects: UpgradeEffects) => CheckpointRecord>
+> = {
+  // The stream's first v27 lines follow the v26 ones an eve 0.83 owner wrote.
+  17: (checkpoint, effects) => {
+    const upgraded = upgradeV26Checkpoint(checkpoint, refuse);
+    effects.v26 = upgraded.carried;
+    return upgraded.checkpoint;
+  },
+};
+
+interface UpgradeEffects {
+  v26?: V26CarriedState;
+}
 
 /**
  * Upgrades a checkpoint written by an older eve build to the current shape.
@@ -41,7 +61,7 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   if (typeof version === "number" && version < MIN_SESSION_CHECKPOINT_VERSION) {
     return {
       kind: "incompatible",
-      detail: `checkpoint version ${version} predates v27 session events; the session continues on the deployment that owns it`,
+      detail: `checkpoint version ${version} predates eve 0.83; the session continues on the deployment that owns it`,
     };
   }
   if (
@@ -55,11 +75,12 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
     };
   }
   let current: CheckpointRecord = checkpoint;
+  const effects: UpgradeEffects = {};
   try {
     for (let from = version; from < SESSION_CHECKPOINT_VERSION; from++) {
       const upgrade = CHECKPOINT_UPGRADES[from];
       if (upgrade === undefined) refuse(`no upgrade from checkpoint version ${from}`);
-      current = { ...upgrade(current), version: from + 1 };
+      current = { ...upgrade(current, effects), version: from + 1 };
     }
   } catch (error) {
     if (!(error instanceof CheckpointRefusal)) throw error;
@@ -68,7 +89,9 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   if (!isCurrentCheckpoint(current)) {
     return { kind: "incompatible", detail: `checkpoint version ${version} is incomplete` };
   }
-  return { kind: "current", checkpoint: current };
+  return effects.v26 === undefined
+    ? { kind: "current", checkpoint: current }
+    : { kind: "current", checkpoint: current, v26: effects.v26 };
 }
 
 function isCurrentCheckpoint(value: unknown): value is SessionCheckpoint {

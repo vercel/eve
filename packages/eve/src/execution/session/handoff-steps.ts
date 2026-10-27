@@ -42,6 +42,10 @@ import {
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
+import { rebuildV26Projection } from "#execution/session/v26-projection.js";
+import { withV26Projection } from "#execution/session/v26-checkpoint.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
 
 const log = createLogger("execution.handoff");
 
@@ -120,7 +124,8 @@ export async function hasRunEndedStep(input: { readonly runId: string }): Promis
 }
 
 export type SessionCheckpointValidation =
-  | { readonly kind: "valid" }
+  /** `projection`: the one a v26 owner's checkpoint lacks, rebuilt from the session's stream. */
+  | { readonly kind: "valid"; readonly projection?: SessionProjection }
   | { readonly kind: "incompatible"; readonly reason: "checkpoint-version" }
   /** The source no longer holds every address it handed over, so none may be taken. */
   | { readonly kind: "source-gone" };
@@ -151,7 +156,19 @@ export async function prepareSuccessorStep(input: {
     return { kind: "incompatible", reason: "checkpoint-version" };
   };
   if (migration.kind === "incompatible") return unreadable(migration.detail);
-  const { checkpoint } = migration;
+  let { checkpoint } = migration;
+  let projection: SessionProjection | undefined;
+  if (migration.v26 !== undefined) {
+    try {
+      validateHarnessModelMessages(checkpoint.history);
+    } catch (error) {
+      return unreadable(`v26 history: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const rebuilt = await rebuildV26Projection(input.sessionId, migration.v26);
+    if (rebuilt.kind === "refused") return unreadable(`v26 session: ${rebuilt.detail}`);
+    projection = rebuilt.projection;
+    checkpoint = withV26Projection(checkpoint, projection);
+  }
   const timeout = checkpoint.sessionTimeoutMs;
   if (
     timeout !== false &&
@@ -204,7 +221,7 @@ export async function prepareSuccessorStep(input: {
       sessionId: input.sessionId,
     });
   }
-  return { kind: "valid" };
+  return projection === undefined ? { kind: "valid" } : { kind: "valid", projection };
 }
 
 /**

@@ -42,6 +42,7 @@ import {
   signalSessionOwnerActivationStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
+import { withV26Projection } from "#execution/session/v26-checkpoint.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -284,7 +285,10 @@ async function prepareSuccessor(
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
-  const { checkpoint } = migration;
+  const checkpoint =
+    validation.projection === undefined
+      ? migration.checkpoint
+      : withV26Projection(migration.checkpoint, validation.projection);
   return {
     checkpoint,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
