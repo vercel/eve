@@ -80,7 +80,15 @@ export async function verifyTeamsRequest(
     throw new Error("teamsChannel: inbound request missing bearer token.");
   }
 
-  await verifyTeamsJwt(token, options);
+  const claims = await verifyTeamsJwt(token, options);
+  const activity: unknown = JSON.parse(body);
+  if (
+    !isObject(activity) ||
+    typeof claims.serviceurl !== "string" ||
+    activity.serviceUrl !== claims.serviceurl
+  ) {
+    throw new Error("teamsChannel: activity service URL does not match the verified token.");
+  }
   return body;
 }
 

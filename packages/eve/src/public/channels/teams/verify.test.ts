@@ -44,6 +44,28 @@ describe("Teams request verification", () => {
     ).rejects.toThrow();
   });
 
+  it.each([
+    ["matching", "https://smba.trafficmanager.net/amer/", true],
+    ["missing", undefined, false],
+    ["different", "https://smba.trafficmanager.net/emea/", false],
+  ] as const)(
+    "requires a %s service URL claim for native activities",
+    async (_name, serviceUrl, accepted) => {
+      const fixture = await createJwtFixture({ audience: "APP", serviceUrl });
+      const body = JSON.stringify({ serviceUrl: "https://smba.trafficmanager.net/amer/" });
+      const verified = verifyTeamsRequest(
+        new Request("https://eve.test/teams", {
+          body,
+          headers: { authorization: `Bearer ${fixture.token}` },
+          method: "POST",
+        }),
+        { appId: "APP", fetch: fixture.fetch, jwksUrl: "https://keys.example.test/jwks" },
+      );
+      if (accepted) await expect(verified).resolves.toBe(body);
+      else await expect(verified).rejects.toThrow("service URL");
+    },
+  );
+
   it("rejects requests without bearer tokens", async () => {
     await expect(
       verifyTeamsRequest(new Request("https://eve.test/teams", { body: "{}", method: "POST" }), {
@@ -65,11 +87,14 @@ describe("Teams request verification", () => {
 async function createJwtFixture(input: {
   readonly audience: string;
   readonly issuer?: string;
+  readonly serviceUrl?: string;
 }): Promise<{ readonly fetch: typeof fetch; readonly token: string }> {
   const { privateKey, publicKey } = await generateKeyPair("RS256");
   const jwk = await exportJWK(publicKey);
   const key = { ...jwk, alg: "RS256", kid: "kid-1", use: "sig" };
-  const token = await new SignJWT({})
+  const token = await new SignJWT(
+    input.serviceUrl === undefined ? {} : { serviceurl: input.serviceUrl },
+  )
     .setProtectedHeader({ alg: "RS256", kid: "kid-1" })
     .setAudience(input.audience)
     .setIssuer(input.issuer ?? "https://api.botframework.com")
