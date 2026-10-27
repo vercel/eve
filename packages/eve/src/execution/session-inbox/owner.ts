@@ -48,7 +48,16 @@ export async function resumeRunnableHook(
   payload: unknown,
   inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
-  if (inbox !== undefined && inbox.length <= 8_192 && routesToOwnerDeployment(await getWorld())) {
+  const world = inbox !== undefined ? await getWorld() : undefined;
+  if (
+    inbox !== undefined &&
+    inbox.length <= 8_192 &&
+    world !== undefined &&
+    routesToOwnerDeployment(world) &&
+    world.capabilities !== undefined &&
+    "resolvedHookResume" in world.capabilities &&
+    world.capabilities.resolvedHookResume === true
+  ) {
     const parsed = readInboxHandle(inbox);
     const cached = parsed?.token === token ? parsed : undefined;
     if (cached !== undefined) {
