@@ -1292,8 +1292,7 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectRoot);
   });
 
-  // Expected failure until #5422 is fixed: staging runs mkdtemp inside the missing `apps/`.
-  it.fails("creates missing parent directories for a nested fresh target", async () => {
+  it("creates missing parent directories for a nested fresh target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-nested-parent-"));
     const projectRoot = join(parentDirectory, "apps", "my-agent");
     const deps = dependencies();

@@ -47,7 +47,7 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 | `eve init` or `eve init .` in an existing project                                                          | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files |
 | `eve init path/to/app`                                                                                     | Adds an agent to the existing package at `path/to/app`                                                                 |
 
-Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
+Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`. A new project path can be nested, such as `eve init apps/my-agent`; eve creates missing parent directories.
 
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
