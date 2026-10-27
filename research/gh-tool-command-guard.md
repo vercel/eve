@@ -162,7 +162,9 @@ the test if bash exits non-zero. The test passes with bash 3.2.57 (macOS) and ba
   command in bash. Unquoted parentheses are a bash syntax error. An unquoted `#` that
   starts a word starts a comment. A `~` that starts a word, or follows the `=` of an
   assignment-like word such as `body=~/n.md`, expands to the home directory. A `*`, `?`,
-  or bracket expression such as `[ax]` that matches files expands to their names.
+  or bracket expression such as `[ax]` that matches files expands to their names. The
+  input schema trims leading and trailing whitespace before parsing, so a trailing `\ `
+  is lost.
 - bash 3.2 leaves a brace sequence with an increment, such as `{1..3..+1}`, literal, and
   bash 4 and later expand it. The parser refuses it, and the unit tests cover it outside
   the parity table.
