@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scenario-apps/nuxt-eve-service.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { waitForCondition } from "./dev-server-harness.js";
+import { stopChildProcess, waitForCondition } from "./dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -65,7 +65,14 @@ describe("framework-nuxt dev", () => {
 
     try {
       await waitForCondition(
-        async () => (await fetchStatus(`${origin}/`)) === 200,
+        async () => {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            throw new Error(
+              `nuxt dev exited before serving the page (code ${String(child.exitCode)}, signal ${String(child.signalCode)}).\n${output}`,
+            );
+          }
+          return (await fetchStatus(`${origin}/`)) === 200;
+        },
         () => `Timed out waiting for nuxt dev to serve the page.\n${output}`,
         180_000,
       );
@@ -77,7 +84,7 @@ describe("framework-nuxt dev", () => {
 
       expect(importSource).toContain("/.cache/vite/client/deps/");
     } finally {
-      child.kill();
+      await stopChildProcess(child);
     }
   }, 300_000);
 });
