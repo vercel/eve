@@ -10,6 +10,7 @@ This guide covers breaking changes to agent definitions, approvals, channels, cl
 - Rebuild and republish installed extensions. Earlier epoch-based distributions cannot be loaded by this release; see [Extensions](../extensions).
 - Keep the deployments that own existing sessions available. This release requires checkpoint version 18 and cannot take over sessions with earlier checkpoint formats. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
 - Update event consumers, frontend persistence, and custom channel handlers using the mappings below. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
+- If your application saves session history, follows streams itself, or derives outcomes from events, plan that work with [Migrate application-owned state](#migrate-application-owned-state).
 
 ## Restore saved history
 
@@ -126,3 +127,73 @@ export default defineHook({
 - Replace `eve remote invoke` with `eve remote connect --print <prompt>` for one-shot requests. Use `eve/client` for scripted multi-turn sessions and answers; see the [CLI reference](../reference/cli#eve-remote-connect).
 - MCP's `input_required` now covers sign-ins as well as approvals and questions. Answer non-sign-in interactions using `responses: [{ interactionId, optionId?, text? }]`; complete sign-ins externally. Direct `invokeTool` calls return call-shaped outcomes, not conversational pauses. See [MCP](../channels/mcp).
 - Remote agent protocol 3 supports relaying interactions. A protocol-3 caller relays a protocol-2 remote agent's approvals, questions, and sign-ins, but a protocol-3 remote agent can't relay them to a protocol-2 caller, so upgrade callers before the remote agents they call. Older peers can still exchange results. See [Upgrading callers and remote agents](../guides/remote-agents#upgrading-callers-and-remote-agents).
+
+## Migrate application-owned state
+
+The tables above cover renamed events and APIs. Applications that save history, follow streams, or track lifecycle state themselves also need to decide which of that state they still own, and how saved history moves across the upgrade.
+
+### Decide what eve owns
+
+Let eve own live execution and observation: turn lifecycle, streaming and reconnection, optimistic sends, and interaction state. Use `useEveAgent` or `SessionStore` to follow a session, `view` queries from `eve/events` for lifecycle questions, and `delivery.result()` for a request's outcome.
+
+Keep the records eve doesn't hold: saved archives and their cursors, forks and shared copies, feedback, authorization and responder policy, budgets you authored, and ledgers of external effects such as uploads or published changes.
+
+- Replace an application-owned lifecycle model as a whole. A second reducer layered on the store becomes another source of truth that can disagree with it.
+- Adapt at the presentation boundary. Map `messages`, `view`, and interaction parts into your existing components instead of rebuilding a lifecycle to feed them.
+- Decide before you start which v26 behaviors were incidental. Otherwise every difference becomes a parity requirement, and old lifecycle details get rebuilt on top of the new model.
+
+### Find every consumer
+
+A clean typecheck doesn't find every v26 consumer. Code that parses NDJSON or saved JSON with locally declared event types compiles against any `eve` version and ignores facts it doesn't recognize.
+
+- Search for v26 event names such as `message.completed`, `action.result`, `actions.requested`, and `authorization.required`, not only for `eve` imports. Include scripts, test helpers, and server routes that proxy streams.
+- Run a recorded v27 stream through each consumer and check its output. A reducer that returns nothing, or a filter that matches nothing, still compiles.
+- Check server code that filters or redacts streamed content before it reaches a browser. A filter keyed on v26 event types passes v27 `content.delta` and `content.completed` events through unchanged.
+- Check consumers in other deployments, such as remote agents and their callers, along with their protocol versions.
+
+### Persist and restore history
+
+Saved history fails in predictable ways: cursors computed from the wrong unit, incomplete reads treated as complete, and caches converted with the wrong tool.
+
+- **Cursors count source lines, not events.** One line can hold several facts, and converted history can cover lines that produced none. Save the cursor and `meta` the reader reports. Never derive a cursor from an array length.
+- **Advance computed cursors only past complete lines.** An event with `meta.endOfLine: false` has more events in the same line. If you compute a cursor yourself, end it at the last complete line so a reload resumes at a line boundary.
+- **Hydrate one session at a time.** A saved record can hold several sessions, for example after a chat moves to a new session or a fork copies its parent's history. Select the current session's events before you pass them to `initialEvents` or `convertLegacyEvents`.
+- **Replay instead of repairing.** When a saved prefix is incomplete or malformed, lacks its `session.started`, or mixes v26 and v27 events, read the stream again from position 0 while it's still available. If the stream has expired, convert only the v26 prefix and keep later v27 events and their metadata unchanged.
+- **Don't convert folded caches.** Message lists produced by v26 reducers aren't raw events and aren't input for `convertLegacyEvents`. Re-read the stream, or render those caches as read-only records.
+- **Treat missing data as unknown.** A partial read must not overwrite a fuller archive. An expired stream must not replace saved history with an empty projection. A child session you can no longer read hasn't necessarily completed. Keep the saved copy until a complete read replaces it.
+- **Guard concurrent writes.** Browser saves, server catch-up reads, and background capture can race. Bind each write to its session, and reject a cursor that moves backward. Track each child session's archive progress separately from its parent's cursor.
+- **Keep copied history inert.** Interactions in a fork, shared copy, or historical transcript belong to the original session. Render them as read-only, not as live approval or sign-in controls.
+- **Qualify IDs with the session.** Turn and message IDs aren't guaranteed to be unique across sessions. When one record holds several sessions, include the session ID in keys for derived UI state.
+
+### Attribute results to their delivery
+
+- Bind each outcome to the delivery that requested it. Use `delivery.result()` or that delivery's own turn, not the session's latest turn or every event after a polling cursor. Otherwise a queued or concurrent turn can claim another turn's output.
+- For a child session that several calls reuse, follow the `child.sent` links from a call to the child delivery it sent, for example with `agentCallActivity(state, callId)` from `eve/client`. If that link is missing, treat the result as unknown instead of using the child's latest output.
+- Treat acceptance as admission, not completion. When an outcome is unconfirmed, read it again instead of resending after a timeout. Use `operationId` for create requests that you retry; see [the eve channel](../channels/eve).
+- Read payloads by their documented shape. `turn.settled.data.reply` lists the reply's part IDs, not its text; use `reply(ctx.view, turnId)` in hooks and channels, or `messages` in the frontend.
+- Classify messages by provenance, not wording. Human text that resembles a status notification is still human text.
+
+### Simplify code eve now owns
+
+Application code that mirrors eve's state is usually removable. Measure the result by the state owners you remove, not only by deleted lines.
+
+| Usually replaceable                                                 | Replacement                                                                        |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Custom stream followers, reconnect loops, and optimistic-send state | `useEveAgent` or `SessionStore`                                                    |
+| Hook or session state that mirrors turns, calls, tasks, or models   | `ctx.view` and selectors from `eve/events`                                         |
+| Hand-written finite stream readers and history scanners             | `session.stream({ follow: false })` or `session.snapshot()`                        |
+| Observers that scan replies or terminal events for an outcome       | `delivery.result()`                                                                |
+| Conversions from `Interaction` to a custom request shape and back   | Native `Interaction` values and the channel's interaction rendering                |
+| Settlement or retirement code for interaction cards that eve posted | The channel's native settlement; your renderer still updates cards it posts itself |
+| Event-keyed dynamic capability maps                                 | `defineDynamic(ctx => value)`                                                      |
+| Local v26-to-v27 event translators                                  | `convertLegacyEvents` during migration, or a fresh read from position 0            |
+| Tests that only exercised removed machinery                         | Delete them with that machinery; keep tests for behavior that remains              |
+
+Keep code that enforces your application's own contracts: archive storage and cursor guards, effect ledgers and deduplication receipts, authorization and responder checks, budgets you authored, `operationId` retries, and product UI such as composers, branches, and sharing.
+
+### Verify the migration
+
+- Build fixtures from real saved history. Record v26 data with the release you're upgrading from, and pass it through a JSON round trip so tests use the shape you actually store.
+- Write a failing regression test before each fix. For authorization and attribution checks, remove the check temporarily and confirm that a test fails.
+- Test history paths explicitly: expired streams, sessions saved mid-turn, forks, records holding several sessions, and caches written across the upgrade.
+- Report typechecks, builds, tests, and live journeys separately. A passing build doesn't establish behavior. List the journeys you haven't exercised, such as sign-ins, attachments, and channel delivery, before you roll out.
