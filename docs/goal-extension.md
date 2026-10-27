@@ -3,7 +3,7 @@ title: "Goal Extension"
 description: "Give a session a durable goal that a judge checks after every turn, and let the agent keep working until it's met."
 ---
 
-`eve/extensions/goal` keeps an agent working toward an objective across turns without someone prompting each step. After every turn, a judge reads the objective and what the turn surfaced, and decides whether the goal is met. If it isn't, the extension starts the next turn on its own, guided by the judge's reason. It stops when the goal is met, judged impossible, paused, or out of budget. The extension ships inside the `eve` package and is built on hook [`ctx.send()`](./guides/hooks#continue-the-session-from-a-hook).
+`eve/extensions/goal` keeps an agent working toward an objective across turns without someone prompting each step. After every turn, a judge reads the objective and what the turn surfaced, and decides whether the goal is met. If it isn't, the extension starts the next turn on its own, guided by the judge's reason. It stops when the goal is met, judged impossible, paused, or out of budget. The extension ships inside the `eve` package and is built on hook [`ctx.followUp()`](./guides/hooks#follow-up-a-turn-from-a-hook).
 
 ## Mount the extension
 
@@ -17,7 +17,7 @@ export default goal({ maxRuns: 30, maxCostUsd: 25 });
 | ------------ | -------------------------- | ---------------------------------------------------------------------- |
 | `model`      | `"openai/gpt-6-luna-fast"` | The default judge's model: an AI Gateway model ID or a model instance. |
 | `judge`      | a structured-output call   | Replaces the default judge: `(input) => Promise<{ verdict, reason }>`. |
-| `maxRuns`    | `50`                       | Continuations a goal may send before it pauses.                        |
+| `maxRuns`    | `50`                       | Follow-ups a goal may queue before it pauses.                          |
 | `maxCostUsd` | unlimited                  | Model spend, in US dollars, a goal may add before it pauses.           |
 
 A model ID goes through AI SDK's default provider, AI Gateway, so the deployment needs Gateway credentials such as `AI_GATEWAY_API_KEY` or Vercel OIDC. To judge with eve's provider authentication instead, pass a model instance such as `openai("gpt-6-luna-fast")` from `eve/models/openai`.
@@ -45,7 +45,7 @@ After each turn of an active goal settles, the extension pauses the goal when:
 - the goal reached `maxRuns`, or its spend reached `maxCostUsd`, or
 - the judge failed.
 
-Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. On `continue`, the extension sends `Continue working toward the goal. <reason>` as the session's next message.
+Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. On `continue`, the extension follows up with `Continue working toward the goal. <reason>` as the session's next message. The model reads it with a note that the hook sent it, not a person.
 
 The judge sees the turn's input, its reply, and its settled tool calls, not the whole transcript, so the agent should prove progress with tool output. A person's message always wins: the continuation yields to any turn that starts first, and that turn is judged next with the person's input in view. A "stop" or a change of direction reaches the verdict.
 

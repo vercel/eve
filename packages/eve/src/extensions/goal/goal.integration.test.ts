@@ -20,7 +20,7 @@ import set from "./extension/tools/set.ts";
 import status from "./extension/tools/status.ts";
 
 // The goal loop end to end in one session: the model sets a goal, the judge keeps it going
-// through the hook's ctx.send(), and the session stops once the judge finds it met.
+// through the hook's ctx.followUp(), and the session stops once the judge finds it met.
 
 const ALICE = {
   attributes: {},

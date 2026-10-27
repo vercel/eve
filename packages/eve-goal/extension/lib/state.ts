@@ -6,7 +6,7 @@ export type GoalStatus = "active" | "paused" | "met" | "impossible";
 export interface Goal {
   readonly objective: string;
   readonly status: GoalStatus;
-  /** Continuations the goal has sent. */
+  /** Follow-ups the goal has queued. */
   readonly runs: number;
   readonly maxRuns: number;
   /** Continuation turns in a row that made no tool calls. */

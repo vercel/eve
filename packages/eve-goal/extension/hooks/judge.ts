@@ -24,7 +24,11 @@ export default defineHook({
       const checked = check(
         current,
         {
-          continued: input.length > 0 && input.every(({ source }) => source && "hook" in source),
+          continued:
+            input.length > 0 &&
+            input.every(
+              ({ source }) => source !== undefined && "hook" in source && source.hook !== undefined,
+            ),
           costUsd: usage(ctx.view).total.costUsd,
           outcome: event.data.outcome,
           toolCalls: turnCalls.length,
@@ -52,7 +56,8 @@ export default defineHook({
       });
       const next = settle(current, verdict, checked.idleRuns);
       goal.update(() => next.goal);
-      if (next.message !== undefined) ctx.send(next.message);
+      // `queued: false` only when another hook already followed up this turn; it goes on either way.
+      if (next.message !== undefined) ctx.followUp(next.message);
     },
   },
 });
