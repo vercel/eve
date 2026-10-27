@@ -51,6 +51,8 @@ test("parses text that cannot expand without a shell into the argv bash produces
     ['gh pr comment 1 --body "one \\\ntwo"', ["gh", "pr", "comment", "1", "--body", "one two"]],
     ["gh pr comment 1 --body 'one \\\ntwo'", ["gh", "pr", "comment", "1", "--body", "one \\\ntwo"]],
     ["gh pr view {..} {a..} {foo..bar}", ["gh", "pr", "view", "{..}", "{a..}", "{foo..bar}"]],
+    ["gh pr comment 1 --body x\\ ", ["gh", "pr", "comment", "1", "--body", "x "]],
+    ["\n gh pr view 1 \n", ["gh", "pr", "view", "1"]],
     ["gh pr comment 1 --body a\u00a0b\rc", ["gh", "pr", "comment", "1", "--body", "a\u00a0b\rc"]],
     ['gh pr comment 1 --body "C:\\path"', ["gh", "pr", "comment", "1", "--body", "C:\\path"]],
     [
@@ -87,6 +89,11 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
     ["gh pr view 1 > out", "redirect", /">" cannot redirect/u],
     ["gh pr create --body-file - <<EOF", "heredoc", /"<<" cannot start a heredoc.*--body-file/u],
     [
+      "gh pr create --body-file - <<'EOF'\nIt's done\nEOF",
+      "heredoc",
+      /"<<" cannot start a heredoc/u,
+    ],
+    [
       'gh pr comment 1 --body "$(cat notes.md)"',
       "substitution",
       /"\$\(" is not expanded.*--body-file/u,
@@ -99,6 +106,7 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
       /"\$\(\(" is not evaluated\. Write the computed value/u,
     ],
     ["gh pr comment 1 --body $'a\\nb'", "substitution", /quoting is not interpreted\. Use plain/u],
+    ["gh pr comment 1 --body $'it\\'s'", "substitution", /"\$'" quoting is not interpreted/u],
     ["gh pr comment 1 --body `id`", "substitution", /"`" is not expanded.*single quotes/u],
     ['gh pr comment 1 --body "${BODY}"', "variable", /"\$\{" is not expanded/u],
     [
@@ -109,6 +117,10 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
     ["gh pr view {1,2}", "brace_expansion", /"\{1,2\}" is not expanded into separate arguments/u],
     ["gh pr view pr-{1..3}", "brace_expansion", /"\{1\.\.3\}" is not expanded/u],
     ["gh pr view pr-{1.\\\n.3}", "brace_expansion", /"\{1\.\.3\}" is not expanded/u],
+    ["gh pr view {+1..3}", "brace_expansion", /"\{\+1\.\.3\}" is not expanded/u],
+    ["gh pr view {1..+3}", "brace_expansion", /"\{1\.\.\+3\}" is not expanded/u],
+    ["gh pr view {1..3..+1}", "brace_expansion", /"\{1\.\.3\.\.\+1\}" is not expanded/u],
+    ["gh pr view {a..c..+2}", "brace_expansion", /"\{a\.\.c\.\.\+2\}" is not expanded/u],
     ['gh pr comment 1 --body "costs $5"', "variable", /"\$5" is not expanded\..*write \\\$5/u],
     ["GH_TOKEN=stolen gh auth status", "env_assignment", /"GH_TOKEN=" cannot set the environment/u],
     ["env GH_TOKEN=stolen gh auth status", "env_assignment", /"env" cannot set the environment/u],

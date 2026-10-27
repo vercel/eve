@@ -151,7 +151,7 @@ const NO_SHELL = "GitHub commands run without a shell";
 const GIT_REMOTE_COMMANDS = "Authenticated git supports fetch, ls-remote, pull, and push";
 const WORD_SEPARATORS = " \t\n";
 const DOUBLE_QUOTE_ESCAPES = '$`"\\';
-const BRACE_SEQUENCE = /^(?:-?\d+\.\.-?\d+|[A-Za-z]\.\.[A-Za-z])(?:\.\.-?\d+)?$/u;
+const BRACE_SEQUENCE = /^(?:[-+]?\d+\.\.[-+]?\d+|[A-Za-z]\.\.[A-Za-z])(?:\.\.[-+]?\d+)?$/u;
 const ARITHMETIC_FIX = "is not evaluated. Write the computed value, or write \\$ for a literal $.";
 const QUOTING_FIX =
   "quoting is not interpreted. Use plain single or double quotes, or write \\$ for a literal $.";
@@ -355,7 +355,7 @@ async function withGitHubCredentialLease<T>(
 }
 
 export function parseCommand(command: string): string[] {
-  const value = joinContinuedLines(command).replace(/^[ \t\n]+|[ \t\n]+$/gu, "");
+  const value = joinContinuedLines(command);
   if (!value) throw new GitHubCommandError("invalid_input", "GitHub command must not be empty.");
   if (value.includes("\0")) {
     throw new GitHubCommandError("invalid_input", "GitHub command contains a NUL character.");
@@ -367,9 +367,16 @@ export function parseCommand(command: string): string[] {
   let quoteStart = 0;
   let escaped = false;
   let started = false;
+  // A newline before the first word or after the last one separates no commands.
+  const contentStart = value.length - value.replace(/^[ \t\n]+/u, "").length;
+  const contentEnd = value.replace(/[ \t\n]+$/u, "").length;
   let refused: GitHubCommandError | undefined;
+  let heredoc = false;
   const refuse = (syntax: ShellSyntax | undefined) => {
-    if (syntax) refused ??= shellSyntaxError(started ? [...argv, token] : argv, syntax);
+    if (!syntax) return;
+    refused ??= shellSyntaxError(started ? [...argv, token] : argv, syntax);
+    // Quotes inside $'…' follow escape rules the parser does not model.
+    if (syntax.token === "$'") throw refused;
   };
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]!;
@@ -389,13 +396,19 @@ export function parseCommand(command: string): string[] {
       else token += character;
       continue;
     }
-    refuse(
-      character === "$"
-        ? expansionAt(value, index, quote === "double")
-        : quote === null
-          ? operatorAt(value, index)
-          : undefined,
-    );
+    if (character === "$") {
+      refuse(expansionAt(value, index, quote === "double"));
+    } else if (quote === null && character === "\n" && heredoc) {
+      throw refused!;
+    } else if (
+      quote === null &&
+      (character !== "\n" || (index >= contentStart && index < contentEnd))
+    ) {
+      const operator = operatorAt(value, index);
+      refuse(operator);
+      if (operator?.token === "<<") heredoc = true;
+      if (operator) index += operator.token.length - 1;
+    }
     if (quote === "double") {
       if (character === '"') quote = null;
       else token += character;
@@ -457,6 +470,7 @@ function operatorAt(value: string, index: number): ShellSyntax | undefined {
   const pair = value.slice(index, index + 2);
   if (pair === "&&" || pair === "||") return { code: "chain", token: pair };
   if (pair === "<(" || pair === ">(") return { code: "substitution", token: pair };
+  if (value.startsWith("<<<", index)) return { code: "heredoc", token: "<<<" };
   if (pair === "<<") return { code: "heredoc", token: pair };
   if (pair === "&>") return { code: "redirect", token: pair };
   const character = value[index]!;

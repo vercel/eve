@@ -78,6 +78,7 @@ const TOKENS: readonly (readonly [string, Expectation, Expectation, Expectation]
   ["{a,b}", "refused", "refused", "same"],
   ["{1..3}", "refused", "refused", "same"],
   ["{a..c}", "refused", "refused", "same"],
+  ["{+1..3}", "refused", "refused", "same"],
   ["{owner}", "same", "same", "same"],
   ["{}", "same", "same", "same"],
   ["{..}", "same", "same", "same"],
@@ -86,8 +87,10 @@ const TOKENS: readonly (readonly [string, Expectation, Expectation, Expectation]
   [")", "differs", "differs", "same"],
   ["#", "same", "differs", "same"],
   ["~", "same", "differs", "same"],
+  ["=~/n", "differs", "same", "same"],
   ["*", "same", "differs", "same"],
   ["?", "same", "differs", "same"],
+  ["[ax]", "same", "differs", "same"],
 ];
 
 function corpus() {
