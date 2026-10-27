@@ -4,7 +4,7 @@ import { parseCreateBody, parseSessionMessageBody } from "#eve-channel/request.j
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 describe("HTTP attachment reference boundary", () => {
-  it.each(["chat-sdk-file:?p=placeholder", "CHAT-SDK-FILE:?p=placeholder"])(
+  it.each(["chat-sdk-file:?p=placeholder", "CHAT-SDK-FILE:?p=placeholder", "eve-url://["])(
     "rejects internal attachment marker %s on creates and follow-ups",
     (data) => {
       const payload = { message: [{ type: "file", mediaType: "image/png", data }] };

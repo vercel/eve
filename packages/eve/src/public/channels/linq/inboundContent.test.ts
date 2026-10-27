@@ -20,6 +20,23 @@ describe("Linq attachment downloads", () => {
     },
   );
 
+  it("preserves the upload-limit explanation for oversized downloads", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        headers: { "content-length": String(25 * 1024 * 1024 + 1) },
+      }),
+    );
+    const attachment = rehydrateLinqAttachment({
+      type: "image",
+      url: "https://files.example/photo.png",
+    });
+
+    await expect(attachment.fetchData!()).rejects.toMatchObject({
+      name: "EveAttachmentError",
+      message: "it is over the 25 MB upload limit.",
+    });
+  });
+
   it("downloads public HTTPS attachments as bytes without credentials", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("photo"));
     const attachment = rehydrateLinqAttachment({

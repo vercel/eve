@@ -113,7 +113,7 @@ export async function readBoundedResponse(
 
   if (declaredLength !== undefined && declaredLength > maxResponseSize) {
     await cancelResponseBody(response);
-    throw createResponseTooLargeError(maxResponseSize);
+    throw new ResponseTooLargeError(maxResponseSize);
   }
 
   const body = await readBoundedBody(response, maxResponseSize);
@@ -154,7 +154,7 @@ async function readBoundedBody(response: Response, maxResponseSize: number): Pro
       byteLength += value.byteLength;
       if (byteLength > maxResponseSize) {
         await reader.cancel();
-        throw createResponseTooLargeError(maxResponseSize);
+        throw new ResponseTooLargeError(maxResponseSize);
       }
 
       chunks.push(value);
@@ -180,6 +180,9 @@ export async function cancelResponseBody(response: Response): Promise<void> {
   }
 }
 
-function createResponseTooLargeError(maxResponseSize: number): Error {
-  return new Error(`Response too large (exceeds ${maxResponseSize} bytes).`);
+export class ResponseTooLargeError extends Error {
+  constructor(maxResponseSize: number) {
+    super(`Response too large (exceeds ${maxResponseSize} bytes).`);
+    this.name = "ResponseTooLargeError";
+  }
 }

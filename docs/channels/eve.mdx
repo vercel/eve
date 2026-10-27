@@ -204,15 +204,15 @@ that built it.
 
 ### Send files
 
-A message can mix text and file parts. A file part's `data` is base64, a `data:` URL, or a URL. Framework-generated attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`) are not accepted in HTTP request bodies; they return `400 Bad Request`.
-
-For example:
+A message can mix text and file parts. A file part's `data` is base64, a `data:` URL, or a URL:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -H "Content-Type: application/json" \
   -d '{"message":[{"type":"text","text":"Summarize this report."},{"type":"file","mediaType":"application/pdf","filename":"report.pdf","data":"data:application/pdf;base64,JVBERi0xLjQK..."}]}'
 ```
+
+Framework-generated attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`) are not accepted in HTTP request bodies; they return `400 Bad Request`.
 
 `uploadPolicy` sets the size cap and allowed media types, 25 MB and every type by default. A request whose inline file breaks the policy returns `413` for size or `415` for type. Inline bytes also count toward the request body limit of the platform that serves the channel. On Vercel Functions that limit is 4.5 MB, so a base64 file stops at about 3.3 MB.
 
