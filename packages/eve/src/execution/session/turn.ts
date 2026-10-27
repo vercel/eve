@@ -7,6 +7,7 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import {
   isSteeringMessage,
+  steeringDeliveryId,
   type SessionInputQueue,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
@@ -531,7 +532,7 @@ class ActiveTurn {
       isSteeringMessage(delivery, this.identity) &&
       !this.input.cursor.optionalSessionState?.hasProxyInputRequests
     )
-      this.steeringController.abort(delivery.deliveryMetadata?.[0]?.deliveryId);
+      this.steeringController.abort(steeringDeliveryId(delivery));
   };
 
   get signal(): AbortSignal {

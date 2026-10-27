@@ -91,7 +91,7 @@ describe("generation steering with the real AI SDK", () => {
     }
   });
 
-  it.each(["input.requested", "turn.completed", "step.failed"] as const)(
+  it.each(["input.requested", "step.completed", "turn.completed", "step.failed"] as const)(
     "finishes committing %s when a correction arrives during publication",
     async (boundary) => {
       const logs = captureLogRecords();
@@ -310,7 +310,7 @@ describe("generation steering with the real AI SDK", () => {
       .map((event) => `${event.type}:${(event as { data: { stepIndex: number } }).data.stepIndex}`);
     expect(stepEvents).toEqual([
       "step.started:0",
-      expect.stringMatching(/^step\.(completed|failed):0$/),
+      expect.stringMatching("step.completed:0"),
       "step.started:1",
       "step.completed:1",
     ]);
