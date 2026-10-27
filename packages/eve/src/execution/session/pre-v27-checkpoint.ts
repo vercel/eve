@@ -1,4 +1,4 @@
-// Imports a handoff checkpoint from an owner before v27 (eve 0.66–0.83, checkpoint versions 8–17)
+// Imports a handoff checkpoint from an owner before v27 (eve 0.69–0.83, checkpoint versions 10–17)
 // the way an incompatible upgrade starts over: the successor keeps the session's identity, authored
 // state, and conversation, which it compacts before anything else, and leaves the earlier build's
 // framework records behind. It continues the session's stream after the lines already on it.
@@ -30,8 +30,9 @@ export type PreV27CheckpointImport =
   | { readonly kind: "incompatible"; readonly detail: string };
 
 export function isPreV27CheckpointVersion(version: unknown): version is number {
+  // eve 0.68 and earlier saved contexts in a layout that holds keys this build no longer defines.
   return (
-    typeof version === "number" && Number.isSafeInteger(version) && version >= 8 && version <= 17
+    typeof version === "number" && Number.isSafeInteger(version) && version >= 10 && version <= 17
   );
 }
 
@@ -107,17 +108,16 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   const state = session.state === undefined ? {} : readRecord(session, "state");
   const turnCount = readTurnCount(sessionState, state);
   requireFinishedTasks(state["eve.taskTable"]);
-  requireNoSubagentHandles(state["eve.agent.handles"]);
-  // eve 0.66–0.69 kept history in the durable snapshot.
+  // eve 0.69 kept history in the durable snapshot.
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
   const context = readRecord(checkpoint, "serializedContext");
   // A caller from before v27 gets its result but no relayed requests, which it can't read.
   const callback = context[SESSION_CALLBACK_CONTEXT_KEY_NAME];
   const earlierCaller = isObject(callback)
-    ? context[LEGACY_REMOTE_CALLER_KEY] !== undefined || callback.taskId !== undefined
-      ? 1
-      : 2
+    ? context[LEGACY_REMOTE_CALLER_KEY] === undefined
+      ? 2
+      : 1
     : undefined;
   return {
     checkpoint: {
@@ -195,13 +195,6 @@ function requireFinishedTasks(table: unknown): void {
     )
       refuse("session holds a running task");
   }
-}
-
-/** eve 0.66–0.68 kept idle subagent sessions running for reuse; only their owner stops them. */
-function requireNoSubagentHandles(store: unknown): void {
-  if (store === undefined) return;
-  if (!isObject(store) || !Array.isArray(store.handles) || store.handles.length > 0)
-    refuse("session keeps subagent sessions");
 }
 
 function importHistory(history: unknown[]) {

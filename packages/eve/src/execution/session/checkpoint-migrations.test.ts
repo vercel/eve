@@ -39,16 +39,16 @@ describe("migrateSessionCheckpoint", () => {
     },
   );
 
-  it.each([7, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
-    expect(migrateSessionCheckpoint({ ...eve066Checkpoint(), version })).toMatchObject({
+  it.each([9, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
+    expect(migrateSessionCheckpoint({ ...eve069Checkpoint(), version })).toMatchObject({
       kind: "incompatible",
     });
   });
 });
 
 describe("migrateSessionCheckpoint from an owner before v27", () => {
-  it("imports a checkpoint written by an eve 0.66 owner", () => {
-    expect(migrateSessionCheckpoint(eve066Checkpoint())).toEqual({
+  it("imports a checkpoint written by an eve 0.69 owner", () => {
+    expect(migrateSessionCheckpoint(eve069Checkpoint())).toEqual({
       kind: "pre-v27",
       imported: {
         checkpoint: {
@@ -58,10 +58,10 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
           history: [
             { content: "Alice asks for a report.", kind: "user", role: "user" },
             { content: [{ text: "Started the report.", type: "text" }], role: "assistant" },
-            { content: "The report is ready.", kind: "user", role: "user" },
+            { content: "The report is ready.", kind: "task.result", role: "user" },
           ],
           serializedContext: {
-            ...eve066Checkpoint().serializedContext,
+            ...eve069Checkpoint().serializedContext,
             "eve.capabilities": { requestInput: false },
             "eve.earlierRemoteCaller": 1,
           },
@@ -131,13 +131,6 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
     expect(migrateSessionCheckpoint(saved)).toMatchObject({ kind: "incompatible" });
     expect(saved).toEqual(before);
   });
-
-  it("keeps an eve 0.66 session that keeps subagent sessions on its owner", () => {
-    expect(migrateSessionCheckpoint(eve066Checkpoint({ subagents: true }))).toEqual({
-      detail: "checkpoint version 8: session keeps subagent sessions",
-      kind: "incompatible",
-    });
-  });
 });
 
 const PROJECTION = "eve.harness.sessionProjection";
@@ -181,19 +174,17 @@ function eve083Checkpoint(state: Record<string, unknown>, context: Record<string
   };
 }
 
-/** Trimmed from a handoff checkpoint captured from an eve 0.66.1 owner. */
-function eve066Checkpoint({ subagents = false }: { readonly subagents?: boolean } = {}) {
+/** An idle session an eve 0.69 owner hands off after its first turn: history still in its snapshot. */
+function eve069Checkpoint() {
   return {
-    mode: "conversation",
     serializedContext: {
       "eve.auth": null,
       "eve.bundle": { source: { kind: "bundled" } },
       "eve.channel": { kind: "http", state: {} },
-      "eve.mode": "conversation",
-      "eve.runtime.taskDeliveryPolicy": "auto",
-      "eve.sessionCallback": { ...CALLBACK, taskId: "caller-task" },
+      "eve.legacyRemoteAgentCaller": { taskId: "caller-task" },
+      "eve.sessionCallback": CALLBACK,
       "eve.sessionTitle": "Alice asks for a report.",
-      "eve.turnTaskDelivery": "none",
+      "eve.stateLayout": 1,
     },
     sessionState: {
       continuationToken: "",
@@ -207,62 +198,16 @@ function eve066Checkpoint({ subagents = false }: { readonly subagents?: boolean 
           history: [
             { content: "Alice asks for a report.", kind: "user", role: "user" },
             { content: [{ text: "Started the report.", type: "text" }], role: "assistant" },
-            { content: "The report is ready.", kind: "execution.background_task", role: "user" },
+            { content: "The report is ready.", kind: "task.result", role: "user" },
           ],
           sandboxState: { session: null },
           sessionId: "session-1",
-          state: {
-            ...(subagents && {
-              "eve.agent.handles": {
-                handles: [
-                  {
-                    address: {
-                      continuationToken: "local-token",
-                      kind: "agent/local",
-                      sessionId: "child-local",
-                    },
-                    phase: "parked",
-                  },
-                  {
-                    address: {
-                      kind: "agent/remote",
-                      sessionId: "child-remote",
-                      url: "https://remote.example",
-                    },
-                    phase: "available",
-                  },
-                ],
-              },
-            }),
-            "eve.harness.requestEnvelopeTokens": 2483.5,
-            "eve.workflowTool": {
-              runs: [
-                {
-                  address: { hookToken: "hook-1", runId: "run-1" },
-                  callId: "call-1",
-                  lifetime: "session",
-                  origin: { stepIndex: 0, turnId: "turn_0" },
-                  task: {
-                    dispatchContext: { auth: { current: null, initiator: null } },
-                    metadata: { kind: "tool", name: "report" },
-                    outcome: {
-                      lastOutput: { type: "result", value: "ready" },
-                      status: "completed",
-                    },
-                    taskId: "task-1",
-                  },
-                  toolName: "report",
-                },
-              ],
-              version: 3,
-            },
-          },
-          taskId: "task-0",
+          state: { "eve.harness.requestEnvelopeTokens": 2483.5 },
         },
       },
       version: 1,
     },
     sessionTimeoutMs: false,
-    version: 8,
+    version: 10,
   };
 }

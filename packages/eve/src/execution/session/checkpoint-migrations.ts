@@ -41,7 +41,7 @@ const CHECKPOINT_UPGRADES: Readonly<
 /**
  * Upgrades a checkpoint written by an older eve build to the current shape.
  * Pure, so the session workflow can run it before validation. Newer
- * checkpoints and those older than eve 0.66 are incompatible.
+ * checkpoints and those older than eve 0.69 are incompatible.
  */
 export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpointMigration {
   if (!isObject(checkpoint)) return { kind: "incompatible", detail: "checkpoint is not an object" };
@@ -63,7 +63,7 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   ) {
     return {
       kind: "incompatible",
-      detail: `checkpoint version ${JSON.stringify(version)} is outside the supported ranges: 8-17 import, ${MIN_SESSION_CHECKPOINT_VERSION}-${SESSION_CHECKPOINT_VERSION} upgrade`,
+      detail: `checkpoint version ${JSON.stringify(version)} is outside the supported ranges: 10-17 import, ${MIN_SESSION_CHECKPOINT_VERSION}-${SESSION_CHECKPOINT_VERSION} upgrade`,
     };
   }
   let current: CheckpointRecord = checkpoint;
