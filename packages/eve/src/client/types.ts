@@ -259,7 +259,7 @@ export type { Delivery, DeliveryResult } from "#shared/delivery.js";
  * Serializable cursor for one fixed, ID-addressed client session.
  */
 export interface ClientSessionState {
-  /** Opaque delivery routing hint; restored sessions resolve it on their first send. */
+  /** Opaque delivery routing hint; preserve it when saving and restoring a session. */
   readonly inbox?: string;
   readonly sessionId: string;
   readonly streamIndex: number;
