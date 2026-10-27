@@ -20,15 +20,15 @@ export default defineRemoteAgent({
 
 `defineRemoteAgent` accepts:
 
-| Parameter          | Type                    | Required | Default           | Description                                                                                                                                        |
-| ------------------ | ----------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`              | `string`                | Yes      | n/a               | Base URL of the remote eve deployment. Compute runtime URLs in a dynamic definition (see [Runtime URLs](#runtime-urls)).                           |
-| `description`      | `string`                | Yes      | n/a               | Model-visible delegation description.                                                                                                              |
-| `auth`             | `OutboundAuthFn`        | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                         |
-| `forwardPrincipal` | `boolean`               | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)). |
-| `headers`          | `HeadersValue`          | No       | none              | Static or lazily resolved request headers.                                                                                                         |
-| `path`             | `string`                | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                            |
-| `tool`             | `boolean \| "deferred"` | No       | `true`            | Expose the remote agent as a tool to the parent model. Set `false` to allow only `ctx.agent()` calls from authored workflow tools.                 |
+| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                        |
+| ------------------ | --------------------------------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment. Use a function for [runtime URLs](#runtime-urls).                                                           |
+| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                              |
+| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                         |
+| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)). |
+| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                         |
+| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                            |
+| `tool`             | `boolean \| "deferred"`                       | No       | `true`            | Expose the remote agent as a tool to the parent model. Set `false` to allow only `ctx.agent()` calls from authored workflow tools.                 |
 
 ## Dynamic remote agents
 
@@ -81,20 +81,22 @@ selection inside a memo. This does not change the per-message caller identity de
 
 ## Runtime URLs
 
-A static `url` is read at compile time. When an environment variable supplies the URL only at runtime, compute it inside `defineDynamic`:
+A string `url` is read at compile time. Use a function when an environment variable
+supplies the URL only at runtime. eve invokes it when resolving the runtime agent graph;
+it can return a string or a promise:
 
 ```ts title="agent/subagents/weather.ts"
-import { defineDynamic, defineRemoteAgent } from "eve";
+import { defineRemoteAgent } from "eve";
 
-export default defineDynamic(() =>
-  defineRemoteAgent({
-    url: process.env.WEATHER_AGENT_URL ?? "https://weather-agent.example.com",
-    description: "Answers weather, temperature, forecast, wind, rain, and snow questions.",
-  }),
-);
+export default defineRemoteAgent({
+  url: () => process.env.WEATHER_AGENT_URL ?? "https://weather-agent.example.com",
+  description: "Answers weather, temperature, forecast, wind, rain, and snow questions.",
+});
 ```
 
-`url` must be a non-empty string. `auth` and `headers` remain lazy callbacks resolved per request.
+The resolved `url` must be a non-empty string. Use `defineDynamic` when the current
+session determines which agent is exposed or whether it is available.
+`auth` and `headers` remain lazy callbacks resolved per request.
 
 ## Calling a remote agent
 
