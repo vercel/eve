@@ -178,3 +178,21 @@ test("reads a single artifact that download-artifact unpacked straight into the 
   assert.equal(first.outcome, "passed");
   assert.equal(first.raw_path, `raw/kimi-k3/${rawPath}`);
 });
+
+test("publishes a pull request run apart from main's runs", async (t) => {
+  const store = memoryStore();
+  const result = await publishResults({
+    plan,
+    artifactsDir: artifactsDirectory(t),
+    githubRunId: "123",
+    runAttempt: 1,
+    pullRequest: 4567,
+    store,
+  });
+  const prefix = "authoring/pull-requests/4567/123/1";
+  assert.equal(result.prefix, prefix);
+  assert(![...store.objects.keys()].some((path) => path.startsWith("authoring/runs/")));
+  assert.equal(JSON.parse(store.objects.get(`${prefix}/manifest.json`)).pull_request, 4567);
+  const [first] = store.objects.get(`${prefix}/records.jsonl`).toString().trim().split("\n");
+  assert.equal(JSON.parse(first).pull_request, 4567);
+});

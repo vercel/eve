@@ -12,9 +12,11 @@ name: Authoring Benchmark
 # - Or dispatch this workflow from the Actions tab on any branch with the same
 #   options as inputs.
 #
-# Dispatches on main also publish their results to the private benchmark Blob
-# store, the same way the nightly Eval Benchmark does. PR runs execute branch
-# code, so their results stay in workflow artifacts only.
+# Dispatches on main and labeled PR runs also publish their results to the
+# private benchmark Blob store, the same way the nightly Eval Benchmark does.
+# PR runs benchmark unmerged branch code, so they publish under
+# authoring/pull-requests/<number>/, apart from main's authoring/runs/.
+# Dispatches on other branches keep their results in workflow artifacts only.
 on:
   pull_request:
     types: [labeled]
@@ -225,7 +227,8 @@ jobs:
     needs: [request, benchmark]
     if: >-
       always() && needs.request.result == 'success' && needs.request.outputs.run == 'true' &&
-      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      (github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -269,4 +272,5 @@ jobs:
           BENCHMARK_MODELS: ${{ needs.request.outputs.models }}
           BENCHMARK_CASES: ${{ needs.request.outputs.cases }}
           BENCHMARK_RUNS: ${{ needs.request.outputs.runs }}
+          BENCHMARK_PULL_REQUEST: ${{ github.event.pull_request.number }}
         run: node scripts/publish-results.mjs "$RUNNER_TEMP/artifacts"
