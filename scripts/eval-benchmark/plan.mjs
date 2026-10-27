@@ -5,8 +5,10 @@
 //   max_parallel, evals_per_leg
 //                the registry's concurrency caps, which bound gateway load
 //                and keep evals from sharing a runner; legs never exceed
-//                the selected models, so a narrowed run keeps at most one
-//                leg per model in flight, like the full registry
+//                the selected models, so a narrowed run averages about one
+//                leg per model in flight, like the full registry (not a hard
+//                bound: when a model's leg finishes early, the next queued
+//                leg can start beside one of a slower model)
 //   mock_matrix  attempt × mock fixture × mock world legs (`mockAttempts` each:
 //                one sample is exact for durable-work counters, but too few
 //                for timing trends) on a local server
@@ -133,7 +135,8 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {}, ba
     devStartup,
     // Model-innermost leg order spreads the cap across models, so more legs
     // than models would load each model harder than a full-registry run does
-    // and skew latency against it.
+    // and skew latency against it. GitHub cannot cap legs per model, so a
+    // model can still briefly run two legs when job durations differ.
     concurrency: {
       ...concurrency,
       legs: Math.max(1, Math.min(concurrency.legs, selectedModels.length)),

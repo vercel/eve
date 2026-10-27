@@ -87,9 +87,11 @@ test("dispatch inputs narrow every dimension and reject unknown names", () => {
     planLegs(selection).live.map((leg) => leg.leg_id),
     ["live__agent-two__beta__local__1"],
   );
-  // One model keeps one leg in flight, as each model has in a full run.
+  // Narrowing models lowers the leg cap to the model count, never below one.
   assert.equal(selection.concurrency.legs, 1);
   assert.equal(select({}, { models: "none" }).concurrency.legs, 1);
+  // A registry cap below the model count stays, as in the nightly's 8 for 10.
+  assert.equal(select({ concurrency: { legs: 1, evalsPerLeg: 1 } }).concurrency.legs, 1);
   assert.deepEqual(planLegs(select({}, { fixtures: "none" })), { live: [], mock: [] });
   assert.throws(
     () => select({}, { models: "gamma" }),
