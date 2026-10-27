@@ -16,13 +16,14 @@ This plan adds one core primitive, a same-session `ctx.send()` on `HookContext`,
 
 ## Prior art
 
-| System                                                                                    | Judge                                                                                            | Trigger                                                                     | Budget and safety                                                                                    |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [Claude Code](https://code.claude.com/docs/en/goal)                                       | Separate small model reads condition plus transcript; verdict met, not met, or impossible, with a reason | Session-scoped prompt Stop hook after every turn                            | Stops after several turns without tool use; skips evaluation while subagents or shells run; clears on unrecoverable errors |
-| [Codex](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)        | The working model marks the goal complete through a tool, only on evidence                       | Continuation template injected at idle safe boundaries only                 | Thread-scoped budget; interruptions pause; a continuation turn with no tool call suppresses the next |
-| [Mastra](https://mastra.ai/docs/harness/goals)                                             | LLM-as-judge scorer inside the agent loop, optionally with read-only verification tools          | In-loop step after `isTaskComplete`                                         | `maxRuns` (default 50); exhaustion pauses and is resumable                                           |
-| [Hermes](https://hermes-agent.nousresearch.com/docs/user-guide/features/goals)             | Auxiliary model returns done, blocked, continue, or wait                                         | Continuation prompt fed back into the same session                          | Turn budget; judge errors fail open                                                                  |
-| [Antigravity](https://antigravity.google/docs/commands/goal/)                              | None; the agent audits its own work against a deliverables checklist                             | Stop hook blocks premature turn end                                         | No iteration cap; waits for subagents and background tasks                                           |
+Several coding agents and agent frameworks ship goal loops. They differ mainly in who judges and what triggers the next turn:
+
+| Pattern                    | Judge                                                                         | Trigger                                              | Safety                                                                                  |
+| -------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Separate judge after turns | A small, fast model reads the condition and evidence; met, not met, or impossible, with a reason that steers the next turn | A stop hook after every turn                         | Stops after several turns without tool use; skips judging while background work runs     |
+| Self-assessed completion   | The working model marks the goal complete through a tool, only on evidence    | A continuation prompt at idle boundaries only        | Thread-scoped budget; interruptions pause; no continuation while user input is queued    |
+| Judge inside the loop      | An LLM-as-judge scorer, optionally with read-only verification tools         | A step in the agent loop before it returns           | Run budget (commonly 50); exhaustion pauses and is resumable                            |
+| Blocked stop               | None; the agent audits its own work against a deliverables checklist          | A stop hook refuses premature turn ends              | Often no iteration cap; waits for subagents and background tasks                        |
 
 The shared shape is: durable objective per thread, a trigger at turn end, a judge, a budget with a no-progress guard, pause, resume, and clear, and waiting for background work. eve already provides the last item: [turns wait for their tasks](../docs/tools/tasks.md#turns-wait-for-their-tasks).
 
@@ -78,16 +79,18 @@ Semantics reuse the `ctx.cancel()` command path where they can, and differ where
 | Stored as         | An intent keyed by the active `turnId`            | A session-level intent with no turn, keyed by the settled `turnId`    |
 | Consumed by       | `actOnCancels` after the commit                   | The idle wait in `nextTurnDelivery`, when nothing is queued           |
 | Effect            | `turn.cancelled`, then `session.waiting`          | A message delivery that starts a normal turn                          |
-| Competing input   | The first cancel wins                             | Dropped if any delivery is already queued or pending; people win      |
+| Competing input   | The first cancel wins                             | Yields to any other turn; survives controls that start no turn        |
 
 - **Recorded now, applied later.** Channel sends return a delivery receipt, but a hook send returns `void`: it is recorded during the handler and admitted after the event's hooks return, so retries and workflow replay stay deterministic. Like `cancel()`, calling it after the handler settled throws. If the handler throws, its commands are discarded with the rest of its requests.
 - **Fails closed on events.** Eligibility is a total map over hook event types, so a new event does not compile until it is classified. A call on an ineligible event, or on a `failed` or `cancelled` settle, is ignored with a warning.
 - **At most one per settled turn.** The intent is keyed by the settled `turnId`, and the hook's `occurrence.idempotencyKey` dedupes retried steps. A second request for the same turn, from the same or another hook, is ignored with a warning.
-- **Queues, never steers.** `nextTurnDelivery` takes the intent only when the input queue and inbox are empty. Any person's message, answer, or control that arrives first drops it. A turn starting for any other reason also drops it, because the intent belongs to the turn that settled.
+- **Queues, never steers, and yields.** The intent belongs to the turn that settled. `nextTurnDelivery` admits it only when the input queue and inbox are empty. Any other turn that starts first discards it: a person's message, an answer, a schedule send, or another hook's send. Controls that start no turn, such as `compact`, leave it queued, so a compaction cannot stall a goal. `cancel` and `reset` discard it, so a person can always stop a loop from any channel.
 - **Arrives as an ordinary message delivery.** `delivery.admitted` records `source: { hook: "<slug>" }`, a new member of the open `DeliverySource` set, and the resolved principal. The delivery passes through the owning channel's `deliver` hook like any other send. The model receives the text as the next user message. Channels and UIs can render hook-origin turns distinctly.
 - **Same session only.** A hook send never creates or reaches another session, so the delegated-session refusal on `ctx.to()` in #5096 does not apply: that refusal exists because a new session would outlive the delegation and act for the caller, and a message into the running session creates nothing new. Whether the caller waits for those extra turns is an open question below.
 - **No new settlement path.** The continuation runs as a normal turn, so approvals, task waiting, and `limits.sessionUsage` apply unchanged. Unattended sessions keep failing with `SESSION_USAGE_LIMIT_REACHED` instead of prompting.
 - **Failures between turns are logged.** A hook that throws during a turn fails that turn. On `turn.settled` there is no turn left to fail, so `reportReactionFailure` logs the error and nothing continues.
+
+Yielding is a fixed rule, not an option. For a goal it loses nothing: the hook runs after every `turn.settled`, including the person's turn, so their turn becomes the next goal iteration and is judged with their input in view. Queuing behind other input instead would deliver guidance written before the person spoke (after "stop" or "try the other approach"), add a turn per interjection that spends budget, and let channels that batch adjacent same-auth messages merge stale guidance into the person's message. Hooks that must always deliver a follow-up, such as notifications, should use a channel send instead.
 
 Adding `send()` bumps the hook extension contract epoch and retains the previous one.
 
@@ -107,9 +110,9 @@ flowchart LR
 ```
 
 - **State.** `defineState("goal")` holds `{ objective, status, runs, maxRuns, idleRuns, continued, lastReason, costAtStart }`. `status` is `active`, `paused`, `met`, or `impossible`. One goal per session; setting a new one replaces it.
-- **Tools.** Names derive from paths and the mount adds the prefix. `goal__set` sets or replaces the objective (up to 4,000 characters, as in Claude Code and Codex) and is the only lifecycle action the model may take on its own. `goal__status` reports status, runs, spend, and the last reason. `goal__pause`, `goal__resume`, and `goal__clear` are for the person; channels can map them to a `/goal` command. The model can never mark a goal met.
+- **Tools.** Names derive from paths and the mount adds the prefix. `goal__set` sets or replaces the objective (up to 4,000 characters) and is the only lifecycle action the model may take on its own. `goal__status` reports status, runs, spend, and the last reason. `goal__pause`, `goal__resume`, and `goal__clear` are for the person; channels can map them to a `/goal` command. The model can never mark a goal met.
 - **Instructions.** A `defineDynamic` instruction shows the objective, the run count, and the judge's last reason before every model call while the goal is active.
-- **Judge.** A structured-output model call returns `{ verdict: "met" | "continue" | "impossible", reason }`. It reads the objective, the turn's reply (`reply(ctx.view, turnId)`), and the turn's settled calls (`call(ctx.view, callId)`). Hooks do not receive assembled history, so the judge sees evidence the turn surfaced, not the whole transcript. `decide()` is not enough on its own because it returns no prose rationale, and the reason is what steers the next turn.
+- **Judge.** A structured-output model call returns `{ verdict: "met" | "continue" | "impossible", reason }`. It reads the objective, the input the turn consumed (the parts on its `delivery.consumed`), the turn's reply (`reply(ctx.view, turnId)`), and its settled calls (`calls(ctx.view, { turnId })`). Reading the input lets a person's "stop" or change of direction reach the verdict. Hooks do not receive assembled history, so the judge sees evidence the turn surfaced, not the whole transcript. `decide()` is not enough on its own because it returns no prose rationale, and the reason is what steers the next turn.
 - **Budget and guards.** Default `maxRuns` is 50; an optional spend cap compares `usage(ctx.view).total.costUsd` with `costAtStart`. Reaching either pauses with a reason. Two consecutive continuation turns with no tool calls pause the goal. A `failed` or `cancelled` turn pauses it. A judge error pauses it: unattended sessions should not burn budget on a broken judge.
 
 ### Sketch
@@ -130,6 +133,7 @@ import { defineHook } from "eve/hooks";
 import extension from "../extension";
 import { judge } from "../lib/judge";
 import { goal } from "../lib/state";
+import { turnInput } from "../lib/turn-input";
 
 export default defineHook({
   events: {
@@ -147,7 +151,12 @@ export default defineHook({
       const spent = (usage(ctx.view).total.costUsd ?? 0) - current.costAtStart;
       if (spent >= extension.config.maxCostUsd) return pause(`Spent $${spent.toFixed(2)}.`);
 
-      const verdict = await judge(current.objective, reply(ctx.view, turnId), turnCalls).catch(() => undefined);
+      const verdict = await judge({
+        objective: current.objective,
+        input: turnInput(ctx.view, turnId), // parts from the turn's delivery.consumed
+        reply: reply(ctx.view, turnId),
+        calls: turnCalls,
+      }).catch(() => undefined);
       if (verdict === undefined) return pause("The goal judge failed.");
       if (verdict.verdict !== "continue") {
         return goal.update((g) => g && { ...g, status: verdict.verdict, lastReason: verdict.reason });
@@ -196,13 +205,12 @@ export default defineDynamic(() => {
   That is a usable interim recipe once the stack lands, but not the goal primitive. It is channel-specific: the extension would need the consumer's channel module and a per-channel target mapping, and sessions without an addressable channel cannot use it. Delegated sessions are refused by design. It is only on tools, so continuation depends on the model calling a checkpoint tool rather than on a judge that always runs. Giving hooks `ctx.to()` would fix the last point but not the first two.
 - **`ctx.continue(message)`.** An earlier draft of this plan. Same semantics, but a new verb for what is a message send, with its own option shape instead of `MessageSendOptions`.
 - **Schedules.** Dynamic schedules start fresh sessions and do not steer an existing conversation. A minute-granularity dispatcher adds latency and an external store.
-- **Stop hook that blocks turn end, or a judge inside the harness loop.** Matches Antigravity and Mastra, but changes `harness/` turn settlement. Continuation after settlement gets the same behavior with a smaller core change.
+- **Stop hook that blocks turn end, or a judge inside the harness loop.** Matches the blocked-stop and in-loop patterns above, but changes `harness/` turn settlement. Continuation after settlement gets the same behavior with a smaller core change.
 
 ## Open questions
 
 - Confirm that `defineState` writes from a `turn.settled` handler persist into the next turn and that dynamic instructions can read the slot. The docs only show `turn.started` and task events. If not, the extension needs a memo or external store.
 - Whether the hook should see that a turn was a continuation, for example from the turn's delivery `source`, instead of tracking it in state.
-- Whether dropping a hook send when a person's input is already pending should be the fixed rule or an option. Dropping keeps shared threads safe; queuing behind the person's message matches `Session.send` but can start a stale turn that the extension must dedupe by `turnId`.
 - In a delegated session, the caller receives the child's reply when its turn settles. A hook send there starts turns nobody waits for. Goals in subagents likely need the hook send to keep the delegated task open until the child stops sending.
 - Whether a hook send should support a delay (`send(message, { after })`) for goals that wait on external events, using a durable sleep in the session workflow.
 - How first-party channels (Slack, web chat) should present hook-origin turns.
