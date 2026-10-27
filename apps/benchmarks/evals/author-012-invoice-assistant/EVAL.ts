@@ -436,13 +436,19 @@ async function toolContext(
   { sessionId = "session-1", approvedBy }: { sessionId?: string; approvedBy?: User } = {},
 ) {
   const current = await principal(user);
-  return {
+  const context: {
+    session: unknown;
+    callId: string;
+    abortSignal: AbortSignal;
+    approval?: { responder: unknown };
+  } = {
     session: { id: sessionId, auth: { current, initiator: current }, turn: { id: "turn-1" } },
     callId: "call-1",
     abortSignal: new AbortController().signal,
-    // eve sets this on a call a person approved.
-    ...(approvedBy === undefined ? {} : { approval: { responder: await principal(approvedBy) } }),
   };
+  // eve sets this on a call a person approved.
+  if (approvedBy !== undefined) context.approval = { responder: await principal(approvedBy) };
+  return context;
 }
 
 async function principal(user: User) {
