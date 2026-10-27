@@ -32,8 +32,11 @@ A session completes after 30 idle days by default; configure
 timeout. The idle window restarts each time a turn settles, and a session never
 expires while a turn is open. At expiration, eve emits `session.ended` with `outcome: "completed"` and
 releases the session's continuation addresses so the next qualifying channel
-message starts fresh. Stored session data is not deleted. See
-[Agent config](../agent-config#runtime-limits).
+message starts fresh. Stored data follows the session's
+[run-data retention policy](../agent-config#run-data-retention). Under the default
+policy outside development, eve requests deletion when private and unknown-audience
+sessions end. The Workflow World must support deletion to enforce it. See
+[Agent config](../agent-config#runtime-limits) for timeout settings.
 
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 

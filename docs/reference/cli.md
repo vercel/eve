@@ -55,6 +55,8 @@ After scaffolding in an interactive human terminal, eve opens the TUI directly. 
 | ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--agents <names>`      | string | unset                                                | Create a workspace with comma-separated agent names, such as `support,research`.                                         |
+| `-y, --yes`             | flag   | off                                                  | Accepted for compatibility; warns and has no effect.                                                                     |
 | `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
 | `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
 
@@ -77,6 +79,7 @@ Creates a new extension package, installs dependencies, and initializes Git. Pri
 | No target                   | Same as `.` for humans; coding agents get a short setup guide |
 
 Create-only: cannot target an existing project that already has a `package.json`.
+`-y` and `--yes` are accepted for compatibility; they warn and have no effect.
 
 See [Extensions](/docs/extensions) for authoring and mount details.
 

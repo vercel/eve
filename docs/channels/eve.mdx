@@ -344,6 +344,10 @@ export default eveChannel({
 });
 ```
 
+Audience also selects the default [run-data retention](../agent-config#run-data-retention).
+Outside development, private and unknown-audience sessions request deletion when
+they end. The Workflow World must support deletion to enforce it.
+
 `audience` controls observability content capture; it does not change who may
 call the endpoint. `auth` still controls access. For a classification that
 depends on channel state or application-specific verified data, use a [custom

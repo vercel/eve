@@ -190,7 +190,20 @@ have one home, `eve/sessions`; client factories and transport-specific types sta
 
 `HistoryMessage` and the sandbox session, process, result, and method-option types are eve-owned. Their declarations do not change with your app's AI SDK peer version. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
 
-The `exports` field in `packages/eve/package.json` lists every package entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. The CLI setup wizard is not a public authoring API; Agent Builder's scaffold integration lives at `eve/internal/scaffold`.
+## Stability policy
+
+The `exports` field in `packages/eve/package.json` lists every package entry point.
+`eve/experimental/*` and `eve/internal/*` have no compatibility promise. The same
+applies to `experimental` fields in stable definitions, such as
+`defineAgent({ experimental })` and connection `experimental.events`, and to
+`experimental_`-prefixed functions such as `experimental_runDiscordGatewayRelay`.
+
+Event union types name today's values. Adding fact types, outcomes, or interaction
+kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add)
+is not a breaking change. Keep a default branch when switching on those values.
+
+The CLI setup wizard is not a public authoring API; Agent Builder's scaffold
+integration lives at `eve/internal/scaffold`.
 
 ## Direct provider models
 

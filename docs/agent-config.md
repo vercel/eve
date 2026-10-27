@@ -450,6 +450,11 @@ for the retry behavior.
 
 ## Run data retention
 
+Outside development, the default policy requests deletion of private and
+unknown-audience session data when the session ends. On a Workflow World that
+supports deletion, completed transcripts become unreadable. To preserve them,
+set `experimental.workflow.retention: "default"`; this override is experimental.
+
 By default, eve derives run-data retention from the session's resolved
 [OpenTelemetry trace policy](./observability/otel#configure-opentelemetry):
 
