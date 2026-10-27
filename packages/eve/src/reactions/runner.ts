@@ -4,7 +4,7 @@ import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { currentProjection } from "#harness/session-machine/current.js";
-import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -36,6 +36,7 @@ import {
   sessionIdOf,
   type ReactionsState,
   type Slot,
+  type TurnIntent,
   writeLive,
   writeReactionsState,
 } from "./state.js";
@@ -92,6 +93,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
+  dropYieldedSends(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -389,13 +391,33 @@ function actOnCancels(
     (intent) => (intent.type === "cancel" || intent.type === "fail") && intent.turnId !== turnId,
   );
   const [first] = (readReactionsState(ctx).intents ?? []).filter(
-    (intent) => intent.type === "cancel",
+    (intent): intent is TurnIntent => intent.type === "cancel",
   );
   if (first === undefined || cancelTurn === undefined) return;
   const hook = reactions.find(({ id }) => id === first.reactionId)?.label ?? first.reactionId;
   takeIntents(ctx, (intent) => intent.type === "cancel");
   writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledTurnId: first.turnId });
   cancelTurn({ hook, ...(first.reason !== undefined && { reason: first.reason }) });
+}
+
+/**
+ * A hook's send yields: once another turn starts, or a cancel or reset arrives, the session no
+ * longer continues the turn it was sent for, and the send is dropped.
+ */
+function dropYieldedSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+  if (!(readReactionsState(ctx).intents ?? []).some((intent) => intent.type === "send")) return;
+  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
+  const stopped = written.some(
+    ({ event }) =>
+      event.type === "delivery.admitted" &&
+      event.data.source !== undefined &&
+      "control" in event.data.source &&
+      (event.data.source.control === "cancel" || event.data.source.control === "reset"),
+  );
+  takeIntents(
+    ctx,
+    (intent) => intent.type === "send" && (stopped || intent.turnId !== latestTurnId),
+  );
 }
 
 function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): ReactionsState {

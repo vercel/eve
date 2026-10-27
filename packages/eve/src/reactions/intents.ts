@@ -1,3 +1,4 @@
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -8,20 +9,21 @@ import { readReactionsState, writeReactionsState, type PendingIntent } from "./s
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one. A send targets the next turn, for the
+// turn that settled. Repeated requests add nothing.
 
 /** A command a hook asked for, before it's queued. */
-export interface Command {
-  readonly type: "cancel";
-  readonly reason?: string;
-}
+export type Command =
+  | { readonly type: "cancel"; readonly reason?: string }
+  | { readonly type: "send"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
 /**
- * Adds cancellations to the session's queue. Requests between turns are dropped.
+ * Adds a hook's commands to the session's queue. Cancels between turns are dropped; a send for a
+ * turn that already has one is ignored with a warning.
  */
 export function queueCommands(
   ctx: ContextContainer,
-  reactionId: string,
+  reaction: Pick<Reaction, "id" | "label">,
   occurrence: string,
   commands: readonly Command[],
 ): void {
@@ -31,11 +33,23 @@ export function queueCommands(
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
+    if (command.type === "send") {
+      if (intents.some((queued) => queued.type === "send" && queued.turnId === command.turnId)) {
+        log.warn(
+          `Hook "${reaction.label}" called ctx.send() for a turn that already sends its next message; this one is ignored.`,
+          { turnId: command.turnId },
+        );
+        continue;
+      }
+      intents.push({ ...command, occurrence, reactionId: reaction.id });
+      changed = true;
+      continue;
+    }
     if (turnId === undefined || state.cancelledTurnId === turnId) continue;
     if (intents.some((queued) => queued.type === "cancel" && queued.turnId === turnId)) continue;
     intents.push({
       occurrence,
-      reactionId,
+      reactionId: reaction.id,
       type: command.type,
       ...(command.reason !== undefined && { reason: command.reason }),
       turnId,
@@ -102,5 +116,5 @@ export function takeTurnFailure(ctx: ContextContainer | undefined): string | und
     ctx,
     (intent) => intent.type === "fail" && intent.turnId === turnId,
   );
-  return failure?.reason;
+  return failure?.type === "fail" ? failure.reason : undefined;
 }

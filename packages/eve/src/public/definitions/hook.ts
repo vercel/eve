@@ -2,6 +2,7 @@ import type { AuthoringEventType } from "#protocol/session-events/authoring.js";
 import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
 import type { Memo, Occurrence, SessionFrame } from "../../dynamic/definition.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
@@ -28,6 +29,16 @@ export type HookEventKey = HookEventType | "*";
 export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends HookEventType
   ? HookEventMap[TKey]
   : HookEventMap[HookEventType];
+
+/** Options for {@link HookContext.send}. */
+export interface HookSendOptions {
+  /** Who the message acts for. Defaults to `ctx.session.auth.current`. */
+  readonly auth?: SessionAuthContext | null;
+  /** Extra context the model reads with the message, as with `session.send()`. */
+  readonly context?: readonly string[];
+  /** Defaults to `ctx.occurrence.idempotencyKey`, so a retried step sends once. */
+  readonly idempotencyKey?: string;
+}
 
 /**
  * Every hook handler receives this context: the session as of the commit the event is in, the
@@ -58,6 +69,14 @@ export interface HookContext extends SessionContext, Omit<SessionFrame, "session
    * Throws after the handler has settled.
    */
   cancel(reason?: string): void;
+  /**
+   * Sends `message` into this session as its next turn, from a `turn.settled` handler whose turn
+   * completed. It's recorded now and admitted once the session is idle, as a delivery whose
+   * source is this hook. It yields: any other turn that starts first, a `session.cancel()`, or a
+   * reset discards it, so a person's input always wins. One send per settled turn; later ones,
+   * and calls on other events, are ignored with a warning. Throws after the handler has settled.
+   */
+  send(message: string, options?: HookSendOptions): void;
 }
 
 /**

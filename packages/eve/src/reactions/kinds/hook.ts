@@ -1,8 +1,13 @@
+import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
-import type { HookContext } from "#public/definitions/hook.js";
+import { ChannelDeliveryKey } from "#context/keys.js";
+import { createLogger } from "#internal/logging.js";
+import type { HookContext, HookSendOptions } from "#public/definitions/hook.js";
 import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { TurnSettledData } from "#protocol/session-events/families/turn.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { currentProjection } from "#harness/session-machine/current.js";
@@ -12,6 +17,8 @@ import { sessionFrameOf } from "../frame.js";
 import type { CommitContext, CommitReaction } from "../reaction.js";
 import { openMemos } from "../records.js";
 import { discardedByDeployment, keepMemos, mergeMemos, readReactionsState } from "../state.js";
+
+const log = createLogger("hooks");
 
 /**
  * An authored hook as a reaction: its handlers run after every commit, once for each fact of
@@ -39,6 +46,7 @@ export function hookReaction(hook: ResolvedHookDefinition): CommitReaction {
             occurrence: `${position.line}.${position.index}`,
             position,
             reaction,
+            slug: hook.slug,
             view,
           });
         }
@@ -57,6 +65,7 @@ async function runHandler(call: {
   readonly occurrence: string;
   readonly position: HookContext["position"];
   readonly reaction: Pick<CommitReaction, "id" | "kind" | "label">;
+  readonly slug: string;
   readonly view: SessionTables;
 }): Promise<void> {
   const { ctx, abortSignal } = call.input;
@@ -76,24 +85,53 @@ async function runHandler(call: {
     sessionId,
   });
   const requested: Command[] = [];
-  const command =
-    (type: Command["type"]) =>
-    (reason?: string): void => {
-      if (settled) {
-        throw new Error(
-          `Hook "${label}" called ctx.${type}() after its handler settled. Await the work that calls it before the handler returns.`,
-        );
-      }
-      requested.push(reason === undefined ? { type } : { reason, type });
-    };
+  const assertOpen = (method: string): void => {
+    if (!settled) return;
+    throw new Error(
+      `Hook "${label}" called ctx.${method}() after its handler settled. Await the work that calls it before the handler returns.`,
+    );
+  };
+  const cancel = (reason?: string): void => {
+    assertOpen("cancel");
+    requested.push(reason === undefined ? { type: "cancel" } : { reason, type: "cancel" });
+  };
+  const send = (message: string, options: HookSendOptions = {}): void => {
+    assertOpen("send");
+    if (typeof message !== "string" || message.trim().length === 0) {
+      throw new TypeError(`Hook "${label}" called ctx.send() without a message.`);
+    }
+    const { type } = call.event;
+    const settledTurn = type === "turn.settled" ? (call.event.data as TurnSettledData) : undefined;
+    // Only a completed turn has a next turn to continue it; every other event is ineligible.
+    if (settledTurn?.outcome !== "completed") {
+      const on = settledTurn === undefined ? `"${type}"` : `a ${settledTurn.outcome} turn`;
+      log.warn(
+        `Hook "${label}" called ctx.send() on ${on}; only a completed "turn.settled" can send the next message, so it's ignored.`,
+      );
+      return;
+    }
+    validateDeliveryIdempotencyKey(options.idempotencyKey);
+    requested.push({
+      delivery: hookDelivery(ctx, {
+        auth: options.auth === undefined ? frame.session.auth.current : options.auth,
+        context: options.context,
+        idempotencyKey: options.idempotencyKey ?? idempotencyKey,
+        message,
+        slug: call.slug,
+      }),
+      turnId: settledTurn.turnId,
+      type: "send",
+    });
+  };
   const hookContext: HookContext = {
     ...base,
     ...frame,
     agent: agentOf(ctx),
-    cancel: command("cancel"),
+    cancel,
     memo: memos.memo,
     occurrence: { abortSignal, idempotencyKey },
     position: call.position,
+    send,
     session: { ...base.session, ...frame.session },
   };
   try {
@@ -106,10 +144,14 @@ async function runHandler(call: {
       activeTurnIdOf(currentProjection(ctx)) === undefined
         ? call.input.cancelBeforeTurn
         : undefined;
-    if (beforeTurn === undefined) queueCommands(ctx, id, idempotencyKey, requested);
+    if (beforeTurn === undefined) queueCommands(ctx, call.reaction, idempotencyKey, requested);
     else
-      for (const { reason } of requested)
-        beforeTurn({ hook: label, ...(reason !== undefined && { reason }) });
+      for (const command of requested)
+        if (command.type === "cancel")
+          beforeTurn({
+            hook: label,
+            ...(command.reason !== undefined && { reason: command.reason }),
+          });
   } catch (error) {
     mergeMemos(ctx, memoScope, memos.used());
     reportReactionFailure(ctx, call.reaction, error, idempotencyKey);
@@ -122,4 +164,42 @@ async function runHandler(call: {
 function agentOf(ctx: ContextContainer): HookContext["agent"] {
   const bundle = ctx.require(BundleKey);
   return { name: bundle.turnAgent.id, nodeId: bundle.nodeId };
+}
+
+/**
+ * A hook's message as a delivery into its own session. It queues behind the running turn and
+ * keeps the channel of the turn that settled, so the channel's `deliver` hook reads it like any
+ * other message.
+ */
+function hookDelivery(
+  ctx: ContextContainer,
+  input: {
+    readonly auth: DeliverHookPayload["auth"];
+    readonly context: readonly string[] | undefined;
+    readonly idempotencyKey: string;
+    readonly message: string;
+    readonly slug: string;
+  },
+): DeliverHookPayload {
+  const channel = ctx.get(ChannelDeliveryKey);
+  return {
+    auth: input.auth,
+    deliveryMetadata: [
+      {
+        channelKind: channel?.channelKind ?? "hook",
+        channelName: channel?.channelName ?? "hook",
+        deliveryId: crypto.randomUUID(),
+        hook: input.slug,
+        payloadIndex: 0,
+      },
+    ],
+    idempotencyKey: input.idempotencyKey,
+    kind: "deliver",
+    payloads: [
+      input.context === undefined
+        ? { message: input.message }
+        : { context: input.context, message: input.message },
+    ],
+    turnPolicy: "queue",
+  };
 }

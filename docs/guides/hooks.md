@@ -27,7 +27,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services and cancel the running turn. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services, cancel the running turn, and send the session's next message once a turn settles. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -92,6 +92,7 @@ interface HookContext extends SessionContext {
   readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
   readonly memo: Memo;
   cancel(reason?: string): void;
+  send(message: string, options?: HookSendOptions): void;
 }
 ```
 
@@ -212,7 +213,7 @@ Each committed line is published in this order:
 1. Write. The line is written to the durable stream.
 2. Channel delivery. The channel adapter handler runs for each fact.
 3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-4. Cancellation requests queued by `ctx.cancel()` take effect after the handlers return.
+4. Cancellation requests queued by `ctx.cancel()` take effect after the handlers return. A message from `ctx.send()` is admitted once the session is idle.
 
 Before an ordinary model call, dynamic functions compute the model and capabilities from the latest committed session. They do not subscribe to events.
 
@@ -259,6 +260,49 @@ The same goes for the `call.progress` a workflow tool reports while the turn wai
 
 `ctx.cancel()` targets the turn being processed, including while its input is being admitted. Calls between turns without an incoming turn do nothing. Repeated requests cancel that turn only once; they never cancel a later turn. Hook-side `ctx.compact` and `ctx.once` are not available. Client and channel session compaction APIs are unchanged.
 
+## Continue the session from a hook
+
+Call `ctx.send(message, options?)` from a `turn.settled` handler to start the session's next turn without waiting for someone to send it. This hook keeps the agent working until the test suite passes, for at most ten more turns:
+
+```ts title="agent/hooks/until-green.ts"
+import { defineState } from "eve/context";
+import { defineHook } from "eve/hooks";
+
+const attempts = defineState("until-green.attempts", () => 0);
+
+export default defineHook({
+  events: {
+    async "turn.settled"(event, ctx) {
+      if (event.data.outcome !== "completed") return;
+      const sandbox = await ctx.getSandbox();
+      const test = await sandbox.run({ command: "pnpm test --reporter=dot" });
+      if (test.exitCode === 0 || attempts.get() >= 10) {
+        attempts.update(() => 0);
+        return;
+      }
+      attempts.update((n) => n + 1);
+      ctx.send(
+        `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
+      );
+    },
+  },
+});
+```
+
+The message reaches the model as the next user message. Its `delivery.admitted` names the hook as its source, `{ hook: "until-green" }`, and it passes through the channel's `deliver` hook like any other message. Options are a subset of `session.send()`'s:
+
+| Option           | Default                         |
+| ---------------- | ------------------------------- |
+| `auth`           | `ctx.session.auth.current`      |
+| `context`        | none                            |
+| `idempotencyKey` | `ctx.occurrence.idempotencyKey` |
+
+A send always queues; it never steers a running turn. It also yields: when any other turn starts first, such as one from a person's message, or a `session.cancel()` or reset arrives, eve drops the send. That other turn settles too, so a hook that sends on every `turn.settled` sees it and decides again with the person's input in view. A control that starts no turn, such as a compaction, leaves the send waiting.
+
+Only a completed `turn.settled` can send. A call from any other event, or from a `failed` or `cancelled` turn, is ignored with a warning. Each settled turn sends at most once: a second call, from the same hook or another, is ignored with a warning. Like `ctx.cancel()`, `ctx.send()` returns `void`, throws after the handler has settled, and counts only if the handler returns.
+
+A continuation is an ordinary turn, so approvals, task waiting, and `limits.sessionUsage` apply unchanged. Bound loops yourself, as the example does: eve doesn't cap how many turns hooks send. For a message that must always be delivered, such as a notification, use a channel send instead.
+
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
@@ -270,6 +314,7 @@ A subagent's approvals, questions, and sign-ins are also relayed to the parent s
 | Need                                              | Use                                            |
 | ------------------------------------------------- | ---------------------------------------------- |
 | Observe runtime events (audit, metrics, alerting) | `events.<type>` (or a channel adapter handler) |
+| Start the next turn after one settles             | `ctx.send()` from `events["turn.settled"]`     |
 | Provide structured input to the model on demand   | a tool                                         |
 | Make a value available across the entire step     | a context provider                             |
 | Subscribe to platform-specific events             | a channel adapter handler                      |

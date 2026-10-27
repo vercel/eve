@@ -118,6 +118,8 @@ export interface ChannelDeliveryMetadata {
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
+  /** The hook whose `ctx.send()` made the delivery: its `delivery.admitted` source. */
+  readonly hook?: string;
   readonly requestId?: string;
   readonly requestTraceContext?: SessionTraceSeed;
 }

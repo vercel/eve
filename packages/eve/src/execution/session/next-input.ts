@@ -1,5 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
-import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
+import { pendingHookSend } from "#reactions/hook-send.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -55,6 +56,16 @@ export async function nextTurnDelivery(input: {
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;
+    }
+
+    // A hook's send continues the turn that settled only once nothing else waits; input that
+    // starts another turn first discards it. Its idempotency key admits it once.
+    if (queue.pendingCount === 0 && !inbox.hasPending()) {
+      const send = pendingHookSend(
+        cursor.serializedContext,
+        latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
+      );
+      if (send !== undefined && queue.enqueueDelivery(send) !== undefined) continue;
     }
 
     if (!inbox.hasPending()) {

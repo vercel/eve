@@ -4,14 +4,15 @@ import { conforming, envelopeOf, id, principal, userPart, known } from "../commo
 import type { Envelope, Principal, UserPart } from "../envelope.js";
 
 /**
- * Where a delivery came from: a channel (with the schedule that sent it), a control, or a
- * sign-in callback. The set is open. A parent session records which of its calls sent a child's
+ * Where a delivery came from: a channel (with the schedule that sent it), a control, a sign-in
+ * callback, or a hook's `ctx.send()` (the hook's slug). The set is open. A parent session records which of its calls sent a child's
  * delivery on its own `child.sent`.
  */
 export type DeliverySource =
   | { readonly channel: string; readonly scheduleId?: string }
   | { readonly control: string }
-  | { readonly callback: string };
+  | { readonly callback: string }
+  | { readonly hook: string };
 
 export interface DeliveryAdmittedData {
   readonly deliveryId: string;
@@ -72,6 +73,7 @@ const deliverySource = conforming<DeliverySource>()(
     }),
     z.object({ control: z.string() }),
     z.object({ callback: z.string() }),
+    z.object({ hook: z.string() }),
   ]),
 );
 
