@@ -5,9 +5,10 @@ with the installed package and match its version exactly. In most installs, they
 are at `node_modules/eve/docs/`. In workspaces or local package installs, resolve
 the installed `eve` package location first and read its `docs/` directory. If
 package docs are unavailable, use https://eve.dev/docs as a fallback. Read
-`README.md` in the package docs first, then the guide for what you're adding,
-such as `connections`, `channels/slack`, or `guides/auth-and-route-protection`
-for the Vercel Connect flow.
+`recipes.md` in the package docs first: it has a checked snippet for each common
+requirement. Open `README.md` to find the full guide for anything a recipe
+doesn't cover, and read only the sections you need (`grep -n '^#' <page>` lists
+them).
 
 Before implementing an integration yourself, use `eve registry search <query>` or
 `eve registry list` to discover available integrations. Inspect one with
