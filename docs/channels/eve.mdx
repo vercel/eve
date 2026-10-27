@@ -204,7 +204,9 @@ that built it.
 
 ### Send files
 
-A message can mix text and file parts. A file part's `data` is base64, a `data:` URL, or a URL:
+A message can mix text and file parts. A file part's `data` is base64, a `data:` URL, or a URL. Framework-generated attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`) are not accepted in HTTP request bodies; they return `400 Bad Request`.
+
+For example:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \

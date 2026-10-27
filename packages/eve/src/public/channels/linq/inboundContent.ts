@@ -1,7 +1,7 @@
 import type { MessageContent } from "#shared/message-content.js";
 
 import type { Attachment, Message } from "#compiled/chat/index.js";
-import { readLimitedBytes } from "#internal/attachments/limited-read.js";
+import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { messageContentOf } from "#public/channels/chat-sdk/index.js";
 import {
   fetchMessageBestEffort,
@@ -46,9 +46,13 @@ export function rehydrateLinqAttachment(attachment: Attachment): Attachment {
   return {
     ...attachment,
     async fetchData() {
-      const response = await fetch(url);
+      const response = await requestPublicUrl(url, {
+        headers: {},
+        maxResponseSize: DEFAULT_UPLOAD_POLICY.maxBytes,
+        signal: AbortSignal.timeout(30_000),
+      });
       if (!response.ok) throw new Error(`Linq CDN returned HTTP ${response.status}.`);
-      return await readLimitedBytes(response, DEFAULT_UPLOAD_POLICY.maxBytes, "linq");
+      return Buffer.from(await response.arrayBuffer());
     },
   };
 }
