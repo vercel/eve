@@ -1,5 +1,21 @@
 # eve
 
+## 0.84.1
+
+### Patch Changes
+
+- 41916a5: Dynamic models, dynamic subagent configs, and `ctx.agent(name, { model })` overrides now read context windows from the AI Gateway model catalog recorded at build time instead of downloading it at runtime; a model that catalog doesn't list fails until you return `modelContextWindowTokens` or rebuild. Builds no longer carry built-in limits for `anthropic/claude-opus-4.7`, `openai/gpt-5.4`, and `openai/gpt-5.4-mini`, so a static model needs the catalog, a cached copy, or `modelContextWindowTokens` to compile offline.
+- b322096: A compaction that fails during a turn, for example on a provider 429 that outlasts its retries, now fails that turn with `MODEL_CALL_FAILED` and leaves the session waiting with its history uncompacted. Previously the error escaped the turn step, so eve replayed the step and then ended the session. Thanks @gshost1 for the report and reproduction in #5350.
+- 4276727: Messages a route forwards with `ctx.to()` now carry the deployment and request that accepted them, so an idle session reached that way hands off to the new deployment like one reached with `from()`. Thanks @haydenbleasel for reporting this in #5408.
+- bea10fd: Model calls that AI Gateway rejects with a 402 because it temporarily throttled the credit balance check now retry with backoff. They previously reported "AI Gateway credit balance exhausted", told users to add credits, and parked the session without retrying.
+- 105bf60: `eve init apps/my-agent` now creates missing parent directories such as `apps/` instead of failing with `ENOENT` from `mkdtemp`. Thanks @otakusboy for reporting this in #5422.
+- 5bb6d43: Nuxt apps that call the auto-imported `useEveAgent()` now hydrate in `nuxt dev`. The `eve/nuxt` module pre-bundles `eve/vue` with Vite, which previously served its CommonJS dependencies to the browser unbundled and failed with `does not provide an export named 'getContext'`.
+- cb1db12: Sending a message from a web client served over plain HTTP on a host other than `localhost` no longer fails with `crypto.randomUUID is not a function`. Thanks @KingAmo for reporting this in #5415.
+- 5458bc4: Reuse signed inbox routing information between client turns when the Workflow SDK and adapter support guarded resumes and `EVE_INBOX_HANDLE_SECRET` is configured. Refresh stale routing after a confirmed refusal without retrying uncertain deliveries.
+- a5328b4: `sandbox.spawn({ stdin: true })` returns a process with a writable `stdin` stream; closing it sends EOF. The Vercel and Docker sandboxes support it, and just-bash and custom providers without stdin support reject the call.
+- 66103be: `eve dev` on Windows no longer opens a console window for each Docker command, dev build process, or optional package install. Thanks @satish860 for reporting this in #5291.
+- 040519a: The browser client no longer triggers a Content Security Policy `eval` violation on pages whose `script-src` omits `'unsafe-eval'`. eve's bundled Zod now skips its `Function("")` probe and always uses its interpreted parser. Your app's own Zod and `z.config()` are not affected. Thanks @wasimxyz for reporting this in #5365.
+
 ## 0.84.0
 
 ### Minor Changes
