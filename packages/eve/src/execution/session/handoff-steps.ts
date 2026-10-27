@@ -136,7 +136,7 @@ export type SessionCheckpointValidation =
 export async function prepareSuccessorStep(input: {
   /** Absent for version 1 sources, which predate the field. */
   readonly handoffVersion: number | undefined;
-  readonly migration: SessionCheckpointMigration;
+  readonly migration: Exclude<SessionCheckpointMigration, { readonly kind: "busy" }>;
   readonly sessionId: string;
   /** Version 3: the run that still holds the session and the addresses it hands over. */
   readonly source?: { readonly runId: string; readonly hookTokens: readonly string[] };

@@ -90,11 +90,43 @@ it.each([
   });
 });
 
+it("tells an owner that still runs a task to try again on a later delivery", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-busy" } });
+  await runtime.run(async () => {
+    const task = { calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } };
+    const { activation, owner, sessionId } = await handOffReleasedWith(KITCHEN_SINK, {
+      "eve.taskTable": { tasks: [task], version: 1 },
+    });
+    try {
+      // Not `incompatible`, which the owner would remember for this deployment.
+      expect(activation).toMatchObject({ kind: "failed" });
+      const readable = getRun(sessionId).getReadable();
+      try {
+        expect(await readable.getTailIndex()).toBe(KITCHEN_SINK.length - 1);
+      } finally {
+        await readable.cancel().catch(() => {});
+      }
+    } finally {
+      await owner.cancel().catch(() => {});
+    }
+  });
+});
+
 /**
  * An eve 0.69–0.82 owner (handoff version 2), whose session stream holds `records`, hands its
  * session to this build: it releases its addresses and waits for the successor's verdict.
  */
 async function handOffReleased(records: readonly unknown[], turnCount: number) {
+  const { activation, ...handoff } = await handOffReleasedWith(records, {}, turnCount);
+  expect(activation).toEqual({ kind: "active" });
+  return handoff;
+}
+
+async function handOffReleasedWith(
+  records: readonly unknown[],
+  state: Record<string, unknown>,
+  turnCount = turnsIn(records),
+) {
   const release = `pre-v27-release-${crypto.randomUUID()}`;
   const owner = await start(releasingSessionOwnerWorkflow, [{ aliases: [], release }]);
   const sessionId = owner.runId;
@@ -107,7 +139,7 @@ async function handOffReleased(records: readonly unknown[], turnCount: number) {
   const successor = await start(workflowEntry, [
     {
       activationToken: `${sessionId}:handoff`,
-      checkpoint: savedCheckpoint(14, sessionId, turnCount),
+      checkpoint: savedCheckpoint(14, sessionId, turnCount, state),
       delivery: followUpDelivery(),
       handoffVersion: 2,
       kind: "handoff",
@@ -116,8 +148,8 @@ async function handOffReleased(records: readonly unknown[], turnCount: number) {
       sessionWritable: getRun(sessionId).getWritable<Uint8Array>(),
     },
   ]);
-  await expect(owner.returnValue).resolves.toMatchObject({ activation: { kind: "active" } });
-  return { owner, sessionId, successor };
+  const { activation } = (await owner.returnValue) as { readonly activation: unknown };
+  return { activation, owner, sessionId, successor };
 }
 
 /**
@@ -208,7 +240,12 @@ function followUpDelivery(): DeliverHookPayload {
  * The checkpoint an idle owner before v27 hands off after `turnCount` turns: eve 0.79 writes
  * version 14, which predates the admitted delivery keys eve 0.83's version 17 carries.
  */
-function savedCheckpoint(version: 14 | 17, sessionId: string, turnCount: number) {
+function savedCheckpoint(
+  version: 14 | 17,
+  sessionId: string,
+  turnCount: number,
+  state: Record<string, unknown> = {},
+) {
   return {
     ...(version === 17 && { admittedDeliveryKeys: [] }),
     history: [
@@ -230,6 +267,7 @@ function savedCheckpoint(version: 14 | 17, sessionId: string, turnCount: number)
           sessionId,
           state: {
             "eve.harness.sessionProjection": { nextSequence: turnCount, started: true, turns: {} },
+            ...state,
           },
         },
       },

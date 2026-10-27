@@ -27,6 +27,8 @@ export interface PreV27Checkpoint<C = SessionCheckpoint> {
 export type PreV27CheckpointImport =
   /** Its checkpoint still unchecked against the current shape. */
   | { readonly kind: "pre-v27"; readonly imported: PreV27Checkpoint<Record<string, unknown>> }
+  /** Work the earlier owner runs will finish; a later delivery can move the session. */
+  | { readonly kind: "busy"; readonly detail: string }
   | { readonly kind: "incompatible"; readonly detail: string };
 
 export function isPreV27CheckpointVersion(version: unknown): version is number {
@@ -47,9 +49,9 @@ export function importPreV27Checkpoint(
   try {
     return { kind: "pre-v27", imported: importCheckpoint(checkpoint) };
   } catch (error) {
-    if (!(error instanceof CheckpointRefusal)) throw error;
+    if (!(error instanceof CheckpointRefusal) && !(error instanceof SessionBusy)) throw error;
     return {
-      kind: "incompatible",
+      kind: error instanceof SessionBusy ? "busy" : "incompatible",
       detail: `checkpoint version ${String(checkpoint.version)}: ${error.message}`,
     };
   }
@@ -107,7 +109,8 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   if (typeof sessionState.sessionId !== "string") refuse("session id is missing");
   const state = session.state === undefined ? {} : readRecord(session, "state");
   const turnCount = readTurnCount(sessionState, state);
-  requireFinishedTasks(state["eve.taskTable"]);
+  if (holdsRunningTask(state["eve.taskTable"]))
+    throw new SessionBusy("session holds a running task");
   // eve 0.69 kept history in the durable snapshot.
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
@@ -182,20 +185,23 @@ function readCount(value: unknown): number {
   return value;
 }
 
-/** Earlier owners hand off with tasks still running; their runs answer only the old owner. */
-function requireFinishedTasks(table: unknown): void {
-  if (table === undefined) return;
+/**
+ * Earlier owners hand off with tasks still running, including idle resumable ones; their runs
+ * answer only the old owner.
+ */
+function holdsRunningTask(table: unknown): boolean {
+  if (table === undefined) return false;
   if (!isObject(table) || !Array.isArray(table.tasks)) refuse("task table is malformed");
-  for (const task of table.tasks) {
-    if (
+  return table.tasks.some(
+    (task) =>
       !isObject(task) ||
       task.run !== undefined ||
       (Array.isArray(task.held) && task.held.length > 0) ||
-      (Array.isArray(task.calls) && task.calls.length > 0)
-    )
-      refuse("session holds a running task");
-  }
+      (Array.isArray(task.calls) && task.calls.length > 0),
+  );
 }
+
+class SessionBusy extends Error {}
 
 function importHistory(history: unknown[]) {
   try {

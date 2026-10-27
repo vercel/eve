@@ -23,6 +23,8 @@ export type SessionCheckpointMigration =
   | { readonly kind: "current"; readonly checkpoint: SessionCheckpoint }
   /** A checkpoint from an owner before v27, still without the projection its stream holds. */
   | { readonly kind: "pre-v27"; readonly imported: PreV27Checkpoint }
+  /** An owner before v27 still runs work for the session; a later delivery can move it. */
+  | { readonly kind: "busy"; readonly detail: string }
   | { readonly kind: "incompatible"; readonly detail: string };
 
 type CheckpointRecord = Record<string, unknown>;
@@ -48,7 +50,7 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   const { version } = checkpoint;
   if (isPreV27CheckpointVersion(version)) {
     const result = importPreV27Checkpoint({ ...checkpoint, version });
-    if (result.kind === "incompatible") return result;
+    if (result.kind !== "pre-v27") return result;
     const { imported } = result;
     if (!isCurrentCheckpoint(imported.checkpoint)) {
       return { kind: "incompatible", detail: `checkpoint version ${version} is incomplete` };

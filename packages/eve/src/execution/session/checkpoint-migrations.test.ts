@@ -116,20 +116,20 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
   it.each([
     ["a turn is still open", { [PROJECTION]: { activeTurnId: "turn_2", nextSequence: 3 } }],
     ["its turn position is malformed", { [PROJECTION]: { nextSequence: -1 } }],
-    [
-      "a task still runs",
-      {
-        "eve.taskTable": {
-          tasks: [{ calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } }],
-          version: 1,
-        },
-      },
-    ],
   ])("keeps the session on its owner while %s", (_name, state) => {
     const saved = eve083Checkpoint(state);
     const before = structuredClone(saved);
     expect(migrateSessionCheckpoint(saved)).toMatchObject({ kind: "incompatible" });
     expect(saved).toEqual(before);
+  });
+
+  it("leaves a session to its owner only until a task it still runs finishes", () => {
+    const task = { calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } };
+    expect(
+      migrateSessionCheckpoint(
+        eve083Checkpoint({ "eve.taskTable": { tasks: [task], version: 1 } }),
+      ),
+    ).toEqual({ detail: "checkpoint version 17: session holds a running task", kind: "busy" });
   });
 });
 

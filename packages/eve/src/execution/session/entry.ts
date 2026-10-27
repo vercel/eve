@@ -264,6 +264,12 @@ async function prepareSuccessor(
   const { sessionId } = input;
   // The previous owner may run an older eve build; read its checkpoint in this build's shape.
   const migration = migrateSessionCheckpoint(input.checkpoint);
+  if (migration.kind === "busy") {
+    // Not `incompatible`, which an owner before v27 remembers for this deployment: once its work
+    // finishes, its next delivery tries again.
+    await signalFailedActivation(input, new Error(migration.detail), { payloads: [] });
+    return undefined;
+  }
   const validation = await prepareSuccessorStep({
     handoffVersion: input.handoffVersion,
     migration,
@@ -457,7 +463,8 @@ async function startSuccessor(
       admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
-      // The earlier build's conversation reaches this build's model only as a summary.
+      // The earlier build's history follows its own message conventions, such as memory recalls
+      // and task notices; this build's model reads it only as a summary.
       compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
