@@ -55,7 +55,6 @@ export {
   spawnPnpm,
   type PackageManagerStrategy,
   type RunPackageManagerOptions,
-  type RunPnpmOptions,
   type RunVercelOptions,
 } from "./primitives/index.js";
 export {
