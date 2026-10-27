@@ -65,6 +65,7 @@ function createEmptySkillBundle(): CompiledBundle {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: { kind: "bundled" },
     graph: undefined as never,
+    modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: { skills: [] } as never,

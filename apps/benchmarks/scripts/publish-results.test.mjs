@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -153,4 +153,28 @@ test("rejects artifacts that ran another revision, an unplanned model, or an unp
     publishResults({ ...input, artifactsDir: artifactsDirectory(t, {}, "run-3") }),
     /"run-3" is outside the planned run-1\.\.run-2/,
   );
+});
+
+test("reads a single artifact that download-artifact unpacked straight into the directory", async (t) => {
+  // With one matching artifact, actions/download-artifact skips the
+  // `<artifact-name>/` subdirectory, so meta.json lands at the root.
+  const root = artifactsDirectory(t);
+  const nested = join(root, `authoring-benchmark-kimi-k3-${plan.sha}`);
+  const flat = mkdtempSync(join(tmpdir(), "eve-authoring-flat-"));
+  t.after(() => rmSync(flat, { recursive: true, force: true }));
+  cpSync(nested, flat, { recursive: true });
+
+  const store = memoryStore();
+  await publishResults({ plan, artifactsDir: flat, githubRunId: "123", runAttempt: 1, store });
+  const prefix = "authoring/runs/123/1";
+  const rawPath = "current/2026-10-26T00-00-00.000Z/author-001-weather-tool/run-1";
+  assert(store.objects.has(`${prefix}/raw/kimi-k3/${rawPath}/transcript.json`));
+  const [first] = store.objects
+    .get(`${prefix}/records.jsonl`)
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(first.outcome, "passed");
+  assert.equal(first.raw_path, `raw/kimi-k3/${rawPath}`);
 });

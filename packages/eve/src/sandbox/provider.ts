@@ -35,9 +35,11 @@ export interface SandboxConnection<Extensions extends object = {}> {
    * Runs `command` as a Bash login-shell script (`bash -lc`) in
    * `workingDirectory`, with the sandbox's environment plus `env`. `env`
    * holds only the per-call variables. Aborting kills the process tree.
+   * With `stdin`, return a process with a writable `stdin` or throw.
    */
   spawn(options: {
     readonly signal?: AbortSignal;
+    readonly stdin?: boolean;
     readonly command: string;
     readonly env: Readonly<Record<string, string>>;
     readonly workingDirectory: string;

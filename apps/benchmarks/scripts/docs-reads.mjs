@@ -27,6 +27,9 @@ export function transcriptToolCalls(transcript) {
       );
       return {
         name: event.tool.name,
+        // Claude Code's shell keeps its working directory between calls; Codex
+        // and OpenCode start each call in a fresh shell at the project root.
+        keepsCwd: /\/claude-code$/.test(transcript.agent ?? ""),
         command,
         paths: [args._extractedPath, args.path, args.filePath, args.file_path, args.pattern].filter(
           (value) => typeof value === "string",
@@ -39,18 +42,70 @@ export function transcriptToolCalls(transcript) {
  * Lists `docs/<page>` paths in call order. A `cat`, `sed -n`, `grep -r`, or read
  * tool path counts as one read each, and a directory listing or glob counts as a
  * `<dir>/*` probe. The first entry is the page the agent entered the docs through.
+ *
+ * Agents often `cd` into the docs and then name pages relative to them, so
+ * relative paths count while the shell sits in `eve/docs` (or `docs/<page>` in
+ * the `eve` package root). The directory carries across calls only for
+ * harnesses whose shell keeps it.
  */
 export function docsSequence(toolCalls) {
   const pages = [];
+  let prefix = null;
   for (const call of toolCalls) {
-    for (const text of new Set([call.command ?? "", ...call.paths])) {
-      for (const match of text.matchAll(/eve\/docs\/([\w./-]*\.mdx?)/g)) pages.push(match[1]);
-      for (const match of text.matchAll(/eve\/docs\/([\w/-]+)\/(?:\*|$|\s)/g)) {
-        pages.push(`${match[1]}/*`);
-      }
+    if (!call.keepsCwd) prefix = null;
+    const command = call.command ?? "";
+    let start = 0;
+    for (const cd of command.matchAll(cdPattern)) {
+      pages.push(...segmentPages(command.slice(start, cd.index), prefix));
+      prefix = docsPrefixAfterCd(cd[2], prefix);
+      start = cd.index + cd[0].length;
+    }
+    pages.push(...segmentPages(command.slice(start), prefix));
+    for (const path of new Set(call.paths)) {
+      if (path !== command) pages.push(...segmentPages(path, null));
     }
   }
   return pages;
+}
+
+// Shell words start after whitespace, an operator, or a quote, so `cd` and
+// relative paths still match inside Codex's `bash -lc '...'` wrapper.
+const wordBoundary = String.raw`(?<=^|[\s'"=<>;&|(])`;
+const dirEnd = String.raw`(?:\*|$|[\s'"])`;
+const cdPattern = new RegExp(String.raw`${wordBoundary}cd\s+(['"]?)([^\s'";&|)]*)\1`, "g");
+const absolutePage = /eve\/docs\/([\w./-]*\.mdx?)/g;
+const absoluteDir = new RegExp(String.raw`eve/docs/([\w/-]+)/${dirEnd}`, "g");
+// A relative path must start a shell word, so a path that merely ends in
+// `<page>.md` (for example `/workspace/agent/x.md`) does not match.
+const relativePage = new RegExp(String.raw`${wordBoundary}(?:\./)?([\w-][\w./-]*\.mdx?)`, "g");
+const relativeDir = new RegExp(String.raw`${wordBoundary}(?:\./)?([\w-][\w/-]*)/${dirEnd}`, "g");
+
+/** Pages named in `text`, in the order they appear. */
+function segmentPages(text, prefix) {
+  const found = [];
+  for (const match of text.matchAll(absolutePage)) found.push([match.index, match[1]]);
+  for (const match of text.matchAll(absoluteDir)) found.push([match.index, `${match[1]}/*`]);
+  if (prefix !== null) {
+    const relative = (path) => path.startsWith(prefix) && !path.includes("eve/docs/");
+    for (const match of text.matchAll(relativePage)) {
+      if (relative(match[1])) found.push([match.index, match[1].slice(prefix.length)]);
+    }
+    for (const match of text.matchAll(relativeDir)) {
+      if (relative(match[1]) && match[1].length > prefix.length) {
+        found.push([match.index, `${match[1].slice(prefix.length)}/*`]);
+      }
+    }
+  }
+  return found.sort((a, b) => a[0] - b[0]).map(([, page]) => page);
+}
+
+/** `""` inside the docs, `"docs/"` in the `eve` package root, otherwise `null`. */
+function docsPrefixAfterCd(target, prefix) {
+  if (/(?:^|\/)eve\/docs\/?$/.test(target)) return "";
+  if (/(?:^|\/)eve\/?$/.test(target)) return "docs/";
+  if (prefix === "docs/" && /^(?:\.\/)?docs\/?$/.test(target)) return "";
+  if (prefix === "" && /^\.\.\/?$/.test(target)) return "docs/";
+  return null;
 }
 
 export function docsCounts(pages) {

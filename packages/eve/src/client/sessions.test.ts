@@ -13,6 +13,27 @@ afterEach(() => {
 });
 
 describe("Client.sessions", () => {
+  it("carries the refreshed inbox handle across sends and restored session state", async () => {
+    const hints: Array<string | null> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      hints.push(JSON.parse(String(init?.body)).inbox ?? null);
+      expect(new Headers(init?.headers).has("x-eve-inbox")).toBe(false);
+      return Response.json({
+        sessionId: "session_1",
+        deliveryId: `delivery_${hints.length}`,
+        inbox: `handle_${hints.length}`,
+      });
+    });
+    const client = new Client({ baseUrl: "https://eve.test" });
+    const session = client.sessions.attach("session_1");
+    await session.send("Alice starts the conversation.");
+    await session.send("Bob follows up.");
+    const restored = client.sessions.attach(session.state.sessionId, session.state);
+    await restored.send("Alice continues after reopening it.");
+    expect(hints).toEqual([null, "handle_1", "handle_2"]);
+    expect(restored.state.inbox).toBe("handle_3");
+  });
+
   it("creates a session without starting a turn or opening its stream", async () => {
     const requests: Array<{ readonly body?: string; readonly url: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {

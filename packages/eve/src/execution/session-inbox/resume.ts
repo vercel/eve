@@ -1,3 +1,4 @@
+import { issueInboxHandle } from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -34,6 +35,7 @@ const HANDOFF_RETRY_INTERVAL_MS = 20;
 
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
+  readonly inbox?: string;
   /** Lazy identity resolution; delivery never needs to decrypt hook metadata. */
   readonly sessionId: Promise<string>;
 }
@@ -63,7 +65,11 @@ export async function resumeSessionInbox(
   while (true) {
     let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
     try {
-      hook = await resumeRunnableHook(sessionInboxHookToken(token), command);
+      hook = await resumeRunnableHook(
+        sessionInboxHookToken(token),
+        command,
+        typeof address === "string" ? undefined : address.inbox,
+      );
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
@@ -73,6 +79,7 @@ export async function resumeSessionInbox(
     let identity: Promise<string> | undefined;
     return {
       ownerRunId: hook.runId,
+      inbox: issueInboxHandle(hook),
       get sessionId() {
         return (identity ??= (async () => {
           try {

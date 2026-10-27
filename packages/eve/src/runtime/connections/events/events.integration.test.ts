@@ -178,6 +178,7 @@ beforeEach(async () => {
     adapterRegistry: createRuntimeAdapterRegistry({ channels: root.channels }),
     compiledArtifactsSource: { kind: "disk", appRoot: "/virtual/events" },
     graph,
+    modelMetadata: undefined as never,
     moduleMap,
     resolvedAgent: root.agent,
     subagentRegistry: root.subagentRegistry,

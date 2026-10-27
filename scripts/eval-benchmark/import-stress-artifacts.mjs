@@ -25,9 +25,8 @@
 //
 // Usage: node scripts/eval-benchmark/import-stress-artifacts.mjs [--dry-run] [--repo vercel/eve] [--branch changeset-release/main]
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN (read even with --dry-run), a
-// GitHub token (GITHUB_TOKEN, GH_TOKEN, or `gh auth login`), the release
-// merge commits in the local git history, and an `origin` remote to fetch each
-// measured merge ref from.
+// GitHub token (GITHUB_TOKEN, GH_TOKEN, or `gh auth login`), and the release
+// merge commits in the local git history.
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,14 +84,22 @@ function evalIdsAt(sha) {
  * Why the run did not measure the release merge commit's code, if it did not.
  * The run checked out its pull_request merge ref; if main moved before the
  * release merged, the release labels would name code the run never ran.
+ *
+ * GitHub deletes a merge ref when its PR merges, and git cannot fetch a
+ * commit no ref reaches, so the measured tree comes from the API, which keeps
+ * the commit. Every metrics version re-derives every release, long after its
+ * merge, so this check must not depend on the ref.
  */
-function measurementMismatch(measuredSha, sha) {
+async function measurementMismatch({ measuredSha, sha, repo, token }) {
   if (!measuredSha) return "the archive does not name the commit it measured";
-  // Merge refs are not on main, so fetch the measured commit by id.
-  execFileSync("git", ["fetch", "--quiet", "--no-tags", "origin", measuredSha]);
-  const tree = (rev) =>
-    execFileSync("git", ["rev-parse", `${rev}^{tree}`], { encoding: "utf8" }).trim();
-  if (tree(measuredSha) !== tree(sha))
+  const measured = await github(`/repos/${repo}/git/commits/${measuredSha}`, token, {
+    optional: true,
+  });
+  if (measured === null) return `the measured commit ${measuredSha} no longer exists`;
+  const releaseTree = execFileSync("git", ["rev-parse", `${sha}^{tree}`], {
+    encoding: "utf8",
+  }).trim();
+  if (measured.tree.sha !== releaseTree)
     return `the measured commit ${measuredSha} and the release merge commit ${sha} have different trees`;
   return undefined;
 }
@@ -162,7 +169,8 @@ function planFor({ metadata, sha, evalIds }) {
   };
 }
 
-async function github(path, token) {
+/** `optional` returns null for a resource GitHub does not have, instead of failing. */
+async function github(path, token, { optional = false } = {}) {
   const response = await fetch(`https://api.github.com${path}`, {
     headers: {
       accept: "application/vnd.github+json",
@@ -170,6 +178,7 @@ async function github(path, token) {
       "x-github-api-version": "2022-11-28",
     },
   });
+  if (optional && response.status === 404) return null;
   if (!response.ok)
     throw new Error(`GET ${path} failed: ${response.status} ${response.statusText}`);
   return response.json();
@@ -247,7 +256,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         continue;
       }
       const sha = pull.merge_commit_sha;
-      const mismatch = measurementMismatch(metadata.workflow_run.merge_sha, sha);
+      const mismatch = await measurementMismatch({
+        measuredSha: metadata.workflow_run.merge_sha,
+        sha,
+        repo,
+        token,
+      });
       if (mismatch !== undefined) {
         counts.rejected += 1;
         console.error(`${label}: rejected: ${mismatch}`);

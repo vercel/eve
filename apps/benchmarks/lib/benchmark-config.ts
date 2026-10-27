@@ -169,6 +169,22 @@ export const benchmarkModels = [
     support: "supported",
   },
   {
+    id: "gpt-6-1-sol-high",
+    model: "openai/gpt-6.1-sol",
+    agentModel: "openai/gpt-6.1-sol?reasoningEffort=high",
+    displayName: "GPT-6.1 Sol (high)",
+    harness: "Codex",
+    support: "candidate",
+  },
+  {
+    id: "gpt-6-1-terra-high",
+    model: "openai/gpt-6.1-terra",
+    agentModel: "openai/gpt-6.1-terra?reasoningEffort=high",
+    displayName: "GPT-6.1 Terra (high)",
+    harness: "Codex",
+    support: "candidate",
+  },
+  {
     id: "grok-4-7",
     model: "spacexai/grok-4.7",
     displayName: "Grok 4.7",

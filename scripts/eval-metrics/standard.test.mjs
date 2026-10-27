@@ -135,6 +135,26 @@ test("attributes delegated work to tasks across repeated captures of one session
   assertPartition(metrics);
 });
 
+test("an attempt from before agent.started delegation measures nothing", () => {
+  // eve < 0.69.0: the child session has no `agent.started` link to its parent.
+  const artifact = synthetic(
+    turn(0, 100, [
+      event("subagent.called", 10, { turnId: "t", callId: "c" }),
+      event("subagent.completed", 90, { turnId: "t", callId: "c" }),
+    ]),
+  );
+  artifact.result.sessions.push({
+    sessionId: "child",
+    events: turn(20, 80, []).map((e) => ({ ...e, meta: { ...e.meta, id: `child:${e.meta.id}` } })),
+  });
+  const { metrics } = deriveAttemptMetrics(artifact);
+  assert.deepEqual(
+    new Set(Object.values(metrics).map((m) => m.reason)),
+    new Set(["legacy-delegation-events"]),
+    "never a measured zero fan-out or child turns counted as root turns",
+  );
+});
+
 test("excludes sign-in wait from latency and counts it as human wait", () => {
   const artifact = synthetic(
     turn(0, 1000, [

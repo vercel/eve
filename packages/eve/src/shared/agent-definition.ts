@@ -82,7 +82,6 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
-  maxOutputTokens?: number;
   source?: ModuleSourceRef;
   /** Field of the `source` agent config export that holds this model; absent means `model`. */
   sourceField?: "compaction.model";

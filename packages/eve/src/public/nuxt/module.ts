@@ -132,6 +132,14 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
     // without an explicit import, matching Nuxt's composable conventions.
     addImports({ name: "useEveAgent", from: "eve/vue" });
 
+    // Vite's dependency scan never sees an auto-import, so without this it
+    // serves `eve/vue`'s CommonJS dependencies (such as `@vercel/oidc`) to the
+    // browser unbundled in dev, and the app fails to hydrate.
+    nuxt.options.vite.optimizeDeps = {
+      ...nuxt.options.vite.optimizeDeps,
+      include: [...(nuxt.options.vite.optimizeDeps?.include ?? []), "eve/vue"],
+    };
+
     // On Vercel the eve app deploys as a sibling service. A Nitro runtime
     // `proxy` rule can't reach it — the proxied request loops back into the
     // Nuxt function and 404s — so declare the service and route eve transport

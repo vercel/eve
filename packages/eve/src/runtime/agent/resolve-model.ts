@@ -1,8 +1,6 @@
 import { localGatewayModel } from "#internal/model-auth/transport.js";
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import type { ContextAccessor } from "#context/key.js";
-import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
 import {
   normalizeAgentDefinition,
   normalizeAgentPromptCache,
@@ -32,10 +30,11 @@ import {
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import {
-  createRuntimeModelCatalog,
-  type RuntimeModelCatalog,
-  type RuntimeModelMetadata,
-} from "#runtime/agent/model-catalog.js";
+  lookupCatalogModelByProviderModelId,
+  lookupCatalogModelBySlug,
+  type ModelCatalogEntry,
+  type ModelMetadata,
+} from "#internal/model-catalog.js";
 
 export { shouldMockAuthoredRuntimeModels };
 
@@ -161,10 +160,10 @@ export async function loadDynamicRuntimeModelDefinition(input: {
 }
 
 export async function resolveRuntimeModelSelection(input: {
-  readonly catalog?: RuntimeModelCatalog;
   readonly durability: "durable" | "live";
+  /** The build's model metadata snapshot, read only when the selection omits its context window. */
+  readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: PublicAgentDynamicModelResult;
-  readonly state: ContextAccessor;
 }): Promise<ResolvedRuntimeModelSelection> {
   if (input.selection === null || input.selection === undefined) {
     throw new InvalidRuntimeModelSelectionError(
@@ -194,23 +193,20 @@ export async function resolveRuntimeModelSelection(input: {
   }
 
   const selectedModel = selection.model;
-  const catalog = input.catalog ?? runtimeModelCatalogForState(input.state);
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
     if (promptCache !== undefined) throw gatewayPromptCacheError(id);
-    const metadata = await resolveSelectionMetadata({
-      cacheKey: `gateway:${id}`,
-      catalog,
-      contextWindowTokens: selection.modelContextWindowTokens,
-      load: (catalog) => catalog.getByGatewayId(id),
-      modelLabel: id,
-      state: input.state,
-    });
+    const contextWindowTokens =
+      selection.modelContextWindowTokens ??
+      (
+        await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
+          lookupCatalogModelBySlug(metadata, id),
+        )
+      ).contextWindowTokens;
     return {
       reference: {
-        id: metadata.resolvedModelId,
-        contextWindowTokens: metadata.contextWindowTokens,
-        maxOutputTokens: metadata.maxOutputTokens,
+        id,
+        contextWindowTokens,
         providerOptions,
         reasoning: selection.reasoning,
       },
@@ -225,31 +221,33 @@ export async function resolveRuntimeModelSelection(input: {
   }
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
-  const topLevelProvider = selectedModel.provider.split(".")[0]!;
-  if (promptCache !== undefined && topLevelProvider === "gateway") {
+  const routesThroughGateway = selectedModel.provider.split(".")[0] === "gateway";
+  if (promptCache !== undefined && routesThroughGateway) {
     throw gatewayPromptCacheError(formattedId);
   }
-  const metadata = await resolveSelectionMetadata({
-    cacheKey:
-      topLevelProvider === "gateway"
-        ? `gateway:${selectedModel.modelId}`
-        : `provider:${selectedModel.provider}:${selectedModel.modelId}`,
-    catalog,
-    contextWindowTokens: selection.modelContextWindowTokens,
-    load: (catalog) =>
-      topLevelProvider === "gateway"
-        ? catalog.getByGatewayId(selectedModel.modelId)
-        : catalog.getByProviderModelId(selectedModel.provider, selectedModel.modelId),
-    modelLabel: formattedId,
-    state: input.state,
-  });
+  // A Gateway instance carries its Gateway model id, as a string selection does.
+  let id = routesThroughGateway ? selectedModel.modelId : formattedId;
+  let contextWindowTokens = selection.modelContextWindowTokens;
+  if (contextWindowTokens === undefined) {
+    const entry = await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
+      routesThroughGateway
+        ? lookupCatalogModelBySlug(metadata, selectedModel.modelId)
+        : lookupCatalogModelByProviderModelId(
+            metadata,
+            selectedModel.provider,
+            selectedModel.modelId,
+          ),
+    );
+    // A direct provider model takes its Gateway slug, as the compiler names a static one.
+    if (!routesThroughGateway) id = entry.slug;
+    contextWindowTokens = entry.contextWindowTokens;
+  }
 
   return {
     model: selectedModel,
     reference: {
-      id: metadata.resolvedModelId,
-      contextWindowTokens: metadata.contextWindowTokens,
-      maxOutputTokens: metadata.maxOutputTokens,
+      id,
+      contextWindowTokens,
       promptCache,
       providerOptions,
       reasoning: selection.reasoning,
@@ -271,58 +269,19 @@ function gatewayPromptCacheError(modelId: string): Error {
   );
 }
 
-const runtimeModelCatalogsByState = new WeakMap<ContextAccessor, RuntimeModelCatalog>();
-
-function runtimeModelCatalogForState(state: ContextAccessor): RuntimeModelCatalog {
-  const existing = runtimeModelCatalogsByState.get(state);
-  if (existing !== undefined) return existing;
-
-  const catalog = createRuntimeModelCatalog();
-  runtimeModelCatalogsByState.set(state, catalog);
-  return catalog;
-}
-
-const RUNTIME_MODEL_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-async function resolveSelectionMetadata(input: {
-  readonly cacheKey: string;
-  readonly catalog: RuntimeModelCatalog;
-  readonly contextWindowTokens?: number;
-  readonly load: (catalog: RuntimeModelCatalog) => Promise<RuntimeModelMetadata | null>;
-  readonly modelLabel: string;
-  readonly state: ContextAccessor;
-}): Promise<RuntimeModelMetadata> {
-  if (input.contextWindowTokens !== undefined) {
-    return {
-      contextWindowTokens: input.contextWindowTokens,
-      resolvedModelId: input.modelLabel,
-    };
-  }
-
-  const now = Date.now();
-  const cached = input.state.get(RuntimeModelMetadataCacheKey)?.[input.cacheKey];
-  if (cached !== undefined && cached.expiresAt > now) {
-    return cached;
-  }
-
-  const resolved = await input.load(input.catalog);
-  if (resolved === null) {
-    throw new InvalidRuntimeModelSelectionError(
-      `Cannot select model "${input.modelLabel}" because AI Gateway did not provide context window metadata. Return modelContextWindowTokens with this selection for an unlisted or custom model.`,
-    );
-  }
-
-  const entry: CachedModelMetadata = {
-    ...resolved,
-    expiresAt: now + RUNTIME_MODEL_METADATA_CACHE_TTL_MS,
-  };
-  input.state.set(RuntimeModelMetadataCacheKey, (current) => ({
-    ...Object.fromEntries(
-      Object.entries(current ?? {}).filter(([, value]) => value.expiresAt > now),
-    ),
-    [input.cacheKey]: entry,
-  }));
-  return entry;
+async function lookupModelMetadata(
+  loadModelMetadata: () => Promise<ModelMetadata>,
+  modelLabel: string,
+  find: (metadata: ModelMetadata) => ModelCatalogEntry | null,
+): Promise<ModelCatalogEntry> {
+  const metadata = await loadModelMetadata();
+  const entry = find(metadata);
+  if (entry !== null) return entry;
+  throw new InvalidRuntimeModelSelectionError(
+    metadata.fetchedAt === null
+      ? `Cannot select model "${modelLabel}" because this build couldn't read the AI Gateway model catalog, so it has no context window for the model. Return modelContextWindowTokens with this selection, or rebuild with network access to ai-gateway.vercel.sh.`
+      : `Cannot select model "${modelLabel}" because the AI Gateway model catalog this build read at ${metadata.fetchedAt} has no context window for it. Return modelContextWindowTokens with this selection for an unlisted or custom model, or rebuild to pick up a newly published one.`,
+  );
 }
 
 const DYNAMIC_MODEL_SELECTION_KEYS = new Set([

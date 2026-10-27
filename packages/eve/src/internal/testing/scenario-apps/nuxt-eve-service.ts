@@ -11,7 +11,8 @@ interface NuxtEveServiceDescriptorOptions {
 }
 
 /**
- * A Nuxt host with a generated eve Vercel service.
+ * A Nuxt host with a generated eve Vercel service whose page uses the
+ * auto-imported `useEveAgent()` composable.
  */
 export function createNuxtEveServiceDescriptor(
   options: NuxtEveServiceDescriptorOptions = {},
@@ -27,8 +28,12 @@ export function createNuxtEveServiceDescriptor(
 export default defineAgent({ model: "openai/gpt-5.4" });
 `,
       "agent/instructions.md": "You are a test agent.\n",
-      "app/app.vue": `<template>
-  <main>eve nuxt deployment</main>
+      "app/app.vue": `<script setup lang="ts">
+const { status } = useEveAgent();
+</script>
+
+<template>
+  <main>eve nuxt deployment: {{ status }}</main>
 </template>
 `,
       "nuxt.config.ts": `export default defineNuxtConfig({

@@ -113,6 +113,28 @@ await response.result();
 
 Per-request headers override client-level values with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` continues to send the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
 
+## Reusing a session inbox
+
+Keep the complete `session.state` when saving and restoring a conversation. It can include an
+opaque `inbox` handle returned by the server. The client sends this handle with later messages
+to avoid another hook lookup. Treat it as transport state: do not inspect or edit it.
+
+Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret (at least 32 characters)
+on the deployments that share sessions. Without this key, handles are neither issued nor used.
+The signature authenticates all routing and encryption fields before use. Rotation falls back
+to ordinary token resolution.
+
+Reuse also requires a Workflow SDK with `parseHookResumeHandle`, an adapter that declares
+`resolvedHookResume`, and a backend with the guarded resolved-hook endpoint.
+Older SDKs do not issue or use handles, even when the secret
+is configured. This change keeps the released SDK dependencies; adopting the SDK update
+enables the optimization. Handles exclude user metadata, live capabilities, and trace carriers,
+which may contain private server baggage. The signature authenticates a handle; it does not hide its contents.
+
+The server checks that the handle addresses the requested inbox. Workflow still validates the
+hook, persists the message, and wakes the workflow. A definite stale-owner rejection resolves
+the current inbox again. An uncertain write is surfaced without submitting a second delivery.
+
 ## Sessions
 
 Create and park an ID-addressed conversation before its first turn when you can start session work
@@ -163,7 +185,7 @@ for await (const event of session.stream({ follow: false })) {
 await session.reset({ reason: "User requested a fresh session" });
 ```
 
-`client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
+`client.sessions` stores the session ID, stream cursor, and optional opaque inbox handle. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
 
 A client can own many independent fixed sessions at once:
 

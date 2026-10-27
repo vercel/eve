@@ -92,6 +92,7 @@ export type SessionSendOptions = SessionDeliveryOptions & {
 export type SessionRespondOptions = SessionDeliveryOptions;
 
 interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
+  readonly inbox?: string;
   readonly callback?: SessionCallback;
   /** The delivery's id, when the request names it (`deliveryIdForIdempotencyKey`). */
   readonly deliveryId?: string;
@@ -136,6 +137,7 @@ export function createSession(
       const result = await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
+        inbox: (options as InternalSessionDeliveryOptions).inbox,
       });
       return commandDelivery(runtime, result, delivery.deliveryId);
     },
@@ -170,6 +172,7 @@ export function createSession(
       const result = await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
+        inbox: (options as InternalSessionDeliveryOptions).inbox,
       });
       return commandDelivery(runtime, result, delivery.deliveryId);
     },

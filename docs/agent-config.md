@@ -177,10 +177,11 @@ The function returns a Gateway model ID, an AI SDK `LanguageModel`, or a selecti
 - **Serialization.** Only memo results must be JSON. The function can return a live provider
   instance built from those results. `ctx.model` is unavailable during model selection.
 - **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
-  When `modelContextWindowTokens` is omitted, eve resolves it from the AI Gateway catalog and caches
-  successful metadata in durable session state for 24 hours. Set it explicitly for an unlisted or
-  custom model. Dynamic agents cannot set sibling `modelContextWindowTokens` or `modelOptions`
-  fields; return per-model values from the function.
+  When `modelContextWindowTokens` is omitted, eve reads it from the AI Gateway model catalog that
+  `eve build` or `eve dev` recorded, so selecting a model makes no network request. A model that
+  catalog doesn't list fails the turn: set `modelContextWindowTokens` for an unlisted, custom, or
+  newly published model, or rebuild. Dynamic agents cannot set sibling `modelContextWindowTokens` or
+  `modelOptions` fields; return per-model values from the function.
 
 The `session.started` runtime identity does not include a model ID for a dynamic agent. Each public
 `model.started` event reports the concrete model selected for that model call.

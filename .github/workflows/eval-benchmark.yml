@@ -5,6 +5,16 @@ name: Eval Benchmark
 # `main` revisions and never on pull requests. Run legs hold model or Vercel
 # deployment credentials, never the Blob token: the publish job is the only
 # one that holds it.
+#
+# A `release` dispatch backfills a published eve release: the run legs check
+# out its `eve@<version>` tag (that release's eve, fixtures, and eval runner)
+# as the code under test, while main's harness (.benchmark-harness: planning,
+# probes, and record derivation) runs against it. The run is dated at the
+# release's npm publish time, skips hosted worlds, and publishes under
+# imports/ (scripts/eval-benchmark/release.mjs). On main the two checkouts
+# are the same commit.
+run-name: ${{ inputs.release && format('Eval Benchmark (eve@{0} backfill)', inputs.release) || 'Eval Benchmark' }}
+
 on:
   schedule:
     # Nightly; skipped when main has not moved since the last successful
@@ -24,9 +34,16 @@ on:
         description: Attempts per fixture and model (empty for the registry default)
         type: string
         default: ""
+      release:
+        description: Published eve version to backfill, e.g. 0.61.0 (empty to benchmark main)
+        type: string
+        default: ""
 
 concurrency:
-  group: eval-benchmark-main
+  # One group per backfilled release: a group holds a single pending run, so
+  # dispatching several releases into one would cancel all but the last. The
+  # prefix keeps an unvalidated input (e.g. "main") out of main's group.
+  group: eval-benchmark-${{ inputs.release && format('release-{0}', inputs.release) || 'main' }}
   cancel-in-progress: false
 
 permissions:
@@ -48,6 +65,7 @@ jobs:
       max_parallel: ${{ steps.plan.outputs.max_parallel }}
       evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
       dev_startup: ${{ steps.plan.outputs.dev_startup }}
+      keep_state: ${{ steps.plan.outputs.keep_state }}
     steps:
       - name: Require main
         if: github.ref != 'refs/heads/main'
@@ -55,15 +73,49 @@ jobs:
           echo "::error::Benchmark results publish only from refs/heads/main (got ${GITHUB_REF})."
           exit 1
 
-      - name: Checkout code
+      - name: Resolve code under test
+        id: target
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -z "$RELEASE" ]; then
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          elif [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ref=refs/tags/eve@${RELEASE}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::release must be a published eve version such as 0.61.0 (got \"${RELEASE}\")."
+            exit 1
+          fi
+
+      - name: Checkout code under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ steps.target.outputs.ref }}
+          persist-credentials: false
+
+      - name: Require a release on main
+        # Legs run the planned commit with model credentials, so a backfill
+        # may only run a commit main has: a tag can point anywhere.
+        if: inputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/$(git rev-parse HEAD)...${GITHUB_SHA}" --jq .status)"
+          if [ "$status" != "ahead" ] && [ "$status" != "identical" ]; then
+            echo "::error::$(git rev-parse HEAD) is not on main (compare status: ${status})."
+            exit 1
+          fi
+
+      - name: Checkout benchmark harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .benchmark-harness
           persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version-file: .benchmark-harness/.nvmrc
 
       - name: Skip an unchanged nightly run
         id: skip
@@ -71,7 +123,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           if [ "$EVENT_NAME" = "schedule" ]; then
             last_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow eval-benchmark.yml \
               --branch main --event schedule --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
@@ -90,7 +142,9 @@ jobs:
           BENCHMARK_MODELS: ${{ inputs.models }}
           BENCHMARK_FIXTURES: ${{ inputs.fixtures }}
           BENCHMARK_ATTEMPTS: ${{ inputs.attempts }}
-        run: node scripts/eval-benchmark/plan.mjs "$RUNNER_TEMP/plan.json" "$GITHUB_SHA"
+          BENCHMARK_RELEASE: ${{ inputs.release }}
+          SHA: ${{ steps.skip.outputs.sha }}
+        run: node "$GITHUB_WORKSPACE/.benchmark-harness/scripts/eval-benchmark/plan.mjs" "$RUNNER_TEMP/plan.json" "$SHA"
 
       - name: Upload plan
         if: steps.skip.outputs.run == 'true'
@@ -122,10 +176,16 @@ jobs:
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
     steps:
-      - name: Checkout planned commit
+      - name: Checkout code under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Checkout benchmark harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .benchmark-harness
           persist-credentials: false
 
       - name: Setup pnpm
@@ -138,6 +198,11 @@ jobs:
           cache: "pnpm"
 
       - name: Resolve eve sandbox image
+        # A backfilled release runs the sandbox image it shipped with: from
+        # 0.49.1, eve's default is its own version's image (published for every
+        # release since 0.49.0); older releases read no image tag. The release's
+        # checkout also predates this action.
+        if: inputs.release == ''
         uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
@@ -154,18 +219,22 @@ jobs:
 
       - name: Run fixture evals
         working-directory: ${{ matrix.dir }}
+        env:
+          KEEP_STATE_FLAG: ${{ needs.plan.outputs.keep_state == 'true' && '--keep-state' || '' }}
         run: |
           pnpm run --if-present e2e:prepare
           pnpm exec eve eval --list --json > "$RUNNER_TEMP/expected.json"
-          # --keep-state leaves the eval server's Workflow data for the world probe.
-          if ! pnpm exec eve eval --verbose --keep-state --max-concurrency "$EVALS_PER_LEG"; then
+          # --keep-state leaves the eval server's Workflow data for the world
+          # probe; releases before eve 0.83.1 have no such flag.
+          if ! pnpm exec eve eval --verbose $KEEP_STATE_FLAG --max-concurrency "$EVALS_PER_LEG"; then
             echo "::warning::Some evals failed; failures are recorded as benchmark data."
           fi
 
       - name: Export world probe
+        if: needs.plan.outputs.keep_state == 'true'
         working-directory: ${{ matrix.dir }}
         run: |
-          if ! node "$GITHUB_WORKSPACE/scripts/eval-benchmark/export-world.mjs" . "$RUNNER_TEMP/world"; then
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/scripts/eval-benchmark/export-world.mjs" . "$RUNNER_TEMP/world"; then
             echo "::warning::World probe export failed; durability metrics are recorded as unavailable."
             rm -rf "$RUNNER_TEMP/world"
           fi
@@ -180,7 +249,7 @@ jobs:
           WORLD: ${{ matrix.world }}
           ATTEMPT: ${{ matrix.attempt }}
           RUNNER_OS_NAME: ${{ runner.os }}
-        run: bash .github/scripts/stage-benchmark-leg.sh
+        run: bash "$GITHUB_WORKSPACE/.benchmark-harness/.github/scripts/stage-benchmark-leg.sh"
 
       - name: Upload leg artifact
         if: always()
@@ -230,10 +299,16 @@ jobs:
       WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
       WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"
     steps:
-      - name: Checkout planned commit
+      - name: Checkout code under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Checkout benchmark harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .benchmark-harness
           persist-credentials: false
 
       - name: Setup pnpm
@@ -246,6 +321,11 @@ jobs:
           cache: "pnpm"
 
       - name: Resolve eve sandbox image
+        # A backfilled release runs the sandbox image it shipped with: from
+        # 0.49.1, eve's default is its own version's image (published for every
+        # release since 0.49.0); older releases read no image tag. The release's
+        # checkout also predates this action.
+        if: inputs.release == ''
         uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
@@ -262,10 +342,12 @@ jobs:
       - name: Run fixture evals on the local world
         if: matrix.world == 'local'
         working-directory: ${{ matrix.dir }}
+        env:
+          KEEP_STATE_FLAG: ${{ needs.plan.outputs.keep_state == 'true' && '--keep-state' || '' }}
         run: |
           pnpm run --if-present e2e:prepare
           pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
-          if ! pnpm exec eve eval --verbose --keep-state --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG"; then
+          if ! pnpm exec eve eval --verbose $KEEP_STATE_FLAG --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG"; then
             echo "::warning::Some evals failed; failures are recorded as benchmark data."
           fi
 
@@ -313,11 +395,13 @@ jobs:
           EVE_E2E_WORKFLOW_WORLD: ${{ matrix.world_package }}
 
       - name: Export world probe
+        # A local world keeps its data only with --keep-state; others persist it.
+        if: matrix.world != 'local' || needs.plan.outputs.keep_state == 'true'
         working-directory: ${{ matrix.dir }}
         run: |
           # Local legs read the kept eval server's data; others the leg's world.
           if [ -n "$WORLD_PACKAGE" ]; then export EVE_E2E_WORKFLOW_WORLD="$WORLD_PACKAGE"; fi
-          if ! node "$GITHUB_WORKSPACE/scripts/eval-benchmark/export-world.mjs" . "$RUNNER_TEMP/world"; then
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/scripts/eval-benchmark/export-world.mjs" . "$RUNNER_TEMP/world"; then
             echo "::warning::World probe export failed; durability metrics are recorded as unavailable."
             rm -rf "$RUNNER_TEMP/world"
           fi
@@ -334,7 +418,7 @@ jobs:
           WORLD: ${{ matrix.world }}
           ATTEMPT: ${{ matrix.attempt }}
           RUNNER_OS_NAME: ${{ runner.os }}
-        run: bash .github/scripts/stage-benchmark-leg.sh
+        run: bash "$GITHUB_WORKSPACE/.benchmark-harness/.github/scripts/stage-benchmark-leg.sh"
 
       - name: Upload leg artifact
         if: always()
@@ -351,6 +435,7 @@ jobs:
   # One leg at a time, so concurrent legs don't contend for the same project.
   # No world probe (the World's event log isn't local) and no build or start
   # probes (they would measure Vercel's build and deploy, not eve).
+  # Release backfills plan none: the hosted platform is today's, not the release's.
   run-hosted:
     name: run-hosted (${{ matrix.fixture }}, ${{ matrix.world }}, ${{ matrix.attempt }})
     needs: plan
@@ -477,10 +562,16 @@ jobs:
     continue-on-error: true
     timeout-minutes: 45
     steps:
-      - name: Checkout planned commit
+      - name: Checkout code under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Checkout benchmark harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .benchmark-harness
           persist-credentials: false
 
       - name: Setup pnpm
@@ -510,7 +601,7 @@ jobs:
             '{sha: $sha, runner_os: $runner_os}' >"$out/meta.json"
           runs="$(jq -r '.runs' <<<"$DEV_STARTUP")"
           while read -r name tools; do
-            if ! node packages/eve/scripts/benchmark-startup.mjs packages/eve "$runs" "$tools" >"$out/$name.jsonl"; then
+            if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-startup.mjs" packages/eve "$runs" "$tools" >"$out/$name.jsonl"; then
               echo "::warning::Startup benchmark for $name failed; its runs are recorded as missing."
             fi
           done < <(jq -r '.subjects[] | "\(.name) \(.tools)"' <<<"$DEV_STARTUP")
@@ -524,7 +615,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Runs trusted code from the planned main commit, never code a leg uploaded.
+  # Runs main's code, never code a leg uploaded or the release a backfill planned.
   # Planned legs without an artifact become `missing` records.
   publish:
     name: publish
@@ -532,10 +623,11 @@ jobs:
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout planned commit
+      - name: Checkout harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.plan.outputs.sha }}
+          # main's code, never the planned commit: a backfill plans a release.
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup pnpm

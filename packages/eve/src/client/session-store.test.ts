@@ -37,6 +37,7 @@ function store(options: SessionStoreInit = {}) {
 afterEach(() => {
   for (const current of stores.splice(0)) detachSessionStore(current);
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** An append-only agent stream, independent of when its POST acknowledgements arrive. */
@@ -158,6 +159,40 @@ function appendPersonWait(server: ReturnType<typeof agent>) {
 }
 
 describe("SessionStore acceptance and observation", () => {
+  it("preserves refreshed inbox handles in saved snapshots and session-change callbacks", async () => {
+    agent();
+    const fetchAgent = vi.mocked(fetch).getMockImplementation()!;
+    const inboxes: Array<string | undefined> = [];
+    vi.mocked(fetch).mockImplementation(async (request, init) => {
+      const response = await fetchAgent(request, init);
+      if (init?.method !== "POST") return response;
+      inboxes.push(JSON.parse(String(init.body)).inbox);
+      const accepted = (await response.json()) as Record<string, unknown>;
+      return Response.json({
+        ...accepted,
+        inbox: `inbox_${inboxes.length}`,
+      });
+    });
+    const current = store({ initialSession: { ...initialSession, inbox: "inbox_0" } });
+    const changed = vi.fn();
+    current.setCallbacks({ onSessionChange: changed });
+    const before = current.snapshot.session;
+    expect(before?.inbox).toBe("inbox_0");
+
+    // No stream facts arrive: the POST receipt must publish the refreshed state.
+    await current.send({ message: "Alice starts the conversation." });
+    expect(current.snapshot.session).toEqual({ ...initialSession, inbox: "inbox_1" });
+    expect(changed).toHaveBeenLastCalledWith(current.snapshot.session);
+    expect(before?.inbox).toBe("inbox_0");
+
+    const restored = store({
+      initialSession: JSON.parse(JSON.stringify(changed.mock.lastCall![0])),
+    });
+    await restored.send({ message: "Bob continues after reopening it." });
+    expect(inboxes).toEqual(["inbox_0", "inbox_1"]);
+    expect(restored.snapshot.session).toEqual({ ...initialSession, inbox: "inbox_2" });
+  });
+
   it.each([false, true])(
     "observes its accepted turn once, including a reply already at the tail (early: %s)",
     async (early) => {
@@ -643,6 +678,20 @@ describe("SessionStore acceptance and observation", () => {
     await expect(current.send({ message: "sunny." })).rejects.toThrow();
     expect(current.snapshot.error).toBeInstanceOf(Error);
     expect(current.snapshot.messages[0]?.metadata?.status).toBe("failed");
+  });
+
+  // Browsers expose `crypto.randomUUID` only in secure contexts (#5415).
+  it("sends where crypto.randomUUID is not exposed, as on a plain-HTTP origin", async () => {
+    const server = agent();
+    const webCrypto = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: webCrypto.getRandomValues.bind(webCrypto) });
+    const current = store({ initialSession });
+    await current.send({ message: "sunny." });
+    await current.send({ message: "sunny.", turnPolicy: "queue" });
+    expect(server.posts).toEqual(["/eve/v1/session/session_1", "/eve/v1/session/session_1"]);
+    const [first, second] = current.snapshot.messages;
+    expect(texts(current)).toEqual(["user: sunny.", "user: sunny."]);
+    expect(first?.id).not.toBe(second?.id);
   });
 });
 

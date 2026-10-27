@@ -78,7 +78,12 @@ export function createDockerConnection(input: {
       setNetworkPolicy: (policy) => setDockerNetworkPolicy(cli, containerIdentity, policy),
     },
     async spawn(options) {
-      const args = ["exec", "-w", options.workingDirectory];
+      const args = [
+        "exec",
+        ...(options.stdin === true ? ["-i"] : []),
+        "-w",
+        options.workingDirectory,
+      ];
       for (const [key, value] of Object.entries(options.env)) {
         args.push("-e", `${key}=${value}`);
       }
@@ -96,12 +101,13 @@ export function createDockerConnection(input: {
         `status=$?; rm -f ${shellQuote(pidFilePath)}; exit $status`;
       args.push(containerIdentity, "bash", "-c", wrapped);
 
-      const child = cli.stream(args, { signal: options.signal });
+      const child = cli.stream(args, { signal: options.signal, stdin: options.stdin });
       options.signal?.addEventListener("abort", () => void killSpawnTree(pidFilePath), {
         once: true,
       });
 
       return {
+        stdin: child.stdin,
         stdout: child.stdout,
         stderr: child.stderr,
         async wait() {

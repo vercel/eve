@@ -62,12 +62,18 @@ export function createConnectionSession<Extensions extends object>(
     });
   }
   async function spawn(options: SandboxSpawnOptions) {
-    return await connection.spawn({
+    const process = await connection.spawn({
       signal: options.signal,
+      stdin: options.stdin,
       command: options.command,
       env: options.env ?? {},
       workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
     });
+    if (options.stdin === true && process.stdin === undefined) {
+      await Promise.resolve(process.kill()).catch(() => undefined);
+      throw new Error("This sandbox provider does not support `stdin` on spawn.");
+    }
+    return process;
   }
   const session: SandboxSession = {
     resolvePath: resolveSandboxPath,
