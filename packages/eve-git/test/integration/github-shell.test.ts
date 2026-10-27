@@ -226,7 +226,7 @@ test("runs the parsed argv as one single-quoted exec of the trusted gh", async (
     {
       ...READ,
       command:
-        "gh pr comment 1 --repo vercel/internal-agents --body \"it's `id`; done\" --title '$(id)|$HOME'",
+        "gh pr comment 1 --repo vercel/internal-agents --body \"it's done; really\" --title '$(id)|`id` $HOME'",
     },
     CONFIG,
     {
@@ -241,7 +241,7 @@ test("runs the parsed argv as one single-quoted exec of the trusted gh", async (
   );
   assert.equal(
     runs[0]?.command,
-    `cd '/workspace' && exec '${GITHUB_TOOLING_PATHS.ghReal}' 'pr' 'comment' '1' '--repo' 'vercel/internal-agents' '--body' 'it'"'"'s \`id\`; done' '--title' '$(id)|$HOME'`,
+    `cd '/workspace' && exec '${GITHUB_TOOLING_PATHS.ghReal}' 'pr' 'comment' '1' '--repo' 'vercel/internal-agents' '--body' 'it'"'"'s done; really' '--title' '$(id)|\`id\` $HOME'`,
   );
 });
 

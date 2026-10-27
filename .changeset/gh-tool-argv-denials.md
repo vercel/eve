@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-The `gh` tool accepts backticks inside double quotes, braces such as `{owner}`, parentheses, and a `$` that cannot expand, and each refusal names the offending token, its fix, and an internal reason code. It now refuses an unquoted newline and a NUL character, joins backslash-newline continuations, and keeps a backslash inside double quotes unless bash removes it, so `"C:\path"` passes `C:\path`.
+Each `gh` tool refusal now names the offending token and its fix, and the tool description states the command rules. The tool also refuses a NUL character, an unquoted newline, a backslash-newline line continuation, and authenticated git that does not name `origin` right after the subcommand, which `main` accepted but could not run as written.

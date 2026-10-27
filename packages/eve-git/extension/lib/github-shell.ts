@@ -113,10 +113,12 @@ type GitHubCommandDenialCode =
   | "git_subcommand"
   | "heredoc"
   | "invalid_input"
+  | "line_continuation"
   | "pipe"
   | "program"
   | "redirect"
   | "substitution"
+  | "subshell"
   | "unterminated_quote"
   | "variable";
 
@@ -132,16 +134,18 @@ class GitHubCommandError extends Error {
 interface ShellSyntax {
   readonly code: Extract<
     GitHubCommandDenialCode,
-    "brace_expansion" | "chain" | "heredoc" | "pipe" | "redirect" | "substitution" | "variable"
+    | "brace_expansion"
+    | "chain"
+    | "heredoc"
+    | "pipe"
+    | "redirect"
+    | "subshell"
+    | "substitution"
+    | "variable"
   >;
   readonly token: string;
   /** Replaces the default fix for `code`. */
   readonly fix?: string;
-}
-
-interface BraceGroup {
-  readonly start: number;
-  lists: boolean;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
@@ -149,15 +153,22 @@ const leaseQueues = new Map<string, Promise<void>>();
 const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
 const NO_SHELL = "GitHub commands run without a shell";
 const GIT_REMOTE_COMMANDS = "Authenticated git supports fetch, ls-remote, pull, and push";
-const WORD_SEPARATORS = " \t\n";
-const DOUBLE_QUOTE_ESCAPES = '$`"\\';
-const BRACE_SEQUENCE = /^(?:[-+]?\d+\.\.[-+]?\d+|[A-Za-z]\.\.[A-Za-z])(?:\.\.[-+]?\d+)?$/u;
 const ARITHMETIC_FIX = "is not evaluated. Write the computed value, or write \\$ for a literal $.";
 const QUOTING_FIX =
   "quoting is not interpreted. Use plain single or double quotes, or write \\$ for a literal $.";
+const LITERAL_DOLLAR: ShellSyntax = {
+  code: "variable",
+  token: "$",
+  fix: "must be in single quotes. Put the text in single quotes, such as 'costs 5$'.",
+};
+const BACKTICK: ShellSyntax = {
+  code: "substitution",
+  token: "`",
+  fix: "must be in single quotes. Put literal backticks in single quotes or a --body-file, or run the inner command separately and use its output.",
+};
 const SHELL_SYNTAX_FIXES: Record<ShellSyntax["code"], (token: string) => string> = {
   brace_expansion: () =>
-    "is not expanded into separate arguments. Write each argument out, or quote the braces to send them literally.",
+    "must be quoted. Quote literal braces, such as 'repos/{owner}/{repo}', and write each argument of a brace list out.",
   chain: () => "cannot chain commands. Send each command in its own call.",
   heredoc: () =>
     "cannot start a heredoc. Write the text to a file and pass it with --body-file, or --input for gh api.",
@@ -165,6 +176,7 @@ const SHELL_SYNTAX_FIXES: Record<ShellSyntax["code"], (token: string) => string>
     "cannot pipe output. Filter it with --jq or --template, or process it in a separate call.",
   redirect: () =>
     "cannot redirect. The tool returns stdout and stderr; read files with flags such as --body-file or --input.",
+  subshell: () => 'must be quoted. Quote the text, such as "fix(git): title".',
   substitution: () =>
     "is not expanded. Run the inner command separately and use its output, or put literal text in single quotes or a --body-file.",
   variable: (token) =>
@@ -355,21 +367,17 @@ async function withGitHubCredentialLease<T>(
 }
 
 export function parseCommand(command: string): string[] {
-  const value = joinContinuedLines(command);
+  const value = command.trim();
   if (!value) throw new GitHubCommandError("invalid_input", "GitHub command must not be empty.");
   if (value.includes("\0")) {
     throw new GitHubCommandError("invalid_input", "GitHub command contains a NUL character.");
   }
   const argv: string[] = [];
-  const braces: BraceGroup[] = [];
   let token = "";
   let quote: "single" | "double" | null = null;
   let quoteStart = 0;
   let escaped = false;
   let started = false;
-  // A newline before the first word or after the last one separates no commands.
-  const contentStart = value.length - value.replace(/^[ \t\n]+/u, "").length;
-  const contentEnd = value.replace(/[ \t\n]+$/u, "").length;
   let refused: GitHubCommandError | undefined;
   let heredoc = false;
   const refuse = (syntax: ShellSyntax | undefined) => {
@@ -381,14 +389,20 @@ export function parseCommand(command: string): string[] {
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]!;
     if (escaped) {
-      escaped = false;
-      if (quote === "double" && !DOUBLE_QUOTE_ESCAPES.includes(character)) token += "\\";
+      if (character === "\n") {
+        refused ??= new GitHubCommandError(
+          "line_continuation",
+          `${NO_SHELL}, so a "\\" at the end of a line cannot continue it. Put the whole command on one line.`,
+        );
+      }
       token += character;
+      escaped = false;
       started = true;
       continue;
     }
     if (character === "\\" && quote !== "single") {
       escaped = true;
+      started = true;
       continue;
     }
     if (quote === "single") {
@@ -397,13 +411,12 @@ export function parseCommand(command: string): string[] {
       continue;
     }
     if (character === "$") {
-      refuse(expansionAt(value, index, quote === "double"));
+      refuse(expansionAt(value, index, quote === "double") ?? LITERAL_DOLLAR);
+    } else if (character === "`") {
+      refuse(BACKTICK);
     } else if (quote === null && character === "\n" && heredoc) {
       throw refused!;
-    } else if (
-      quote === null &&
-      (character !== "\n" || (index >= contentStart && index < contentEnd))
-    ) {
+    } else if (quote === null) {
       const operator = operatorAt(value, index);
       refuse(operator);
       if (operator?.token === "<<") heredoc = true;
@@ -418,15 +431,13 @@ export function parseCommand(command: string): string[] {
       quote = character === "'" ? "single" : "double";
       quoteStart = index;
       started = true;
-    } else if (WORD_SEPARATORS.includes(character)) {
-      braces.length = 0;
+    } else if (/\s/u.test(character)) {
       if (started) {
         argv.push(token);
         token = "";
         started = false;
       }
     } else {
-      refuse(braceExpansionAt(value, index, braces));
       token += character;
       started = true;
     }
@@ -446,25 +457,6 @@ export function parseCommand(command: string): string[] {
   return argv;
 }
 
-/** Removes each backslash-newline pair outside single quotes, as bash's reader does. */
-function joinContinuedLines(command: string): string {
-  let joined = "";
-  let quote: "'" | '"' | null = null;
-  for (let index = 0; index < command.length; index += 1) {
-    const character = command[index]!;
-    if (quote !== "'" && character === "\\") {
-      const next = command[index + 1] ?? "";
-      index += 1;
-      if (next !== "\n") joined += character + next;
-      continue;
-    }
-    if (character === "'" && quote !== '"') quote = quote === "'" ? null : "'";
-    else if (character === '"' && quote !== "'") quote = quote === '"' ? null : '"';
-    joined += character;
-  }
-  return joined;
-}
-
 /** The control or redirection operator bash reads at `index` outside quotes. */
 function operatorAt(value: string, index: number): ShellSyntax | undefined {
   const pair = value.slice(index, index + 2);
@@ -478,8 +470,9 @@ function operatorAt(value: string, index: number): ShellSyntax | undefined {
   if (character === "&" || character === ";" || character === "\n") {
     return { code: "chain", token: character };
   }
-  if (character === "`") return { code: "substitution", token: character };
   if (character === "<" || character === ">") return { code: "redirect", token: character };
+  if (character === "{" || character === "}") return { code: "brace_expansion", token: character };
+  if (character === "(" || character === ")") return { code: "subshell", token: character };
   return undefined;
 }
 
@@ -498,28 +491,6 @@ function expansionAt(value: string, index: number, quoted: boolean): ShellSyntax
   if (next === "{") return { code: "variable", token: "${" };
   const name = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9*@#?!$-])/u.exec(value.slice(index + 1));
   return name ? { code: "variable", token: `$${name[0]}` } : undefined;
-}
-
-/**
- * Tracks the unquoted braces of the current word. Returns the brace expansion bash performs
- * when a group that holds an unquoted `,`, or a sequence such as `1..3` or `a..z`, closes.
- */
-function braceExpansionAt(
-  value: string,
-  index: number,
-  open: BraceGroup[],
-): ShellSyntax | undefined {
-  const character = value[index];
-  if (character === "{") open.push({ start: index, lists: false });
-  else if (character === "}") {
-    const group = open.pop();
-    if (group && (group.lists || BRACE_SEQUENCE.test(value.slice(group.start + 1, index)))) {
-      return { code: "brace_expansion", token: value.slice(group.start, index + 1) };
-    }
-  } else if (character === "," && open.length > 0) {
-    open.at(-1)!.lists = true;
-  }
-  return undefined;
 }
 
 function shellSyntaxError(words: readonly string[], syntax: ShellSyntax): GitHubCommandError {
