@@ -18,12 +18,12 @@ This plan adds one core primitive, a same-session `ctx.send()` on `HookContext`,
 
 Several coding agents and agent frameworks ship goal loops. They differ mainly in who judges and what triggers the next turn:
 
-| Pattern                    | Judge                                                                         | Trigger                                              | Safety                                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Separate judge after turns | A small, fast model reads the condition and evidence; met, not met, or impossible, with a reason that steers the next turn | A stop hook after every turn                         | Stops after several turns without tool use; skips judging while background work runs     |
-| Self-assessed completion   | The working model marks the goal complete through a tool, only on evidence    | A continuation prompt at idle boundaries only        | Thread-scoped budget; interruptions pause; no continuation while user input is queued    |
-| Judge inside the loop      | An LLM-as-judge scorer, optionally with read-only verification tools         | A step in the agent loop before it returns           | Run budget (commonly 50); exhaustion pauses and is resumable                            |
-| Blocked stop               | None; the agent audits its own work against a deliverables checklist          | A stop hook refuses premature turn ends              | Often no iteration cap; waits for subagents and background tasks                        |
+| Pattern                    | Judge                                                                                                                      | Trigger                                       | Safety                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Separate judge after turns | A small, fast model reads the condition and evidence; met, not met, or impossible, with a reason that steers the next turn | A stop hook after every turn                  | Stops after several turns without tool use; skips judging while background work runs  |
+| Self-assessed completion   | The working model marks the goal complete through a tool, only on evidence                                                 | A continuation prompt at idle boundaries only | Thread-scoped budget; interruptions pause; no continuation while user input is queued |
+| Judge inside the loop      | An LLM-as-judge scorer, optionally with read-only verification tools                                                       | A step in the agent loop before it returns    | Run budget (commonly 50); exhaustion pauses and is resumable                          |
+| Blocked stop               | None; the agent audits its own work against a deliverables checklist                                                       | A stop hook refuses premature turn ends       | Often no iteration cap; waits for subagents and background tasks                      |
 
 The shared shape is: durable objective per thread, a trigger at turn end, a judge, a budget with a no-progress guard, pause, resume, and clear, and waiting for background work. eve already provides the last item: [turns wait for their tasks](../docs/tools/tasks.md#turns-wait-for-their-tasks).
 
@@ -64,7 +64,9 @@ export default defineHook({
         return;
       }
       attempts.update((n) => n + 1);
-      ctx.send(`Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`);
+      ctx.send(
+        `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
+      );
     },
   },
 });
@@ -72,14 +74,14 @@ export default defineHook({
 
 Semantics reuse the `ctx.cancel()` command path where they can, and differ where the target turn differs:
 
-|                   | `cancel(reason?)`                                 | `send(message, options?)`                                             |
-| ----------------- | ------------------------------------------------- | --------------------------------------------------------------------- |
-| Targets           | The running turn                                  | The next turn                                                         |
-| Eligible on       | Events while a turn runs                          | `turn.settled` with outcome `completed` only                          |
-| Stored as         | An intent keyed by the active `turnId`            | A session-level intent with no turn, keyed by the settled `turnId`    |
-| Consumed by       | `actOnCancels` after the commit                   | The idle wait in `nextTurnDelivery`, when nothing is queued           |
-| Effect            | `turn.cancelled`, then `session.waiting`          | A message delivery that starts a normal turn                          |
-| Competing input   | The first cancel wins                             | Yields to any other turn; survives controls that start no turn        |
+|                 | `cancel(reason?)`                        | `send(message, options?)`                                          |
+| --------------- | ---------------------------------------- | ------------------------------------------------------------------ |
+| Targets         | The running turn                         | The next turn                                                      |
+| Eligible on     | Events while a turn runs                 | `turn.settled` with outcome `completed` only                       |
+| Stored as       | An intent keyed by the active `turnId`   | A session-level intent with no turn, keyed by the settled `turnId` |
+| Consumed by     | `actOnCancels` after the commit          | The idle wait in `nextTurnDelivery`, when nothing is queued        |
+| Effect          | `turn.cancelled`, then `session.waiting` | A message delivery that starts a normal turn                       |
+| Competing input | The first cancel wins                    | Yields to any other turn; survives controls that start no turn     |
 
 - **Recorded now, applied later.** Channel sends return a delivery receipt, but a hook send returns `void`: it is recorded during the handler and admitted after the event's hooks return, so retries and workflow replay stay deterministic. Like `cancel()`, calling it after the handler settled throws. If the handler throws, its commands are discarded with the rest of its requests.
 - **Fails closed on events.** Eligibility is a total map over hook event types, so a new event does not compile until it is classified. A call on an ineligible event, or on a `failed` or `cancelled` settle, is ignored with a warning.
@@ -140,7 +142,8 @@ export default defineHook({
     async "turn.settled"(event, ctx) {
       const current = goal.get();
       if (current?.status !== "active") return;
-      const pause = (reason: string) => goal.update((g) => g && { ...g, status: "paused", lastReason: reason });
+      const pause = (reason: string) =>
+        goal.update((g) => g && { ...g, status: "paused", lastReason: reason });
 
       if (event.data.outcome !== "completed") return pause(`Turn ${event.data.outcome}.`);
       const { turnId } = event.data;
@@ -159,9 +162,20 @@ export default defineHook({
       }).catch(() => undefined);
       if (verdict === undefined) return pause("The goal judge failed.");
       if (verdict.verdict !== "continue") {
-        return goal.update((g) => g && { ...g, status: verdict.verdict, lastReason: verdict.reason });
+        return goal.update(
+          (g) => g && { ...g, status: verdict.verdict, lastReason: verdict.reason },
+        );
       }
-      goal.update((g) => g && { ...g, runs: g.runs + 1, idleRuns: idle, continued: true, lastReason: verdict.reason });
+      goal.update(
+        (g) =>
+          g && {
+            ...g,
+            runs: g.runs + 1,
+            idleRuns: idle,
+            continued: true,
+            lastReason: verdict.reason,
+          },
+      );
       ctx.send(`Continue toward the goal. ${verdict.reason}`);
     },
   },
@@ -181,7 +195,9 @@ export default defineDynamic(() => {
       `<goal runs="${current.runs}/${current.maxRuns}">${current.objective}</goal>`,
       current.lastReason && `<last_judgement>${current.lastReason}</last_judgement>`,
       "Work toward the goal. Prove progress with tool output; the judge only sees what this turn surfaces.",
-    ].filter(Boolean).join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   });
 });
 ```
@@ -203,6 +219,7 @@ export default defineDynamic(() => {
   ```
 
   That is a usable interim recipe once the stack lands, but not the goal primitive. It is channel-specific: the extension would need the consumer's channel module and a per-channel target mapping, and sessions without an addressable channel cannot use it. Delegated sessions are refused by design. It is only on tools, so continuation depends on the model calling a checkpoint tool rather than on a judge that always runs. Giving hooks `ctx.to()` would fix the last point but not the first two.
+
 - **`ctx.continue(message)`.** An earlier draft of this plan. Same semantics, but a new verb for what is a message send, with its own option shape instead of `MessageSendOptions`.
 - **Schedules.** Dynamic schedules start fresh sessions and do not steer an existing conversation. A minute-granularity dispatcher adds latency and an external store.
 - **Stop hook that blocks turn end, or a judge inside the harness loop.** Matches the blocked-stop and in-loop patterns above, but changes `harness/` turn settlement. Continuation after settlement gets the same behavior with a smaller core change.
