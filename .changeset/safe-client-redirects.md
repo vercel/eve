@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
-Client requests now reject redirects by default, including session writes and event streams. Set `redirect: "manual"` to inspect redirect responses; explicitly opting into `"follow"` retains the previous automatic-follow behavior.
+Client requests now reject redirects by default, including session writes and event streams. Update redirecting base URLs to their final destination, use `redirect: "manual"` to stop at redirects, or explicitly opt into `"follow"` only when every redirect destination is trusted.
