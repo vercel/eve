@@ -460,7 +460,13 @@ describe("dispatchChannelRequest", () => {
     await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /webhook", {} as never);
 
     expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
-      { delivery: { acceptedDeploymentId: "dpl_current", channelName: "alerts" } },
+      {
+        delivery: {
+          acceptedDeploymentId: "dpl_current",
+          channelKind: "channel:alerts",
+          channelName: "alerts",
+        },
+      },
     );
   });
 
