@@ -1,14 +1,13 @@
 /**
  * Why one model run ended. `tool-calls` is the only one the turn continues after, unless
- * steering superseded the run, which ends `steered` and continues with the next run. The wire
- * carries it as an open string on `model.settled`.
+ * steering superseded the run, which ends `steered` on the wire and continues with the next run.
+ * The wire carries it as an open string on `model.settled`.
  */
 export type AssistantStepFinishReason =
   | "content-filter"
   | "error"
   | "length"
   | "other"
-  | "steered"
   | "stop"
   | "tool-calls";
 

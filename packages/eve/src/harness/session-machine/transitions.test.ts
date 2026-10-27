@@ -277,7 +277,7 @@ describe("closing what a turn leaves open", () => {
 
   it("leaves a retried run's settle free of steering fields", () => {
     const settled = committed(viewOf(busyTurn()), (view) =>
-      discardAttempt(view, { ending: "retried", runId, steeredBy: "dlv_ignored" }),
+      discardAttempt(view, { ending: "retried", runId }),
     ).find((event) => event.type === "model.settled")?.data;
     expect(settled).toMatchObject({ outcome: "abandoned" });
     expect(settled).not.toHaveProperty("finishReason");
