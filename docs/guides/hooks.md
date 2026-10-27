@@ -214,7 +214,7 @@ Each committed line is published in this order:
 1. Write. The line is written to the durable stream.
 2. Channel delivery. The channel adapter handler runs for each fact.
 3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-4. Cancellation requests queued by `ctx.cancel()` take effect after the handlers return. A follow-up from `ctx.followUp()` is admitted once the session is idle.
+4. Cancellation requests queued by `ctx.cancel()` take effect after the handlers return.
 
 Before an ordinary model call, dynamic functions compute the model and capabilities from the latest committed session. They do not subscribe to events.
 
@@ -263,7 +263,7 @@ The same goes for the `call.progress` a workflow tool reports while the turn wai
 
 ## Follow up a turn from a hook
 
-Call `ctx.followUp(message, options?)` from a `turn.settled` handler to start the session's next turn without waiting for someone to send it. This hook keeps the agent working until the test suite passes, for at most ten more turns:
+Call `ctx.followUp(message, options?)` from a `turn.settled` handler to start the session's next turn. This hook keeps the agent working until the tests pass, for at most ten more turns:
 
 ```ts title="agent/hooks/until-green.ts"
 import { defineState } from "eve/context";
@@ -290,58 +290,13 @@ export default defineHook({
 });
 ```
 
-Only `turn.settled` and `*` handlers receive `ctx.followUp`; on any other key it doesn't exist, so calling it is a type error. The message is [`MessageContent`](./client/messages), so it can carry files, and the options are `session.send()`'s `context`, plus an optional `auth`:
+Only `turn.settled` and `*` handlers receive `ctx.followUp`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the follow-up names no sender and the turn runs as the session's current identity.
 
-| Option    | Default                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `auth`    | none: the follow-up names no sender, and the turn runs as the session's current identity |
-| `context` | none                                                                                     |
+The follow-up waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or reset, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and the model is told that a hook sent it. Bound loops yourself, as the example does.
 
-Pass a principal as `auth` to make the turn act for them, or `null` to run it with no caller, as with `session.send()`. There's no `idempotencyKey`: eve records a turn's follow-up with the step that settled it, so a retry never runs the handler again, and the session admits it once.
+A turn can be followed up when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and follow up with a correction. When several hooks follow up the same turn, their messages share the next turn.
 
-### Several hooks, and cancelled turns
-
-Every hook that follows up the same turn contributes to one next turn. Each message is its own payload with its own `delivery.admitted`, in hook order, and the model reads them together as the turn's input. A goal hook and a lint hook can both follow up, and neither drops the other. One turn acts for one principal, so a follow-up whose `auth` differs from the one already queued isn't queued.
-
-A hook that cancelled a turn with `ctx.cancel()` can follow it up, to redirect the agent:
-
-```ts title="agent/hooks/protect-tests.ts"
-import { defineHook } from "eve/hooks";
-import { editsTestFiles } from "../lib/tests";
-
-export default defineHook({
-  events: {
-    "call.started"(event, ctx) {
-      if (editsTestFiles(event.data)) ctx.cancel("The agent started editing test files.");
-    },
-    "turn.settled"(event, ctx) {
-      if (event.data.outcome === "cancelled") {
-        ctx.followUp("Fix the code without editing test files.");
-      }
-    },
-  },
-});
-```
-
-Only the hook that cancelled the turn can follow it up. A turn a person cancelled with `session.cancel()`, or another hook cancelled, can't be followed up, so a person can always stop a loop. Neither can a failed turn.
-
-The model reads the message and its `context` exactly as the hook passed them. Its `delivery.admitted` records `source: { channel, hook: "until-green" }` and no principal unless you pass `auth`, so UIs can tell it from a person's message. From that source, eve places a note ahead of the message in each prompt saying the hook sent it and no person wrote it; the note never joins history. It passes through the channel's `deliver` hook like any other message.
-
-`ctx.followUp()` returns synchronously what eve did with the request:
-
-| Result                                        | When                                                                 |
-| --------------------------------------------- | -------------------------------------------------------------------- |
-| `{ queued: true }`                            | eve recorded the follow-up                                           |
-| `{ queued: false, reason: "not-completed" }`  | the turn failed, or something other than this hook cancelled it      |
-| `{ queued: false, reason: "already-queued" }` | this hook already followed up this turn                              |
-| `{ queued: false, reason: "auth-conflict" }`  | another hook's follow-up to this turn acts for a different principal |
-| `{ queued: false, reason: "not-settled" }`    | a `*` handler ran for an event other than `turn.settled`             |
-
-A queued follow-up can still be dropped, because it yields. When any other turn starts first, such as one from a person's message, or a `session.cancel()`, clear, or reset arrives, eve drops it. If the session expires first, it ends with the follow-up unsent. That other turn settles too, so a hook that follows up every `turn.settled` sees it and decides again with the person's input in view. A compaction leaves the follow-up waiting. It always queues; it never steers a running turn.
-
-Unlike `session.send()`, `ctx.followUp()` returns no `Delivery`: the delivery doesn't exist until the session admits it, after the handler returns. Like `ctx.cancel()`, it throws after the handler has settled and counts only if the handler returns.
-
-A follow-up is an ordinary turn, so approvals, task waiting, and `limits.sessionUsage` apply unchanged. Bound loops yourself, as the example does: eve doesn't cap how many turns hooks start. For a message that must always be delivered, such as a notification, use a channel send instead.
+`ctx.followUp()` returns `{ queued: true }`, or `{ queued: false, reason }` when it can't follow up the turn: `not-completed`, `already-queued`, `auth-conflict` (another hook's follow-up acts for a different principal), or `not-settled` (a `*` handler on another event).
 
 ## Subagent isolation
 
