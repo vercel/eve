@@ -303,7 +303,7 @@ describe("runtime compiled artifact loaders", () => {
         '  model: "openai/gpt-5.4",',
         "  compaction: {",
         '    model: "openai/gpt-5.4-mini",',
-        "    thresholdPercent: 0.75,",
+        "    threshold: 0.75,",
         "  },",
         "});",
         "",

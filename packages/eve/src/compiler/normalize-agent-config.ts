@@ -149,7 +149,10 @@ export async function compileAgentConfig(
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
-      sessionUsage: definition.limits.sessionUsage === undefined ? undefined : true,
+      sessionUsage:
+        typeof definition.limits.sessionUsage === "function"
+          ? true
+          : definition.limits.sessionUsage,
     };
   }
 
@@ -166,8 +169,8 @@ export async function compileAgentConfig(
     });
   }
 
-  if (definition.compaction?.thresholdPercent !== undefined) {
-    compaction.thresholdPercent = definition.compaction.thresholdPercent;
+  if (definition.compaction?.threshold !== undefined) {
+    compaction.thresholdPercent = definition.compaction.threshold;
   }
 
   if (dynamicModel !== undefined) {
