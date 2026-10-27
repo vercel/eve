@@ -57,6 +57,8 @@ export const modelPricing = {
     cacheRead: 0.01,
     cacheWrite: 0.125,
   },
+  // GPT-6 Sol and GPT-6.1 bill prompts over 272k tokens at higher rates, but
+  // Codex only reports per-turn usage, so these list prices are a lower bound.
   "openai/gpt-6.1-sol": {
     effectiveDate: "2026-10-27",
     source: "https://ai-gateway.vercel.sh/v1/models",
@@ -203,9 +205,11 @@ const number = (value) => (typeof value === "number" && Number.isFinite(value) ?
 const object = (value) => (value !== null && typeof value === "object" ? value : {});
 
 /**
- * Usage per model request, in transcript order. Claude Code streams one
- * response as several `assistant` events (one per content block) that repeat
- * the same message id and `usage`, so each id counts once, with its last usage.
+ * Usage per reported entry, in transcript order: one per model request for
+ * Claude Code and OpenCode, but one per turn for Codex, whose `turn.completed`
+ * sums every request in the turn. Claude Code streams one response as several
+ * `assistant` events (one per content block) that repeat the same message id
+ * and `usage`, so each id counts once, with its last usage.
  */
 export function extractRunRequests(raw, harness) {
   const requests = [];
@@ -328,7 +332,11 @@ export function countToolInvocations(raw) {
  * `longContext.above` is billed at the long-context rates. Null when the run
  * reported no usage.
  */
-export function priceRequests(requests, pricing) {
+export function priceRequests(requests, pricing, harness) {
+  // Codex entries are per-turn totals, so a per-request threshold can't apply to them.
+  if (pricing.longContext !== undefined && harness === "Codex") {
+    throw new Error("Long-context pricing needs per-request usage, which Codex does not report.");
+  }
   if (requests.reduce((total, r) => total + tokenConsumption(r), 0) === 0) return null;
   return requests.reduce((total, r) => {
     const long = pricing.longContext;

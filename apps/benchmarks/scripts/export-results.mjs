@@ -277,7 +277,7 @@ function meanRunMetrics(summaryPath, model, harness) {
   const pricing = modelPricing[model];
   if (pricing !== undefined && performanceUsage.length > 0) {
     result.meanEstimatedListCostUsd = mean(
-      performanceRequests.map((requests) => priceRequests(requests, pricing)),
+      performanceRequests.map((requests) => priceRequests(requests, pricing, harness)),
     );
   }
   if (performanceUsage.length > 0) {

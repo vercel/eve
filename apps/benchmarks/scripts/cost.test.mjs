@@ -10,6 +10,7 @@ import {
   priceUsage,
   tokenConsumption,
 } from "./cost.mjs";
+import { benchmarkModels } from "../lib/benchmark-config.ts";
 
 test("extracts usage from authoring harness transcripts", () => {
   const usage = extractRunUsage(
@@ -172,4 +173,13 @@ test("prices each request at long-context rates when its prompt exceeds the thre
   assert.ok(Math.abs(priceRequests([long], pricing) - 0.00795005) < 1e-12);
   assert.ok(Math.abs(priceRequests([short, long], pricing) - (0.00159 + 0.00795005)) < 1e-12);
   assert.equal(priceRequests([], pricing), null);
+});
+
+test("refuses long-context pricing for Codex's per-turn usage", () => {
+  const pricing = modelPricing["anthropic/claude-haiku-5.5"];
+  const turn = { input: 1_000, output: 1_000, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+  assert.throws(() => priceRequests([turn], pricing, "Codex"), /per-request usage/u);
+  for (const benchmark of benchmarkModels.filter((entry) => entry.harness === "Codex")) {
+    assert.equal(modelPricing[benchmark.model]?.longContext, undefined, benchmark.id);
+  }
 });
