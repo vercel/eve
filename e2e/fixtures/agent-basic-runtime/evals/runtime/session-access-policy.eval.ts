@@ -3,7 +3,7 @@ import { equals } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Alice's workspace allows her session access while Bob waits for membership approval.",
+    "A workspace policy denies one caller session access while a permitted caller continues the conversation.",
   tags: ["client", "regression"],
   async test(t) {
     const session = await t.session();

@@ -83,15 +83,15 @@ describe("eve ID-addressed session routes", () => {
     const session = createFixedSession();
     const attachSession = vi.fn(() => session);
     const authorizeSession = vi.fn(() => false);
+    const subagent = path.includes(":parentSessionId");
+    const expectedSessionId = subagent ? "parent-only-session" : "wrun_A";
+    const params: Record<string, string> = subagent
+      ? { parentSessionId: expectedSessionId, callId: "call-1", childSessionId: "child-1" }
+      : { sessionId: expectedSessionId };
     const args = {
       ...createArgs(session),
       attachSession,
-      params: {
-        sessionId: "wrun_A",
-        parentSessionId: "wrun_A",
-        callId: "call-1",
-        childSessionId: "child-1",
-      },
+      params,
     };
     const response = await route(method, path, { auth: none(), authorizeSession })(
       new Request(`https://eve.test${path}`, { method }),
@@ -99,7 +99,7 @@ describe("eve ID-addressed session routes", () => {
     );
     expect(response.status).toBe(403);
     expect(authorizeSession).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ sessionId: "wrun_A" }),
+      expect.objectContaining({ sessionId: expectedSessionId }),
     );
     expect(attachSession).not.toHaveBeenCalled();
     expect(session.prewarm).not.toHaveBeenCalled();

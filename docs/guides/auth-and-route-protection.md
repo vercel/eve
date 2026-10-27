@@ -21,6 +21,8 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
+For existing-session routes, `eveChannel({ authorizeSession })` adds a resource check after authentication. User principals require an explicit policy; non-user transports keep shared access unless a policy narrows it. The auth examples below show identity verification only. Configure [existing-session authorization](../channels/eve#existing-session-authorization) before using them for multi-user conversations.
+
 The health route created by `eveChannel()` is public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials. Replacing `agent/channels/eve.ts` with a custom `defineChannel(...)` or disabling that slot also replaces or removes the health route.
 
 ```ts title="agent/channels/eve.ts"
@@ -300,9 +302,9 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 - A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
 - `auth.current` is whatever the channel passed as `auth` when it dispatched the message. Route auth either accepts the request or returns `401`, but a route handler or channel hook can still dispatch with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`. On a continuation, `auth.current` is `null` while `auth.initiator` stays pinned to the session's original caller. Internal runtime paths, such as subagents, can also have no caller auth.
 
-Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.
+Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. This mutable turn identity does not establish session ownership.
 
-Route auth does not enforce session ownership. If multiple users or tenants can reach the same route, you must implement the per-user, per-tenant, or per-session authorization your application requires.
+For the eve HTTP channel, `auth` identifies the transport caller and `authorizeSession` checks that caller against the requested session before messages, controls, preparation, and streams. User principals without a policy are denied existing-session access. eve does not maintain an application ownership database: load permissions from your own server records. Custom `defineChannel` routes must enforce their own resource checks. See [existing-session authorization](../channels/eve#existing-session-authorization).
 
 ## Tool replacement permission
 
@@ -325,7 +327,7 @@ export default eveChannel({
 
 The channel checks the grant before forwarded-principal handling or `onMessage` projection. It removes the grant before using the identity for forwarding, audience classification, or session persistence. This is an authentication-result permission, not a session attribute.
 
-Later messages, approvals, controls, and result reads use normal channel authentication. There is no additional creator-only rule or replacement-permission recheck. Anyone your channel admits to an existing session can use its configured stubs; apply the same application-specific session-access policy you need for ordinary sessions.
+Later messages, approvals, controls, and result reads use channel authentication and any applicable existing-session authorization policy. There is no additional creator-only rule or replacement-permission recheck. Anyone your channel admits to an existing session can use its configured stubs; apply the same application-specific session-access policy you need for ordinary sessions.
 
 ## Tool and connection auth
 

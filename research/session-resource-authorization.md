@@ -32,6 +32,12 @@ The verified transport caller, original request, and root/parent session ID are 
 
 Review the default policy and migration burden before making this ready. Blocking users without an application policy is intentional; automatically declaring a mutable current caller to be the owner would be incorrect for shared conversations and forwarded sessions. This proposal does not change callback capabilities, remote-agent principal forwarding, or the execution core.
 
+## Required migration before readiness
+
+The fail-closed prototype is not a completed first-party rollout. A decision is still required for verified development-user access in the default channel and scaffold, and for user-authenticated starters such as web chat, voice, personal-agent, Auth.js, and shared Basic-auth applications. Do not blanket-opt production templates into shared access to silence failures; either provide owner-backed policy or explicitly approve shared-workspace semantics.
+
+Shared descendant-stream, channel-conformance, and local workflow-delivery test harnesses also need intentional policies once that decision is made. These non-unit suites are not claimed green by the focused unit checks. Keep this PR draft until the default, scaffold/template migration, documentation examples, and targeted integration/scenario validation agree.
+
 ## Validation
 
 Owner-boundary route tests cover rejection before access across all session routes, default user rejection, and a server-owned permission check. CI eval coverage should exercise the configured policy through HTTP without contacting identity providers.
