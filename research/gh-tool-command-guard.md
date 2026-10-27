@@ -184,11 +184,12 @@ To revert, revert the eve patch release. There is no stored state to migrate.
   expected argv. An open quote reports `unterminated_quote` before an operator the
   misquoted text exposes, and a heredoc body reports `heredoc`. An environment-assignment
   message never contains the assigned value.
-- Baseline (`packages/eve-git/test/unit/github-command-baseline.test.ts`): a corpus built
-  from each token in a word, alone, and inside double and single quotes, plus whole
-  commands, runs through the parser and through `main`'s validation. Every accepted
-  command is accepted by `main` with the same argv, and every command `main` accepts
-  that this change refuses falls under one of the four kinds in decision 4.
+- Baseline (`packages/eve-git/test/unit/github-command-baseline.test.ts`): a committed
+  fixture records `main`'s verdict and argv at 38e53fcf5 for a corpus built from each
+  token in a word, alone, and inside double and single quotes, plus whole commands.
+  Every command the parser accepts is accepted in the fixture with the same argv, and
+  every command the fixture accepts that the parser refuses falls under one of the four
+  kinds in decision 4.
 - Integration (`packages/eve-git/test/integration/github-shell.test.ts`): the full
   `sandbox.run` command string is `cd '<dir>' && exec '<trusted gh>'` followed by each
   argv value single-quoted.
