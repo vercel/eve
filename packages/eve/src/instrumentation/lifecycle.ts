@@ -447,6 +447,8 @@ export interface InstrumentationCallSettledEvent {
   /** Why it didn't complete. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
   readonly errorCode?: string;
+  /** The thrown error's `name`, such as `"GitBrokerRefusedError"`, on every trace. */
+  readonly errorName?: string;
   readonly usage?: InstrumentationUsage;
   readonly reason?: string;
   readonly cause?: Cause;

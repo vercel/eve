@@ -298,6 +298,7 @@ function instrumentationEventsOf(
           cause: event.data.cause,
           error: line.capturesOutputs ? error : undefined,
           errorCode: event.data.error?.code,
+          errorName: event.data.error?.name,
           idempotencyKey,
           outcome,
           reason: event.data.reason,

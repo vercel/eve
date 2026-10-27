@@ -387,8 +387,12 @@ describe("calls", () => {
       expect(completed).toMatchObject({
         output: capturesContent ? { temperature: 4 } : undefined,
       });
-      // The failure's code reaches every provider; its message is content.
-      expect(failed).toMatchObject({ errorCode: "TOOL_FAILED", outcome: "failed" });
+      // The failure's code and its error's name reach every provider; its message is content.
+      expect(failed).toMatchObject({
+        errorCode: "TOOL_FAILED",
+        errorName: "QuotaError",
+        outcome: "failed",
+      });
       if (capturesContent) expect(failed).toHaveProperty("error.name", "QuotaError");
       expect(failed && "error" in failed ? failed.error : undefined).toEqual(
         capturesContent

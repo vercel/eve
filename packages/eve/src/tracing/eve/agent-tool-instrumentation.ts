@@ -170,7 +170,7 @@ export function createAgentToolInstrumentation(input: {
         // Trace schema 4 still calls an interrupted call cancelled.
         outcome: event.outcome === "interrupted" ? "cancelled" : event.outcome,
         failed,
-        errorType: failed ? event.errorCode : undefined,
+        errorType: failed ? toolErrorType(event) : undefined,
         error: failed ? event.error : undefined,
         output: input.recordOutputs && !failed ? event.output : undefined,
         usage: event.usage,
@@ -301,6 +301,13 @@ export function createAgentToolInstrumentation(input: {
       "call.settled": onDispatchTerminal,
     },
   };
+}
+
+/** A thrown error's class names a failure that carries no code of its own. */
+function toolErrorType({ errorCode, errorName }: InstrumentationCallSettledEvent) {
+  return errorCode === "ACTION_RESULT_FAILED" && errorName && errorName !== "Error"
+    ? errorName
+    : errorCode;
 }
 
 function toolContext(state: AgentActionTraceState): AgentToolContext {

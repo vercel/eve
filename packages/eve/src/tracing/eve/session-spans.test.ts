@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 import { AgentSpanIdGenerator, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { callSettledFrom } from "#harness/call-facts.js";
 import { eventsOf } from "#harness/publication.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import {
@@ -309,6 +311,49 @@ describe("a session's spans, from its committed lines", () => {
     ]);
     const failed = exported.find((span) => span.name === "execute_tool weather");
     expect(failed?.attributes["error.type"]).toBe("TOOL_FAILED");
+  });
+
+  it.each([
+    {
+      thrown: Object.assign(new Error("Token refused."), { name: "GitBrokerRefusedError" }),
+      type: "GitBrokerRefusedError",
+    },
+    { thrown: new Error("Token refused."), type: "ACTION_RESULT_FAILED" },
+    {
+      thrown: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      type: "ACTION_RESULT_FAILED",
+    },
+    {
+      thrown: Object.assign(new Error(JSON.stringify({ code: "X", message: "Token refused." })), {
+        name: "GitBrokerRefusedError",
+      }),
+      type: "X",
+    },
+  ])("types a call that threw $thrown.name as $type", async ({ thrown, type }) => {
+    for (const records of [false, true]) {
+      const { commit, spans } = session(() => ({
+        emit: true,
+        recordInputs: records,
+        recordOutputs: records,
+      }));
+      await commit(...opening);
+      await commit(requested("call_publish", "publish"));
+      await commit({
+        ...callSettledFrom(
+          createRuntimeToolResultFromValue({
+            callId: "call_publish",
+            isError: true,
+            output: thrown,
+            toolName: "publish",
+          }),
+        ),
+        scope: run,
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const tool = (await spans()).find((span) => span.name === "execute_tool publish");
+      expect(tool?.attributes["error.type"], `outputs recorded: ${records}`).toBe(type);
+    }
   });
 
   it("fails the step a failed turn's end cuts short", async () => {
