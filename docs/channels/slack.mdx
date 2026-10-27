@@ -39,6 +39,19 @@ Choose **Use portable credentials** when the agent does not run on Vercel or you
 2. Install the app, then set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**. Put both values in `.env.local` for local development or in the target runtime's environment when deployed.
 3. Set the Request URL to `https://your-agent.example/eve/v1/slack` under **Event Subscriptions** (subscribe to `app_mention`, plus `message.im` for DMs), **Interactivity & Shortcuts**, and each **Slash Command**.
 
+The channel reads both variables when you omit `credentials`. To name the source explicitly:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: {
+    botToken: process.env.SLACK_BOT_TOKEN,
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+  },
+});
+```
+
 A function-form `botToken` receives `{ teamId }`, the app installation workspace, so a self-managed multi-workspace app can select an installation: `credentials: { botToken: ({ teamId }) => loadInstallationToken(teamId) }`. Reject a missing `teamId` instead of falling back to a default installation.
 
 ## Test a preview branch

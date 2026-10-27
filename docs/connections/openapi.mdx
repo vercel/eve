@@ -28,6 +28,19 @@ Each operation becomes a tool named by its `operationId`, reported as `<connecti
 
 `spec` can be a URL that eve fetches at runtime, or an inline parsed OpenAPI object. A spec URL must use `https` (plain `http` is allowed only for loopback hosts such as `localhost` during local development), and eve re-checks the transport after any redirects. Prefer a URL when the provider owns the contract and updates it; prefer an inline object for private APIs, generated specs you pin in source control, or small hand-authored contracts.
 
+For a contract that isn't published, keep the JSON file in the project and import it. The scaffolded `tsconfig.json` enables `resolveJsonModule`, and the build bundles the file:
+
+```ts title="agent/connections/inventory.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+import spec from "../../inventory-openapi.json";
+
+export default defineOpenAPIConnection({
+  spec,
+  baseUrl: "https://api.example.com",
+  description: "Inventory lookups and purchase orders.",
+});
+```
+
 ## Base URL and servers
 
 eve resolves operation paths against `baseUrl` when you provide one. Otherwise, it derives the base URL from the spec:

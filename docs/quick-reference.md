@@ -1,9 +1,9 @@
 ---
-title: "Recipes"
+title: "Quick Reference"
 description: "Copy-ready snippets for the requirements most agents need: tools, approvals, Slack, SSO, connections, per-user tools, subagents, skills, schedules, webhooks, memory, and evals."
 ---
 
-Each recipe is the smallest complete version of one requirement, checked against the current API. Copy the ones you need, then follow the link only when you need an option the recipe doesn't show. Every capability is a file: its path under `agent/` gives its name, so `agent/tools/get_order.ts` is the tool `get_order`.
+Each snippet is the smallest complete version of one requirement, checked against the current API. Copy the ones you need, then follow the link only when you need an option the snippet doesn't show. For end-to-end designs that combine several features, such as multi-tenant credentials, see [Patterns](./patterns/multi-tenant-auth.md). Every capability is a file: its path under `agent/` gives its name, so `agent/tools/get_order.ts` is the tool `get_order`.
 
 ## Start a project
 
@@ -111,9 +111,9 @@ export default eveChannel({ auth: [employee, localWithStubs] });
 
 - `auth` entries run in order. The first to return a principal wins, and a request nobody accepts gets a `401`. `localDev()` never accepts anything in production, so this channel admits only SSO tokens there.
 - `oidc()` fetches the issuer's discovery document, verifies signature, issuer, audience, and expiry, and labels the caller `authenticator: "oidc"`, `principalType: "service"`. Relabel it `"user"`, as above, when tokens identify people. User-scoped connections, such as `connect()` below, require a `user` principal.
-- Custom string and string-array claims become `ctx.session.auth.current.attributes`, so a `groups` claim is `attributes.groups`. Standard claims (`iss`, `sub`, `aud`, `exp`, …) are omitted; the subject is `principalId`.
+- Custom string and string-array claims become `ctx.session.auth.current.attributes`, so a `groups` claim is `attributes.groups`. Standard claims (`iss`, `sub`, `aud`, `exp`, …) are omitted from `attributes`; the token's `sub` is `subject`.
 
-See [Authentication](./guides/auth-and-route-protection.md).
+See [Authentication](./guides/auth-and-route-protection.md). To pick credentials or policy per tenant, see [Multi-Tenant Auth](./patterns/multi-tenant-auth.md).
 
 ## Connect an MCP server as each user
 
@@ -300,7 +300,7 @@ export default defineChannel({
 });
 ```
 
-Routes mount at the path you give, here `POST /webhooks/alerts`. Verify the raw body before parsing, and return early so a rejected request never reaches the agent. The Slack post starts a thread that people can continue by mentioning the app. See [Custom Channels](./channels/custom.mdx#cross-channel-hand-off).
+Routes mount at the path you give, here `POST /webhooks/alerts`. Verify the raw body before parsing, and return early so a rejected request never reaches the agent. The Slack post starts a thread that people can continue by mentioning the app. See [Custom Channels](./channels/custom.mdx#cross-channel-hand-off). To post without an agent turn, with retries, see [Durable Cross-Channel Notifications](./patterns/durable-cross-channel-notifications.md).
 
 ## Remember facts across conversations
 
@@ -315,7 +315,7 @@ export default defineMemory({
 });
 ```
 
-A fixed string scope gives everyone one shared memory. Use `byPrincipal` from `eve/memory/scope` for one memory per person. See [Memory](./memory) (`memory/overview.mdx`).
+A fixed string scope gives everyone one shared memory. Use `byPrincipal` from `eve/memory/scope` for one memory per person. See [Memory](./memory) (`memory/overview.mdx`) and [Multi-Tenant Memory](./patterns/multi-tenant-memory.md).
 
 ## Test with an eval and a stubbed tool
 
@@ -343,4 +343,4 @@ export default defineEval({
 });
 ```
 
-Run it with `npx eve eval order-lookup`. Stubs replace the tool's `execute`, so the eval never calls the real API. Stubbed sessions need `allowToolStubs: true` from the channel's auth, as the [SSO recipe](#protect-the-http-api-with-your-sso) grants in local development. See [Evals](./evals/overview.mdx) and [Tool Stubs](./evals/tool-stubs.mdx).
+Run it with `npx eve eval order-lookup`. Stubs replace the tool's `execute`, so the eval never calls the real API. Stubbed sessions need `allowToolStubs: true` from the channel's auth, as the [SSO snippet](#protect-the-http-api-with-your-sso) grants in local development. See [Evals](./evals/overview.mdx) and [Tool Stubs](./evals/tool-stubs.mdx).

@@ -309,13 +309,13 @@ For a content-only change to the root agent's identity, purpose, tone, or respon
 ls node_modules/eve/docs
 \`\`\`
 
-Start with \`docs/recipes.md\`: one checked, copy-ready snippet per common requirement (tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, evals). For anything it doesn't cover, \`docs/README.md\` maps each task to the page that covers it. In a workspace or local package install, resolve the installed \`eve\` package location first. If the package docs are missing, use https://eve.dev/docs.
+Start with \`docs/quick-reference.md\`: one checked, copy-ready snippet per common requirement (tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, evals). For anything it doesn't cover, \`docs/README.md\` maps each task to the page that covers it. In a workspace or local package install, resolve the installed \`eve\` package location first. If the package docs are missing, use https://eve.dev/docs.
 
 Pages are long. List a page's sections with \`grep -n '^#' <page>\` and read only the sections you need instead of the whole file. Prefer the docs over \`node_modules/eve/dist\` type declarations; check a declaration only when a typecheck error leaves a question open.
 
 Use a bounded authoring loop:
 
-1. Read the recipe or page section you need and inspect only files you will modify or need to imitate.
+1. Read the quick-reference snippet or page section you need and inspect only files you will modify or need to imitate.
 2. Stop discovery once the file location, imports, and definition shape are clear. Implement the smallest complete behavior the user requested.
 3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
 

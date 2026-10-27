@@ -128,7 +128,9 @@ reasoning effort. It installs dependencies, initializes Git, and opens the termi
 human terminal. Coding-agent invocations return setup instructions instead.
 Targeting an existing project directory (`eve init .`) adds the agent files and
 missing dependencies instead. Initialization does not create a Vercel project,
-configure browser sign-in, or deploy the agent.
+configure browser sign-in, or deploy the agent. Once the project exists, read
+`node_modules/eve/docs/quick-reference.md` for copy-ready snippets of common
+requirements.
 
 To add Web Chat with **Sign in with Vercel**, run these commands from the agent's directory:
 
@@ -166,6 +168,7 @@ eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployme
 
 These files ship inside the installed package at `node_modules/eve/docs/`:
 
+- [Quick Reference](https://eve.dev/docs/quick-reference) (`docs/quick-reference.md`) — checked snippets for the requirements most agents need; start here when building from a list of requirements
 - [Full docs index](https://eve.dev/docs) — recommended entry point
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
 - [Project Layout](https://eve.dev/docs/getting-started#project-layout) — every authored directory in depth

@@ -5,8 +5,8 @@ with the installed package and match its version exactly. In most installs, they
 are at `node_modules/eve/docs/`. In workspaces or local package installs, resolve
 the installed `eve` package location first and read its `docs/` directory. If
 package docs are unavailable, use https://eve.dev/docs as a fallback. Read
-`recipes.md` in the package docs first: it has a checked snippet for each common
-requirement. Open `README.md` to find the full guide for anything a recipe
+`quick-reference.md` in the package docs first: it has a checked snippet for each
+common requirement. Open `README.md` to find the full guide for anything it
 doesn't cover, and read only the sections you need (`grep -n '^#' <page>` lists
 them).
 

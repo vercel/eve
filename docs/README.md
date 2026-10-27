@@ -12,7 +12,7 @@ Important naming note:
 
 ## Find the page for your task
 
-Building an agent from a list of requirements? Start with [Recipes](./recipes.md): one checked snippet each for tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, and evals. Open the pages below only for options a recipe doesn't show.
+Building an agent from a list of requirements? Start with [Quick Reference](./quick-reference.md): one checked snippet each for tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, and evals. Open the pages below only for options a snippet doesn't show.
 
 | To do this                                               | Read this                                                                              |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
