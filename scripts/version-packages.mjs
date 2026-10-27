@@ -3,7 +3,7 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getPackages } from "@manypkg/get-packages";
 
-function renderRelease({ name, version, date, bump, body }) {
+function renderRelease({ name, version, date, bump, body, changesUrl }) {
   const sections = [`### Release ${name}@${version} | ${date} | ${bump}`];
   const groups = new Map();
   const headings = [...body.matchAll(/^#{3,4} (.+)$/gmu)];
@@ -22,6 +22,10 @@ function renderRelease({ name, version, date, bump, body }) {
     "Dependencies",
     "Contributors",
   ]) {
+    if (title === "Other Changes") {
+      sections.push(`### Other Changes\n\nSee the [full list of changes](${changesUrl}).`);
+      continue;
+    }
     let lines = groups.get(title) ?? [];
     if (title === "Contributors") {
       lines = lines.flatMap((block) => block.split("\n"));
@@ -35,7 +39,11 @@ function renderRelease({ name, version, date, bump, body }) {
   return sections.join("\n\n");
 }
 
-async function formatChangelog(path, { name, version }, recovery = false) {
+async function formatChangelog(
+  path,
+  { name, version },
+  { tags, previousVersion, recovery = false },
+) {
   let content;
   try {
     content = await readFile(path, "utf8");
@@ -63,12 +71,20 @@ async function formatChangelog(path, { name, version }, recovery = false) {
     ["major", "minor", "patch"].find((type) =>
       body.includes(`### ${type[0].toUpperCase()}${type.slice(1)} Changes`),
     ) ?? "patch";
+  const previousHeading =
+    next < 0 ? undefined : /^\n## (\S+)[ \t]*$/mu.exec(content.slice(next))?.[1];
+  const previousTag = `${name}@${previousVersion ?? previousHeading}`;
+  const currentTag = encodeURIComponent(`${name}@${version}`);
+  const changesUrl = tags.has(previousTag)
+    ? `https://github.com/vercel/eve/compare/${encodeURIComponent(previousTag)}...${currentTag}`
+    : `https://github.com/vercel/eve/commits/${currentTag}`;
   const rendered = renderRelease({
     name,
     version,
     date: new Date().toISOString().slice(0, 10),
     bump,
     body,
+    changesUrl,
   });
   await writeFile(path, `${content.slice(0, bodyStart)}\n${rendered}\n${content.slice(end)}`);
   return true;
@@ -76,12 +92,16 @@ async function formatChangelog(path, { name, version }, recovery = false) {
 
 async function main() {
   const before = await getPackages(process.cwd());
+  const tags = new Set(
+    execFileSync("git", ["tag", "--list"], { encoding: "utf8" }).trim().split("\n"),
+  );
   const versions = new Map(
     before.packages.map(({ dir, packageJson }) => [dir, packageJson.version]),
   );
   let recovered = false;
   for (const { dir, packageJson } of before.packages) {
-    if (await formatChangelog(join(dir, "CHANGELOG.md"), packageJson, true)) recovered = true;
+    if (await formatChangelog(join(dir, "CHANGELOG.md"), packageJson, { tags, recovery: true }))
+      recovered = true;
   }
   const changesetFiles = await readdir(".changeset");
   if (
@@ -97,7 +117,10 @@ async function main() {
   const after = await getPackages(process.cwd());
   for (const { dir, packageJson } of after.packages) {
     if (versions.get(dir) !== packageJson.version)
-      await formatChangelog(join(dir, "CHANGELOG.md"), packageJson);
+      await formatChangelog(join(dir, "CHANGELOG.md"), packageJson, {
+        tags,
+        previousVersion: versions.get(dir),
+      });
   }
 }
 

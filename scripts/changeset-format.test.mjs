@@ -144,6 +144,8 @@ test("version-packages assembles changesets across bump types and preserves old 
   git("config", "commit.gpgsign", "false");
   git("add", ".");
   git("commit", "-qm", "Initial fixture");
+  git("tag", "eve@1.0.0");
+  git("tag", "@vercel/agent-runs@1.0.0");
   const base = git("rev-parse", "HEAD");
   execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
     cwd: root,
@@ -227,7 +229,15 @@ test("version-packages assembles changesets across bump types and preserves old 
   assert.match(changelog, /- Improve the new tool\. \[#10\]/u);
   assert.equal([...changelog.matchAll(/^### 🚀 Features$/gmu)].length, 1);
   assert.match(changelog, /### 🐛 Bug Fixes\n\n- Correct the setup guide\. \[#11\]/u);
-  assert.match(changelog, /### Other Changes\n\n- Keep the legacy change visible\. \[#12\]/u);
+  assert.match(
+    changelog,
+    /### Other Changes\n\nSee the \[full list of changes\]\(https:\/\/github\.com\/vercel\/eve\/compare\/eve%401\.0\.0\.\.\.eve%401\.1\.0\)\./u,
+  );
+  assert.match(
+    agentRunsChangelog,
+    /### Other Changes\n\nSee the \[full list of changes\]\(https:\/\/github\.com\/vercel\/eve\/compare\/%40vercel%2Fagent-runs%401\.0\.0\.\.\.%40vercel%2Fagent-runs%401\.0\.1\)\./u,
+  );
+  assert.doesNotMatch(changelog, /Keep the legacy change visible/u);
   assert.match(changelog, /\[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.match(changelog, /\[@Bob\]\(https:\/\/github\.com\/Bob\)/u);
   assert.match(changelog, /\[@Carol\]\(https:\/\/github\.com\/Carol\)/u);
@@ -246,5 +256,23 @@ test("version-packages assembles changesets across bump types and preserves old 
   assert.match(
     await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8"),
     /### 🐛 Bug Fixes\n\n- Recover the release\./u,
+  );
+  assert.match(
+    await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8"),
+    /compare\/eve%401\.0\.0\.\.\.eve%401\.1\.0/u,
+  );
+  git("tag", "-d", "@vercel/agent-runs@1.0.0");
+  await write(
+    "packages/agent-runs/CHANGELOG.md",
+    "# @vercel/agent-runs\n\n## 1.0.1\n\n### Patch Changes\n\n#### 🚀 Features\n\n- Recover a release. [#10](https://github.com/vercel/eve/pull/10)\n",
+  );
+  execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
+    cwd: root,
+    stdio: "pipe",
+    env: envWithoutToken,
+  });
+  assert.match(
+    await readFile(join(root, "packages/agent-runs/CHANGELOG.md"), "utf8"),
+    /commits\/%40vercel%2Fagent-runs%401\.0\.1/u,
   );
 });

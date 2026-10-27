@@ -256,7 +256,7 @@ For a PR with a changeset, use `feat:`, `perf:`, or `fix:` at the start of the P
 
 Run `pnpm guard:invariants` to validate changeset summaries. To check a proposed PR title before opening the PR, run `pnpm check:pr-title "feat: description"`. CI also checks the actual PR title.
 
-The release workflow classifies from the immutable commit that introduced the changeset, not the editable PR title. An unrecognized commit subject goes under **Other Changes** for review rather than blocking the release. The contributor list includes the pull request author, GitHub noreply co-authors, and explicitly thanked handles, excluding bots. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
+The release workflow classifies from the immutable commit that introduced the changeset, not the editable PR title. Unrecognized commit subjects do not block the release; review them through the **Other Changes** link to the full repository change list. For a first release without a previous package tag, that link opens the repository history at the new tag. The contributor list includes the pull request author, GitHub noreply co-authors, and explicitly thanked handles, excluding bots. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
 
 ## Developer Certificate of Origin (DCO)
 

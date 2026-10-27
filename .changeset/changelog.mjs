@@ -21,7 +21,7 @@ export default {
     } catch {
       category = "other";
       console.warn(
-        `Changeset ${changeset.id}: commit subject has no release category; review Other Changes.`,
+        `Changeset ${changeset.id}: commit subject has no release category; review the full list of changes.`,
       );
     }
     const heading = headings[category];
