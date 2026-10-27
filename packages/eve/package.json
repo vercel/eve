@@ -389,6 +389,12 @@
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
     },
+    "./experimental/workspace": {
+      "eve-source": "./src/public/experimental/workspace/index.ts",
+      "types": "./dist/src/public/experimental/workspace/index.d.ts",
+      "import": "./dist/src/public/experimental/workspace/index.js",
+      "default": "./dist/src/public/experimental/workspace/index.js"
+    },
     "./experimental/schedules/testing": {
       "eve-source": "./src/public/experimental/schedules/testing.ts",
       "types": "./dist/src/public/experimental/schedules/testing.d.ts",

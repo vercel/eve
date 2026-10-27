@@ -36,7 +36,7 @@ describe("Vercel workspace subagent compilation", () => {
     const app = await createWorkspace(
       "eve-workspace-subagent-description-",
       [
-        'import { defineWorkspaceAgent } from "eve";',
+        'import { defineWorkspaceAgent } from "eve/experimental/workspace";',
         'export default defineWorkspaceAgent({ name: "research" });',
         "",
       ].join("\n"),
@@ -52,7 +52,7 @@ describe("Vercel workspace subagent compilation", () => {
     const app = await createWorkspace(
       "eve-workspace-subagent-description-override-",
       [
-        'import { defineWorkspaceAgent } from "eve";',
+        'import { defineWorkspaceAgent } from "eve/experimental/workspace";',
         "export default defineWorkspaceAgent({",
         '  description: "Research urgent support escalations.",',
         '  name: "research",',
@@ -74,7 +74,7 @@ describe("Vercel workspace subagent compilation", () => {
     const app = await createWorkspace(
       "eve-workspace-subagent-unknown-peer-",
       [
-        'import { defineWorkspaceAgent } from "eve";',
+        'import { defineWorkspaceAgent } from "eve/experimental/workspace";',
         "export default defineWorkspaceAgent({",
         '  description: "Research urgent support escalations.",',
         '  name: "missing",',

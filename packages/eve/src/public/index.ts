@@ -33,11 +33,6 @@ export type {
   SessionFrame,
 } from "#dynamic/definition.js";
 export {
-  defineWorkspaceAgent,
-  type WorkspaceAgentDefinition,
-  type WorkspaceAgentTransport,
-} from "#public/definitions/workspace-agent.js";
-export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
   type RemoteAgentUrl,
