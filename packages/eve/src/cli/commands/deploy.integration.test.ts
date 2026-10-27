@@ -270,7 +270,7 @@ describe("runDeployCommand", () => {
           new Error("Vercel API unavailable"),
         );
       }
-      const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
       vi.stubGlobal("fetch", fetchMock);
       const deployDeps = createDeployProjectDeps();
 
