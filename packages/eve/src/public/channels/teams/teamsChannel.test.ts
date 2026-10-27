@@ -12,6 +12,7 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import { teamsChannel, type TeamsChannelState } from "#public/channels/teams/index.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+import * as verification from "#public/channels/teams/verify.js";
 
 function adapter(channel: unknown) {
   return asCompiled<TeamsChannelState>(channel).adapter;
@@ -88,6 +89,31 @@ async function firePost(
 }
 
 describe("teamsChannel", () => {
+  it.each([
+    ["matching", 200, 1],
+    ["different", 401, 0],
+    ["malformed JSON", 200, 0],
+  ] as const)(
+    "handles a %s verified activity before dispatch",
+    async (kind, status, dispatched) => {
+      const activity = messageActivity({ conversationType: "personal" });
+      const verifier = vi.spyOn(verification, "verifyTeamsRequest").mockResolvedValue({
+        body: kind === "malformed JSON" ? "{" : JSON.stringify(activity),
+        serviceUrl:
+          kind === "different" ? "https://smba.example.test/other" : String(activity.serviceUrl),
+      });
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const { response, send } = await firePost(teamsChannel(), activity);
+        expect(response.status).toBe(status);
+        expect(send).toHaveBeenCalledTimes(dispatched);
+      } finally {
+        verifier.mockRestore();
+        warning.mockRestore();
+      }
+    },
+  );
+
   it("mounts the default Teams activity route", () => {
     const channel = asCompiled(teamsChannel({ credentials: { webhookVerifier: () => true } }));
     expect(channel.routes.map((route) => `${route.method} ${route.path}`)).toEqual([

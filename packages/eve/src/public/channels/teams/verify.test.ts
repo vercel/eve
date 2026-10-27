@@ -47,7 +47,6 @@ describe("Teams request verification", () => {
   it.each([
     ["matching", "https://smba.trafficmanager.net/amer/", true],
     ["missing", undefined, false],
-    ["different", "https://smba.trafficmanager.net/emea/", false],
   ] as const)(
     "requires a %s service URL claim for native activities",
     async (_name, serviceUrl, accepted) => {
@@ -61,7 +60,7 @@ describe("Teams request verification", () => {
         }),
         { appId: "APP", fetch: fixture.fetch, jwksUrl: "https://keys.example.test/jwks" },
       );
-      if (accepted) await expect(verified).resolves.toBe(body);
+      if (accepted) await expect(verified).resolves.toEqual({ body, serviceUrl });
       else await expect(verified).rejects.toThrow("service URL");
     },
   );
@@ -80,7 +79,7 @@ describe("Teams request verification", () => {
       verifyTeamsRequest(new Request("https://eve.test/teams", { body: "old", method: "POST" }), {
         webhookVerifier: verifier,
       }),
-    ).resolves.toBe("new");
+    ).resolves.toEqual({ body: "new" });
   });
 });
 

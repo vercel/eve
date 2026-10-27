@@ -51,19 +51,24 @@ export interface TeamsJwtVerifyOptions {
   readonly openIdMetadataUrl?: string;
 }
 
+export interface VerifiedTeamsRequest {
+  readonly body: string;
+  /** Native Connector claim; a trusted custom verifier owns its own binding. */
+  readonly serviceUrl?: string;
+}
+
 /**
- * Verifies an inbound Teams request and returns the raw body.
+ * Verifies an inbound Teams request and returns its body and native service URL binding.
  *
  * Uses `webhookVerifier` when provided, otherwise validates the bearer JWT
  * against Bot Connector keys and the resolved app id. Throws when the
- * verifier rejects the request, the bearer token is missing, no app id can be
- * resolved (`appId` option or `MICROSOFT_APP_ID`/`TEAMS_APP_ID`), metadata or
- * keys cannot be loaded, or JWT verification fails.
+ * verifier rejects the request, the bearer token or native service URL claim
+ * is missing, no app id can be resolved, keys cannot be loaded, or JWT verification fails.
  */
 export async function verifyTeamsRequest(
   request: Request,
   options: TeamsVerifyOptions,
-): Promise<string> {
+): Promise<VerifiedTeamsRequest> {
   const body = await request.text();
 
   if (options.webhookVerifier !== undefined) {
@@ -71,7 +76,7 @@ export async function verifyTeamsRequest(
     if (!result) {
       throw new Error("teamsChannel: inbound webhook verifier rejected the request.");
     }
-    return typeof result === "string" ? result : body;
+    return { body: typeof result === "string" ? result : body };
   }
 
   const authorization = request.headers.get("authorization") ?? "";
@@ -81,15 +86,10 @@ export async function verifyTeamsRequest(
   }
 
   const claims = await verifyTeamsJwt(token, options);
-  const activity: unknown = JSON.parse(body);
-  if (
-    !isObject(activity) ||
-    typeof claims.serviceurl !== "string" ||
-    activity.serviceUrl !== claims.serviceurl
-  ) {
-    throw new Error("teamsChannel: activity service URL does not match the verified token.");
+  if (typeof claims.serviceurl !== "string") {
+    throw new Error("teamsChannel: verified token is missing its service URL claim.");
   }
-  return body;
+  return { body, serviceUrl: claims.serviceurl };
 }
 
 /** Verifies one Bot Connector JWT and returns its payload. */
