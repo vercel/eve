@@ -15,6 +15,9 @@ const webhookSecret = "test-webhook-secret";
 const metricsUrl = "https://metrics.pinecone.dev/v1/agent-turns";
 // `pnpm@9`, `pnpm@^9`, pnpm's `latest-9` dist-tag, or the official installer's `PNPM_VERSION=9…`.
 const pnpm9Install = /pnpm@(?:[\^~]|latest-)?9(?!\d)|PNPM_VERSION=["']?9(?!\d)/;
+// The prompt says "GitHub Actions checks fail", which any of the channel's CI hooks can serve.
+const ciEvents = ["check_suite", "check_run", "workflow_run"] as const;
+type CiEvent = (typeof ciEvents)[number];
 const { privateKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
@@ -53,7 +56,9 @@ test("creates an eve project for Mender", () => {
 test("typechecks and compiles without changing the CI build", { timeout: 600_000 }, () => {
   // CI deploys with `eve build`, which prepares the sandbox snapshot. Skipping that
   // preparation is a local-only build, not something to bake into the script.
-  expect(projectPackageJson().scripts?.build).toBe("eve build");
+  const build = projectPackageJson().scripts?.build ?? "";
+  expect(build).toMatch(/\beve build\b/);
+  expect(build).not.toMatch(/skip-sandbox-prewarm/);
   const env = { ...process.env };
   for (const name of ["VERCEL", "VERCEL_OIDC_TOKEN", "VERCEL_TOKEN"]) delete env[name];
   const run = (args: string[]) =>
@@ -70,6 +75,7 @@ test("answers @mender comments through its own GitHub App", async () => {
   const asked = await deliver("issue_comment", comment("@mender why is the ledger build red?"));
   expect(asked.status).toBe(200);
   expect(asked.sends).toHaveLength(1);
+  // Coupled to the GitHub channel's continuation-token format; update it if that changes.
   expect(String(asked.sends[0]!.continuationToken)).toMatch(/^repo:4242:issue:17$/);
 
   expect((await deliver("issue_comment", comment("Looks good to me."))).sends).toEqual([]);
@@ -79,18 +85,30 @@ test("answers @mender comments through its own GitHub App", async () => {
   expect(forged.sends).toEqual([]);
 });
 
-test("triages failed GitHub Actions check suites on pull requests", async () => {
-  const failed = await deliver("check_suite", checkSuite({}));
-  expect(failed.sends).toHaveLength(1);
-  // The turn continues the PR thread, so its replies land on PR #31.
-  expect(String(failed.sends[0]!.continuationToken)).toMatch(/^repo:4242:\w+:31$/);
+test("triages failed GitHub Actions checks on pull requests", async () => {
+  // Grade every CI event the agent reacts to; at least one has to start a triage.
+  const handled: CiEvent[] = [];
+  for (const event of ciEvents) {
+    const failed = await deliver(event, ciEvent(event, {}));
+    if (failed.sends.length === 0) continue;
+    handled.push(event);
+    expect(failed.sends, event).toHaveLength(1);
+    // The turn continues the PR thread, so its replies land on PR #31.
+    expect(String(failed.sends[0]!.continuationToken)).toMatch(/^repo:4242:\w+:31$/);
+  }
+  expect(handled, "no CI event started a triage").not.toEqual([]);
 
-  for (const ignored of [
-    checkSuite({ conclusion: "success" }),
-    checkSuite({ app: { slug: "circleci-checks" } }),
-    checkSuite({ action: "requested", conclusion: null, status: "queued" }),
-  ]) {
-    expect((await deliver("check_suite", ignored)).sends, JSON.stringify(ignored)).toEqual([]);
+  for (const event of handled) {
+    const ignored = [
+      ciEvent(event, { conclusion: "success" }),
+      ciEvent(event, { action: pendingAction[event], conclusion: null, status: "queued" }),
+    ];
+    // `workflow_run` is GitHub Actions-only, so only check events can come from other CI apps.
+    if (event !== "workflow_run")
+      ignored.push(ciEvent(event, { app: { slug: "circleci-checks" } }));
+    for (const payload of ignored) {
+      expect((await deliver(event, payload)).sends, JSON.stringify(payload)).toEqual([]);
+    }
   }
 });
 
@@ -144,7 +162,8 @@ test("reports each finished turn to the metrics service", async () => {
   const [report] = reports;
   expect(report!.method).toBe("POST");
   expect(report!.headers.get("authorization")).toBe("Bearer test-metrics-token");
-  expect(JSON.parse(report!.body)).toEqual({
+  // Extra fields don't break the metrics service, so only the requested ones are graded.
+  expect(JSON.parse(report!.body)).toMatchObject({
     sessionId: "session-1",
     turnId: "turn-1",
     outcome: "completed",
@@ -294,19 +313,27 @@ function comment(body: string) {
   };
 }
 
-function checkSuite(overrides: Record<string, unknown>) {
+/** The not-yet-finished action for each CI event. */
+const pendingAction: Record<CiEvent, string> = {
+  check_run: "created",
+  check_suite: "requested",
+  workflow_run: "in_progress",
+};
+
+function ciEvent(event: CiEvent, overrides: Record<string, unknown>) {
+  const { action = "completed", ...fields } = overrides;
   return {
     ...webhookBase(),
-    action: overrides.action ?? "completed",
+    action,
     sender: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
-    check_suite: {
+    [event]: {
       app: { slug: "github-actions" },
       conclusion: "failure",
       head_sha: "4f1c2e9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
       id: 777001,
       pull_requests: [{ number: 31 }],
       status: "completed",
-      ...overrides,
+      ...fields,
     },
   };
 }
