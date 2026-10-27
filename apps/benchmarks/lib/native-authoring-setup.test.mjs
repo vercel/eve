@@ -72,22 +72,51 @@ test("bootstraps the selected source before a native agent starts", async () => 
 
 test("registers the setup of every case the native runner can run", async () => {
   const evalsRoot = new URL("../evals", import.meta.url).pathname;
-  for (const name of fixtureNames(evalsRoot)) {
+  // The iMessage case grades a synthetic provider world only the old local harness wrote.
+  for (const name of fixtureNames(evalsRoot).filter((name) => name !== "author-000-imessage")) {
     const authoringCase = await loadAuthoringCase(`${evalsRoot}/${name}`);
-    let prompts = 0;
-    await authoringCase.interact({
-      send: async () => {
-        prompts += 1;
-        return { text: "", toolCalls: [] };
-      },
-    });
-    // Multi-turn cases are rejected before their setups matter.
-    if (prompts !== 1) continue;
     const ids = [authoringCase.startingPoint.setup, authoringCase.setup]
       .filter(Boolean)
       .map((setup) => setup.id);
     assert.doesNotThrow(() => setupsFor(ids), name);
   }
+});
+
+test("installs the turns shim for the harness of a multi-turn case", async () => {
+  const writes = {};
+  const setup = createNativeAuthoringSetup({
+    packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
+    revision: "commit",
+    treatment: "guided",
+    harness: "Codex",
+  });
+  await setup({
+    async readFile() {
+      return JSON.stringify({
+        startingPoint: "scaffolded",
+        revision: "commit",
+        setupIds: [],
+        prompts: ["First.", "Second."],
+      });
+    },
+    async writeFiles(files) {
+      Object.assign(writes, files);
+    },
+    async runCommand(command) {
+      const path = command === "node" ? "/vercel/runtimes/node24/bin" : "";
+      return { stdout: path, stderr: "", exitCode: 0 };
+    },
+    getWorkingDirectory: () => "/workspace",
+    setWorkingDirectory() {},
+  });
+
+  assert.equal(
+    writes["/vercel/runtimes/node24/bin/codex"],
+    '#!/bin/sh\nexec node /opt/eve-authoring/turns.mjs "$0" "$@"\n',
+  );
+  assert.deepEqual(JSON.parse(writes["/opt/eve-authoring/turns.json"]), {
+    prompts: ["First.", "Second."],
+  });
 });
 
 test("fails a case whose setup the native runner does not know before bootstrapping", async () => {

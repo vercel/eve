@@ -76,17 +76,29 @@ test("materializes fixtures and complete experiment inputs", async () => {
       treatment: "guided",
     });
     assert.match(readFileSync(join(experiments, "large.ts"), "utf8"), /timeoutSeconds: 1800,/u);
+
+    writeCase(evals, "author-005-two-turn", "", 'await send("Then this.");');
+    await prepareFixtures(evals, subject, ["author-005-two-turn"]);
+    assert.equal(
+      readFileSync(join(evals, "author-005-two-turn", "PROMPT.md"), "utf8"),
+      "Build it.\n",
+    );
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(evals, "author-005-two-turn", ".eve-authoring-bootstrap.json")))
+        .prompts,
+      ["Build it.", "Then this."],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-function writeCase(evals, name, extra = "") {
+function writeCase(evals, name, extra = "", followUp = "") {
   const root = join(evals, name);
   mkdirSync(root, { recursive: true });
   writeFileSync(
     join(root, "CASE.ts"),
-    `export default { ${extra}startingPoint: { workspace: "scaffolded" }, async interact({ send }) { await send("Build it."); } };\n`,
+    `export default { ${extra}startingPoint: { workspace: "scaffolded" }, async interact({ send }) { await send("Build it."); ${followUp} } };\n`,
   );
   assert.ok(existsSync(root));
 }

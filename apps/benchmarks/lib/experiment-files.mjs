@@ -18,10 +18,8 @@ export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(e
     if (authoringCase.timeoutSeconds !== undefined) {
       timeoutSeconds = Math.max(timeoutSeconds ?? 0, authoringCase.timeoutSeconds);
     }
-    writeFileSync(
-      join(fixtureRoot, "PROMPT.md"),
-      `${await promptForCase(authoringCase, fixtureRoot)}\n`,
-    );
+    const prompts = await promptsForCase(authoringCase, fixtureRoot);
+    writeFileSync(join(fixtureRoot, "PROMPT.md"), `${prompts[0]}\n`);
     writeFileSync(
       join(fixtureRoot, ".eve-authoring-bootstrap.json"),
       `${JSON.stringify({
@@ -31,6 +29,8 @@ export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(e
         setupIds: [authoringCase.startingPoint.setup, authoringCase.setup]
           .filter(Boolean)
           .map((setup) => setup.id),
+        // Omitted for one-turn cases so their fixtures, and memoized results, are unchanged.
+        prompts: prompts.length > 1 ? prompts : undefined,
       })}\n`,
     );
     writeFileSync(
@@ -53,7 +53,9 @@ async function loadCase(fixtureRoot) {
   return authoringCase;
 }
 
-async function promptForCase(authoringCase, fixtureRoot) {
+// Native runners replay the user's turns as a fixed script, so a case cannot branch on
+// the agent's replies: every `send` resolves to an empty turn here.
+async function promptsForCase(authoringCase, fixtureRoot) {
   const prompts = [];
   await authoringCase.interact({
     send: async (prompt) => {
@@ -61,12 +63,8 @@ async function promptForCase(authoringCase, fixtureRoot) {
       return { text: "", toolCalls: [] };
     },
   });
-  if (prompts.length !== 1) {
-    throw new Error(
-      `${fixtureRoot}/CASE.ts is multi-turn and cannot run on a native agent-eval runner.`,
-    );
-  }
-  return prompts[0];
+  if (prompts.length === 0) throw new Error(`${fixtureRoot}/CASE.ts never sends a prompt.`);
+  return prompts;
 }
 
 function isAuthoringCase(value) {

@@ -135,8 +135,15 @@ export default defineAuthoringCase({
 ```
 
 Use `simpleProject` for the selected canary's `eve init` output and `emptyProject` for a project
-the coding agent creates. Put reusable setup under `lib/setups/`. Native runs support one-turn
-cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
+the coding agent creates. Put reusable setup under `lib/setups/`. Prefer source assertions over an
+LLM judge.
+
+A case can call `send` more than once. Each later prompt goes to the coding agent as a follow-up in
+the same session after it finishes the previous turn (`--continue` for Claude Code, `exec resume`
+for Codex, `--session` for OpenCode). The turns are a fixed script: the runner collects them before
+the run starts, so every `send` resolves to an empty reply and a case cannot branch on what the
+agent said. The iMessage case remains local-only because its grader reads a synthetic provider world
+that the native runner does not provide.
 
 ## Partial credit
 

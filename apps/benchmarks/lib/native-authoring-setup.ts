@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+
 import type { Sandbox } from "@vercel/agent-eval";
 
+import type { AuthoringBenchmarkModel } from "./benchmark-config.js";
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
 import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
@@ -16,7 +19,16 @@ interface FixtureBootstrap {
   readonly projectDirectory?: string;
   readonly revision: string;
   readonly setupIds: readonly string[];
+  /** Every user turn, in order, for a multi-turn case. */
+  readonly prompts?: readonly string[];
 }
+
+const harnessCli: Record<AuthoringBenchmarkModel["harness"], string> = {
+  "Claude Code": "claude",
+  Codex: "codex",
+  OpenCode: "opencode",
+};
+const TURNS_ROOT = "/opt/eve-authoring";
 
 /** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
 export const JUST_BASH_VERSION = "3.6.0";
@@ -27,6 +39,7 @@ export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
   readonly revision: string;
   readonly treatment: "baseline" | "guided";
+  readonly harness: AuthoringBenchmarkModel["harness"];
 }) {
   return async (sandbox: Sandbox): Promise<void> => {
     const bootstrap = JSON.parse(
@@ -45,6 +58,9 @@ export function createNativeAuthoringSetup(options: {
       "/usr/local/bin/eve": `#!/bin/sh\nexec npx --yes --allow-remote=all --package=${shellQuote(options.packageSpec)} eve "$@"\n`,
     });
     await run(sandbox, "chmod +x /usr/local/bin/eve", "eve canary wrapper");
+    if (bootstrap.prompts !== undefined) {
+      await installTurnsShim(sandbox, harnessCli[options.harness], bootstrap.prompts);
+    }
 
     if (bootstrap.startingPoint === "scaffolded") {
       await run(
@@ -88,6 +104,28 @@ export function createNativeAuthoringSetup(options: {
     }
     await run(sandbox, "git add . && git commit --amend --no-edit --quiet");
   };
+}
+
+// agent-eval installs the harness CLI after setup, into npm's global bin. The shim goes
+// in the first PATH entry so the runner reaches it first, and finds the real CLI further
+// down PATH.
+async function installTurnsShim(
+  sandbox: Sandbox,
+  cli: string,
+  prompts: readonly string[],
+): Promise<void> {
+  // Ask node directly: agent-eval launches its runner the same way, not via a login shell.
+  const path = await sandbox.runCommand("node", ["-p", "process.env.PATH.split(':')[0]"]);
+  const binDirectory = path.stdout.trim();
+  if (path.exitCode !== 0 || !binDirectory.startsWith("/")) {
+    throw new Error(`Could not resolve the sandbox PATH for the ${cli} turns shim.`);
+  }
+  await sandbox.writeFiles({
+    [`${TURNS_ROOT}/turns.mjs`]: readFileSync(new URL("./turns-shim.mjs", import.meta.url), "utf8"),
+    [`${TURNS_ROOT}/turns.json`]: `${JSON.stringify({ prompts })}\n`,
+    [`${binDirectory}/${cli}`]: `#!/bin/sh\nexec node ${TURNS_ROOT}/turns.mjs "$0" "$@"\n`,
+  });
+  await run(sandbox, `chmod +x ${shellQuote(`${binDirectory}/${cli}`)}`, "turns shim");
 }
 
 // A case whose setup is skipped would hand the model a workspace without its fixture.
