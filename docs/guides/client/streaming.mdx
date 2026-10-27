@@ -172,11 +172,11 @@ Browser network failures use the same reconnect policy, both when opening a stre
 
 If your consumer persists events, key on `event.meta.position`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [Positions](../../concepts/sessions-runs-and-streaming#positions).
 
-Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
+Set `reconnect: false` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 
 ```ts
 const response = await session.send("Run the long operation.", {
-  streamReconnectPolicy: { reconnect: false },
+  reconnect: false,
 });
 
 for await (const event of response.stream()) {
@@ -184,7 +184,31 @@ for await (const event of response.stream()) {
 }
 ```
 
-The same option is available on manual attachments as `session.stream({ streamReconnectPolicy: { reconnect: false } })`.
+The same option is available on manual attachments as `session.stream({ reconnect: false })`.
+
+To tune connection-open retries, pass a `ReconnectOptions` object from `eve/client`:
+
+```ts
+const response = await session.send("Run the long operation.", {
+  reconnect: {
+    maxAttempts: 6,
+    baseDelayMs: 250,
+    maxDelayMs: 5_000,
+    retryableStatuses: [404, 409, 425, 500, 502, 503, 504],
+  },
+});
+```
+
+`maxAttempts` defaults to `12` for each connection open. It also bounds consecutive
+transport failures during a bounded read (`follow: false`). Following reads
+continue reconnecting until stopped. `baseDelayMs` and `maxDelayMs` tune retries
+when opening a connection; reconnects after an interrupted response body retain
+their default backoff.
+
+If you used `streamReconnectPolicy`, move its `streamOpenReconnectPolicy` fields
+directly under `reconnect` and rename `retryableErrorStatuses` to
+`retryableStatuses`. Replace `{ streamReconnectPolicy: { reconnect: false } }`
+with `{ reconnect: false }`.
 
 ## Open a stream manually
 

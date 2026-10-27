@@ -151,9 +151,9 @@ export interface SendTurnOptions<TOutput = unknown> {
 
   /**
    * Reconnection policy for the response event stream. Omit to use the default
-   * policy, or pass `{ reconnect: false }` when the caller owns cursor recovery.
+   * policy, or pass `false` when the caller owns cursor recovery.
    */
-  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+  readonly reconnect?: false | ReconnectOptions;
 
   /**
    * Abort signal for cancelling the request.
@@ -182,33 +182,23 @@ export type SendTurnPayload<TOutput = unknown> =
       readonly message?: never;
     });
 
-/** Retry and backoff settings for one kind of stream reconnection. */
-export interface StreamReconnectRetryPolicy {
-  /** Initial delay before retrying, in milliseconds. */
+/** Settings for opening client stream connections and retrying bounded reads. */
+export interface ReconnectOptions {
+  /** Initial delay before retrying a connection open, in milliseconds (default: 250). */
   readonly baseDelayMs?: number;
 
-  /** Maximum number of attempts governed by this retry policy. */
+  /**
+   * Maximum attempts to open each HTTP connection (default: 12). Also bounds consecutive
+   * transport failures for `follow: false`; following reads reconnect until stopped.
+   */
   readonly maxAttempts?: number;
 
-  /** Maximum delay between retries, in milliseconds. */
+  /** Maximum delay between connection-open retries, in milliseconds (default: 5000). */
   readonly maxDelayMs?: number;
+
+  /** HTTP response statuses to retry (default: 404, 409, 425, 500, 502, 503, 504). */
+  readonly retryableStatuses?: readonly number[];
 }
-
-/** Configurable policy used when automatic stream reconnection is enabled. */
-export interface ResolvedStreamReconnectPolicy {
-  /**
-   * Retry policy for opening an HTTP stream connection. Its `maxAttempts` also bounds how many
-   * consecutive transport failures a bounded read (`follow: false`) retries. A read that follows
-   * retries failures for as long as it runs, and stops on what it reads.
-   */
-  readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
-
-  /** HTTP response statuses that may be retried while opening a stream. */
-  readonly retryableErrorStatuses?: readonly number[];
-}
-
-/** Automatic stream reconnection configuration. */
-export type StreamReconnectPolicy = ResolvedStreamReconnectPolicy | { readonly reconnect: false };
 
 export type { SessionStreamOptions } from "#shared/session.js";
 

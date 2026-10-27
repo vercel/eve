@@ -82,8 +82,7 @@ export type {
   SendTurnOptions,
   SessionSnapshot,
   ClientSessionState,
-  StreamReconnectPolicy,
-  StreamReconnectRetryPolicy,
+  ReconnectOptions,
   TokenValue,
 } from "#client/types.js";
 

@@ -12,12 +12,7 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
-import type {
-  ClientRedirectPolicy,
-  ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
-  StreamReconnectPolicy,
-  StreamReconnectRetryPolicy,
-} from "#client/types.js";
+import type { ClientRedirectPolicy, ReconnectOptions } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
 
 interface RetryPolicy {
@@ -65,30 +60,21 @@ export function isRetryableStreamError(
   return isStreamDisconnectError(error);
 }
 
-function resolveRetryPolicy(
-  policy: StreamReconnectRetryPolicy | undefined,
-  defaults: RetryPolicy,
-): RetryPolicy {
-  return { ...defaults, ...policy };
-}
-
 function resolveStreamReconnectPolicy(
-  policy: StreamReconnectPolicy | undefined,
+  options: false | ReconnectOptions | undefined,
 ): ResolvedStreamReconnectPolicy {
-  if (policy && "reconnect" in policy && policy.reconnect === false) {
-    return NO_STREAM_RECONNECT_POLICY;
-  }
-
-  const configured = policy as StreamReconnectPolicyOptions | undefined;
+  if (options === false) return NO_STREAM_RECONNECT_POLICY;
+  const defaults = DEFAULT_STREAM_RECONNECT_POLICY;
   return {
     reconnect: true,
-    retryableErrorStatuses: configured?.retryableErrorStatuses
-      ? new Set(configured.retryableErrorStatuses)
-      : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
-    streamOpenReconnectPolicy: resolveRetryPolicy(
-      configured?.streamOpenReconnectPolicy,
-      DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
-    ),
+    retryableErrorStatuses: options?.retryableStatuses
+      ? new Set(options.retryableStatuses)
+      : defaults.retryableErrorStatuses,
+    streamOpenReconnectPolicy: {
+      baseDelayMs: options?.baseDelayMs ?? defaults.streamOpenReconnectPolicy.baseDelayMs,
+      maxAttempts: options?.maxAttempts ?? defaults.streamOpenReconnectPolicy.maxAttempts,
+      maxDelayMs: options?.maxDelayMs ?? defaults.streamOpenReconnectPolicy.maxDelayMs,
+    },
   };
 }
 
@@ -103,8 +89,8 @@ interface FollowStreamInput {
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly baseUrl: string;
-  readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
-  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+  readonly resolveReconnectPolicy?: () => false | ReconnectOptions | undefined;
+  readonly reconnect?: false | ReconnectOptions;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
   readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
@@ -145,9 +131,7 @@ export interface FollowedLine {
 export async function* followStreamLines(input: FollowStreamInput): AsyncGenerator<FollowedLine> {
   const resolvePolicy = () =>
     resolveStreamReconnectPolicy(
-      input.resolveReconnectPolicy === undefined
-        ? input.streamReconnectPolicy
-        : input.resolveReconnectPolicy(),
+      input.resolveReconnectPolicy === undefined ? input.reconnect : input.resolveReconnectPolicy(),
     );
   const bounded = input.follow === false || input.onCaughtUp !== undefined;
   let startIndex = input.startIndex;
@@ -315,8 +299,7 @@ interface OpenedStream {
 export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
-  const retryPolicy =
-    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy);
+  const retryPolicy = input.retryPolicy ?? resolveStreamReconnectPolicy(input.reconnect);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
