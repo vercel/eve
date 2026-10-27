@@ -272,6 +272,8 @@ export function discardAttempt(
   input: {
     readonly runId: string;
     readonly ending: "retried" | "steered";
+    /** With `steered`: the delivery id of the message that cut the run. */
+    readonly steeredBy?: string;
     readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
   },
 ): Transition {
@@ -285,9 +287,10 @@ export function discardAttempt(
     input.ending === "retried"
       ? { outcome: "abandoned" as const, runId: input.runId, usage: input.usage }
       : {
-          finishReason: "other",
+          finishReason: "steered",
           outcome: "completed" as const,
           runId: input.runId,
+          ...(input.steeredBy === undefined ? {} : { steeredBy: input.steeredBy }),
           usage: input.usage,
         };
   return unchanged(view, [...work, ...runSettledFacts(run)]);

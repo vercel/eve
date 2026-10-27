@@ -266,10 +266,32 @@ export function runs(
     Object.values(tables.runs).flatMap((row) => {
       const turnId = selectors.runTurn(tables, row.runId);
       if (filter.turnId !== undefined && filter.turnId !== turnId) return [];
-      const { runId, status, modelId, outcome, finishReason, error, usage, startedAt, endedAt } =
-        row;
+      const {
+        runId,
+        status,
+        modelId,
+        outcome,
+        finishReason,
+        steeredBy,
+        error,
+        usage,
+        startedAt,
+        endedAt,
+      } = row;
       return [
-        { runId, turnId, status, modelId, outcome, finishReason, error, usage, startedAt, endedAt },
+        {
+          runId,
+          turnId,
+          status,
+          modelId,
+          outcome,
+          finishReason,
+          steeredBy,
+          error,
+          usage,
+          startedAt,
+          endedAt,
+        },
       ];
     }),
   );

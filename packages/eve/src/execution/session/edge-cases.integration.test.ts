@@ -928,6 +928,14 @@ describe("calls in flight", () => {
     expect(ofType(events, "content.completed").map((event) => event.data.value)).toEqual([
       "The end.",
     ]);
+    // The cut run settles as steered and names the message that cut it; the rerun doesn't.
+    const steeringId = ofType(events, "delivery.consumed")[1]?.data.deliveryId;
+    expect(steeringId).toBeDefined();
+    expect(ofType(events, "model.settled").map((event) => event.data)).toMatchObject([
+      { finishReason: "steered", steeredBy: steeringId },
+      { finishReason: "stop" },
+    ]);
+    expect(ofType(events, "model.settled")[1]!.data).not.toHaveProperty("steeredBy");
   });
 
   it("finishes a reply already streaming, and answers a message sent meanwhile in its own turn", async () => {
@@ -956,6 +964,13 @@ describe("calls in flight", () => {
     expect(ofType(events, "content.completed").map((event) => event.data.value)).toEqual([
       "Once there was a dragon.",
       "The end.",
+    ]);
+    // Nothing was cut, so no run settles as steered.
+    expect(
+      ofType(events, "model.settled").map((event) => [event.data.finishReason, event.data.steeredBy]),
+    ).toEqual([
+      ["stop", undefined],
+      ["stop", undefined],
     ]);
   });
 });

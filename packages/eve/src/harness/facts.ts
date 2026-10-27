@@ -139,6 +139,7 @@ export interface RunSettlement {
   readonly runId: string;
   readonly outcome: FactOf<"model.settled">["data"]["outcome"];
   readonly finishReason?: string;
+  readonly steeredBy?: string;
   readonly generationId?: string;
   readonly error?: ErrorInfo;
   readonly usage?: Usage;

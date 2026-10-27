@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { SessionInputQueue, steeringDeliveryId } from "#execution/session/input-queue.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { principalOf } from "#execution/session/principal.js";
 
 function signInCallback(attemptId: string) {
@@ -126,5 +127,25 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn)).toBeUndefined();
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
+  });
+});
+
+describe("steeringDeliveryId", () => {
+  const meta = (deliveryId: string, payloadIndex: number) =>
+    ({ deliveryId, payloadIndex }) as NonNullable<DeliverHookPayload["deliveryMetadata"]>[number];
+
+  it("names the delivery of the message, not of an answer batched before it", () => {
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ answers: [] } as never, { message: "correction" }],
+      deliveryMetadata: [meta("dlv_answer", 0), meta("dlv_message", 1)],
+    };
+    expect(steeringDeliveryId(delivery)).toBe("dlv_message");
+  });
+
+  it("is undefined when the delivery carries no metadata", () => {
+    expect(
+      steeringDeliveryId({ kind: "deliver", payloads: [{ message: "correction" }] }),
+    ).toBeUndefined();
   });
 });

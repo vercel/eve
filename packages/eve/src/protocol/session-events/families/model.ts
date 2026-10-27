@@ -40,6 +40,11 @@ export interface ModelSettledData {
   readonly outcome: ModelOutcome;
   /** The provider's finish reason, as an open string: `stop`, `tool-calls`, `length`, …. */
   readonly finishReason?: string;
+  /**
+   * The delivery id of the steering message that cut the run, set only with
+   * `finishReason: "steered"` and only when that delivery has an id.
+   */
+  readonly steeredBy?: string;
   readonly generationId?: string;
   readonly error?: ErrorInfo;
 }
@@ -74,6 +79,7 @@ export const modelSchemas = {
         generationId: z.string().optional(),
         outcome: known<ModelOutcome>(),
         runId: id,
+        steeredBy: z.string().optional(),
       }),
     ),
   ),
