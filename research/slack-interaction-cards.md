@@ -77,20 +77,24 @@ export interface SlackInteractionCard {
   readonly view: SessionView;
 }
 
-export interface SlackInteractionMessage {
+/** Renamed from `SlackTaskCard`: one message either hook returns. */
+export interface SlackCardMessage {
   readonly blocks: readonly BlockKitBlock[];
   readonly text: string;
 }
 
 export interface SlackInteractionCardParts {
   /** The message holding eve's controls. Slack echoes it back on every click, so keep it small. */
-  readonly controls: SlackInteractionMessage;
-  /** Posted as a separate message before the controls, and deleted once the request settles. */
-  readonly details?: SlackInteractionMessage;
+  readonly controls: SlackCardMessage;
+  /**
+   * Posted as a separate message before the controls, for any kind of request. Requests asked
+   * together share one details message, which eve deletes once its last open request settles.
+   */
+  readonly details?: SlackCardMessage;
 }
 
 export interface SlackRenderer {
-  // received, events, taskCard ...
+  // received, events, taskCard (now returning SlackCardMessage) ...
   readonly interactionCard?: (
     card: SlackInteractionCard,
     next: (card: SlackInteractionCard) => SlackInteractionCardParts,
@@ -119,7 +123,12 @@ Renderers compose like `taskCard`: the first one is outermost, and the chain end
 default. `next` accepts a changed card, for example a shorter `interaction.request.prompt` for
 eve's default to render. eve's default renders an open request with controls as
 `renderInteractionPostParts` does today. For an answered or settled request, it renders a single
-block that names the answer and, when known, who gave it.
+block that names the answer and, when known, who gave it. The card and a direct-message request's
+thread note name the outcome the same way.
+
+`details` is open to every kind. Before, only an approval with tool input had a details message,
+and other requests kept everything beside their controls. eve's default still posts details only
+for that case, but a renderer can now give a question or budget prompt a details message too.
 
 The issue's sketch differs in three ways:
 
@@ -138,9 +147,12 @@ interaction.opened ─▶ route (approvalChannel) ─▶ interactionCard per req
                                                                    │
                    group details, then controls, under 50 blocks ◀─┘ ─▶ post, record
 
-response.admitted / response.settled / interaction.settled
-                   ─▶ interactionCard for the changed request ─▶ check ─▶ chat.update if changed
-                   ─▶ delete details once none of its requests is open
+response.admitted / response.settled (request still open)
+                   ─▶ interactionCard for that request ─▶ check ─▶ chat.update if changed
+
+interaction.settled ─▶ interactionCard for each request of the message that settled
+                       without its settled rendering written ─▶ check ─▶ one chat.update
+                    ─▶ delete details once every request it covers was written settled
 ```
 
 - **Scope.** The hook runs for every interaction except sign-ins. That covers approvals,
@@ -152,9 +164,15 @@ response.admitted / response.settled / interaction.settled
 - **When the hook runs.** eve renders a request when it opens, and again when its row changes: an
   answer is admitted, an answer is refused, or the request settles. Approvals in one step settle
   together once each has a standing answer, and relayed requests wait for their asker's batch. So
-  the admitted answer, not the settlement, is when a person sees their click land. eve renders
-  again on every `response.settled`, since any settled response can change the standing answer, and
-  updates a message only when its rendered blocks changed.
+  the admitted answer, not the settlement, is when a person sees their click land. Once admitted,
+  the controls are gone, so a later click can't change the answer; a refused answer brings them
+  back. eve renders again on every `response.settled`, since any settled response can change the
+  standing answer, and updates a message only when its rendered blocks changed.
+- **Settlement.** `response.admitted` and `response.settled` skip a request that is already settled
+  in their commit's view and leave it to `interaction.settled`. A handler's view covers its whole
+  commit, so when several requests of one message settle together, the first `interaction.settled`
+  writes all of them in one update. eve records, per request, that its settled rendering was sent,
+  and forgets a message only once every request in it was.
 - **Actions.** eve renders its own default controls from the original `Interaction`, outside the
   chain. It then checks the chain's result against them:
   - **Open, unanswered.** `controls` must hold exactly eve's interactive elements: every
@@ -163,16 +181,18 @@ response.admitted / response.settled / interaction.settled
     blocks; the check walks nested blocks.
   - **Answered or settled.** `controls` must hold no eve action IDs.
   - **Always.** `details` holds no eve action IDs, and each part fits in 50 blocks.
-- **Failures.** If the hook throws or fails the check, eve logs it and renders that request with
-  its default. If Slack rejects a rendered message (`invalid_blocks`, a size limit), eve posts or
-  updates that message once more with its defaults. A rejected batch message posts its requests'
-  defaults regrouped under the 50-block cap, since the defaults can need more blocks than the
-  rendered messages did. A dropped request would hold the turn, so a
-  default card beats none. `taskCard` differs: a card that throws stays as last written, since a
+- **Failures.** If the hook throws, fails the check, or returns something JSON can't hold, eve
+  logs it and renders that request with its default. If Slack refuses a rendered message's content
+  (`invalid_blocks`, `invalid_blocks_format`, `msg_too_long`, `msg_blocks_too_long`,
+  `msg_blocks_too_many`), eve posts or updates that message once more with its defaults. A refused
+  batch message posts its requests' defaults regrouped under the 50-block cap, since the defaults
+  can need more blocks than the rendered messages did. eve doesn't resend after any other failure,
+  such as a timeout or `rate_limited`, since the first message may have landed. A dropped request
+  would hold the turn, so a default card beats none. `taskCard` differs: a card that throws stays as last written, since a
   stale card holds nothing up.
 - **Block limits.** eve records the number of blocks each request's controls had when posted. A
-  rendering that would grow beyond that number falls back to eve's default for that request, which
-  is one block once the request is answered or settled. An open request whose default would also
+  rendering that would grow beyond that number falls back to eve's default for that request, text
+  included, which is one block once the request is answered or settled. An open request whose default would also
   grow keeps its recorded blocks. Other requests in the message keep their recorded blocks, so a
   message never grows past 50 blocks after posting.
 - **DM delivery.** The hook runs for requests that `approvalChannel` sends to a DM, with
@@ -187,17 +207,24 @@ response.admitted / response.settled / interaction.settled
 
 - Card bookkeeping replaces `pendingApprovalCards` with `interactionCards`, a record per message:
   its `ts` and channel, its destination and a direct message's route, a direct message's thread
-  announcement, and each request's recorded controls blocks, stored once, with their posted count
-  and its details message. Details are recorded per request because details and controls group
-  separately, so one details message can serve requests in two controls messages. eve records every interaction except sign-ins, not just approvals. eve is pre-1.0,
-  so cards posted before the upgrade get no compatibility shim and keep their live buttons.
+  announcement, and each request's recorded controls blocks, stored once, with their posted count,
+  its details message, and whether its settled rendering was sent. Details are recorded per request
+  because details and controls group separately, so one details message can serve requests in two
+  controls messages. eve records each controls message as soon as it posts, so a later group's
+  failure doesn't lose it. eve records every interaction except sign-ins, not just approvals.
+- State from before the upgrade gets no shim. eve ignores the old `pendingApprovalCards` field, and
+  a session without `interactionCards` starts with none, so cards posted before the upgrade keep
+  their live buttons. Removing the field from `SlackChannelState` and renaming `SlackTaskCard` break
+  public types, so the release is `minor`.
 - Question and freeform cards update from session events, not the click webhook, so a freeform
   answer no longer erases its neighbors.
 - eve composes `interactionCard` before it builds its default `interaction.opened`,
   `response.admitted`, `response.settled`, and `interaction.settled` handlers, and passes the
   composed hook into them. Slack's renderer events gain `response.admitted`, which channels already
   receive. A renderer whose handler for one of those events skips `next()` also skips eve's card
-  update for it, as with every other default.
+  update for it, as with every other default. One exception: a request that settles in the same
+  commit as another request of its message is written by whichever `interaction.settled` runs
+  first.
 - Slack-only. No other channel has a renderer chain yet. `SlackInteractionCard` holds mostly
   channel-neutral data, so a later chain on another channel could reuse its shape.
 

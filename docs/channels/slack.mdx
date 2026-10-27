@@ -571,7 +571,7 @@ A turn keeps one card unless it starts a task after every task on its card ended
 - `answeredBy`: the Slack user ID whose answer stands or decided the request, when known.
 - `view`: the session snapshot, for the selectors from `eve/events`.
 
-It returns `controls`, the message holding eve's buttons or select, and an optional `details` message, which eve posts before the controls and deletes once the request settles. Slack sends the whole controls message back with every click, so put long content such as tool input in `details`. This renderer shows a `plan-create` tool's steps as the approval's details:
+It returns `controls`, the message holding eve's buttons or select, and an optional `details` message, which eve posts before the controls. Each is a `SlackCardMessage` with `blocks` and `text`, the same shape `taskCard` returns. Requests asked together share one details message, which eve deletes once its last open request settles. Slack sends the whole controls message back with every click, so put long content such as tool input in `details`. eve's default posts details only for an approval with tool input, but a renderer can give any request details, including a question. This renderer shows a `plan-create` tool's steps as the approval's details:
 
 ```ts title="agent/channels/slack.ts"
 import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
@@ -594,7 +594,7 @@ const plan = defineSlackRenderer({
 export default slackChannel({ renderers: [plan] });
 ```
 
-eve calls `interactionCard` when a request opens, when an answer is admitted or refused, and when the request settles, and updates the Slack message only when its blocks changed. Pass `next` a changed card, such as one with a shorter `interaction.request.prompt`, to have eve's default render it. eve's default renders an open request as buttons or a select, and an answered or settled one as a single block that names the answer and, when known, who gave it. `interactionCard` doesn't run for sign-ins.
+eve calls `interactionCard` when a request opens, when an answer is admitted or refused, and when the request settles, and updates the Slack message only when its blocks changed. Requests in one message that settle together update it once. Pass `next` a changed card, such as one with a shorter `interaction.request.prompt`, to have eve's default render it. eve's default renders an open request as buttons or a select, and an answered or settled one as a single block that names the answer and, when known, who gave it. `interactionCard` doesn't run for sign-ins.
 
 eve still routes, batches, and posts the messages, and owns the controls' action IDs, so clicks keep reaching the session. You can relabel eve's controls, reorder them, or nest them in your own blocks, within these rules:
 
@@ -603,7 +603,7 @@ eve still routes, batches, and posts the messages, and owns the controls' action
 - `details` never holds eve controls, and each message holds at most 50 blocks.
 - An update never uses more blocks than the request's controls had when eve posted them. A larger result falls back to eve's default, which is one block once the request is answered or settled.
 
-If `interactionCard` throws or breaks these rules, eve logs it and renders that request with its default, since a request nobody can answer would hold the turn. If Slack rejects a rendered message, eve sends that message once more with its defaults.
+If `interactionCard` throws or breaks these rules, eve logs it and renders that request with its default, since a request nobody can answer would hold the turn. If Slack refuses a rendered message's content, such as with `invalid_blocks` or `msg_too_long`, eve sends that message once more with its defaults. eve doesn't resend after any other failure, such as a timeout or `rate_limited`, because the first message may have landed.
 
 Renderers run in the order you list them, and the first one is outermost. `onInteraction` receives clicks on buttons a renderer posts, such as the feedback buttons above.
 
@@ -695,7 +695,7 @@ export default slackChannel({
 
 The callback receives the `Interaction` and current `SessionContext`, so it can switch on `request.kind`, `call`, or prompt presentation properties. Omit it to keep every request in the thread, or return `"direct-message"` unconditionally to make every request private. If eve cannot resolve the triggering Slack user for a direct message, it logs the undelivered request and posts no fallback, so private delivery fails closed. The existing `onAnswers` or tool approval response policy still decides whether the person who clicks may respond.
 
-Each card updates from the session as its request changes. Once an answer is admitted, the card shows the answer and who gave it, even while other approvals from the same step still wait for theirs. Once the request settles, the card has no buttons, the separate tool-input post is deleted when no open request shares it, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This applies to approvals, questions, and budget prompts, however they end: a click, a typed reply in the thread, or a withdrawal, in which case the card reads `No longer needed`. When several requests share one message, answering one updates only its part of the message. To change how these cards look, use [`interactionCard`](#customize-rendering).
+Each card updates from the session as its request changes. Once an answer is admitted, the card shows the answer and who gave it in place of the buttons, even while other approvals from the same step still wait for theirs. Clicks can't change an admitted answer, since the buttons are gone; if a policy or check refuses the answer, the buttons come back. Once the request settles, the separate tool-input post is deleted after the last open request it covers settles, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome the card shows. This applies to approvals, questions, and budget prompts, however they end: a click, a typed reply in the thread, or a withdrawal, in which case the card reads `No longer needed`. When several requests share one message, answering one updates only its part of the message. To change how these cards look, use [`interactionCard`](#customize-rendering).
 
 A click on any request whose session is no longer active, for example because its run was cancelled outside eve, can never be answered. eve removes the card's buttons, marks it `No longer active`, and tells the person who clicked, in an ephemeral message, to send a new message.
 
