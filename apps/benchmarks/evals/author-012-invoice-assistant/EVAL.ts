@@ -12,8 +12,9 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 const projectRoot = "tally";
 const agentRoot = `${projectRoot}/agent`;
 const sessionSecret = "test-session-secret";
-const cancelRoute = "/eve/v1/session/:sessionId/cancel";
 const createRoute = "/eve/v1/session";
+// Where eve's runtime hands a channel route its session creator.
+const sessionCreatorKey = "__eveRouteSessionCreator";
 const MB = 1024 * 1024;
 
 /** The demo accounts in Tally's `lib/users.ts`. */
@@ -149,7 +150,7 @@ test("asks an owner to confirm before voiding", async () => {
   expect(decision(await approve(tool, maya, input))).toBe("ask");
 
   // Once Maya approves, the call voids her org's draft.
-  await tool.execute(input, await toolContext(maya));
+  await tool.execute(input, await toolContext(maya, { approvedBy: maya }));
   expect(await invoiceStatus("org_brightside", "inv_1044")).toBe("void");
 });
 
@@ -157,9 +158,12 @@ test("never voids for members or across organizations", async () => {
   const tool = await load(`${agentRoot}/tools/void_invoice.ts`);
   const attempt = async (user: User, invoiceId: string) => {
     const input = await invoiceInput(tool, invoiceId);
-    // A policy may refuse outright; otherwise the call has to refuse when it runs.
-    if (decision(await approve(tool, user, input)) === "deny") return;
-    await tool.execute(input, await toolContext(user)).catch(() => undefined);
+    // A policy may refuse outright; otherwise the call has to refuse when it runs,
+    // even after the person who asked approved it.
+    const status = decision(await approve(tool, user, input));
+    if (status === "deny") return;
+    const context = await toolContext(user, status === "ask" ? { approvedBy: user } : {});
+    await tool.execute(input, context).catch(() => undefined);
   };
 
   await attempt(leo, "inv_1042");
@@ -183,9 +187,9 @@ test("draft_invoice creates a draft in the caller's organization", async () => {
 
 test("accepts PDF attachments up to 3 MB and nothing else", async () => {
   const send = async (mediaType: string, bytes: number) =>
-    (await createSession(sessionCookie(maya), mediaType, bytes)).status;
+    (await createSession({ cookie: sessionCookie(maya) }, attachment(mediaType, bytes))).status;
 
-  expect([413, 415, 401, 403]).not.toContain(await send("application/pdf", 2.5 * 1_000_000));
+  expect(await send("application/pdf", 2.5 * 1_000_000)).toBe(202);
   expect(await send("application/pdf", 3.5 * MB)).toBe(413);
   for (const mediaType of ["image/png", "text/csv", "application/zip"]) {
     expect(await send(mediaType, 20_000), mediaType).toBe(415);
@@ -204,7 +208,7 @@ test("remembers preferences for each person, privately", async () => {
       expect(slot?.provider, file).toBeDefined();
       const scopeFor = async (user: User, sessionId: string) => {
         if (typeof slot.scope !== "function") return slot.scope;
-        const { session } = await toolContext(user, sessionId);
+        const { session } = await toolContext(user, { sessionId });
         return slot.scope({
           session,
           channel: { kind: "http" },
@@ -371,84 +375,91 @@ interface Authentication {
 }
 
 /**
- * Sends a cancel request through the authored eve channel. The route authenticates
- * before it touches the session, and hands the resolved principal to the session.
+ * Starts a session through the authored eve channel, with eve's session creator
+ * stubbed to record the principal the new session would get. The create route
+ * carries no session ID, so a channel that also checks session ownership on
+ * session routes is graded on authentication alone.
  */
 async function authenticate(headers: Record<string, string>): Promise<Authentication> {
-  const route = await eveChannelRoute(cancelRoute);
+  return createSession(headers, [{ type: "text", text: "Which invoices are overdue?" }]);
+}
+
+/** A message asking for a draft invoice from one attached file. */
+function attachment(mediaType: string, bytes: number) {
+  const content = Buffer.alloc(Math.floor(bytes), 0x20);
+  if (mediaType === "application/pdf") content.write("%PDF-1.7\n");
+  return [
+    { type: "text", text: "Please draft an invoice from this purchase order." },
+    {
+      type: "file",
+      mediaType,
+      filename: "purchase-order",
+      data: `data:${mediaType};base64,${content.toString("base64")}`,
+    },
+  ];
+}
+
+async function createSession(
+  headers: Record<string, string>,
+  message: unknown[],
+): Promise<Authentication> {
+  const route = await eveChannelRoute(createRoute);
   let auth: unknown;
   const response: Response = await route.handler(
-    new Request("https://tally.example.com/eve/v1/session/session-1/cancel", {
+    new Request("https://tally.example.com/eve/v1/session", {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify({ turnId: null }),
+      body: JSON.stringify({ message }),
     }),
     {
-      params: { sessionId: "session-1" },
-      attachSession: () => ({
-        cancel: async (options: { auth: unknown }) => {
-          auth = options.auth;
-          return { sessionId: "session-1", deliveryId: "delivery-1", inbox: "accepted" };
-        },
-      }),
+      params: {},
+      waitUntil: () => undefined,
+      [sessionCreatorKey]: async (options: { auth: unknown }) => {
+        auth = options.auth;
+        return { sessionId: "session-1", deliveryId: "delivery-1" };
+      },
     },
   );
   return { status: response.status, auth };
 }
 
-/** Starts a session with one attachment. Past the upload policy, eve needs its runtime. */
-async function createSession(cookie: string, mediaType: string, bytes: number) {
-  const route = await eveChannelRoute(createRoute);
-  const header = mediaType === "application/pdf" ? "%PDF-1.7\n" : "";
-  const content = Buffer.alloc(Math.floor(bytes), 0x20);
-  content.write(header);
-  const response: Response = await route.handler(
-    new Request("https://tally.example.com/eve/v1/session", {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        message: [
-          { type: "text", text: "Please draft an invoice from this purchase order." },
-          {
-            type: "file",
-            mediaType,
-            filename: "purchase-order",
-            data: `data:${mediaType};base64,${content.toString("base64")}`,
-          },
-        ],
-      }),
-    }),
-    { params: {}, waitUntil: () => undefined },
-  );
-  return { status: response.status };
-}
-
 /**
  * The tool context for a demo user's turn. The caller is the principal the
  * authored channel resolves from the user's cookie, so tools see what eve
- * would give them; a broken channel falls back to a principal carrying
- * Tally's session fields, so tools are graded on their own.
+ * would give them; a channel that can't resolve one falls back to a principal
+ * carrying Tally's session fields, so tools are graded on their own.
  */
-async function toolContext(user: User, sessionId = "session-1") {
-  let current;
-  try {
-    current = (await authenticate({ cookie: sessionCookie(user) })).auth;
-  } catch {
-    current = undefined;
-  }
-  current ??= {
-    authenticator: "tally",
-    issuer: "tally",
-    principalId: user.userId,
-    principalType: "user",
-    subject: user.userId,
-    attributes: { ...user, email: `${user.userId}@example.com` },
-  };
+async function toolContext(
+  user: User,
+  { sessionId = "session-1", approvedBy }: { sessionId?: string; approvedBy?: User } = {},
+) {
+  const current = await principal(user);
   return {
     session: { id: sessionId, auth: { current, initiator: current }, turn: { id: "turn-1" } },
     callId: "call-1",
     abortSignal: new AbortController().signal,
+    // eve sets this on a call a person approved.
+    ...(approvedBy === undefined ? {} : { approval: { responder: await principal(approvedBy) } }),
   };
+}
+
+async function principal(user: User) {
+  let resolved;
+  try {
+    resolved = (await authenticate({ cookie: sessionCookie(user) })).auth;
+  } catch {
+    resolved = undefined;
+  }
+  return (
+    resolved ?? {
+      authenticator: "tally",
+      issuer: "tally",
+      principalId: user.userId,
+      principalType: "user",
+      subject: user.userId,
+      attributes: { ...user, email: `${user.userId}@example.com` },
+    }
+  );
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
