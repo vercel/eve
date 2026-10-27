@@ -91,7 +91,7 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   const line = await formatter.getReleaseLine({ id: "example", summary: "Add a tool.", commit });
   assert.match(
     line,
-    /#### 🐛 Bug Fix\n\n- Add a tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
+    /#### 🐛 Bug Fixes\n\n- Add a tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
   );
   assert.match(line, /#### Contributors\n\n- \[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.doesNotMatch(line, /<!--/u);
@@ -106,6 +106,7 @@ test("version-packages assembles changesets across bump types and preserves old 
   await mkdir(join(root, ".changeset"));
   await mkdir(join(root, "scripts"));
   await mkdir(join(root, "packages/eve"), { recursive: true });
+  await mkdir(join(root, "packages/agent-runs"), { recursive: true });
   await symlink(resolve("node_modules"), join(root, "node_modules"), "dir");
   for (const path of [
     ".changeset/config.json",
@@ -129,6 +130,14 @@ test("version-packages assembles changesets across bump types and preserves old 
   await write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
   await write("packages/eve/package.json", JSON.stringify({ name: "eve", version: "1.0.0" }));
   await write("packages/eve/CHANGELOG.md", "# eve\n\n## 1.0.0\n\nOld release.\n");
+  await write(
+    "packages/agent-runs/package.json",
+    JSON.stringify({ name: "@vercel/agent-runs", version: "1.0.0" }),
+  );
+  await write(
+    "packages/agent-runs/CHANGELOG.md",
+    "# @vercel/agent-runs\n\n## 1.0.0\n\nOld release.\n",
+  );
   git("init", "-q");
   git("config", "user.name", "Test Author");
   git("config", "user.email", "test@example.com");
@@ -145,7 +154,10 @@ test("version-packages assembles changesets across bump types and preserves old 
     ".changeset/a.md",
     '---\n"eve": minor\n---\n\nAdd a new tool.\n\nMigrate old callers to the new tool.\n\nThanks @Alice.\n',
   );
-  await write(".changeset/d.md", '---\n"eve": patch\n---\n\nImprove the new tool.\n');
+  await write(
+    ".changeset/d.md",
+    '---\n"eve": patch\n"@vercel/agent-runs": patch\n---\n\nImprove the new tool.\n',
+  );
   git("add", ".changeset/a.md", ".changeset/d.md");
   git(
     "commit",
@@ -202,14 +214,19 @@ test("version-packages assembles changesets across bump types and preserves old 
     },
   });
   const changelog = await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8");
-  assert.match(changelog, /## 1\.1\.0\n\n### Release 1\.1\.0 \| \d{4}-\d\d-\d\d \| minor/u);
+  assert.match(changelog, /## 1\.1\.0\n\n### Release eve@1\.1\.0 \| \d{4}-\d\d-\d\d \| minor/u);
+  const agentRunsChangelog = await readFile(join(root, "packages/agent-runs/CHANGELOG.md"), "utf8");
+  assert.match(
+    agentRunsChangelog,
+    /## 1\.0\.1\n\n### Release @vercel\/agent-runs@1\.0\.1 \| \d{4}-\d\d-\d\d \| patch/u,
+  );
   assert.match(
     changelog,
     /### 🚀 Features\n\n- Add a new tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
   );
   assert.match(changelog, /- Improve the new tool\. \[#10\]/u);
   assert.equal([...changelog.matchAll(/^### 🚀 Features$/gmu)].length, 1);
-  assert.match(changelog, /### 🐛 Bug Fix\n\n- Correct the setup guide\. \[#11\]/u);
+  assert.match(changelog, /### 🐛 Bug Fixes\n\n- Correct the setup guide\. \[#11\]/u);
   assert.match(changelog, /### Other Changes\n\n- Keep the legacy change visible\. \[#12\]/u);
   assert.match(changelog, /\[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.match(changelog, /\[@Bob\]\(https:\/\/github\.com\/Bob\)/u);
@@ -219,7 +236,7 @@ test("version-packages assembles changesets across bump types and preserves old 
   assert.match(changelog, /## 1\.0\.0\n\nOld release\./u);
   await write(
     "packages/eve/CHANGELOG.md",
-    "# eve\n\n## 1.1.0\n\n### Minor Changes\n\n#### 🚀 Features\n\n- Recover the release. [#10](https://github.com/vercel/eve/pull/10)\n\n## 1.0.0\n\nOld release.\n",
+    "# eve\n\n## 1.1.0\n\n### Minor Changes\n\n#### 🐛 Bug Fixes\n\n- Recover the release. [#10](https://github.com/vercel/eve/pull/10)\n\n## 1.0.0\n\nOld release.\n",
   );
   execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
     cwd: root,
@@ -228,6 +245,6 @@ test("version-packages assembles changesets across bump types and preserves old 
   });
   assert.match(
     await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8"),
-    /### 🚀 Features\n\n- Recover the release\./u,
+    /### 🐛 Bug Fixes\n\n- Recover the release\./u,
   );
 });

@@ -4,7 +4,7 @@ import { pullRequestFor } from "../scripts/changeset-github.mjs";
 const pulls = new Map();
 const headings = {
   feature: "🚀 Features",
-  bugfix: "🐛 Bug Fix",
+  bugfix: "🐛 Bug Fixes",
   internal: "Internal",
   other: "Other Changes",
 };

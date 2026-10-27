@@ -3,8 +3,8 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getPackages } from "@manypkg/get-packages";
 
-function renderRelease({ version, date, bump, body }) {
-  const sections = [`### Release ${version} | ${date} | ${bump}`];
+function renderRelease({ name, version, date, bump, body }) {
+  const sections = [`### Release ${name}@${version} | ${date} | ${bump}`];
   const groups = new Map();
   const headings = [...body.matchAll(/^#{3,4} (.+)$/gmu)];
   for (let i = 0; i < headings.length; i++) {
@@ -17,7 +17,7 @@ function renderRelease({ version, date, bump, body }) {
   }
   for (const title of [
     "🚀 Features",
-    "🐛 Bug Fix",
+    "🐛 Bug Fixes",
     "Other Changes",
     "Dependencies",
     "Contributors",
@@ -35,7 +35,7 @@ function renderRelease({ version, date, bump, body }) {
   return sections.join("\n\n");
 }
 
-async function formatChangelog(path, version, recovery = false) {
+async function formatChangelog(path, { name, version }, recovery = false) {
   let content;
   try {
     content = await readFile(path, "utf8");
@@ -56,7 +56,7 @@ async function formatChangelog(path, version, recovery = false) {
   if (
     recovery &&
     (!/^### (?:Major|Minor|Patch) Changes$/mu.test(body) ||
-      !/^#### (?:🚀 Features|🐛 Bug Fix|Other Changes|Internal|Dependencies)$/mu.test(body))
+      !/^#### (?:🚀 Features|🐛 Bug Fixes|Other Changes|Internal|Dependencies)$/mu.test(body))
   )
     return false;
   const bump =
@@ -64,6 +64,7 @@ async function formatChangelog(path, version, recovery = false) {
       body.includes(`### ${type[0].toUpperCase()}${type.slice(1)} Changes`),
     ) ?? "patch";
   const rendered = renderRelease({
+    name,
     version,
     date: new Date().toISOString().slice(0, 10),
     bump,
@@ -80,8 +81,7 @@ async function main() {
   );
   let recovered = false;
   for (const { dir, packageJson } of before.packages) {
-    if (await formatChangelog(join(dir, "CHANGELOG.md"), packageJson.version, true))
-      recovered = true;
+    if (await formatChangelog(join(dir, "CHANGELOG.md"), packageJson, true)) recovered = true;
   }
   const changesetFiles = await readdir(".changeset");
   if (
@@ -97,7 +97,7 @@ async function main() {
   const after = await getPackages(process.cwd());
   for (const { dir, packageJson } of after.packages) {
     if (versions.get(dir) !== packageJson.version)
-      await formatChangelog(join(dir, "CHANGELOG.md"), packageJson.version);
+      await formatChangelog(join(dir, "CHANGELOG.md"), packageJson);
   }
 }
 
