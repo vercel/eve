@@ -57,6 +57,22 @@ export const modelPricing = {
     cacheRead: 0.01,
     cacheWrite: 0.125,
   },
+  "openai/gpt-6.1-sol": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+  },
+  "openai/gpt-6.1-terra": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 1,
+    output: 5,
+    cacheRead: 0.05,
+    cacheWrite: 1.25,
+  },
   "spacexai/grok-4.7": {
     effectiveDate: "2026-10-07",
     source: "https://ai-gateway.vercel.sh/v1/models",
