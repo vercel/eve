@@ -35,10 +35,6 @@ eve link
 eve add channel/web
 ```
 
-`eve init --channel-web-nextjs` keeps its existing scaffolding behavior and does
-not provision authentication. Sign-in setup runs through `eve add channel/web`
-or the terminal UI's channel picker.
-
 The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
 channel verifies the same session, while retaining Vercel OIDC and local
 development access. In an agent workspace, setup configures only the selected

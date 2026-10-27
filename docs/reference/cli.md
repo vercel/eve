@@ -34,7 +34,7 @@ eve collects CLI telemetry by default to improve the command-line interface. Run
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--non-interactive]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--non-interactive]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -55,7 +55,6 @@ After scaffolding in an interactive human terminal, eve opens the TUI directly. 
 | ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
 | `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
 
 ## `eve extension`
