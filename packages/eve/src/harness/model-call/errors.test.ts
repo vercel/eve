@@ -250,7 +250,7 @@ describe("classifyModelCallError", () => {
       upstreamType: "insufficient_funds",
     });
 
-    expect(summarizeKnownError(err)?.id).not.toBe("gateway-credit-exhausted");
+    expect(summarizeKnownError(err)?.id).toBe("gateway-credit-check-throttled");
     expect(classifyModelCallError(err)).toBe("retry");
   });
 
