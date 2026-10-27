@@ -97,7 +97,7 @@ export function createDockerConnection(input: {
       const pidFilePath = `${DOCKER_SPAWN_PID_FILE_PREFIX}${randomUUID()}.pid`;
       const wrapped =
         `echo "$$" > ${shellQuote(pidFilePath)}; ` +
-        `bash -lc ${shellQuote(options.command)}; ` +
+        `bash ${options.loginShell ? "-lc" : "--noprofile --norc -c"} ${shellQuote(options.command)}; ` +
         `status=$?; rm -f ${shellQuote(pidFilePath)}; exit $status`;
       args.push(containerIdentity, "bash", "-c", wrapped);
 

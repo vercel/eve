@@ -579,7 +579,10 @@ function createVercelConnection(
     },
     async spawn(options): Promise<SandboxProcess> {
       const command = await sandbox.runCommand({
-        args: ["-lc", options.command],
+        args: [
+          ...(options.loginShell ? ["-lc"] : ["--noprofile", "--norc", "-c"]),
+          options.command,
+        ],
         cmd: "bash",
         cwd: options.workingDirectory,
         detached: true,

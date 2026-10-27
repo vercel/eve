@@ -45,14 +45,30 @@ describe("createConnectionSession", () => {
     await session.writeTextFile({ content: "hi", path: "notes/./a.txt" });
     await session.writeFiles({ files: [{ content: new Uint8Array([1]), path: "/tmp/b.bin" }] });
     await session.run({ command: "ls", workingDirectory: "src" });
-    await session.run({ command: "pwd" });
+    await session.run({ command: "pwd", loginShell: false });
     await session.removePath({ force: true, path: "../tmp/x", recursive: true });
 
     expect(session.resolvePath("notes/todo.txt")).toBe("/workspace/notes/todo.txt");
     expect([...files.keys()]).toEqual(["/workspace/notes/a.txt", "/tmp/b.bin"]);
     expect(connection.spawn.mock.calls).toEqual([
-      [{ signal: undefined, command: "ls", env: {}, workingDirectory: "/workspace/src" }],
-      [{ signal: undefined, command: "pwd", env: {}, workingDirectory: "/workspace" }],
+      [
+        {
+          signal: undefined,
+          command: "ls",
+          env: {},
+          loginShell: true,
+          workingDirectory: "/workspace/src",
+        },
+      ],
+      [
+        {
+          signal: undefined,
+          command: "pwd",
+          env: {},
+          loginShell: false,
+          workingDirectory: "/workspace",
+        },
+      ],
     ]);
     expect(connection.removePath).toHaveBeenCalledWith({
       signal: undefined,

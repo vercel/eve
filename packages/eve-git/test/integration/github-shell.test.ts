@@ -264,10 +264,11 @@ test("mints a repository-scoped token only during execution and redacts output",
     },
   ]);
   assert.equal(runs.length, 5);
-  assert.match(runs[3]?.command ?? "", /git remote get-url --push origin/u);
+  assert.ok(runs.every((run) => run.loginShell === false));
+  assert.match(runs[3]?.command ?? "", /&& \/usr\/bin\/git remote get-url --push origin$/u);
   assert.match(
     runs[4]?.command ?? "",
-    /^cd '\/workspace\/internal-agents' && exec 'git' '-c' 'protocol\.allow=never' '-c' 'protocol\.https\.allow=always' 'push' 'https:\/\/github\.com\/vercel\/internal-agents\.git'/u,
+    /^cd '\/workspace\/internal-agents' && exec '\/usr\/bin\/git' '-c' 'protocol\.allow=never' '-c' 'protocol\.https\.allow=always' 'push' 'https:\/\/github\.com\/vercel\/internal-agents\.git'/u,
   );
   assert.equal(runs[4]?.env?.GH_TOKEN, undefined);
   assert.match(runs[4]?.env?.GIT_CONFIG_VALUE_0 ?? "", /^Authorization: Basic /u);
@@ -301,6 +302,8 @@ test("runs gh auth token with only the placeholder credential and redacts inject
 
   assert.equal(runs.length, 1);
   assert.match(runs[0]?.command ?? "", /eve-code\/gh' 'auth' 'token'$/u);
+  assert.equal(runs[0]?.loginShell, false);
+  assert.equal(runs[0]?.env?.XDG_DATA_HOME, `${runs[0]?.env?.GH_CONFIG_DIR}/data`);
   const placeholder = runs[0]?.env?.GH_TOKEN;
   assert.match(placeholder ?? "", /^eve-github-/u);
   assert.doesNotMatch(JSON.stringify(runs[0]?.env), /secret-token/u);

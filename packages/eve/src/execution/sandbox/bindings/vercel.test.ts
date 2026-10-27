@@ -1848,13 +1848,20 @@ describe("createVercelSandbox", () => {
       command: "printenv DEPLOY_ENV",
       env: { DEPLOY_ENV: "staging" },
     });
+    await handle.sandbox.spawn({ command: "printenv DEPLOY_ENV", loginShell: false });
 
-    expect(sessionSandbox.runCommand).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.runCommand).toHaveBeenCalledTimes(2);
     expect(sessionSandbox.runCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
         env: { DEPLOY_ENV: "staging" },
+      }),
+    );
+    expect(sessionSandbox.runCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        args: ["--noprofile", "--norc", "-c", "printenv DEPLOY_ENV"],
+        cmd: "bash",
       }),
     );
   });

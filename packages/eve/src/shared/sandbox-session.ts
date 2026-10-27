@@ -7,6 +7,12 @@ export interface SandboxRunOptions {
   workingDirectory?: string;
   /** Per-command environment overrides; avoids embedding credentials in command strings. */
   env?: Record<string, string>;
+  /**
+   * Runs the command in a Bash login shell, which sources profile files first.
+   * Defaults to `true`. Pass `false` when sandbox-writable startup files must
+   * not run before the command, such as while a credential is brokered.
+   */
+  loginShell?: boolean;
   signal?: AbortSignal;
 }
 

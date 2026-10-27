@@ -32,16 +32,19 @@ export interface SandboxConnection<Extensions extends object = {}> {
    */
   readonly workspaceRoot?: string;
   /**
-   * Runs `command` as a Bash login-shell script (`bash -lc`) in
-   * `workingDirectory`, with the sandbox's environment plus `env`. `env`
-   * holds only the per-call variables. Aborting kills the process tree.
-   * With `stdin`, return a process with a writable `stdin` or throw.
+   * Runs `command` as a Bash script in `workingDirectory`, with the
+   * sandbox's environment plus `env`. With `loginShell`, run it as a login
+   * shell (`bash -lc`); without it, run `bash --noprofile --norc -c` so no
+   * startup file executes before the command. `env` holds only the per-call
+   * variables. Aborting kills the process tree. With `stdin`, return a
+   * process with a writable `stdin` or throw.
    */
   spawn(options: {
     readonly signal?: AbortSignal;
     readonly stdin?: boolean;
     readonly command: string;
     readonly env: Readonly<Record<string, string>>;
+    readonly loginShell: boolean;
     readonly workingDirectory: string;
   }): Promise<SandboxProcess>;
   /**

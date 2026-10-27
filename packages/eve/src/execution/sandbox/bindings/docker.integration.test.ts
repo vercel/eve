@@ -532,6 +532,10 @@ describe("Docker provider create", () => {
     expect(wrapper).toMatch(/^echo "\$\$" > '\/tmp\/\.eve-sbx-spawn-[0-9a-f-]+\.pid'; /);
     expect(wrapper).toContain(`bash -lc 'echo "$DEPLOY_ENV"'`);
     expect(wrapper).toMatch(/status=\$\?; rm -f '[^']+'; exit \$status$/);
+
+    await handle.sandbox.run({ command: "pwd", loginShell: false });
+    const nonLogin = calls.filter((call) => call.args[0] === "exec" && call.args.includes("bash"));
+    expect(String(nonLogin.at(-1)?.args.at(-1))).toContain("bash --noprofile --norc -c 'pwd'");
   });
 
   it("kill() tree-kills inside the container before killing the docker exec client", async () => {

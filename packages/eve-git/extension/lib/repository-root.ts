@@ -15,7 +15,8 @@ export async function validateRepositoryRoot(sandbox: RootSandbox, root: string)
     workspace === "/" || resolved === workspace || resolved.startsWith(`${workspace}/`);
   if (!inside) throw new Error(`root resolves outside the workspace ${workspace}: ${resolved}`);
   const top = await sandbox.run({
-    command: `git -C ${shellQuote(resolved)} rev-parse --show-toplevel`,
+    command: `/usr/bin/git -C ${shellQuote(resolved)} rev-parse --show-toplevel`,
+    loginShell: false,
   });
   if (top.exitCode !== 0 || top.stdout.trim() !== resolved) {
     throw new Error(`root is not a git work tree root: ${root}`);
@@ -25,7 +26,10 @@ export async function validateRepositoryRoot(sandbox: RootSandbox, root: string)
 
 /** NUL-delimited output keeps paths that contain newlines unambiguous. */
 async function realPath(sandbox: RootSandbox, path: string, label: string): Promise<string> {
-  const result = await sandbox.run({ command: `realpath -e -z -- ${shellQuote(path)}` });
+  const result = await sandbox.run({
+    command: `realpath -e -z -- ${shellQuote(path)}`,
+    loginShell: false,
+  });
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || "no command output";
     throw new Error(`${label} could not be resolved: ${detail.slice(0, MAX_ERROR_DETAIL_CHARS)}`);

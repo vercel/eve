@@ -71,9 +71,9 @@ export const AcmeSandbox = defineSandboxProvider({
 
 function connect(machine: AcmeMachine): SandboxConnection {
   return {
-    spawn: ({ signal, command, env, workingDirectory }) =>
+    spawn: ({ signal, command, env, loginShell, workingDirectory }) =>
       machine.exec({
-        argv: ["bash", "-lc", command],
+        argv: ["bash", ...(loginShell ? ["-lc"] : ["--noprofile", "--norc", "-c"]), command],
         cwd: workingDirectory,
         env,
         signal,
@@ -110,7 +110,7 @@ export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 
 A `SandboxConnection` is the byte-level link to one sandbox. Each method has a fixed contract:
 
-- `spawn({ command, workingDirectory, env, signal })` runs `command` as a Bash login-shell script (`bash -lc`) in `workingDirectory`, with the sandbox's environment plus `env`. `env` holds only the per-call variables. Aborting kills the process tree. It resolves to a process with `stdout` and `stderr` byte streams, `wait()`, and `kill()`. When the call passes `stdin: true`, the process must also have a writable `stdin` stream; without one, eve kills the process and rejects the call.
+- `spawn({ command, workingDirectory, env, loginShell, signal })` runs `command` as a Bash script in `workingDirectory`, with the sandbox's environment plus `env`. When `loginShell` is `true`, run it as a login shell (`bash -lc`). When it is `false`, run `bash --noprofile --norc -c` so no startup file executes before the command; eve relies on this while it brokers a credential. `env` holds only the per-call variables. Aborting kills the process tree. It resolves to a process with `stdout` and `stderr` byte streams, `wait()`, and `kill()`. When the call passes `stdin: true`, the process must also have a writable `stdin` stream; without one, eve kills the process and rejects the call.
 - `readFile({ path, signal })` resolves to the file's bytes or a byte stream, or to `null` only when the path does not exist. A directory or an unreadable path rejects.
 - `writeFiles({ files, signal })` writes every file, creating missing parent directories and overwriting existing files. It is the only write primitive.
 - `removePath({ path, force, recursive, signal })` removes a file or directory. `force` ignores a missing path, and `recursive` removes a non-empty directory.

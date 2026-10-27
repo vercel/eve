@@ -67,6 +67,7 @@ export function createConnectionSession<Extensions extends object>(
       stdin: options.stdin,
       command: options.command,
       env: options.env ?? {},
+      loginShell: options.loginShell ?? true,
       workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
     });
     if (options.stdin === true && process.stdin === undefined) {

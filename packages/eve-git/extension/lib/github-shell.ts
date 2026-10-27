@@ -103,6 +103,8 @@ interface GitHubShellDependencies {
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
+/** Bare `git` would resolve through PATH, which sandbox-writable files can influence. */
+const GIT_EXECUTABLE = "/usr/bin/git";
 const leaseQueues = new Map<string, Promise<void>>();
 const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
 
@@ -192,6 +194,9 @@ export async function executeGitHubShell(
         const env: Record<string, string> = {
           GH_CONFIG_DIR: githubConfig,
           GH_PROMPT_DISABLED: "1",
+          // gh loads extensions from its data directory; a fresh one keeps
+          // extensions installed by earlier commands from running under this lease.
+          XDG_DATA_HOME: `${githubConfig}/data`,
         };
         if (argv[0] !== "git") env.GH_TOKEN = placeholder;
         env.GIT_CONFIG_COUNT = "2";
@@ -201,7 +206,7 @@ export async function executeGitHubShell(
         env.GIT_CONFIG_VALUE_1 = "/dev/null";
         env.GIT_TERMINAL_PROMPT = "0";
         env.PATH = "/usr/local/bin:/usr/bin:/bin";
-        return sandbox.run({ command, env });
+        return sandbox.run({ command, env, loginShell: false });
       },
       config.broker,
     );
@@ -377,8 +382,9 @@ async function assertCommandTargets(
     }
     const push = argv[1] === "push";
     const remote = await sandbox.run({
-      command: `cd ${shellQuote(workingDirectory)} && git remote get-url ${push ? "--push " : ""}origin`,
+      command: `cd ${shellQuote(workingDirectory)} && ${GIT_EXECUTABLE} remote get-url ${push ? "--push " : ""}origin`,
       env: { GIT_TERMINAL_PROMPT: "0", PATH: "/usr/bin:/bin" },
+      loginShell: false,
     });
     if (remote.exitCode !== 0) throw new Error("Could not resolve the origin GitHub repository.");
     remoteRepository = repositoryFromRemote(remote.stdout.trim());
@@ -459,7 +465,7 @@ function repositoryNames(repositories: readonly string[], configuredOrg: string)
 function executablePath(executable: string): string {
   if (executable === "gh") return GITHUB_TOOLING_PATHS.ghReal;
   if (executable === "gh-signed-commit") return GITHUB_TOOLING_PATHS.trustedSignedCommit;
-  return "git";
+  return GIT_EXECUTABLE;
 }
 
 function resolveWorkingDirectory(
