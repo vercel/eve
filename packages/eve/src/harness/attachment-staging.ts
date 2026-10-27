@@ -285,7 +285,9 @@ function cacheRefBytes(key: string, bytes: Uint8Array): void {
  * expired provider sandbox). Attachments then degrade to notes and labels so
  * the step survives; tools still see the resume error through `get()`.
  */
-async function activeSandbox(access: SandboxAccess | undefined): Promise<SandboxSession | null> {
+export async function activeSandbox(
+  access: SandboxAccess | undefined,
+): Promise<SandboxSession | null> {
   if (access === undefined) return null;
   try {
     // Attachments need only the connection, not the skill files queued behind the open.

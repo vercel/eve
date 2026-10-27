@@ -20,6 +20,7 @@ function contextOf(threshold: number): CompactionContext {
     estimateTokens,
     forced: false,
     inputTokens: threshold + 1_000,
+    openSandbox: async () => null,
     recentWindowSize: 20,
     requestEnvelopeTokens: 0,
     summarize: async () => "summary",

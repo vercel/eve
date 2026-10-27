@@ -15,7 +15,8 @@ import {
 } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { AuthKey, HistoryStateKey } from "#context/keys.js";
+import { activeSandbox } from "#harness/attachment-staging.js";
+import { AuthKey, HistoryStateKey, SandboxKey } from "#context/keys.js";
 import {
   type HarnessSession,
   requireSessionModelReference,
@@ -414,6 +415,7 @@ async function compactOnce(input: {
         forced: input.force === true,
         abortSignal: input.abortSignal,
         estimateTokens,
+        openSandbox: () => activeSandbox(contextStorage.getStore()?.get(SandboxKey)),
         summarize,
       };
       compactedOrdinary = await strategy.compact(cloneMessages(ordinary), context);

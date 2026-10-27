@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage } from "ai";
 
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
 
 /**
  * A message a strategy returns. A user message needs a `kind`; build one with
@@ -22,6 +23,11 @@ export interface CompactionContext {
   readonly abortSignal?: AbortSignal;
   /** Estimates tokens the way the core measures the history. */
   estimateTokens(messages: readonly ModelMessage[]): number;
+  /**
+   * Opens the session sandbox, for a strategy that moves content out of the history into files.
+   * `null` when the session has no sandbox or it cannot be resumed.
+   */
+  openSandbox(): Promise<SandboxSession | null>;
   /** Runs the compaction model over `messages`, billed to the session. */
   summarize(input: {
     readonly messages: ModelMessage[];

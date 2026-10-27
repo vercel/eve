@@ -8,5 +8,6 @@
   "HarnessModelMessage",
   "createCompactionUserMessage",
   "defineCompaction",
-  "fixedTail"
+  "fixedTail",
+  "referenceCompaction"
 ]
