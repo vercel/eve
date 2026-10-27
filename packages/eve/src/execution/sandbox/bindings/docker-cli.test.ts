@@ -12,6 +12,7 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 function createMockChildProcess() {
   const child = Object.assign(new ChildProcess(), {
+    stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
   });
@@ -19,7 +20,7 @@ function createMockChildProcess() {
   return child;
 }
 
-describe("isLinuxDockerDaemonAvailableSync", () => {
+describe("docker CLI", () => {
   beforeEach(() => {
     spawn.mockReset();
     spawnSync.mockReset();

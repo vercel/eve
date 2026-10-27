@@ -175,15 +175,6 @@ function createInProcessSession(): DevelopmentBuildSession {
   };
 }
 
-// Exported for tests: source checkouts build in-process and never reach this fork.
-export function forkDevelopmentBuildProcess(): ChildProcess {
-  return fork(fileURLToPath(new URL("./dev-build-process.js", import.meta.url)), [], {
-    serialization: "advanced",
-    stdio: ["ignore", "inherit", "inherit", "ipc"],
-    windowsHide: true,
-  });
-}
-
 class DevelopmentBuildProcess {
   readonly #child: ChildProcess;
   #exitError: Error | undefined;
@@ -193,7 +184,11 @@ class DevelopmentBuildProcess {
   >();
 
   constructor() {
-    this.#child = forkDevelopmentBuildProcess();
+    this.#child = fork(fileURLToPath(new URL("./dev-build-process.js", import.meta.url)), [], {
+      serialization: "advanced",
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      windowsHide: true,
+    });
     this.#child.on("message", (message: Partial<DevelopmentBuildResponse> | null) => {
       if (message?.kind !== DEVELOPMENT_BUILD_MESSAGE_KIND || message.id === undefined) return;
       const pending = this.#pending.get(message.id);
