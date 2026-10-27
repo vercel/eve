@@ -8,7 +8,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { KITCHEN_SINK, PENDING_APPROVAL } from "#execution/v26-history.fixtures.js";
+import { KITCHEN_SINK } from "#execution/v26-history.fixtures.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { releasingSessionOwnerWorkflow } from "#internal/testing/session-inbox-workflow.js";
@@ -26,10 +26,25 @@ it("continues an idle session an eve before v27 recorded on the same stream", as
     try {
       expect(activation).toEqual({ kind: "active" });
       const followUp = await readTurn(sessionId, KITCHEN_SINK.length);
-      // The successor's first line follows the v26 lines, and its turn takes the next number.
+      // The successor's first line follows the v26 lines: it compacts the earlier conversation.
       expect(followUp[0]?.meta.position.line).toBe(KITCHEN_SINK.length);
-      expect(new Set(followUp.map(turnIdOf).filter(Boolean))).toEqual(
-        new Set([`turn_${turnCount}`]),
+      const types = followUp.map((event) => event.type);
+      expect(types.indexOf("context.settled")).toBeLessThan(types.indexOf("turn.started"));
+      expect(followUp).toContainEqual(
+        expect.objectContaining({
+          type: "context.settled",
+          data: expect.objectContaining({ kind: "compaction", outcome: "completed" }),
+        }),
+      );
+      // The follow-up turn takes the next number and follows the earlier owner's last turn.
+      expect(followUp).toContainEqual(
+        expect.objectContaining({
+          type: "turn.started",
+          data: expect.objectContaining({
+            follows: `turn_${turnCount - 1}`,
+            turnId: `turn_${turnCount}`,
+          }),
+        }),
       );
       expect(followUp).toContainEqual(
         expect.objectContaining({
@@ -49,24 +64,6 @@ it("continues an idle session an eve before v27 recorded on the same stream", as
       expect(turns.at(-1)).toBe(`turn_${turnCount}`);
     } finally {
       await successor.cancel().catch(() => {});
-      await owner.cancel().catch(() => {});
-    }
-  });
-});
-
-it("keeps a session whose v26 stream holds an open approval on its owner", async () => {
-  const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-busy" } });
-  await runtime.run(async () => {
-    const { activation, owner, sessionId, successor } = await handOff(
-      PENDING_APPROVAL,
-      turnsIn(PENDING_APPROVAL),
-    );
-    try {
-      expect(activation).toMatchObject({ kind: "incompatible", reason: "checkpoint-version" });
-      await successor.returnValue;
-      // The successor wrote nothing to the stream the owner still serves.
-      await expect(readTail(sessionId)).resolves.toBe(PENDING_APPROVAL.length);
-    } finally {
       await owner.cancel().catch(() => {});
     }
   });
@@ -127,15 +124,6 @@ async function readTurn(sessionId: string, startIndex: number): Promise<SessionS
     }
   } finally {
     await reader.cancel().catch(() => {});
-  }
-}
-
-async function readTail(sessionId: string): Promise<number> {
-  const readable = getRun(sessionId).getReadable();
-  try {
-    return (await readable.getTailIndex()) + 1;
-  } finally {
-    await readable.cancel().catch(() => {});
   }
 }
 

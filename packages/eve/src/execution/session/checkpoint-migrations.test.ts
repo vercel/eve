@@ -51,7 +51,6 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
     expect(migrateSessionCheckpoint(eve066Checkpoint())).toEqual({
       kind: "pre-v27",
       imported: {
-        childRunIdsToStop: ["child-local"],
         checkpoint: {
           admittedDeliveryKeys: [],
           // The caller speaks protocol 1, so the session relays it no requests.
@@ -59,15 +58,12 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
           history: [
             { content: "Alice asks for a report.", kind: "user", role: "user" },
             { content: [{ text: "Started the report.", type: "text" }], role: "assistant" },
-            { content: "The report is ready.", kind: "task.result", role: "user" },
+            { content: "The report is ready.", kind: "user", role: "user" },
           ],
           serializedContext: {
-            "eve.auth": null,
-            "eve.bundle": { source: { kind: "bundled" } },
-            "eve.channel": { kind: "http", state: {} },
+            ...eve066Checkpoint().serializedContext,
+            "eve.capabilities": { requestInput: false },
             "eve.earlierRemoteCaller": 1,
-            "eve.sessionCallback": CALLBACK,
-            "eve.sessionTitle": "Alice asks for a report.",
           },
           sessionState: {
             continuationToken: "",
@@ -76,7 +72,6 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
             snapshot: {
               session: {
                 agent: { system: "Be helpful." },
-                compaction: { requestEnvelopeTokens: 2483.5 },
                 continuationToken: "",
                 sandboxState: { session: null },
                 sessionId: "session-1",
@@ -88,88 +83,41 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
           sessionTimeoutMs: false,
           version: SESSION_CHECKPOINT_VERSION,
         },
-        seed: { turnCount: 1 },
+        turnCount: 1,
       },
     });
   });
 
-  it("reads an eve 0.83 session's usage, budget window, history, and context in v27's shape", () => {
+  it("keeps an eve 0.83 session's identity and authored state, not its framework records", () => {
     const result = migrateSessionCheckpoint(
       eve083Checkpoint(
         {
           "app.counter": 4,
-          "eve.harness.reportedSessionUsage": { ...SPEND, costUsd: 0.5, sawCost: false },
-          "eve.harness.requestEnvelopeTokens": 900,
-          "eve.harness.sessionUsageWindowIndex": 2,
-          "eve.harness.sessionUsageWindowStart": { ...SPEND, costUsd: 0.25, sawCost: true },
           "eve.harness.turnState": { grants: ["deploy:api"], suspended: [] },
-          "eve.harness.turnUsage": { session: { ...SPEND, costUsd: 1.5, sawCost: true } },
-          "eve.memory": { locks: {}, operationDigests: [] },
-          "eve.runtime.hitl.requests": { approvals: { activeCandidates: {}, settlements: {} } },
-          "eve.taskTable": {
-            tasks: [{ calls: [], id: "task-1", kind: "tool", name: "report", results: [] }],
-            version: 1,
-          },
+          "eve:mount.v1:notes:draft": "Bob's notes",
         },
-        {
-          "eve.dynamicSkillSandbox": { notes: "sandbox-1" },
-          "eve.experimental.decide.model.abc": { model: "m", turnId: "turn_2" },
-          "eve.runtimeModelMetadataCache": {},
-          "eve.sessionCallback": CALLBACK,
-          "eve.sessionDynamicInstructions": {},
-        },
-        [
-          { content: "Alice asks for the weekly report.", kind: "user", role: "user" },
-          {
-            content: "Alice prefers short summaries.",
-            kind: "memory.load",
-            metadata: { "eve.memory": { slot: "preferences" } },
-            role: "user",
-          },
-          { content: [{ text: "Here is the report.", type: "text" }], role: "assistant" },
-        ],
+        { "eve.sessionCallback": CALLBACK },
       ),
     );
     if (result.kind !== "pre-v27") throw new Error(JSON.stringify(result));
-    const { checkpoint, seed } = result.imported;
-    expect(seed).toEqual({
-      turnCount: 3,
-      usage: { ...SPEND, costUsd: 1.5 },
-      usageWindow: { index: 2, start: { ...SPEND, costUsd: 0.25 } },
+    const { checkpoint, turnCount } = result.imported;
+    expect(turnCount).toBe(3);
+    expect(checkpoint.admittedDeliveryKeys).toEqual(["delivery-3"]);
+    expect(checkpoint.sessionState.snapshot.session.state).toEqual({
+      "app.counter": 4,
+      "eve:mount.v1:notes:draft": "Bob's notes",
     });
-    expect(checkpoint.sessionState.snapshot.session).toMatchObject({
-      compaction: { lastKnownInputTokens: 1200, requestEnvelopeTokens: 900 },
-      // Settled registries, retired usage records, grants, and memory locks are gone.
-      state: { "app.counter": 4, "eve.harness.reportedSessionUsage": SPEND },
-    });
-    expect(Object.keys(checkpoint.sessionState.snapshot.session.state ?? {}).sort()).toEqual([
-      "app.counter",
-      "eve.harness.reportedSessionUsage",
-    ]);
-    // v27 recalls memory on every call instead of keeping it in history.
-    expect(checkpoint.history.map((message) => message.role)).toEqual(["user", "assistant"]);
-    expect(checkpoint.serializedContext).toEqual({
-      "eve.bundle": { source: { kind: "bundled" } },
-      "eve.dynamicSkillSandbox": { notes: "sandbox-1#" },
+    expect(checkpoint.serializedContext).toMatchObject({
       "eve.earlierRemoteCaller": 2,
       "eve.sessionCallback": CALLBACK,
-      "eve.stateLayout": 1,
     });
-    expect(checkpoint.capabilities).toEqual({ requestInput: false });
   });
 
   it.each([
     ["a turn is still open", { [PROJECTION]: { activeTurnId: "turn_2", nextSequence: 3 } }],
-    ["turn input is queued", { "eve.harness.turnState": { queued: {}, suspended: [] } }],
-    ["a step is suspended", { "eve.harness.turnState": { suspended: [{}] } }],
-    ["a sign-in is open", { "eve.runtime.hitl.requests": { signIns: [{}] } }],
-    ["input is relayed", { "eve.runtime.hitl.requests": { relays: { child: {} } } }],
+    ["its turn position is malformed", { [PROJECTION]: { nextSequence: -1 } }],
     [
-      "an approval waits",
-      { "eve.runtime.hitl.requests": { approvals: { activeCandidates: { bob: {} } } } },
-    ],
-    [
-      "a task runs",
+      "a task still runs",
       {
         "eve.taskTable": {
           tasks: [{ calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } }],
@@ -177,29 +125,15 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
         },
       },
     ],
-    [
-      "a workflow tool runs",
-      { "eve.workflowTool": { runs: [{ callId: "call", toolName: "report" }], version: 4 } },
-    ],
   ])("keeps the session on its owner while %s", (_name, state) => {
     const saved = eve083Checkpoint(state);
     const before = structuredClone(saved);
     expect(migrateSessionCheckpoint(saved)).toMatchObject({ kind: "incompatible" });
     expect(saved).toEqual(before);
   });
-
-  it.each([
-    ["a version 3 workflow tool run is unsettled", { settledTask: false }],
-    ["a subagent session is working", { subagentPhase: "running" }],
-  ])("keeps an eve 0.66 session on its owner while %s", (_name, options) => {
-    expect(migrateSessionCheckpoint(eve066Checkpoint(options))).toMatchObject({
-      kind: "incompatible",
-    });
-  });
 });
 
 const PROJECTION = "eve.harness.sessionProjection";
-const SPEND = { cacheReadTokens: 10, cacheWriteTokens: 0, inputTokens: 300, outputTokens: 40 };
 
 const CALLBACK = {
   callId: "call-0",
@@ -209,16 +143,10 @@ const CALLBACK = {
 };
 
 /** An idle session an eve 0.83 owner hands off after its third turn. */
-function eve083Checkpoint(
-  state: Record<string, unknown>,
-  context: Record<string, unknown> = {},
-  history: unknown[] = [
-    { content: "Alice asks for the weekly report.", kind: "user", role: "user" },
-  ],
-) {
+function eve083Checkpoint(state: Record<string, unknown>, context: Record<string, unknown> = {}) {
   return {
     admittedDeliveryKeys: ["delivery-3"],
-    history,
+    history: [{ content: "Alice asks for the weekly report.", kind: "user", role: "user" }],
     serializedContext: {
       "eve.bundle": { source: { kind: "bundled" } },
       "eve.stateLayout": 1,
@@ -247,10 +175,7 @@ function eve083Checkpoint(
 }
 
 /** Trimmed from a handoff checkpoint captured from an eve 0.66.1 owner. */
-function eve066Checkpoint({
-  settledTask = true,
-  subagentPhase = "parked",
-}: { readonly settledTask?: boolean; readonly subagentPhase?: string } = {}) {
+function eve066Checkpoint() {
   return {
     mode: "conversation",
     serializedContext: {
@@ -288,7 +213,7 @@ function eve066Checkpoint({
                     kind: "agent/local",
                     sessionId: "child-local",
                   },
-                  phase: subagentPhase,
+                  phase: "parked",
                 },
                 {
                   address: {
@@ -311,9 +236,10 @@ function eve066Checkpoint({
                   task: {
                     dispatchContext: { auth: { current: null, initiator: null } },
                     metadata: { kind: "tool", name: "report" },
-                    outcome: settledTask
-                      ? { lastOutput: { type: "result", value: "ready" }, status: "completed" }
-                      : undefined,
+                    outcome: {
+                      lastOutput: { type: "result", value: "ready" },
+                      status: "completed",
+                    },
                     taskId: "task-1",
                   },
                   toolName: "report",

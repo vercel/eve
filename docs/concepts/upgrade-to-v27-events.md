@@ -8,7 +8,7 @@ This guide covers breaking changes to agent definitions, approvals, channels, cl
 ## Before you upgrade
 
 - Rebuild and republish installed extensions. Earlier epoch-based distributions cannot be loaded by this release; see [Extensions](../extensions).
-- Keep the deployments that own existing sessions available. A session started on eve 0.66 through 0.83 moves to this release the next time it receives a message while idle. Until then, the deployment that owns the session keeps running it. That deployment also keeps a session that still has work running, such as a background task or a subagent, and a session whose stream holds more than 100,000 lines. After a session moves, a tool approval it remembered is asked for again the next time the tool runs. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
+- Keep the deployments that own existing sessions available. A session started on eve 0.66 through 0.83 moves to this release the next time it receives a message while idle; a session with a background task still running stays on the deployment that owns it. When a session moves, eve compacts its earlier conversation, so the model continues from a summary while the stored transcript stays intact. The session also starts over on remembered tool approvals and usage limits. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
 - Update event consumers, frontend persistence, and custom channel handlers using the mappings below. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
 ## Restore saved history

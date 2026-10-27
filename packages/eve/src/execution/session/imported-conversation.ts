@@ -1,24 +1,8 @@
-// What eve keeps of a conversation an older execution model recorded, as both importers read it:
-// the legacy-session driver import and the pre-v27 handoff import.
+// The history eve keeps of a conversation an older execution model recorded, as both importers read
+// it: the legacy-session driver import and the pre-v27 handoff import.
 
 import type { ModelMessage } from "ai";
-import { usageOf } from "#harness/facts.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
-import { isObject } from "#shared/guards.js";
-import type { TokenUsage } from "#shared/token-usage.js";
-
-/** A legacy usage total: its counts, and its cost only when a provider reported one. */
-export function legacyUsage(raw: unknown): TokenUsage | undefined {
-  if (!isObject(raw)) return undefined;
-  const count = (field: string) => (typeof raw[field] === "number" ? raw[field] : 0);
-  return usageOf({
-    cacheReadTokens: count("cacheReadTokens"),
-    cacheWriteTokens: count("cacheWriteTokens"),
-    costUsd: raw.sawCost === true && typeof raw.costUsd === "number" ? raw.costUsd : undefined,
-    inputTokens: count("inputTokens"),
-    outputTokens: count("outputTokens"),
-  });
-}
 
 export function normalizeHistory(messages: readonly ModelMessage[]) {
   const history: ModelMessage[] = [];

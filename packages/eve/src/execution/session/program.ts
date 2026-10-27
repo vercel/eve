@@ -69,6 +69,8 @@ export interface SessionBoot {
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
+  /** Compacts the history before the first action, for a session an earlier build recorded. */
+  readonly compactFirst?: boolean;
   readonly deploymentId: string;
   readonly history: HarnessModelMessage[];
   readonly initialTurnControl?: TurnControl;
@@ -417,6 +419,8 @@ async function runSessionLoop(
     }
   };
   const runInitialAction = async (): Promise<SessionActionResult> => {
+    // A failed compaction keeps the history; the session continues either way.
+    if (boot.compactFirst === true) await runTurn({ control: "compact" });
     switch (boot.start.kind) {
       case "first-message":
         // Beside the wait, so a first message starts its turn without waiting

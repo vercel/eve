@@ -2,11 +2,13 @@ import type { ModelMessage } from "ai";
 import { withModelUsage } from "#harness/session-usage.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
-import { legacyUsage, normalizeHistory } from "#execution/session/imported-conversation.js";
+import { normalizeHistory } from "#execution/session/imported-conversation.js";
+import { usageOf } from "#harness/facts.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export type LegacySession = DurableSession & { readonly history: ModelMessage[] };
 
@@ -104,4 +106,17 @@ export function importProjection(session: LegacySession): SessionProjection {
       turns: { [turnId]: turn },
     },
   };
+}
+
+/** A legacy usage total: its counts, and its cost only when a provider reported one. */
+function legacyUsage(raw: unknown): TokenUsage | undefined {
+  if (!isObject(raw)) return undefined;
+  const count = (field: string) => (typeof raw[field] === "number" ? raw[field] : 0);
+  return usageOf({
+    cacheReadTokens: count("cacheReadTokens"),
+    cacheWriteTokens: count("cacheWriteTokens"),
+    costUsd: raw.sawCost === true && typeof raw.costUsd === "number" ? raw.costUsd : undefined,
+    inputTokens: count("inputTokens"),
+    outputTokens: count("outputTokens"),
+  });
 }
