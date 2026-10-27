@@ -99,8 +99,6 @@ export interface Block {
   link?: string;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
-  /** Reasoning only: collapse the trace to a single "thinking" line. */
-  collapsed?: boolean;
   /** When true, expand tool input/output instead of summarizing. */
   expanded?: boolean;
   /** Captured-log visibility used for concise-vs-raw diagnostic replay. */
@@ -220,7 +218,7 @@ function renderBody(
     case "subagent-step":
       return renderProse(block, width, theme, context);
     case "reasoning":
-      return renderReasoning(block, width, theme);
+      return renderReasoningLines(block.body ?? "", width, theme, theme.glyph.reasoning);
     case "tool":
     case "subagent-tool":
       return renderTool(block, width, theme, context);
@@ -298,17 +296,6 @@ function renderProse(
   }
 
   return rows.length > 0 ? rows : [`${glyph}`];
-}
-
-function renderReasoning(block: Block, width: number, theme: Theme): string[] {
-  if (block.collapsed) {
-    // A persisted thought labels itself (`Thought for 12s`); a still-live
-    // collapse keeps the generic marker.
-    return [
-      `${theme.colors.gray(theme.glyph.reasoning)} ${theme.colors.dim(block.title ?? "thinking")}`,
-    ];
-  }
-  return renderReasoningLines(block.body ?? "", width, theme, theme.glyph.reasoning);
 }
 
 function renderReasoningLines(text: string, width: number, theme: Theme, glyph?: string): string[] {
