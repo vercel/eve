@@ -32,6 +32,7 @@ import {
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { formatCapabilityError } from "#internal/capability-error.js";
 import {
   getHookByToken,
   getRun,
@@ -565,8 +566,8 @@ export async function resolveContinuation(
     if (HookNotFoundError.is(error)) {
       return undefined;
     }
-    logError(log, "failed to resolve session by continuation token", error, {
-      continuationToken,
+    log.error("failed to resolve session by continuation token", {
+      error: formatCapabilityError(error, [continuationToken]),
     });
     throw error;
   }

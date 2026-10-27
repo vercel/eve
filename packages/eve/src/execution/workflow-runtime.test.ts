@@ -453,9 +453,11 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     await expect(buildRuntime().resolveContinuation("test:token")).resolves.toBeUndefined();
   });
 
-  it("rethrows unexpected lookup failures", async () => {
+  it("rethrows unexpected lookup failures without logging the capability", async () => {
     const logs = captureLogRecords();
-    const failure = new Error("transient backing-store outage");
+    const failure = new Error("lookup failed for test:token", {
+      cause: new Error("request included test:token"),
+    });
     getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
@@ -465,6 +467,7 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
         message: "failed to resolve session by continuation token",
       }),
     );
+    expect(JSON.stringify(logs.records)).not.toContain("test:token");
   });
 });
 
