@@ -54,6 +54,7 @@ export class GenerationSteering {
     // when the model produced no assistant text.
     if (
       event.type === "input.requested" ||
+      event.type === "step.completed" ||
       event.type === "step.failed" ||
       event.type === "turn.completed"
     )

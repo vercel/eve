@@ -123,6 +123,7 @@ export type {
   ReasoningCompletedStreamEvent,
   ResultCompletedStreamEvent,
   RuntimeTraceContext,
+  StepCompletedFinishReason,
   SessionCompletedStreamEvent,
   SessionFailedStreamEvent,
   SessionStartedStreamEvent,

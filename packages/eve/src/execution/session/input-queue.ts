@@ -243,6 +243,14 @@ export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTu
   );
 }
 
+/** The delivery id of the message that steers: the metadata entry of the first payload that carries a message and no answers. */
+export function steeringDeliveryId(delivery: DeliverHookPayload): string | undefined {
+  const index = delivery.payloads.findIndex(
+    (payload) => payload.message !== undefined && payload.inputResponses === undefined,
+  );
+  return delivery.deliveryMetadata?.find((entry) => entry.payloadIndex === index)?.deliveryId;
+}
+
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
   if (entries.length === 1) return entries[0]!.delivery;
   return coalesceDeliveries(entries.map(({ delivery }) => delivery));
