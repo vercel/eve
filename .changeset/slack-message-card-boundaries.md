@@ -2,6 +2,6 @@
 "eve": minor
 ---
 
-Slack `initialMessage` now accepts the same explicit inputs as `thread.post`: Markdown, text, raw blocks, or a card, with optional files. Supported message-card builders remain available and are documented.
+Slack `initialMessage` now accepts Markdown, text, raw blocks, or a card, with optional files uploaded into the root message's thread.
 
-Remove unsupported `Modal*`, `ExternalSelect*`, `TextInput*`, `CardJSXElement`, and `CardJSXProps` exports, plus the internal `isCardElement` and `cardChildToFallbackText` helpers. Replace label-only `TextInput` cards with `CardText`, use native Slack view data for custom modals, and use `cardToFallbackText` for complete cards.
+Remove unsupported `Modal*`, `ExternalSelect*`, `TextInput*`, `CardJSXElement`, `CardJSXProps`, `isCardElement`, and `cardChildToFallbackText` exports; use `CardText` for labels, native Slack view data for modals, and `cardToFallbackText` for whole cards (see [Slack cards](https://eve.dev/docs/channels/slack#cards)).
