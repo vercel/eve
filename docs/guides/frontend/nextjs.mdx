@@ -3,14 +3,7 @@ title: "Next.js"
 description: "Add an eve chat to a Next.js app, from setup and authentication to saved conversations and deployment."
 ---
 
-Your Next.js app and your eve agent run side by side on the same domain. Pages go to Next.js, and requests to `/eve/v1/*` go to the agent:
-
-```text
-Browser ──► your-app.com/          ──► Next.js app
-        └─► your-app.com/eve/v1/*  ──► eve agent
-```
-
-The agent runs as its own service, never inside the Next.js server. Your React code is the same whichever setup you pick below.
+Your Next.js app and your eve agent run side by side on the same domain. Pages go to Next.js, and requests to `/eve/v1/*` go to the agent. The agent runs as its own service, never inside the Next.js server. Your React code is the same whichever setup you pick below.
 
 ## Choose a setup
 
