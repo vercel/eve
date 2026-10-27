@@ -41,7 +41,7 @@ import {
   vercelBlobStore,
 } from "../../../scripts/eval-benchmark/publish.mjs";
 import { findBenchmarkModel } from "../lib/benchmark-config.ts";
-import { modelPricing, priceUsage } from "./cost.mjs";
+import { modelPricing, priceRequests } from "./cost.mjs";
 import { analyzeRun, collectRuns } from "./run-analysis.mjs";
 
 export const RECORD_SCHEMA_VERSION = 1;
@@ -155,7 +155,8 @@ function runMetrics(result, benchmark) {
             cache_read_tokens: usage.cacheRead,
             cache_write_tokens: usage.cacheWrite,
           },
-    cost_usd: usage === null || pricing === undefined ? null : priceUsage(usage, pricing),
+    cost_usd:
+      usage === null || pricing === undefined ? null : priceRequests(result.requests, pricing),
     docs_read: result.docsRead,
     docs_entry: result.docsEntry,
     registry_calls: result.registryCalls,

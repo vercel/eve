@@ -121,6 +121,25 @@ export const modelPricing = {
     cacheRead: 0.5,
     cacheWrite: 6.25,
   },
+  "anthropic/claude-sonnet-5.5": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+  },
+  "anthropic/claude-haiku-5.5": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+    // Requests whose prompt (input + cache read + cache write) exceeds 100k
+    // tokens are billed at these rates instead, for the whole request.
+    longContext: { above: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 },
+  },
   "anthropic/claude-sonnet-5": {
     effectiveDate: "2026-08-17",
     source: "https://docs.anthropic.com/en/docs/about-claude/pricing",
@@ -183,25 +202,44 @@ export const modelPricing = {
 const number = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 const object = (value) => (value !== null && typeof value === "object" ? value : {});
 
-export function extractRunUsage(raw, harness) {
-  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
-  let found = false;
+/**
+ * Usage per model request, in transcript order. Claude Code streams one
+ * response as several `assistant` events (one per content block) that repeat
+ * the same message id and `usage`, so each id counts once, with its last usage.
+ */
+export function extractRunRequests(raw, harness) {
+  const requests = [];
+  const byMessageId = new Map();
   for (const line of raw.split("\n")) {
     try {
       const event = JSON.parse(line);
       const value = usageForEvent(event, harness);
       if (value === undefined) continue;
-      usage.input += value.input;
-      usage.output += value.output;
-      usage.reasoning += value.reasoning;
-      usage.cacheRead += value.cacheRead;
-      usage.cacheWrite += value.cacheWrite;
-      found = true;
+      const id = event.type === "assistant" ? object(event.message).id : undefined;
+      if (typeof id === "string" && byMessageId.has(id)) {
+        requests[byMessageId.get(id)] = value;
+        continue;
+      }
+      if (typeof id === "string") byMessageId.set(id, requests.length);
+      requests.push(value);
     } catch {
       // Ignore malformed transcript lines.
     }
   }
-  return found && tokenConsumption(usage) > 0 ? usage : null;
+  return requests;
+}
+
+export function extractRunUsage(raw, harness) {
+  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+  const requests = extractRunRequests(raw, harness);
+  for (const value of requests) {
+    usage.input += value.input;
+    usage.output += value.output;
+    usage.reasoning += value.reasoning;
+    usage.cacheRead += value.cacheRead;
+    usage.cacheWrite += value.cacheWrite;
+  }
+  return requests.length > 0 && tokenConsumption(usage) > 0 ? usage : null;
 }
 
 function usageForEvent(event, harness) {
@@ -283,6 +321,21 @@ export function countToolInvocations(raw) {
     }
   }
   return count;
+}
+
+/**
+ * Prices each request on its own, so a request whose prompt exceeds a model's
+ * `longContext.above` is billed at the long-context rates. Null when the run
+ * reported no usage.
+ */
+export function priceRequests(requests, pricing) {
+  if (requests.reduce((total, r) => total + tokenConsumption(r), 0) === 0) return null;
+  return requests.reduce((total, r) => {
+    const long = pricing.longContext;
+    const rates =
+      long !== undefined && r.input + r.cacheRead + r.cacheWrite > long.above ? long : pricing;
+    return total + priceUsage(r, rates);
+  }, 0);
 }
 
 export function priceUsage(usage, pricing) {
