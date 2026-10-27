@@ -25,6 +25,33 @@ export interface BoardWatcherConfig {
   readonly previews: boolean;
 }
 
+/** A board route as the public sees it, under `EVE_PUBLIC_ROUTE_PREFIX` when one is set. */
+export function publicBoardRoute(route: string, env: Env = process.env): string {
+  return joinEveRoutePath(
+    normalizePublicRoutePrefix(env[EVE_PUBLIC_ROUTE_PREFIX_ENV]) ?? "",
+    route,
+  );
+}
+
+/**
+ * Whether a request reached this deployment on the host the board wakes: production's domain,
+ * or a preview's branch URL. Those always route to the current deployment, while an older
+ * deployment is reachable only on its own URL, so only these requests may replace the
+ * registration.
+ */
+export function reachedOnWakeHost(request: Request, env: Env = process.env): boolean {
+  const environment = hostedEnvironment(env);
+  const expected =
+    environment === "production"
+      ? env.VERCEL_PROJECT_PRODUCTION_URL
+      : environment === "preview"
+        ? env.VERCEL_BRANCH_URL
+        : undefined;
+  return (
+    expected !== undefined && new URL(request.url).host.toLowerCase() === expected.toLowerCase()
+  );
+}
+
 /** The Vercel environment a deployment runs in, or `undefined` outside a hosted deployment. */
 export function hostedEnvironment(env: Env = process.env): "production" | "preview" | undefined {
   const target = env.VERCEL_ENV;
@@ -46,10 +73,7 @@ export function desiredRegistration(
   if (environment === undefined) return { url: null, watch };
   if (environment === "preview" && !watcher.previews) return undefined;
 
-  const base = joinEveRoutePath(
-    normalizePublicRoutePrefix(env[EVE_PUBLIC_ROUTE_PREFIX_ENV]) ?? "",
-    BOARD_ROUTE_BASE,
-  );
+  const base = publicBoardRoute(BOARD_ROUTE_BASE, env);
   if (discovery.wake_by_path === true) {
     return {
       branch: environment === "preview" ? (env.VERCEL_GIT_COMMIT_REF ?? null) : null,
@@ -87,10 +111,10 @@ export function sameRegistration(
 }
 
 /**
- * Brings the board's registration in line with this deployment's config. A cold start only
- * bootstraps (`overwrite: false`): older deployments keep cold-starting while their runs finish,
- * and must not put an old tail back. A wake-up reaches the current wake target, so it may
- * replace a registration that differs.
+ * Brings the board's registration in line with this deployment's config. With `overwrite: false`
+ * it only registers when there's none: older deployments keep cold-starting while their runs
+ * finish, and must not put an old tail back. Only a request that reached the current deployment
+ * replaces a registration that differs.
  */
 export async function reconcileRegistration(input: {
   readonly client: BoardClient;

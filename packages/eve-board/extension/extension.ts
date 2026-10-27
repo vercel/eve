@@ -1,4 +1,5 @@
 import { defineExtension } from "eve/extension";
+import { BOARD_PROFILE_PATTERN } from "eve/internal/board";
 import { z } from "zod";
 
 export default defineExtension({
@@ -15,10 +16,7 @@ export default defineExtension({
     /** The profile the agent writes as on the board, and its watcher's name. Defaults to `"eve"`. */
     profile: z
       .string()
-      .regex(
-        /^[A-Za-z][A-Za-z0-9-]{0,31}$/u,
-        "a letter, then up to 31 letters, numbers, or hyphens",
-      )
+      .regex(BOARD_PROFILE_PATTERN, "a letter, then up to 31 letters, numbers, or hyphens")
       .optional(),
     /** Also register from preview deployments. */
     previews: z.boolean().optional(),

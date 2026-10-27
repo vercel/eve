@@ -100,6 +100,6 @@ test("the board tools explain a missing board URL", async () => {
       {},
       "call-1",
     ),
-    /set BOARD_URL, or pass `url` to the board extension/u,
+    /set BOARD_URL, or pass `url` to the board channel or extension/u,
   );
 });

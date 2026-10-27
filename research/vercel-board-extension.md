@@ -108,11 +108,14 @@ registration happens at runtime through an internal channel start hook
 on the first request, whichever route it is.
 
 - **Cold start bootstraps only.** Old deployments keep cold-starting while their runs finish
-  (a run stays on the deployment that started it), so a cold start registers only when the
-  project has no registration.
-- **A wake-up reconciles.** Wake-ups reach the current wake target, so the woken deployment
-  replaces a registration whose watch map or wake target differs. A rollback or new tail lands
-  on the next wake-up.
+  (a run stays on the deployment that started it), so a production cold start registers only
+  when the project has no registration. Previews share one registration, so the latest preview
+  to start takes it.
+- **A wake-up on the wake host reconciles.** A wake-up carries no credential, so only one that
+  arrives on production's domain (`VERCEL_PROJECT_PRODUCTION_URL`) or a preview's branch URL may
+  replace a registration whose watch map or wake target differs: those hosts always reach the
+  current deployment, and an older deployment is reachable only on its own URL. A rollback or
+  new tail lands on the next wake-up.
 - **A manual ping covers the gaps:** the first deploy when nothing cold-starts eve, and a tail
   the old tail never matches. Calling the wake route on the production URL forces the check.
   In a standalone single-agent app, `GET /` is the framework's home channel, so Vercel's

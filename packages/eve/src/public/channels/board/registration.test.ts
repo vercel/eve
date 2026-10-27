@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { splitBoardText } from "#public/channels/board/boardChannel.js";
 import {
   desiredRegistration,
+  reachedOnWakeHost,
   type BoardWatcherConfig,
 } from "#public/channels/board/registration.js";
 
@@ -57,5 +59,50 @@ describe("desiredRegistration", () => {
     expect(() => desiredRegistration(watcher, {}, { VERCEL_ENV: "production" })).toThrow(
       /VERCEL_PROJECT_PRODUCTION_URL is unset/u,
     );
+  });
+});
+
+describe("reachedOnWakeHost", () => {
+  const production = {
+    VERCEL_ENV: "production",
+    VERCEL_PROJECT_PRODUCTION_URL: "agent.example.com",
+  };
+  const wake = (host: string) =>
+    new Request(`https://${host}/eve/v1/board/wake`, { method: "POST" });
+
+  it.each([
+    {
+      name: "accepts production's domain",
+      host: "agent.example.com",
+      env: production,
+      expected: true,
+    },
+    {
+      name: "refuses an older deployment's own URL",
+      host: "agent-abc123.vercel.app",
+      env: production,
+      expected: false,
+    },
+    {
+      name: "accepts a preview's branch URL",
+      host: "agent-git-feature.vercel.app",
+      env: { VERCEL_ENV: "preview", VERCEL_BRANCH_URL: "agent-git-feature.vercel.app" },
+      expected: true,
+    },
+    {
+      name: "refuses outside a hosted deployment",
+      host: "localhost:3000",
+      env: {},
+      expected: false,
+    },
+  ])("$name", ({ host, env, expected }) => {
+    expect(reachedOnWakeHost(wake(host), env)).toBe(expected);
+  });
+});
+
+describe("splitBoardText", () => {
+  it("never splits a surrogate pair across messages", () => {
+    const chunks = splitBoardText(`${"a".repeat(9)}😀b`, 10);
+    expect(chunks).toEqual(["a".repeat(9), "😀b"]);
   });
 });

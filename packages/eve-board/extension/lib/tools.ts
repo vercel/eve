@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+
 import {
+  BOARD_TEXT_LIMIT,
   createBoardClient,
-  DEFAULT_BOARD_PROFILE,
+  resolveBoardSettings,
   type BoardChannelSettings,
   type BoardClient,
   type BoardMessage,
@@ -16,14 +19,17 @@ const SHARED =
 const messageId = z.string().min(1).describe("Any message ID in the thread, as the board gave it.");
 
 function client(settings: Settings, session: string): BoardClient {
-  const { url, profile } = settings();
-  const resolved = (url ?? process.env.BOARD_URL)?.trim();
-  if (!resolved) {
-    throw new Error(
-      "The board tools need the board's URL: set BOARD_URL, or pass `url` to the board extension.",
-    );
-  }
-  return createBoardClient({ profile: profile ?? DEFAULT_BOARD_PROFILE, session, url: resolved });
+  const { url, profile } = resolveBoardSettings(settings());
+  return createBoardClient({ profile, session, url });
+}
+
+/**
+ * The board dedupes a post's `id` per profile across the whole board, and every session posts as
+ * the same profile, while a call ID is unique only within its session. Hashing both keeps the key
+ * unique and under the board's 200-character limit, so a retried call lands once.
+ */
+function postId(ctx: { readonly callId: string; readonly session: { readonly id: string } }) {
+  return createHash("sha256").update(`${ctx.session.id}:${ctx.callId}`).digest("hex");
 }
 
 /** What the model reads about a message: enough to follow and reply, without board bookkeeping. */
@@ -89,7 +95,7 @@ export function defineBoardPostTool(settings: Settings) {
     description: `Start a new board thread in a channel. Reply in an existing thread instead when one fits. ${SHARED}`,
     inputSchema: z.object({
       channel: z.string().min(1).describe("The channel path. The first post creates a channel."),
-      text: z.string().min(1).max(10_000).describe("Markdown."),
+      text: z.string().min(1).max(BOARD_TEXT_LIMIT).describe("Markdown."),
       labels: z.record(z.string(), z.string()).optional(),
       noSync: z
         .boolean()
@@ -97,10 +103,9 @@ export function defineBoardPostTool(settings: Settings) {
         .describe("Keep the thread on the board, out of synced platforms."),
     }),
     async execute({ channel, ...post }, ctx) {
-      // The call ID makes a retried call land once.
       const message = await client(settings, ctx.session.id).post(channel, {
         ...post,
-        id: ctx.callId,
+        id: postId(ctx),
       });
       return summarize(message);
     },
@@ -113,14 +118,17 @@ export function defineBoardReplyTool(settings: Settings) {
     description: `Reply in a board thread. ${SHARED}`,
     inputSchema: z.object({
       id: messageId,
-      text: z.string().min(1).max(10_000).describe("Markdown."),
+      text: z.string().min(1).max(BOARD_TEXT_LIMIT).describe("Markdown."),
       noSync: z
         .boolean()
         .optional()
         .describe("Keep the reply on the board, out of synced platforms."),
     }),
     async execute({ id, ...post }, ctx) {
-      const message = await client(settings, ctx.session.id).reply(id, { ...post, id: ctx.callId });
+      const message = await client(settings, ctx.session.id).reply(id, {
+        ...post,
+        id: postId(ctx),
+      });
       return summarize(message);
     },
   });

@@ -89,7 +89,7 @@ export { reply as default } from "eve/extensions/board/tools";
 
 ## How messages reach the agent
 
-eve registers the tail with the board as a watcher. When a post matches, the board sends an empty `POST /eve/v1/board/wake` to your deployment. eve then pulls its matches from the board with its own credentials, hands each post to the thread's session, and acknowledges the match once eve has accepted the message. A forged wake-up only makes eve pull from the board.
+eve registers the tail with the board as a watcher. When a post matches, the board sends an empty `POST /eve/v1/board/wake` to your deployment. eve then pulls its matches from the board with its own credentials, hands each post to the thread's session, and acknowledges the match once eve has accepted the message. A wake-up carries no credential: a forged one makes eve pull from the board, and only a wake-up on your production URL can change what eve registered.
 
 - **Each board thread is one session.** A reply in the thread continues the conversation, and a reply during a turn steers it, as on other channels.
 - **Delivery is at least once.** A match eve fails to hand off is retried by the board up to five times. A match delivered twice reaches the session once.
@@ -109,8 +109,8 @@ Board threads are shared and often synced to a Slack channel, so the channel nev
 The board keeps one registration per Vercel project and environment, and it survives deploys.
 
 - **The first request a deployment serves registers the tail** in the background when the project has no registration yet. In a standalone single-agent app, the request Vercel makes to `/` for the deployment screenshot is usually enough.
-- **Every wake-up compares** the deployment's tail with the board's registration and replaces it when they differ. Wake-ups reach the current production deployment, so a new tail or a rollback takes effect on the next wake-up.
-- **A cold start never replaces a registration.** Older deployments keep starting while their runs finish, and they must not put an old tail back.
+- **A wake-up on your production URL** (`VERCEL_PROJECT_PRODUCTION_URL`) compares the deployment's tail with the board's registration and replaces it when they differ. That URL always reaches the current production deployment, so a new tail or a rollback takes effect on the next wake-up.
+- **A cold start or a request on a deployment's own URL never replaces a registration.** Older deployments keep starting while their runs finish, and they must not put an old tail back.
 
 Force the check after the first deploy, or after changing the tail to one the old tail never matches, by calling the wake route on your production URL yourself:
 
@@ -118,7 +118,7 @@ Force the check after the first deploy, or after changing the tail to one the ol
 vercel curl https://your-agent.example.com/eve/v1/board/wake -- --request POST
 ```
 
-On a board whose discovery offers `wake_by_path`, eve registers the route's path and the board reaches your deployment through its Deployment Protection. On an older board, eve registers your production URL, and that route must be reachable without protection. Preview deployments register only with `previews: true`, and all previews share one registration, so the latest one wins.
+On a board whose discovery offers `wake_by_path`, eve registers the route's path and the board reaches your deployment through its Deployment Protection. On an older board, eve registers your production URL, and that route must be reachable without protection. Preview deployments register only with `previews: true`. All previews share one registration, which the latest preview to start takes, and a wake-up on a preview's branch URL updates it.
 
 ## Local development
 

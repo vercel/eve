@@ -29,6 +29,8 @@ import {
 import {
   BOARD_WAKE_ROUTE,
   hostedEnvironment,
+  publicBoardRoute,
+  reachedOnWakeHost,
   reconcileRegistration,
   type BoardWatcherConfig,
 } from "#public/channels/board/registration.js";
@@ -48,8 +50,9 @@ const log = createLogger("board.channel");
 /** The profile eve writes as when none is configured. */
 export const DEFAULT_BOARD_PROFILE = "eve";
 /** A board message holds at most 10,000 characters. */
-const BOARD_TEXT_LIMIT = 10_000;
-const PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
+export const BOARD_TEXT_LIMIT = 10_000;
+/** A board profile: a letter, then up to 31 letters, numbers, or hyphens. */
+export const BOARD_PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
 /** Marks the local poller's own requests, which hold the route open while the board long-polls. */
 const BOARD_POLL_HEADER = "x-eve-board-poll";
 /** Pulls per wake-up: a burst of matches wakes the deployment once, and it drains them. */
@@ -192,7 +195,7 @@ export type BoardChannelSettings = Pick<
 /** Concrete return type of {@link boardChannel}. */
 export interface BoardChannel extends Channel<BoardChannelState, BoardReceiveTarget> {}
 
-interface BoardSettings {
+export interface BoardSettings {
   readonly url: string;
   readonly watcher: BoardWatcherConfig | undefined;
   readonly profile: string;
@@ -215,7 +218,7 @@ export function createBoardChannel(
   config: BoardChannelConfig,
   settingsOf: () => BoardChannelSettings,
 ): BoardChannel {
-  const settings = (): BoardSettings => resolveSettings(settingsOf());
+  const settings = (): BoardSettings => resolveBoardSettings(settingsOf());
   const client = (session?: string) => {
     const { profile, url } = settings();
     return createBoardClient({
@@ -252,6 +255,8 @@ export function createBoardChannel(
           client: client(),
           config,
           from,
+          // A forged wake-up on an older deployment's own URL must not put its old tail back.
+          overwrite: poll || reachedOnWakeHost(request),
           poll,
           watcher: resolved.watcher,
         });
@@ -310,27 +315,32 @@ export function createBoardChannel(
     waitUntil(
       reconcileRegistration({
         client: client(),
-        overwrite: false,
+        // Previews share one registration, so the latest preview to start takes it.
+        overwrite: hostedEnvironment() === "preview",
         watcher: resolved.watcher,
       }).catch((error) => logError(log, "board registration failed", error)),
     );
     if (hostedEnvironment() === undefined) {
-      startLocalPoller(`${new URL(request.url).origin}${BOARD_WAKE_ROUTE}`, resolved);
+      startLocalPoller(
+        `${new URL(request.url).origin}${publicBoardRoute(BOARD_WAKE_ROUTE)}`,
+        resolved,
+      );
     }
   });
 
   return channel;
 }
 
-function resolveSettings(config: BoardChannelSettings): BoardSettings {
+/** The board and profile the channel and tools act as, with `BOARD_URL` and `"eve"` as defaults. */
+export function resolveBoardSettings(config: BoardChannelSettings): BoardSettings {
   const url = (config.url ?? process.env.BOARD_URL)?.trim().replace(/\/+$/u, "");
   if (!url) {
     throw new Error(
-      "The board channel needs the board's URL: set BOARD_URL, or pass `url`, such as https://team.example/api/board.",
+      "eve needs the board's URL: set BOARD_URL, or pass `url` to the board channel or extension, such as https://team.example/api/board.",
     );
   }
   const profile = config.profile ?? DEFAULT_BOARD_PROFILE;
-  if (!PROFILE_PATTERN.test(profile)) {
+  if (!BOARD_PROFILE_PATTERN.test(profile)) {
     throw new Error(
       `Board profile "${profile}" is invalid: use a letter, then up to 31 letters, numbers, or hyphens.`,
     );
@@ -346,14 +356,14 @@ function resolveSettings(config: BoardChannelSettings): BoardSettings {
   };
 }
 
-// Local pulls reconcile once per process; a hosted wake-up reconciles every time, since it's
-// the only signal that this deployment is the board's current wake target.
+// Local pulls reconcile once per process; a hosted wake-up checks every time.
 const reconciledLocally = new Set<string>();
 
 async function drainMatches(input: {
   readonly client: BoardClient;
   readonly config: BoardChannelConfig;
   readonly from: ChannelFrom<BoardChannelState>;
+  readonly overwrite: boolean;
   readonly poll: boolean;
   readonly watcher: BoardWatcherConfig;
 }): Promise<number> {
@@ -361,7 +371,7 @@ async function drainMatches(input: {
   const key = `${client.url}\n${JSON.stringify(input.watcher)}`;
   if (!poll || !reconciledLocally.has(key)) {
     try {
-      await reconcileRegistration({ client, overwrite: true, watcher: input.watcher });
+      await reconcileRegistration({ client, overwrite: input.overwrite, watcher: input.watcher });
       if (poll) reconciledLocally.add(key);
     } catch (error) {
       if (poll) throw error;
@@ -498,7 +508,10 @@ export function splitBoardText(text: string, limit = BOARD_TEXT_LIMIT): string[]
   let rest = text;
   while (rest.length > limit) {
     const cut = rest.lastIndexOf("\n", limit);
-    const end = cut > limit / 2 ? cut : limit;
+    let end = cut > limit / 2 ? cut : limit;
+    // Never split a surrogate pair, such as an emoji, across two messages.
+    const last = rest.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
     chunks.push(rest.slice(0, end));
     rest = rest.slice(end).replace(/^\n/u, "");
   }
@@ -558,16 +571,16 @@ async function pollLoop(wakeUrl: string, signal: AbortSignal): Promise<void> {
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
     // The poller must never be what keeps a process alive.
-    const timer = setTimeout(resolve, ms);
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
     timer.unref?.();
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }

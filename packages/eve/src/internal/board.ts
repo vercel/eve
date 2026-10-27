@@ -1,7 +1,9 @@
 // What the bundled `eve/extensions/board` extension needs from eve beyond its public exports.
 export {
+  BOARD_PROFILE_PATTERN,
+  BOARD_TEXT_LIMIT,
   createBoardChannel,
-  DEFAULT_BOARD_PROFILE,
+  resolveBoardSettings,
   type BoardChannelSettings,
 } from "#public/channels/board/boardChannel.js";
 export {

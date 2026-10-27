@@ -234,7 +234,8 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
   return {
     url: base,
     async discovery() {
-      const response = await fetchImpl(base, { method: "GET" });
+      // Discovery takes no token, but Deployment Protection's Trusted Sources still needs one.
+      const response = await fetchImpl(base, { headers: await headers(), method: "GET" });
       if (!response.ok) throw await requestError("GET", "/", response);
       return (await response.json()) as BoardDiscovery;
     },
