@@ -26,6 +26,11 @@ export default defineAgent({
           toolCalls: [{ name: "lookup_record", input: lookupInput() }],
         };
       }
+      if (message.includes("Ask the researcher")) {
+        return {
+          toolCalls: [{ name: "researcher", input: { message: "What do the sources say?" } }],
+        };
+      }
       if (message.includes("complete Buy milk")) {
         return { toolCalls: [{ name: "complete_task", input: { task_id: "milk" } }] };
       }

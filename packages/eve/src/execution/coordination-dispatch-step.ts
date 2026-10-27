@@ -34,6 +34,9 @@ import type { HarnessSessionBase } from "#harness/types.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
+import { callToolStub } from "#execution/tool-stubs/steps.js";
+import { recordEndingStubCalls } from "#tool-stubs/ending-calls.js";
+import { findStubTarget, stubCallId, stubMayEndTurn } from "#tool-stubs/target.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
@@ -121,6 +124,7 @@ async function dispatchCoordination(
     admissionView,
   );
 
+  const ending: string[] = [];
   for (const start of starts) {
     const { task } = start;
     const dispatched = await dispatchWorkflowCall(
@@ -128,6 +132,11 @@ async function dispatchCoordination(
       admissionView,
     );
     nextSession = dispatched.session;
+    const ran =
+      task.entry.entryPoint === "execute"
+        ? dispatched.result === undefined
+        : dispatched.started !== undefined;
+    if (ran && (await stubEndsTurn(start))) ending.push(task.callId);
     if (dispatched.result !== undefined) results.push(dispatched.result);
     // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
     else if (task.entry.entryPoint === "execute")
@@ -153,6 +162,8 @@ async function dispatchCoordination(
       );
   }
 
+  // The turn reads these to wait for, then end after, the calls once their results are in.
+  nextSession = recordEndingStubCalls(nextSession, batch.event.turnId, ending);
   return {
     results,
     serializedContext: input.serializedContext,
@@ -162,6 +173,23 @@ async function dispatchCoordination(
         : createDurableSessionState({ session: nextSession }),
     pending: { executing, refused, started },
   };
+}
+
+/**
+ * Whether the stub for a call that ran answers it with `endsTurn`. Playback selects the outcome by
+ * the call's stub ID, so the run's body gets the same one, whichever asks first. Only a tool whose
+ * stubs can end the turn is asked, so other calls keep a single request.
+ */
+async function stubEndsTurn({ agentContext, batchEvent, session, task }: StartWorkflowTaskInput) {
+  const target = findStubTarget(agentContext.toolStubs, task.toolName);
+  if (target === undefined || !stubMayEndTurn(target.scope, target.tool)) return false;
+  const result = await callToolStub(target.scope, {
+    callId: stubCallId(session.sessionId, batchEvent.turnId, task.callId),
+    input: task.input,
+    persistent: task.entry.entryPoint === "serve" || task.entry.entryPoint === "receive",
+    tool: target.tool,
+  });
+  return result.kind === "stub" && result.outcome.endsTurn === true;
 }
 
 /**

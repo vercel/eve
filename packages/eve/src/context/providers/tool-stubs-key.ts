@@ -8,3 +8,6 @@ export interface ToolStubPlayback {
 }
 
 export const ToolStubPlaybackKey = new ContextKey<ToolStubPlayback>("eve.toolStubPlayback");
+
+/** Calls this step's stubs answered with an `endsTurn` response, by tool call id. */
+export const EndingStubCallsKey = new ContextKey<Set<string>>("eve.endingStubCalls");

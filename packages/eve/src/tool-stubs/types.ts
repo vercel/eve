@@ -2,9 +2,18 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 
 /** Return JSON or immediately throw an error for a matching tool call. */
 export type ToolStubOutcome =
-  | { readonly response: JsonValue; readonly throw?: never }
+  | {
+      readonly response: JsonValue;
+      /**
+       * End the turn once this response is the call's result, without another model call. The
+       * model is not told; root-session rules only.
+       */
+      readonly endsTurn?: true;
+      readonly throw?: never;
+    }
   | {
       readonly response?: never;
+      readonly endsTurn?: never;
       readonly throw: {
         readonly message: string;
         /** Defaults to Error. Sets the name, not a custom JavaScript class. */

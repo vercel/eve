@@ -2,7 +2,11 @@ import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
 import { toolStubOutput } from "#tool-stubs/output.js";
 import { contextStorage } from "#context/container.js";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
-import { ToolStubPlaybackKey, type ToolStubPlayback } from "#context/providers/tool-stubs-key.js";
+import {
+  EndingStubCallsKey,
+  ToolStubPlaybackKey,
+  type ToolStubPlayback,
+} from "#context/providers/tool-stubs-key.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
@@ -28,12 +32,24 @@ async function* executeStubbedTool(
   const result = await playback.call(call);
   if (result.kind === "error") throw new Error(result.error);
   if (result.kind === "stub") {
-    yield toolStubOutput(result.outcome);
+    const output = toolStubOutput(result.outcome);
+    if (result.outcome.endsTurn === true) endingStubCalls().add(options.toolCallId);
+    yield output;
     return;
   }
   const output = await execute();
   if (isAsyncIterable(output)) yield* output;
   else yield output;
+}
+
+/** Step-local: the step that ran a call is the one that decides whether it ends the turn. */
+function endingStubCalls(): Set<string> {
+  const context = contextStorage.getStore()!;
+  const existing = context.get(EndingStubCallsKey);
+  if (existing !== undefined) return existing;
+  const calls = new Set<string>();
+  context.setVirtualContext(EndingStubCallsKey, calls);
+  return calls;
 }
 
 function contextStubCall(tool: string, input: unknown, callId: string) {

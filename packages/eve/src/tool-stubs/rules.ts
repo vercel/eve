@@ -11,7 +11,7 @@ const ruleSchema = z.strictObject({
 });
 
 const outcomeSchema = z.union([
-  z.strictObject({ response: z.json() }),
+  z.strictObject({ response: z.json(), endsTurn: z.literal(true).optional() }),
   z.strictObject({
     throw: z.strictObject({ message: z.string(), name: z.string().min(1).optional() }),
   }),
@@ -39,6 +39,12 @@ export function parseToolStubs(value: unknown): readonly ToolStub[] {
     ) {
       throw new Error(
         `Cannot stub ${SEARCH_TOOL_NAME}, ${CALL_TOOL_NAME}, or ${SKILL_TOOL_NAME}. Stub the tool an ${CALL_TOOL_NAME} call reaches, such as linear__list_issues.`,
+      );
+    }
+    const outcomes = "outcomes" in rule ? rule.outcomes : [rule.outcome];
+    if (rule.tool.includes("/") && outcomes.some((outcome) => "endsTurn" in outcome)) {
+      throw new Error(
+        `Tool stub "${rule.id}" sets endsTurn on the subagent tool "${rule.tool}". A delegated session must reply to its caller; set endsTurn on a root tool or agent, such as "${rule.tool.split("/")[0]}".`,
       );
     }
     for (const [property, schema] of Object.entries(rule.match ?? {})) {
