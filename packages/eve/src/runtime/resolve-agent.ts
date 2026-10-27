@@ -148,7 +148,8 @@ async function loadSessionUsageLimit(
   manifest: CompiledAgentNodeManifest,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
-): Promise<SessionUsageLimit | undefined> {
+): Promise<SessionUsageLimit | false | undefined> {
+  if (manifest.config.limits?.sessionUsage === false) return false;
   const source = manifest.config.source;
   if (manifest.config.limits?.sessionUsage !== true || source === undefined) return undefined;
   const definition = await loadResolvedModuleExport({
@@ -203,7 +204,7 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  sessionUsage: SessionUsageLimit | undefined,
+  sessionUsage: SessionUsageLimit | false | undefined,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];

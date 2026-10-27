@@ -118,6 +118,36 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it.each([0, 0.75, 1])("accepts compaction threshold %s", (threshold) => {
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { threshold } },
+        FAILURE_MESSAGE,
+      ).compaction,
+    ).toEqual({ threshold });
+  });
+
+  it.each([-0.1, 1.1, NaN, Infinity, "0.9"])(
+    "rejects invalid compaction threshold %s",
+    (threshold) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          { model: "openai/gpt-5.4", compaction: { threshold } },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow();
+    },
+  );
+
+  it("explains the compaction threshold rename", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { thresholdPercent: 0.9 } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Rename "compaction.thresholdPercent" to "compaction.threshold"');
+  });
+
   it("accepts agent limits and keeps the session usage function", () => {
     const sessionUsage = ({ window }: { window: { inputTokens: number } }) =>
       window.inputTokens >= 1_000;
@@ -139,20 +169,16 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits?.sessionUsage).toBe(sessionUsage);
   });
 
-  it("accepts false to disable the session timeout", () => {
+  it.each(["sessionTimeoutMs", "sessionUsage"])("accepts false to disable %s", (limit) => {
     const definition = normalizeAgentDefinition(
       {
         model: "openai/gpt-5.5",
-        limits: {
-          sessionTimeoutMs: false,
-        },
+        limits: { [limit]: false },
       },
       FAILURE_MESSAGE,
     );
 
-    expect(definition.limits).toEqual({
-      sessionTimeoutMs: false,
-    });
+    expect(definition.limits).toEqual({ [limit]: false });
   });
 
   it.each([
@@ -202,7 +228,6 @@ describe("normalizeAgentDefinition", () => {
     ["sessionTimeoutMs", -1],
     ["sessionTimeoutMs", "30d"],
     ["sessionUsage", true],
-    ["sessionUsage", false],
     ["sessionUsage", 40_000_000],
     ["sessionUsage", { inputTokens: 40_000_000 }],
     ["sessionUsage", "() => true"],

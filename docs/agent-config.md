@@ -235,13 +235,13 @@ Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
-Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
+Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `compaction.threshold` (a fraction from 0 to 1) to compact sooner:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   compaction: {
-    thresholdPercent: 0.75, // default 0.9
+    threshold: 0.75, // default 0.9
   },
 });
 ```
@@ -325,8 +325,8 @@ export default defineAgent({
 });
 ```
 
-Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
-false` is not accepted. eve calls `sessionUsage` before each model call once
+Set `sessionUsage: false` to leave sessions uncapped. A callback that returns
+`false` also leaves them uncapped. eve calls a configured callback before each model call once
 the window has usage. The model call that crosses a limit is allowed to finish
 because exact usage arrives after the call completes. Before the next model
 call, eve pauses the turn (`turn.paused`) and sends a deterministic

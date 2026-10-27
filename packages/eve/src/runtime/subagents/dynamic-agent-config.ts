@@ -93,8 +93,8 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
         },
       });
     }
-    if (definition.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = definition.compaction.thresholdPercent;
+    if (definition.compaction.threshold !== undefined) {
+      compaction.thresholdPercent = definition.compaction.threshold;
     }
     config.compaction = compaction;
   }
