@@ -257,7 +257,13 @@ Every PR that touches the published `eve` package must include a
 changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
 cases, including bug fixes and new features. Use `minor` only when the change
 breaks a public API. Write the body for someone reading release notes — what
-changed and what they'll see differently, in 1–2 sentences.
+changed and what they'll see differently, in one sentence. Prefix it with
+`feature:`, `bugfix:`, `docs(feature):`, `docs(bugfix):`, or `internal:`.
+The category is independent of the version bump: documentation changes go in
+the chosen feature or bug fix section, and internal changes are omitted from
+both. Put contributor thanks in a separate paragraph. CI validates this format;
+run `node scripts/check-changesets.mjs` to check locally. See
+[Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When
 in doubt, add one.

@@ -36,6 +36,9 @@ jobs:
       - name: Check dependency versions are in sync
         run: pnpm check:deps
 
+      - name: Validate changeset summaries
+        run: node scripts/check-changesets.mjs
+
       - name: Check the pinned sandbox image tag matches the Dockerfile
         run: pnpm check:sandbox-image-tag
 
@@ -100,7 +103,7 @@ jobs:
         run: pnpm test:unit
 
       - name: Test workflow and guard helpers
-        run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs
+        run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs
 
       - name: Test eval benchmark scripts
         run: pnpm test:eval-benchmark

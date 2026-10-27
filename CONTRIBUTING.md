@@ -238,6 +238,24 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 
+### Changeset summaries
+
+Start the changeset summary with a category and one complete sentence. The category is independent of the version bump in the frontmatter:
+
+```md
+---
+"eve": patch
+---
+
+bugfix: Restore the connection sign-in page after an authorization error.
+
+Thanks @octocat for reporting this in #1234.
+```
+
+Use `feature:` or `bugfix:` for product changes. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `internal:` for changes that should not appear in either section. Put contributor credits in the following paragraphs; mentioned GitHub handles appear in the contributor list.
+
+CI validates the summary format. The release workflow finds the original pull request from the commit that introduced the changeset. It includes the pull request author, GitHub noreply co-authors, and credited handles, excluding bots. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
+
 ## Developer Certificate of Origin (DCO)
 
 We do not require a CLA. Instead, all contributions are made under the
