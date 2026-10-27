@@ -3,7 +3,8 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { Card, CardText } from "#compiled/chat/index.js";
+import { Card, CardText } from "#public/channels/slack/cards.js";
+import type { SlackPostInput } from "#public/channels/slack/api.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import {
@@ -303,6 +304,53 @@ describe("slackChannel thread history", () => {
       }),
     );
   });
+
+  it.each<{ message: SlackPostInput; expected: Record<string, unknown> }>([
+    { message: { markdown: "*Alice's update*" }, expected: { markdown_text: "*Alice's update*" } },
+    { message: { text: "Alice's update" }, expected: { text: "Alice's update" } },
+    {
+      message: { blocks: [{ type: "divider" }], text: "Update" },
+      expected: { blocks: [{ type: "divider" }], text: "Update" },
+    },
+    {
+      message: { card: Card({ children: [CardText("Update")] }), fallbackText: "Notification" },
+      expected: {
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Update" } }],
+        text: "Notification",
+      },
+    },
+  ])(
+    "posts an initial $message message and routes the turn under its root",
+    async ({ message, expected }) => {
+      const channel = slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        async onEvent(ctx) {
+          await ctx.send("follow up", {
+            auth: null,
+            target: { channelId: "C01", initialMessage: message },
+          });
+        },
+      });
+      const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+      await firePost(
+        channel,
+        signed(
+          JSON.stringify({
+            event: { type: "reaction_added", user: "U01" },
+            event_id: "EvInitial",
+            team_id: "T01",
+            type: "event_callback",
+          }),
+        ),
+        send,
+      );
+      expect(slackCalls("chat.postMessage")).toEqual([
+        expect.objectContaining({ channel: "C01", ...expected }),
+      ]);
+      expect(slackCalls("chat.postMessage")[0]).not.toHaveProperty("thread_ts");
+      expect(send).toHaveBeenCalledWith("C01:1700000001.000001", expect.anything());
+    },
+  );
 
   it("rejects a generic event send's invalid key before posting its initial message", async () => {
     let sendError: unknown;

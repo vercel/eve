@@ -900,22 +900,93 @@ renderers: [
 
 The private authorization button uses the label **Sign in**, so long connection display names do not make the button invalid. The public status identifies the connection.
 
+### Cards
+
+Use the card builders from `eve/channels/slack` for typed message layouts, or pass
+raw Slack blocks with `{ blocks, text }`. Cards are plain data, not JSX components.
+
+| Builders                                | Use                                          |
+| --------------------------------------- | -------------------------------------------- |
+| `Card`, `CardText`, `CardLink`          | Build a card with text and links.            |
+| `Section`, `Divider`, `Image`           | Group content, separate it, or add an image. |
+| `Fields`, `Field`, `Table`              | Display labeled values or tabular data.      |
+| `Actions`, `Button`, `LinkButton`       | Group action buttons and links.              |
+| `Select`, `SelectOption`, `RadioSelect` | Add fixed-choice controls inside `Actions`.  |
+
+For example, post a review link from a message hook:
+
+```ts title="agent/channels/slack.ts"
+import { Actions, Card, CardText, LinkButton, slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onAppMention(ctx) {
+    await ctx.thread.post({
+      card: Card({
+        title: "Review ready",
+        children: [
+          CardText("Alice's draft is ready for review."),
+          Actions([LinkButton({ label: "Open draft", url: "https://example.com/draft" })]),
+        ],
+      }),
+      fallbackText: "Alice's draft is ready for review.",
+    });
+    return null;
+  },
+});
+```
+
+Handle your own button and select callbacks in `onInteraction`. To build eve-owned
+approval or question controls, use the [HITL helpers](#render-and-decode-hitl-controls-yourself).
+`cardToBlocks(card)` converts a card to Slack blocks;
+`cardToFallbackText(card)` produces notification and accessibility text.
+`thread.post({ card })` calls both converters automatically unless you supply
+`fallbackText`.
+
+Message cards do not support `Modal`, `TextInput`, or `ExternalSelect`, or their
+associated types. Replace a text input used only as a label with `CardText`.
+For custom modals, send native Slack view data with `ctx.slack.request("views.open", ...)`;
+see [interactive callbacks](#message-hooks). The `CardJSXElement` and `CardJSXProps`
+types are no longer exported. Use `CardElement` and the data factories instead.
+The internal `isCardElement` and `cardChildToFallbackText` helpers are no longer
+public; use `cardToFallbackText` for a complete card's fallback.
+
 ### Proactive sessions
 
 Start a Slack conversation from a [webhook on another channel](./custom#cross-channel-hand-off), a [schedule](../schedules#handler-form-run), or a [tool](../tools#start-channel-sessions-ctxto), without waiting for someone to message the app. To copy an existing conversation into a new thread or someone's direct messages, see [Fork conversations into a new thread](../patterns/fork-conversations-into-new-threads).
 
 Pass `{ channelId }` as the target to start a new thread. The agent's first post becomes the thread's root message. You can also set these target fields:
 
-| Field                | Use                                                                                                                                                |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `threadTs`           | Continue an existing thread instead of creating one.                                                                                               |
-| `initialMessage`     | Post a card as the thread root before the agent runs. Cannot be combined with `threadTs`.                                                          |
-| `installationTeamId` | Select the app installation workspace when using a function-form bot token.                                                                        |
-| `codeChannel`        | Open a [code channel](#build-your-own-code-channel-tool) from a message in `channelId` and start the session there. Requires `codeChannels: true`. |
-| `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                                                                          |
+| Field                | Use                                                                                                                                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `threadTs`           | Continue an existing thread instead of creating one.                                                                                                                                                  |
+| `initialMessage`     | Post a `SlackPostInput` as the thread root before the agent runs: `{ markdown }`, `{ text }`, `{ blocks, text? }`, or `{ card, fallbackText? }`. Cannot be combined with `threadTs` or `codeChannel`. |
+| `installationTeamId` | Select the app installation workspace when using a function-form bot token.                                                                                                                           |
+| `codeChannel`        | Open a [code channel](#build-your-own-code-channel-tool) from a message in `channelId` and start the session there. Requires `codeChannels: true`.                                                    |
+| `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                                                                                                                             |
 
 A send with an `idempotencyKey` and no `threadTs` or `initialMessage` derives the new thread's session from the key, so a retry with the same key reaches the same session instead of starting a second thread. Because the key chooses the session, two different sends that reuse a key land in the same thread and the second is ignored. Use a key that identifies the delivery across every sender to this channel, not only across retries of one sender.
 
+`initialMessage` uses the same explicit inputs as `thread.post`, including cards
+and optional files. For example, start a thread with a Markdown root:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onEvent(ctx, event) {
+    if (event.type !== "team_join") return;
+    await ctx.send("Prepare a welcome message for the new teammate.", {
+      auth: null,
+      target: {
+        channelId: "C0123ABC",
+        initialMessage: { markdown: "A new teammate joined. Preparing their welcome." },
+      },
+    });
+  },
+});
+```
+
+The root is posted before the agent runs; the agent's replies appear under it.
 The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
 
 For a Slack post without an agent turn, use `ctx.thread.post(...)` in an inbound handler or `ctx.channel.thread.post(...)` in a renderer's event handler. Outside a handler, use [`callSlackApi(...)`](#slack-api-calls-outside-a-handler).
