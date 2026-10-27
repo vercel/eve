@@ -213,6 +213,8 @@ When a remote tool returns more data than the model needs, narrow the result at 
 
 An MCP connection can watch the server's events and run your code when one arrives. Vercel Connect holds the upstream subscription and forwards each event to your agent; eve runs your callback.
 
+MCP event subscriptions are based on a [draft specification](https://github.com/modelcontextprotocol/experimental-ext-triggers-events/blob/main/docs/design-sketch-proposal.md).
+
 Requirements:
 
 - A statically authored MCP connection with a static `connect()` auth provider. Dynamic connections and auth resolvers are not supported.
@@ -316,7 +318,9 @@ There is one subscribe action per event the server offers; its description names
 
 ### Receiver
 
-eve mounts `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only Connect's delivery token and only deliveries for a live watch's subscription; it answers `410` once the watch has ended. The callback's identity always comes from the saved watch, never from the event payload.
+When a connection defines `experimental_events`, eve mounts `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. Defining callbacks mounts the receiver; it does not create a subscription.
+
+The receiver verifies Connect's delivery token and checks the delivery against the saved watch's subscription before running your callback. Deliveries arriving before subscription creation finishes are queued until their subscription ID can be validated. Missing or ended watches return `410`; once the subscription is known, mismatched subscription IDs also return `410`. The callback's identity comes from the saved watch, never from the event payload.
 
 ## Troubleshooting
 
