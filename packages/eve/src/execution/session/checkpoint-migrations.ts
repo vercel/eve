@@ -4,6 +4,7 @@ import {
   isPreV27CheckpointVersion,
   type PreV27Checkpoint,
 } from "#execution/session/pre-v27-checkpoint.js";
+import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { isObject } from "#shared/guards.js";
 import {
   DELIVERY_IDEMPOTENCY_WINDOW,
@@ -62,7 +63,7 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   ) {
     return {
       kind: "incompatible",
-      detail: `checkpoint version ${JSON.stringify(version)} is outside the supported range`,
+      detail: `checkpoint version ${JSON.stringify(version)} is outside the supported ranges: 8-17 import, ${MIN_SESSION_CHECKPOINT_VERSION}-${SESSION_CHECKPOINT_VERSION} upgrade`,
     };
   }
   let current: CheckpointRecord = checkpoint;
@@ -98,10 +99,4 @@ function isCurrentCheckpoint(value: unknown): value is SessionCheckpoint {
     isObject(value.serializedContext) &&
     isObject(value.sessionState)
   );
-}
-
-class CheckpointRefusal extends Error {}
-
-function refuse(detail: string): never {
-  throw new CheckpointRefusal(detail);
 }

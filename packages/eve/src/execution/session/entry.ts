@@ -38,12 +38,12 @@ import {
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
 import {
-  isSessionStreamTailStep,
   prepareSuccessorStep,
+  readSessionStreamTailStep,
   signalSessionOwnerActivationStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import { withProjection } from "#execution/session/pre-v27-checkpoint.js";
+import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -252,8 +252,8 @@ export async function bootInitialOwner(
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
   readonly serializedContext: Record<string, unknown>;
-  /** A session from an owner before v27: where this owner's first line goes on its stream. */
-  readonly preV27?: { readonly streamPosition: number };
+  /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
+  readonly importedTurnCount?: number;
 }
 
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
@@ -295,22 +295,26 @@ async function prepareSuccessor(
       serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
     };
   }
-  const { projection } = validation;
-  if (projection === undefined) throw new Error("Session import is missing its projection.");
-  const checkpoint = withProjection(migration.imported.checkpoint, projection);
+  const { checkpoint, turnCount } = migration.imported;
   return {
     checkpoint,
-    preV27: { streamPosition: projection.view.position },
+    importedTurnCount: turnCount,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
 }
 
-/** Throws when the previous owner wrote to the stream after this successor read its tail. */
-async function confirmFoldedStream(sessionId: string, prepared: PreparedSuccessor): Promise<void> {
-  if (prepared.preV27 === undefined) return;
-  const position = prepared.preV27.streamPosition;
-  if (await isSessionStreamTailStep({ position, sessionId })) return;
-  throw new Error("The session's previous owner wrote to its stream after this successor read it.");
+/**
+ * An imported session continues its stream after the lines its earlier owner wrote. Read once this
+ * run holds the session, so no line the earlier owner writes lands after the position.
+ */
+async function placeImportedSession(
+  sessionId: string,
+  prepared: PreparedSuccessor,
+): Promise<PreparedSuccessor> {
+  if (prepared.importedTurnCount === undefined) return prepared;
+  const tailIndex = await readSessionStreamTailStep({ sessionId });
+  const projection = preV27Projection(tailIndex, prepared.importedTurnCount);
+  return { ...prepared, checkpoint: withProjection(prepared.checkpoint, projection) };
 }
 
 async function signalFailedActivation(
@@ -370,7 +374,7 @@ async function bootForcedHandoffOwner(
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHooks(hookTokens, { force: true, handover: attemptKey });
-    await confirmFoldedStream(sessionId, prepared);
+    prepared = await placeImportedSession(sessionId, prepared);
   } catch (error) {
     const claimedHooks = inbox.claimedTokens.length > 0;
     await signalFailedActivation(input, error, { claimedHooks, payloads: [] });
@@ -427,7 +431,7 @@ async function bootReleasedHandoffOwner(
         sessionState: prepared.checkpoint.sessionState,
       }),
     );
-    await confirmFoldedStream(input.sessionId, prepared);
+    prepared = await placeImportedSession(input.sessionId, prepared);
     await signalSessionOwnerActivationStep({
       activation: { kind: "active" },
       token: input.activationToken,
@@ -454,7 +458,7 @@ async function startSuccessor(
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
       // The earlier build's conversation reaches this build's model only as a summary.
-      compactFirst: prepared.preV27 !== undefined,
+      compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
       start:

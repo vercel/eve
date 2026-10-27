@@ -5,7 +5,12 @@
 //
 // Delete once no pre-v27 deployment owns a session.
 
+import {
+  EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME,
+  SESSION_CALLBACK_CONTEXT_KEY_NAME,
+} from "#context/key-names.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
+import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
@@ -51,7 +56,7 @@ export function importPreV27Checkpoint(
 
 /**
  * The projection of a session whose earlier lines a v27 writer never folded: it writes after
- * `tailIndex`, and its next turn follows the earlier owner's last.
+ * `tailIndex`, and its next turn follows the earlier owner's last. An empty stream has not opened.
  */
 export function preV27Projection(tailIndex: number, turnCount: number): SessionProjection {
   const projection = initialSessionProjection();
@@ -61,7 +66,7 @@ export function preV27Projection(tailIndex: number, turnCount: number): SessionP
       ...projection.view,
       position: tailIndex + 1,
       session: {
-        status: "open",
+        status: tailIndex < 0 ? "new" : "open",
         turnCount,
         ...(turnCount > 0 && { latestTurnId: `turn_${String(turnCount - 1)}` }),
       },
@@ -93,7 +98,6 @@ export function withProjection(
 
 type CheckpointRecord = Record<string, unknown>;
 
-const SESSION_CALLBACK_KEY = "eve.sessionCallback";
 const LEGACY_REMOTE_CALLER_KEY = "eve.legacyRemoteAgentCaller";
 
 function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<CheckpointRecord> {
@@ -103,12 +107,13 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   const state = session.state === undefined ? {} : readRecord(session, "state");
   const turnCount = readTurnCount(sessionState, state);
   requireFinishedTasks(state["eve.taskTable"]);
+  requireNoSubagentHandles(state["eve.agent.handles"]);
   // eve 0.66–0.69 kept history in the durable snapshot.
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
   const context = readRecord(checkpoint, "serializedContext");
   // A caller from before v27 gets its result but no relayed requests, which it can't read.
-  const callback = context[SESSION_CALLBACK_KEY];
+  const callback = context[SESSION_CALLBACK_CONTEXT_KEY_NAME];
   const earlierCaller = isObject(callback)
     ? context[LEGACY_REMOTE_CALLER_KEY] !== undefined || callback.taskId !== undefined
       ? 1
@@ -131,7 +136,7 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
           : {
               ...context,
               "eve.capabilities": { requestInput: false },
-              "eve.earlierRemoteCaller": earlierCaller,
+              [EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME]: earlierCaller,
             },
       sessionState: {
         continuationToken: sessionState.continuationToken,
@@ -192,6 +197,13 @@ function requireFinishedTasks(table: unknown): void {
   }
 }
 
+/** eve 0.66–0.68 kept idle subagent sessions running for reuse; only their owner stops them. */
+function requireNoSubagentHandles(store: unknown): void {
+  if (store === undefined) return;
+  if (!isObject(store) || !Array.isArray(store.handles) || store.handles.length > 0)
+    refuse("session keeps subagent sessions");
+}
+
 function importHistory(history: unknown[]) {
   try {
     return normalizeHistory(history as Parameters<typeof normalizeHistory>[0]);
@@ -204,12 +216,6 @@ function pick(record: CheckpointRecord, keys: readonly string[]): CheckpointReco
   return Object.fromEntries(
     keys.flatMap((key) => (record[key] === undefined ? [] : [[key, record[key]]])),
   );
-}
-
-class CheckpointRefusal extends Error {}
-
-function refuse(detail: string): never {
-  throw new CheckpointRefusal(detail);
 }
 
 function readRecord(value: CheckpointRecord, key: string): CheckpointRecord {

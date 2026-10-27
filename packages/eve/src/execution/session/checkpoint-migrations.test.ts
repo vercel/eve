@@ -131,6 +131,13 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
     expect(migrateSessionCheckpoint(saved)).toMatchObject({ kind: "incompatible" });
     expect(saved).toEqual(before);
   });
+
+  it("keeps an eve 0.66 session that keeps subagent sessions on its owner", () => {
+    expect(migrateSessionCheckpoint(eve066Checkpoint({ subagents: true }))).toEqual({
+      detail: "checkpoint version 8: session keeps subagent sessions",
+      kind: "incompatible",
+    });
+  });
 });
 
 const PROJECTION = "eve.harness.sessionProjection";
@@ -175,7 +182,7 @@ function eve083Checkpoint(state: Record<string, unknown>, context: Record<string
 }
 
 /** Trimmed from a handoff checkpoint captured from an eve 0.66.1 owner. */
-function eve066Checkpoint() {
+function eve066Checkpoint({ subagents = false }: { readonly subagents?: boolean } = {}) {
   return {
     mode: "conversation",
     serializedContext: {
@@ -205,26 +212,28 @@ function eve066Checkpoint() {
           sandboxState: { session: null },
           sessionId: "session-1",
           state: {
-            "eve.agent.handles": {
-              handles: [
-                {
-                  address: {
-                    continuationToken: "local-token",
-                    kind: "agent/local",
-                    sessionId: "child-local",
+            ...(subagents && {
+              "eve.agent.handles": {
+                handles: [
+                  {
+                    address: {
+                      continuationToken: "local-token",
+                      kind: "agent/local",
+                      sessionId: "child-local",
+                    },
+                    phase: "parked",
                   },
-                  phase: "parked",
-                },
-                {
-                  address: {
-                    kind: "agent/remote",
-                    sessionId: "child-remote",
-                    url: "https://remote.example",
+                  {
+                    address: {
+                      kind: "agent/remote",
+                      sessionId: "child-remote",
+                      url: "https://remote.example",
+                    },
+                    phase: "available",
                   },
-                  phase: "available",
-                },
-              ],
-            },
+                ],
+              },
+            }),
             "eve.harness.requestEnvelopeTokens": 2483.5,
             "eve.workflowTool": {
               runs: [

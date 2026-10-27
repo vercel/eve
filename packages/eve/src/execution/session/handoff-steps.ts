@@ -42,9 +42,7 @@ import {
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
-import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
 import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
-import type { SessionProjection } from "#protocol/session-projection.js";
 
 const log = createLogger("execution.handoff");
 
@@ -123,11 +121,7 @@ export async function hasRunEndedStep(input: { readonly runId: string }): Promis
 }
 
 export type SessionCheckpointValidation =
-  | {
-      readonly kind: "valid";
-      /** For a checkpoint from an owner before v27: the projection that continues its stream. */
-      readonly projection?: SessionProjection;
-    }
+  | { readonly kind: "valid" }
   | { readonly kind: "incompatible"; readonly reason: "checkpoint-version" }
   /** The source no longer holds every address it handed over, so none may be taken. */
   | { readonly kind: "source-gone" };
@@ -158,16 +152,8 @@ export async function prepareSuccessorStep(input: {
     return { kind: "incompatible", reason: "checkpoint-version" };
   };
   if (migration.kind === "incompatible") return unreadable(migration.detail);
-  let checkpoint: SessionCheckpoint;
-  let projection: SessionProjection | undefined;
-  if (migration.kind === "pre-v27") {
-    // The earlier owner's lines stay on the stream; this owner writes after them.
-    const tailIndex = await readSessionStreamTailIndex(input.sessionId);
-    projection = preV27Projection(tailIndex, migration.imported.turnCount);
-    checkpoint = withProjection(migration.imported.checkpoint, projection);
-  } else {
-    checkpoint = migration.checkpoint;
-  }
+  const checkpoint =
+    migration.kind === "pre-v27" ? migration.imported.checkpoint : migration.checkpoint;
   const timeout = checkpoint.sessionTimeoutMs;
   if (
     timeout !== false &&
@@ -220,10 +206,10 @@ export async function prepareSuccessorStep(input: {
       sessionId: input.sessionId,
     });
   }
-  if (projection === undefined) return { kind: "valid" };
   // This line shows when no owner before v27 remains, which is when that import can go.
-  log.info("session handoff accepted from an owner before v27", { sessionId: input.sessionId });
-  return { kind: "valid", projection };
+  if (migration.kind === "pre-v27")
+    log.info("session handoff accepted from an owner before v27", { sessionId: input.sessionId });
+  return { kind: "valid" };
 }
 
 /**
@@ -366,14 +352,10 @@ export async function signalSessionAnchorStep(input: {
   await resumeHook(input.token, input.result);
 }
 
-/**
- * Whether the stream still ends where the successor read its tail. On its normal path an owner
- * before v27 writes nothing once it starts a successor; only a failure it records could land after.
- */
-export async function isSessionStreamTailStep(input: {
-  readonly position: number;
+/** The position of the session stream's last line, or `-1` before the first. */
+export async function readSessionStreamTailStep(input: {
   readonly sessionId: string;
-}): Promise<boolean> {
+}): Promise<number> {
   "use step";
-  return (await readSessionStreamTailIndex(input.sessionId)) + 1 === input.position;
+  return await readSessionStreamTailIndex(input.sessionId);
 }
