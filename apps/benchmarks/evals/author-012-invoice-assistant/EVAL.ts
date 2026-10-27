@@ -150,6 +150,7 @@ test("asks an owner to confirm before voiding", async () => {
   expect(decision(await approve(tool, maya, input))).toBe("ask");
 
   // Once Maya approves, the call voids her org's draft.
+  expect(await approvalSettles(tool, maya, input)).toBe(true);
   await tool.execute(input, await toolContext(maya, { approvedBy: maya }));
   expect(await invoiceStatus("org_brightside", "inv_1044")).toBe("void");
 });
@@ -158,10 +159,11 @@ test("never voids for members or across organizations", async () => {
   const tool = await load(`${agentRoot}/tools/void_invoice.ts`);
   const attempt = async (user: User, invoiceId: string) => {
     const input = await invoiceInput(tool, invoiceId);
-    // A policy may refuse outright; otherwise the call has to refuse when it runs,
-    // even after the person who asked approved it.
+    // A policy may refuse outright or refuse the person's approval; otherwise the
+    // call has to refuse when it runs, even after the person who asked approved it.
     const status = decision(await approve(tool, user, input));
     if (status === "deny") return;
+    if (status === "ask" && !(await approvalSettles(tool, user, input))) return;
     const context = await toolContext(user, status === "ask" ? { approvedBy: user } : {});
     await tool.execute(input, context).catch(() => undefined);
   };
@@ -472,6 +474,37 @@ async function approve(tool: any, user: User, input: unknown): Promise<unknown> 
     toolInput: input,
     toolName: "void_invoice",
   });
+}
+
+/**
+ * Whether the person who asked can approve their own call. A tool's `response`
+ * policy can refuse the approval, which leaves the call waiting, never run.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function approvalSettles(tool: any, user: User, input: unknown): Promise<boolean> {
+  const policy = tool.approval?.response;
+  if (typeof policy !== "function") return true;
+  const requester = await principal(user);
+  const result = await policy({
+    request: {
+      interactionId: "interaction-1",
+      callId: "call-1",
+      toolName: "void_invoice",
+      toolInput: input,
+      principal: requester,
+    },
+    response: { decision: "approve", principal: requester },
+    session: { id: "session-1", initiator: requester, turn: { id: "turn-1" } },
+    auth: {
+      getToken: async () => {
+        throw new Error("The grader has no provider tokens.");
+      },
+      requireAuth: async () => {
+        throw new Error("The grader has no provider tokens.");
+      },
+    },
+  });
+  return result?.status !== "rejected";
 }
 
 function decision(status: unknown): "ask" | "deny" | "run" {
