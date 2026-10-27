@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
@@ -8,7 +8,7 @@ import {
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
-import type { Session } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
@@ -22,7 +22,7 @@ interface CrossChannelSendOptions {
 
 /** Message delivery bound to one channel-specific proactive target. */
 export interface CrossChannelTargetHandle {
-  send(message: string | UserContent, options: CrossChannelSendOptions): Promise<Session>;
+  send(message: MessageContent, options: CrossChannelSendOptions): Promise<Delivery>;
 }
 
 /** Selects another authored channel and one of its proactive targets. */
@@ -104,7 +104,7 @@ interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: {
-    readonly message: string | UserContent;
+    readonly message: MessageContent;
     readonly target: Readonly<Record<string, unknown>>;
     readonly auth: SessionAuthContext | null;
   };
@@ -116,7 +116,7 @@ interface InvokeChannelReceiveInput {
 /**
  * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
  */
-async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
+async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Delivery> {
   if (!args.target.receive) {
     throw new Error(args.describeMissingReceive());
   }

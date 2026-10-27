@@ -28,9 +28,11 @@ await writeFile(
   JSON.stringify({ private: true, type: "module", dependencies: { eve: "*" } }),
 );
 await writeFile(join(root, "agent", "instructions.md"), "You are a helpful assistant.\n");
+// A mock model has no catalog context window, and older releases (0.61.0, for
+// one) refuse to compile an agent without it. Release backfills run this agent.
 await writeFile(
   join(root, "agent", "agent.ts"),
-  'import { defineAgent } from "eve";\nimport { mockModel } from "eve/evals";\nexport default defineAgent({ model: mockModel("ready") });\n',
+  'import { defineAgent } from "eve";\nimport { mockModel } from "eve/evals";\nexport default defineAgent({ model: mockModel("ready"), modelContextWindowTokens: 1_000_000 });\n',
 );
 await writeFile(
   join(root, "agent", "channels", "eve.ts"),

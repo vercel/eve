@@ -85,7 +85,7 @@ export function createSandboxEnvironmentHarness<
         sessionContext(input.appRoot, input.sandboxName),
         input.state,
         {
-          abortSignal: input.abortSignal,
+          signal: input.signal,
           reason: input.reason ?? "completed",
         },
       );

@@ -7,8 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { writeCompiledArtifactsFiles } from "../../src/internal/application/compiled-artifacts.js";
 import { resolvePackageSourceFilePath } from "../../src/internal/application/package.js";
-import { createBundledRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
+import {
+  createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
+} from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompileMetadata } from "../../src/runtime/loaders/compile-metadata.js";
+import { loadModelMetadata } from "../../src/runtime/loaders/model-metadata.js";
 import {
   createRuntimeSession,
   withRuntimeSession,
@@ -34,7 +38,7 @@ describe("writeCompiledArtifactsFiles", () => {
     ];
   });
 
-  it("installs compile metadata into bundled compiled artifacts", async () => {
+  it("installs compile and model metadata into bundled compiled artifacts", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-bootstrap-", {
       packageName: "compiled-artifacts-bootstrap-test-agent",
     });
@@ -68,6 +72,15 @@ describe("writeCompiledArtifactsFiles", () => {
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         }),
       ).resolves.toEqual(compileResult.metadata);
+      const bundledModelMetadata = await loadModelMetadata(
+        createBundledRuntimeCompiledArtifactsSource(),
+      );
+      expect(bundledModelMetadata).toEqual(
+        await loadModelMetadata(createDiskRuntimeCompiledArtifactsSource(appRoot)),
+      );
+      expect(bundledModelMetadata.models).toContainEqual(
+        expect.objectContaining({ slug: "openai/gpt-5.4" }),
+      );
     });
   });
 

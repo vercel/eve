@@ -4,6 +4,7 @@
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 
 export type TemplateIntegration =
+  | "Browserbase"
   | "Contentful"
   | "Datadog"
   | "Discord"
@@ -417,6 +418,32 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/subagents/product-marketer/agent.ts",
       "agent/subagents/seo/agent.ts",
       "agent/subagents/social-media-coordinator/agent.ts",
+    ],
+  },
+  {
+    slug: "bell-stack",
+    title: "BELL Stack",
+    setupPrompt:
+      "Set up the BELL stack template in my current workspace using https://github.com/browserbase/bell-stack as the source. Follow its README and integration guides, and preserve the existing project if the workspace is not empty. Configure local browsing with OpenAI and Browserbase first. Explain the optional Linq messaging, Stripe Link payments, 1Password, and Baselayer setup separately. Keep personal 1Password Agentic Autofill disabled as documented upstream. Before deployment, explain the authentication and durable storage requirements for this single-operator sample app. Do not request secrets in chat or commit credentials.",
+    description:
+      "A single-operator personal assistant built with eve and Browserbase, with browser automation, human handoff, optional Linq messaging, Stripe Link payments, and Baselayer merchant access.",
+    sourceHref: "https://github.com/browserbase/bell-stack",
+    category: "Example",
+    model: "openai/gpt-5.6-sol",
+    integrations: ["Browserbase", "Linq", "Stripe Link", "Web chat"],
+    source: "GitHub",
+    github: { owner: "browserbase", repo: "bell-stack", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/channels/linq.ts",
+      "agent/instructions.md",
+      "agent/hooks/browser-lifecycle.ts",
+      "agent/tools/run.ts",
+      "agent/tools/human_handoff.ts",
+      "agent/tools/merchant_access.ts",
+      "agent/extensions/link/extension.ts",
+      "agent/extensions/link/tools/checkout.ts",
     ],
   },
   {

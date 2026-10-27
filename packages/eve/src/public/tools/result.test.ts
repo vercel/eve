@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import type { RuntimeActionResult } from "#shared/action-types.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineTool } from "#tools/definition.js";
 import {
@@ -12,38 +11,29 @@ import {
   toolResultFrom,
   type MatchedConnectionResult,
   type MatchedToolResult,
+  type ToolResultSource,
 } from "#public/tools/result.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function toolResult(toolName: string, output: unknown, isError?: boolean): RuntimeActionResult {
-  const base: RuntimeActionResult = {
+import { call, emptySessionView, foldEvents } from "#protocol/session-projection/public-view.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import type { JsonValue } from "#shared/json.js";
+
+function toolResult(toolName: string, output: JsonValue, isError?: boolean): ToolResultSource {
+  return {
     callId: "call_1",
-    kind: "tool-result",
-    output: output as RuntimeActionResult extends { output: infer O } ? O : never,
-    toolName,
+    kind: "tool",
+    name: toolName,
+    state: isError === true ? "failed" : "completed",
+    output,
   };
-  if (isError !== undefined) {
-    return { ...base, isError };
-  }
-  return base;
 }
 
-function subagentResult(): RuntimeActionResult {
-  return {
-    callId: "call_2",
-    kind: "subagent-result",
-    origin: "child",
-    outcome: {
-      kind: "terminal",
-      result: { kind: "succeeded", output: "done" },
-      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
-    },
-    output: "done",
-    subagentName: "sub",
-  };
+function subagentResult(): ToolResultSource {
+  return { callId: "call_2", kind: "agent", name: "sub", state: "completed", output: "done" };
 }
 
 describe("toolResultFrom", () => {
@@ -85,6 +75,41 @@ describe("toolResultFrom", () => {
       const _check: MatchedToolResult<{ city: string; tempF: number }> = result;
       void _check;
     }
+  });
+
+  it("matches a completed call observation from an opaque snapshot", () => {
+    const view = foldEvents(
+      emptySessionView(),
+      stampTestEvents([
+        {
+          type: "call.requested",
+          data: {
+            callId: "call_3",
+            owner: { runId: "run_0" },
+            capability: { kind: "tool", name: "get_weather" },
+          },
+        },
+        {
+          type: "call.settled",
+          data: { callId: "call_3", outcome: "completed", output: { city: "SF", tempF: 72 } },
+        },
+      ]),
+    );
+    const row = call(view, "call_3")!;
+
+    expect(toolResultFrom(row, weatherTool)).toEqual({
+      callId: "call_3",
+      output: { city: "SF", tempF: 72 },
+      toolName: "get_weather",
+    });
+    expect(toolResultFrom({ ...row, state: "failed" }, weatherTool)).toBeUndefined();
+    expect(
+      toolResultFrom({ ...row, kind: "agent", name: "get_weather" }, weatherTool),
+    ).toBeUndefined();
+    expect(toolResultFrom(undefined, weatherTool)).toBeUndefined();
+    expect(
+      toolResultFrom({ ...row, kind: "tool", name: "linear__list_issues" }, linearConnection),
+    ).toMatchObject({ connectionToolName: "list_issues" });
   });
 
   it("preserves structured output — not a JSON string", () => {

@@ -3,16 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
   buildFreeformModalResponse,
-  deriveComponentInputResponses,
-  deriveModalInputResponses,
+  deriveComponentAnswers,
+  deriveModalAnswers,
   isDiscordFreeformComponent,
-  renderInputRequestComponents,
+  renderInteractionComponents,
 } from "#public/channels/discord/hitl.js";
 import type {
   DiscordComponentInteraction,
   DiscordModalSubmitInteraction,
 } from "#public/channels/discord/inbound.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 
 const BASE_COMPONENT: Omit<
   DiscordComponentInteraction,
@@ -26,19 +26,28 @@ const BASE_COMPONENT: Omit<
   user: { id: "U01", isBot: false, username: "ada" },
 };
 
-function request(overrides?: Partial<InputRequest>): InputRequest {
+function request(
+  overrides: Partial<Interaction["request"]> &
+    Partial<Pick<Interaction, "interactionId" | "call">> = {},
+): Interaction {
+  const {
+    interactionId = "call_1",
+    call = { callId: "call_1", name: "ask_question", input: {} },
+    ...request
+  } = overrides;
   return {
-    action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
-    prompt: "Choose one",
-    requestId: "call_1",
-    ...overrides,
-    kind: overrides?.kind ?? "question",
+    interactionId,
+    call,
+    status: "open",
+    turnId: "turn_0",
+    stepIndex: 0,
+    request: { prompt: "Choose one", kind: "question", ...request },
   };
 }
 
-describe("renderInputRequestComponents", () => {
+describe("renderInteractionComponents", () => {
   it("renders select requests as a string select and decodes selected values", () => {
-    const components = renderInputRequestComponents(
+    const components = renderInteractionComponents(
       request({
         display: "select",
         options: [
@@ -50,7 +59,7 @@ describe("renderInputRequestComponents", () => {
     const select = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!;
 
     expect(
-      deriveComponentInputResponses({
+      deriveComponentAnswers({
         ...BASE_COMPONENT,
         componentType: 3,
         customId: select.custom_id,
@@ -58,11 +67,11 @@ describe("renderInputRequestComponents", () => {
         type: 3,
         values: ["weekly"],
       }),
-    ).toEqual([{ optionId: "weekly", requestId: "call_1" }]);
+    ).toEqual([{ optionId: "weekly", interactionId: "call_1" }]);
   });
 
   it("renders freeform requests as a modal-opening button", () => {
-    const components = renderInputRequestComponents(request({ allowFreeform: true }));
+    const components = renderInteractionComponents(request({ allowFreeform: true }));
     const customId = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!
       .custom_id;
 
@@ -76,10 +85,10 @@ describe("renderInputRequestComponents", () => {
   });
 });
 
-describe("deriveModalInputResponses", () => {
+describe("deriveModalAnswers", () => {
   it("decodes freeform modal submissions", () => {
     const customId = (
-      renderInputRequestComponents(request({ allowFreeform: true }))[0] as {
+      renderInteractionComponents(request({ allowFreeform: true }))[0] as {
         components: Array<{ custom_id: string }>;
       }
     ).components[0]!.custom_id;
@@ -94,8 +103,8 @@ describe("deriveModalInputResponses", () => {
       type: 5,
     };
 
-    expect(deriveModalInputResponses(interaction)).toEqual([
-      { requestId: "call_1", text: "freeform answer" },
+    expect(deriveModalAnswers(interaction)).toEqual([
+      { interactionId: "call_1", text: "freeform answer" },
     ]);
   });
 });

@@ -1,6 +1,6 @@
-import type { TaskCardView } from "#channel/task-card.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { TaskCard } from "#channel/task-card.js";
+import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import type {
@@ -10,74 +10,60 @@ import type {
   SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 /** The session events a Slack renderer can handle, in no particular order. */
 const SLACK_RENDERED_EVENTS = [
-  "action.partial",
-  "action.result",
-  "actions.requested",
-  "approval.candidate",
-  "approval.settled",
-  "authorization.completed",
-  "authorization.required",
-  "input.requested",
-  "input.resolved",
-  "message.appended",
-  "message.completed",
-  "reasoning.appended",
-  "reasoning.completed",
-  "session.completed",
-  "session.failed",
-  "session.waiting",
-  "step.started",
-  "task.settled",
+  "call.progress",
+  "call.requested",
+  "call.started",
+  "call.settled",
+  "content.completed",
+  "content.delta",
+  "delivery.settled",
+  "interaction.opened",
+  "interaction.settled",
+  "model.settled",
+  "model.started",
+  "response.settled",
+  "session.ended",
+  "task.ended",
   "task.started",
-  "turn.cancelled",
-  "turn.completed",
-  "turn.failed",
+  "turn.paused",
+  "turn.settled",
   "turn.started",
-  "turn.waiting",
 ] as const;
 
 export type SlackRenderedEvent = (typeof SLACK_RENDERED_EVENTS)[number];
-type SlackSessionEvent = Exclude<SlackRenderedEvent, "authorization.required" | "session.failed">;
+type SlackSessionEvent = Exclude<SlackRenderedEvent, "interaction.opened">;
 
 /**
- * Runs the rest of the chain, ending with eve's default. Pass changed data to
- * hand it on instead of the event; the rest of the chain runs at most once.
+ * Runs the rest of the chain, ending with eve's default. Pass a changed event to
+ * hand it on instead of this one; the rest of the chain runs at most once.
  * Await it, so the rest of the chain finishes before the event does.
  */
-export type SlackRenderNext<T extends SlackRenderedEvent> = (data?: EventData<T>) => Promise<void>;
+export type SlackRenderNext<T extends SlackRenderedEvent> = (
+  event?: ChannelEventOf<T>,
+) => Promise<void>;
 
 /** Renders one session event, before, after, around, or instead of the rest of the chain. */
 export type SlackRenderHandler<T extends SlackSessionEvent> = (
-  data: EventData<T>,
-  channel: SlackEventContext,
-  ctx: SessionContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<SlackEventContext>,
   next: SlackRenderNext<T>,
 ) => void | Promise<void>;
 
 /**
- * Session event handlers of one {@link SlackRenderer}. `authorization.required`
- * receives the private delivery surface, because the challenge is a
- * credential; its `next` reaches eve's default, which posts the public,
- * link-free status. `session.failed` has no session context.
+ * Session event handlers of one {@link SlackRenderer}. For a sign-in, `interaction.opened`
+ * receives only the private delivery surface as `ctx.channel`, because the challenge is a
+ * credential; its `next` reaches eve's default, which posts the public, link-free status. Any
+ * other `interaction.opened` receives the full channel context.
  */
 export type SlackRendererEvents = {
   readonly [T in SlackSessionEvent]?: SlackRenderHandler<T>;
 } & {
-  readonly "authorization.required"?: (
-    data: EventData<"authorization.required">,
-    channel: SlackAuthorizationEventContext,
-    ctx: SessionContext,
-    next: SlackRenderNext<"authorization.required">,
-  ) => void | Promise<void>;
-  readonly "session.failed"?: (
-    data: EventData<"session.failed">,
-    channel: SlackEventContext,
-    next: SlackRenderNext<"session.failed">,
+  readonly "interaction.opened"?: (
+    event: ChannelEventOf<"interaction.opened">,
+    ctx: ChannelEventContext<SlackEventContext | SlackAuthorizationEventContext>,
+    next: SlackRenderNext<"interaction.opened">,
   ) => void | Promise<void>;
 };
 
@@ -106,20 +92,25 @@ export interface SlackRenderer {
   /** Handlers for session events, such as posting replies and questions. */
   readonly events?: SlackRendererEvents;
   /**
-   * Returns the message for a turn's task card, or `null` for none. Runs for
-   * every turn that calls a tool; the view carries the turn's tasks and its
-   * other tool calls with their input. Pure and synchronous: eve posts the
-   * card, updates it as the turn changes, and handles Slack's rate limits.
-   * `next` returns eve's default card, which is `null` for a turn without tasks.
+   * Returns the message for one of a turn's task cards, or `null` for none. Runs
+   * for every turn that calls a tool; the card holds the turn's calls as rows,
+   * with the tables to read them by (`callState`, `callLabel`, `waiting` from
+   * `eve/events`). Pure and synchronous: eve posts the card, updates it as the
+   * turn changes, and handles Slack's rate limits. `next` returns eve's default
+   * card, which is `null` for a card without tasks.
    */
   readonly taskCard?: (
-    view: TaskCardView,
-    next: (view: TaskCardView) => SlackTaskCard | null,
+    card: TaskCard,
+    next: (card: TaskCard) => SlackTaskCard | null,
   ) => SlackTaskCard | null;
 }
 
 /** Types a Slack renderer. */
 export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
+  for (const key of Object.keys(renderer.events ?? {})) {
+    const removed = removedEventKeyMessage(key);
+    if (removed !== undefined) throw new Error(`A Slack renderer handles ${removed}`);
+  }
   return renderer;
 }
 
@@ -130,7 +121,7 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
-  readonly taskCard: (view: TaskCardView) => SlackTaskCard | null;
+  readonly taskCard: (card: TaskCard) => SlackTaskCard | null;
 }
 
 type AnyHandler = (...args: unknown[]) => void | Promise<void>;
@@ -139,6 +130,7 @@ export function composeSlackRenderers(
   renderers: readonly SlackRenderer[],
   defaults: SlackRenderChain,
 ): SlackRenderChain {
+  for (const renderer of renderers) defineSlackRenderer(renderer);
   return {
     events: composeEvents(renderers, defaults.events),
     received: (message, channel) => composeReceived(renderers, defaults, message, channel, 0),
@@ -158,34 +150,29 @@ function composeEvents(
       return handler === undefined ? [] : [handler];
     });
     if (handlers.length === 0 && fallback === undefined) continue;
-    events[type] =
-      type === "session.failed"
-        ? (data, channel) =>
-            runChain(
-              handlers,
-              data,
-              (handler, value, next) => handler(value, channel, next),
-              (value) => fallback?.(value, channel),
-            )
-        : (data, channel, ctx) =>
-            runChain(
-              handlers,
-              data,
-              (handler, value, next) =>
-                handler(value, userChannel(type, channel as SlackEventContext), ctx, next),
-              (value) => fallback?.(value, channel, ctx),
-            );
+    events[type] = (event, ctx) =>
+      runChain(
+        handlers,
+        event,
+        (handler, value, next) =>
+          handler(
+            value,
+            userContext(type, ctx as ChannelEventContext<SlackEventContext>, value),
+            next,
+          ),
+        (value) => fallback?.(value, ctx),
+      );
   }
   return events as SlackChannelInternalEvents;
 }
 
 /**
  * Runs `handlers` in order around `last`. Each handler's `next` runs the rest
- * once, with the data it passes or the data it received.
+ * once, with the event it passes or the event it received.
  */
 async function runChain(
   handlers: readonly AnyHandler[],
-  data: unknown,
+  event: unknown,
   invoke: (
     handler: AnyHandler,
     value: unknown,
@@ -203,20 +190,30 @@ async function runChain(
       (ran ??= run(index + 1, changed === undefined ? value : changed));
     await invoke(handlers[index]!, value, next);
   };
-  await run(0, data);
+  await run(0, event);
 }
 
 /** User renderers see only the private delivery surface for a sign-in challenge. */
-function userChannel(
+function userContext(
   type: SlackRenderedEvent,
-  channel: SlackEventContext,
-): SlackEventContext | SlackAuthorizationEventContext {
-  if (type !== "authorization.required") return channel;
-  return {
+  ctx: ChannelEventContext<SlackEventContext>,
+  event: unknown,
+): ChannelEventContext<SlackEventContext | SlackAuthorizationEventContext> {
+  if (type !== "interaction.opened" || !isSignIn(event)) return ctx;
+  const { channel } = ctx;
+  const restricted: SlackAuthorizationEventContext = {
     postDirectMessage: (userId, message) => channel.thread.postDirectMessage(userId, message),
     postEphemeral: (userId, message) => channel.thread.postEphemeral(userId, message),
     state: channel.state,
   };
+  return { ...ctx, channel: restricted };
+}
+
+function isSignIn(event: unknown): boolean {
+  return (
+    (event as Partial<ChannelEventOf<"interaction.opened">> | undefined)?.data?.request?.kind ===
+    "sign-in"
+  );
 }
 
 async function composeReceived(
@@ -245,7 +242,7 @@ async function composeReceived(
 function composeTaskCard(
   renderers: readonly SlackRenderer[],
   defaults: SlackRenderChain,
-  view: TaskCardView,
+  view: TaskCard,
   index: number,
 ): SlackTaskCard | null {
   if (index === renderers.length) return defaults.taskCard(view);

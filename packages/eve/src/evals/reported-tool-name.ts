@@ -14,11 +14,11 @@ const UNREPORTED_TOOL_NAMES = new Map([
   ],
   [
     SKILL_TOOL_NAME,
-    `Calls through ${SKILL_TOOL_NAME} are reported as skill loads; use t.loadedSkill(name).`,
+    `Calls through ${SKILL_TOOL_NAME} are reported as skill loads; use t.calledSkill(name).`,
   ],
   [
     "eve__execute",
-    "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.loadedSkill(name).",
+    "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.calledSkill(name).",
   ],
 ]);
 
@@ -27,7 +27,7 @@ const RETIRED_TOOL_NAMES = new Map([
   ["connection_execute", "assert on the connection tool's own name, `<connection>__<tool>`"],
   ["connection_search", `use ${SEARCH_TOOL_NAME}`],
   ["final_output", `use ${REPLY_TOOL_NAME}`],
-  ["load_skill", "use t.loadedSkill(name)"],
+  ["load_skill", "use t.calledSkill(name)"],
   ["task_cancel", `use ${TASK_CANCEL_TOOL_NAME}`],
   ["task_wait", `use ${TASK_WAIT_TOOL_NAME}`],
 ]);

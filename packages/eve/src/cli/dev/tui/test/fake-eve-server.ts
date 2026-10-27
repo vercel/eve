@@ -1,16 +1,13 @@
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { StoredLine } from "#protocol/session-events/envelope.js";
+import { linesOf } from "#protocol/session-lines.js";
 import {
-  createMessageCompletedEvent,
-  createMessageReceivedEvent,
-  createSessionWaitingEvent,
-  createTurnCompletedEvent,
-  createTurnStartedEvent,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
-  type MessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+  EVE_STREAM_TAIL_INDEX_HEADER,
+} from "#protocol/session-http.js";
 
-/** What the fake server reports a session spent, like a real one does on `session.waiting`. */
+/** What one fake model run spends, recorded with its terminal facts. */
 const FAKE_USAGE = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -28,10 +25,10 @@ export interface FakeEveRequest {
 /** Events a fake agent streams after it accepts one delivery. */
 export type FakeEveTurn = (
   request: FakeEveRequest & { readonly deliveryId: string; readonly turnId: string },
-) => readonly UnstampedMessageStreamEvent[];
+) => readonly SessionEvent[];
 
 interface FakeSession {
-  readonly log: MessageStreamEvent[];
+  readonly log: StoredLine[];
   readonly streams: Set<ReadableStreamDefaultController<Uint8Array>>;
 }
 
@@ -71,22 +68,16 @@ export class FakeEveServer {
 
   /** Appends events to a session's durable stream; the current session by default. */
   emit(
-    events: readonly UnstampedMessageStreamEvent[],
-    deliveryId?: string,
+    events: readonly SessionEvent[],
+    _deliveryId?: string,
     sessionId = this.#currentSessionId,
   ): void {
     if (sessionId === undefined) throw new Error("No fake eve session exists yet.");
     const session = this.#session(sessionId);
-    for (const event of events) {
-      this.#eventCount += 1;
-      const at = new Date(Date.UTC(2026, 0, 1) + this.#eventCount).toISOString();
-      const id = `evt_fake_${String(this.#eventCount).padStart(4, "0")}`;
-      const stamped = {
-        ...event,
-        meta: deliveryId === undefined ? { at, id } : { at, id, deliveryIds: [deliveryId] },
-      } as MessageStreamEvent;
-      session.log.push(stamped);
-      const line = encoder.encode(`${JSON.stringify(stamped)}\n`);
+    const at = new Date(Date.UTC(2026, 0, 1) + ++this.#eventCount).toISOString();
+    for (const record of linesOf(events, at)) {
+      session.log.push(record);
+      const line = encoder.encode(`${JSON.stringify(record)}\n`);
       for (const stream of session.streams) stream.enqueue(line);
     }
   }
@@ -127,11 +118,15 @@ export class FakeEveServer {
         { status: 202 },
       );
     }
-    if (method === "POST" && action === "reset" && sessionId !== undefined) {
-      return Response.json({ ok: true, status: "reset", previousSessionId: sessionId });
-    }
-    if (method === "POST" && sessionId !== undefined) {
-      return Response.json({ ok: true, status: "accepted", sessionId });
+    if (method === "POST" && action !== undefined && sessionId !== undefined) {
+      const deliveryId = `control_${this.requests.length}`;
+      const facts: SessionEvent[] = [
+        { type: "delivery.admitted", data: { deliveryId, source: { control: action } } },
+        { type: "delivery.settled", data: { deliveryId, outcome: "applied" } },
+      ];
+      if (action === "reset") facts.push({ type: "session.ended", data: { outcome: "completed" } });
+      this.emit(facts, deliveryId, sessionId);
+      return Response.json({ ok: true, sessionId, deliveryId }, { status: 202 });
     }
     return new Response("Not found", { status: 404 });
   };
@@ -152,7 +147,15 @@ export class FakeEveServer {
   #session(id: string): FakeSession {
     let session = this.#sessions.get(id);
     if (session === undefined) {
-      session = { log: [], streams: new Set() };
+      session = {
+        log: [
+          {
+            at: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+            facts: [{ type: "session.started", data: {} }],
+          },
+        ],
+        streams: new Set(),
+      };
       this.#sessions.set(id, session);
     }
     return session;
@@ -160,12 +163,16 @@ export class FakeEveServer {
 
   #stream(sessionId: string, startIndex: number): Response {
     const session = this.#session(sessionId);
+    const cursor = startIndex < 0 ? Math.max(0, session.log.length + startIndex) : startIndex;
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     return new Response(
       new ReadableStream<Uint8Array>({
         start(streamController) {
           controller = streamController;
-          for (const event of session.log.slice(startIndex)) {
+          controller.enqueue(
+            encoder.encode(`${JSON.stringify({ $eve: "position", next: cursor })}\n`),
+          );
+          for (const event of session.log.slice(cursor)) {
             controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
           }
           session.streams.add(controller);
@@ -174,28 +181,51 @@ export class FakeEveServer {
           session.streams.delete(controller);
         },
       }),
-      { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+      {
+        headers: {
+          [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+          [EVE_STREAM_TAIL_INDEX_HEADER]: String(session.log.length - 1),
+        },
+      },
     );
   }
 }
 
 /** A fake agent that answers every message with the same completed reply. */
 export function reply(text: string): FakeEveTurn {
-  return ({ body, turnId }) => [
-    ...(typeof body?.message === "string"
-      ? [createMessageReceivedEvent({ message: body.message, sequence: 0, turnId })]
-      : ([] as UnstampedMessageStreamEvent[])),
-    createTurnStartedEvent({ sequence: 1, turnId }),
-    createMessageCompletedEvent({
-      finishReason: "stop",
-      message: text,
-      sequence: 2,
-      stepIndex: 0,
-      turnId,
-    }),
-    createTurnCompletedEvent({ sequence: 3, turnId }),
-    createSessionWaitingEvent(FAKE_USAGE),
-  ];
+  return ({ body, deliveryId, turnId }) => {
+    const runId = `${turnId}.run`;
+    const partId = `${runId}.reply`;
+    const scope = { turnId, runId };
+    const events: SessionEvent[] = [
+      { type: "delivery.admitted", data: { deliveryId } },
+      { type: "turn.started", data: { turnId, cause: { deliveryId }, follows: null }, scope },
+      {
+        type: "delivery.consumed",
+        data: {
+          deliveryId,
+          turnId,
+          parts: typeof body?.message === "string" ? [{ kind: "text", text: body.message }] : [],
+        },
+      },
+      { type: "model.requested", data: { runId, owner: { turnId } }, scope },
+      { type: "model.started", data: { attempt: 0, runId, modelId: "fake" }, scope },
+      {
+        type: "content.completed",
+        data: { runId, partId, kind: "text", phase: "reply", value: text },
+        scope,
+      },
+      { type: "model.settled", data: { runId, outcome: "completed", finishReason: "stop" }, scope },
+      {
+        type: "usage.recorded",
+        data: { owner: { runId }, kind: "model", usage: FAKE_USAGE },
+        scope,
+      },
+      { type: "turn.settled", data: { turnId, outcome: "completed", reply: [partId] }, scope },
+      { type: "delivery.settled", data: { deliveryId, turnId, outcome: "handled" } },
+    ];
+    return events;
+  };
 }
 
 /** A fake agent that accepts deliveries and leaves their events to the test. */

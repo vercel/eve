@@ -37,7 +37,8 @@ export function estimateTokens(value: unknown): number {
     };
     return { mediaType, type };
   });
-  return Buffer.byteLength(serialized ?? "") / 4 + mediaTokens;
+  // Whole tokens: the count reaches events, which carry integers.
+  return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
 }
 
 /**

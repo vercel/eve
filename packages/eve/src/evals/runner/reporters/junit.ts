@@ -16,7 +16,7 @@ export interface JUnitReporterConfig {
  * Creates a reporter that writes one JUnit XML testsuite for an eval run.
  * Each eval becomes one `<testcase>` named by its path-derived id.
  */
-export function JUnit(config: JUnitReporterConfig): EvalReporter {
+export function junitReporter(config: JUnitReporterConfig): EvalReporter {
   return new JUnitReporter(config);
 }
 

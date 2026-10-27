@@ -2,14 +2,34 @@
 // neither the model nor the tools. Definitions follow durable-harness's
 // /compare page (packages/demo-ui/src/compare-glossary.ts at
 // METRIC_DEFINITIONS.commit in standard.mjs), so a value here means what the
-// same name means there. fixtures/durable-harness/ holds the conformance data.
+// same name means there, except as noted below. fixtures/durable-harness/
+// holds the conformance data.
 //
-// Per-occurrence metrics (per turn, per call, per send) are the attempt's p50,
+// One deliberate difference: /compare subtracts every tool's full duration,
+// so time that concurrent tools share is subtracted once per tool, and a
+// turn's overhead can go negative. Here concurrent tools count once
+// (the time at least one was running), and tool hops are measured per batch
+// (the calls one model step requested), since the next model call waits for
+// the whole batch. For a single tool both give the same value.
+//
+// Per-occurrence metrics (per turn, per batch, per send) are the attempt's p50,
 // with `count` and the raw `samples` so quantiles can be recomputed across
 // attempts. An occurrence the definition does not cover (a tool that ended
 // its turn has no next model call) is left out, never estimated.
 import { notApplicable, selectEvents, timestamp, unavailable } from "./measurements/events.mjs";
-import { hopStart } from "./measurements/marks.mjs";
+import { coveredLengthBetween, stepKey } from "./measurements/intervals.mjs";
+import { hopStart, toolBatches } from "./measurements/marks.mjs";
+
+/** Time at least one of `tools` was running, so concurrent calls count once. */
+function toolTime(tools) {
+  return coveredLengthBetween(tools.map((tool) => ({ startAt: tool.start.t, endAt: tool.end.t })));
+}
+
+/** The latest end in a batch whose calls all ended, else undefined. */
+function batchEnd(batch) {
+  if (batch.some((tool) => tool.end === undefined)) return undefined;
+  return Math.max(...batch.map((tool) => tool.end.t));
+}
 
 /**
  * Server-clock parts, from the root sessions' marks.
@@ -46,12 +66,13 @@ export function serverOverheads(roots, bySession) {
       if (turn.idle !== undefined && workEnds.length > 0)
         finalize.push(turn.idle.t - Math.max(...workEnds));
 
-      for (const tool of turn.tools) {
-        if (tool.end === undefined) continue;
-        const hop = hopStart(turn, tool);
-        const next = turn.steps.find((step) => step.request.t >= tool.end.t);
+      for (const batch of toolBatches(turn)) {
+        const end = batchEnd(batch);
+        if (end === undefined) continue;
+        const hop = hopStart(turn, batch);
+        const next = turn.steps.find((step) => step.request.t >= end);
         if (hop === undefined || next === undefined) continue;
-        toolHop.push(next.request.t - hop - (tool.end.t - tool.start.t));
+        toolHop.push(next.request.t - hop - toolTime(batch));
       }
     }
 
@@ -202,30 +223,31 @@ function measureTurn(turn, sent, arrival, offset) {
 
   if (idleAt !== undefined && calls.length > 0 && calls.every(({ step }) => step.done)) {
     const modelSum = calls.reduce((sum, { step }) => sum + step.done.t - step.request.t, 0);
-    const toolSum = turn.tools
-      .filter((tool) => inWindow(arrival(tool.start.via)))
-      .reduce((sum, tool) => sum + (tool.end === undefined ? 0 : tool.end.t - tool.start.t), 0);
-    result.turn = idleAt - sent - modelSum - toolSum;
+    const toolMs = toolTime(
+      turn.tools.filter((tool) => tool.end !== undefined && inWindow(arrival(tool.start.via))),
+    );
+    result.turn = idleAt - sent - modelSum - toolMs;
   }
 
-  for (const tool of turn.tools) {
-    const startAt = arrival(tool.start.via);
-    if (tool.end === undefined || !inWindow(startAt)) continue;
-    // Calls requested together start together; the next output is the first
-    // one after their request, so every call of a batch is measured.
-    const nextOut = outputs.find(({ at, event }) => at >= startAt && event !== tool.start.via);
+  for (const batch of toolBatches(turn)) {
+    const batchStep = stepKey(batch[0].start.via);
+    const startAt = arrival(batch[0].start.via);
+    const end = batchEnd(batch);
+    if (end === undefined || !inWindow(startAt)) continue;
+    // The requesting step can still stream between its calls (its later
+    // requests, text flushed before each one); the next output is past it.
+    const nextOut = outputs.find(({ at, event }) => at >= startAt && stepKey(event) !== batchStep);
     if (nextOut === undefined) continue;
     const next =
-      calls.find(({ step, reqAt }) => step.request.t >= tool.end.t && reqAt <= nextOut.at) ??
+      calls.find(({ step, reqAt }) => step.request.t >= end && reqAt <= nextOut.at) ??
       calls.find(({ reqAt }) => reqAt >= startAt && reqAt <= nextOut.at);
     const nextModelMs = visibleModelMs(next, nextOut.at);
     if (nextModelMs === undefined) continue;
-    const exec = tool.end.t - tool.start.t;
-    const hop = hopStart(turn, tool);
+    const hop = hopStart(turn, batch);
     result.tools.push(
       hop === undefined
-        ? nextOut.at - (tool.end.t + offset) - nextModelMs
-        : nextOut.at - (hop + offset) - exec - nextModelMs,
+        ? nextOut.at - (end + offset) - nextModelMs
+        : nextOut.at - (hop + offset) - toolTime(batch) - nextModelMs,
     );
   }
   return result;

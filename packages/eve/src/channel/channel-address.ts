@@ -1,4 +1,6 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
+import type { Delivery } from "#shared/delivery.js";
+import { commandDelivery } from "#channel/delivery.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
@@ -12,10 +14,6 @@ import { createSession, sessionCallbackToTurnCaller, type Session } from "#chann
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  ResetSessionResult,
   RunInput,
   Runtime,
   SessionAuthContext,
@@ -23,7 +21,8 @@ import type {
   SessionCommand,
   TurnPolicy,
 } from "#channel/types.js";
-import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
+import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import { validateSessionHistory } from "#shared/session-history.js";
 
@@ -70,20 +69,17 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
-  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   create(options: ChannelAddressCreateOptions<TState>): Promise<ChannelCreateResult>;
-  send(
-    message: string | UserContent,
-    options: ChannelAddressDeliveryOptions<TState>,
-  ): Promise<Session>;
+  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
+  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
   respond(
-    inputResponses: SendPayload["inputResponses"],
+    answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,
-  ): Promise<Session>;
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
-  compact(): Promise<CompactSessionResult>;
-  clear(): Promise<ClearSessionResult>;
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  ): Promise<Delivery>;
+  cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
+  clear(options?: SessionControlOptions): Promise<Delivery>;
+  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -109,10 +105,11 @@ export function createChannelAddress<TState = undefined>(input: {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
       validateDeliveryIdempotencyKey(options.idempotencyKey);
-      const delivery =
-        metadata.channelKind !== undefined && metadata.channelName !== undefined
-          ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
-          : undefined;
+      const delivery = createChannelDeliveryMetadata({
+        channelKind: `channel:${input.channelName}`,
+        channelName: input.channelName,
+        ...metadata,
+      });
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
@@ -161,19 +158,23 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       };
-      const toSession = (sessionId: string) =>
-        createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
-
       const result = await input.runtime.dispatchContinuation({
         command,
         continuationToken: namespacedToken,
         successor: runInput,
       });
-      if (result.status === "accepted") return toSession(result.sessionId);
-      if (payload.inputResponses && payload.inputResponses.length > 0) {
+      if (result.status === "accepted")
+        return commandDelivery(input.runtime, result, delivery.deliveryId);
+      if (result.retryable === true) throw new SessionNotActiveError({ retryable: true });
+      if (payload.answers && payload.answers.length > 0) {
         throw new SessionNotActiveError();
       }
-      return toSession((await input.runtime.createSession(runInput)).sessionId);
+      const started = await input.runtime.createSession(runInput);
+      return commandDelivery(
+        input.runtime,
+        { status: "accepted", sessionId: started.sessionId },
+        delivery.deliveryId,
+      );
     },
     async create(options) {
       const history = validateSessionHistory(options.history);
@@ -228,35 +229,43 @@ export function createChannelAddress<TState = undefined>(input: {
     async send(message, options) {
       return await this.deliver({ message }, options);
     },
-    async respond(inputResponses, options) {
-      if (inputResponses === undefined || inputResponses.length === 0) {
-        throw new Error("respond() requires at least one input response.");
+    async respond(answers, options) {
+      if (answers === undefined || answers.length === 0) {
+        throw new Error("respond() requires at least one answer.");
       }
-      return await this.deliver({ inputResponses }, options);
+      return await this.deliver({ answers }, options);
     },
     async cancel(options) {
-      return await input.runtime.dispatchContinuation({
-        command: { kind: "cancel", turnId: options?.turnId },
+      const command = controlCommand({ kind: "cancel" as const, turnId: options?.turnId }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId);
     },
-    async compact() {
-      return await input.runtime.dispatchContinuation({
-        command: { kind: "compact" },
+    async compact(options) {
+      const command = controlCommand({ kind: "compact" as const }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId);
     },
-    async clear() {
-      return await input.runtime.dispatchContinuation({
-        command: { kind: "clear" },
+    async clear(options) {
+      const command = controlCommand({ kind: "clear" as const }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId);
     },
     async reset(options) {
-      return await input.runtime.dispatchContinuation({
-        command: { kind: "reset", reason: options?.reason },
+      const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId, { follow: false });
     },
     async resolveSession() {
       const owner = await input.runtime.resolveContinuation(namespacedToken);

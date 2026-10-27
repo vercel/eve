@@ -8,80 +8,39 @@ import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 
+import type { ModelCallOptions } from "./call.js";
+
 const log = createLogger("harness.tool-loop");
-/** How a recovery reissues the call. */
-type RecoveryCall = (options: {
-  readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
-  readonly suppressStepStartedEmission?: boolean;
-  readonly trailingUserNote?: string;
-}) => Promise<HarnessStepResult>;
 
-/**
- * Recovers a failed model call, each recovery at most once and within the current step, so the
- * reissue suppresses a second `step.started`:
- *
- * 1. The host rejected a provider-specific tool it can't serve (an AI Gateway fallback provider,
- *    or an OpenAI-compatible endpoint without OpenAI web search): the call is reissued without
- *    it, and a system note tells the model which capability went away. Only known provider tools
- *    are dropped, never an authored one.
- * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
- *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
- *    recovery removed.
- *
- * Each reissue goes through `call` so it gets fresh step hooks: the failed attempt's one-shot
- * `stepResult` already resolved. Returns the error that remains when nothing recovered.
- */
-export async function recoverModelCall(input: {
-  readonly error: unknown;
-  readonly call: RecoveryCall;
-  readonly sessionId: string;
-  readonly turnId: string;
-}): Promise<{ readonly result: HarnessStepResult } | { readonly error: unknown }> {
-  let { error } = input;
-  const diagnostics = { sessionId: input.sessionId, turnId: input.turnId };
-  let options: Parameters<RecoveryCall>[0] = {};
-
-  const unsupportedTypes = extractUnsupportedProviderToolTypes(error);
-  const disabled = [
-    ...new Set(
-      unsupportedTypes.flatMap((type) => resolveFrameworkToolFromUpstreamType(type) ?? []),
-    ),
-  ];
-  if (disabled.length > 0) {
-    log.warn("disabling unsupported provider tool(s); retrying step once", {
-      ...diagnostics,
-      disabled,
-      upstreamTypes: unsupportedTypes,
-    });
-    options = {
-      disabledProviderTools: new Set(disabled),
-      extraSystemNote: buildDisabledToolNote(disabled),
-    };
-    try {
-      return { result: await input.call({ ...options, suppressStepStartedEmission: true }) };
-    } catch (retryError) {
-      error = retryError;
-    }
-  }
-
-  if (error instanceof EmptyModelResponseError) {
-    log.warn("empty model response; reissuing the model call once", diagnostics);
-    try {
+/** Recovery changes the request, never executes it: drop unsupported tools, then nudge once. */
+export function recoverModelCall(
+  error: unknown,
+  options: ModelCallOptions,
+  diagnostics: { readonly sessionId: string; readonly turnId: string },
+): ModelCallOptions | undefined {
+  if (options.retryReason !== undefined) return undefined;
+  if (options.disabledProviderTools === undefined) {
+    const unsupportedTypes = extractUnsupportedProviderToolTypes(error);
+    const disabled = [
+      ...new Set(
+        unsupportedTypes.flatMap((type) => resolveFrameworkToolFromUpstreamType(type) ?? []),
+      ),
+    ];
+    if (disabled.length > 0) {
+      log.warn("disabling unsupported provider tool(s); retrying step once", {
+        ...diagnostics,
+        disabled,
+        upstreamTypes: unsupportedTypes,
+      });
       return {
-        result: await input.call({
-          ...options,
-          retryReason: "empty-response",
-          suppressStepStartedEmission: true,
-          trailingUserNote: EMPTY_RESPONSE_NUDGE,
-        }),
+        disabledProviderTools: new Set(disabled),
+        extraSystemNote: buildDisabledToolNote(disabled),
       };
-    } catch (retryError) {
-      error = retryError;
     }
   }
-  return { error };
+  if (!(error instanceof EmptyModelResponseError)) return undefined;
+  log.warn("empty model response; reissuing the model call once", diagnostics);
+  return { ...options, retryReason: "empty-response", trailingUserNote: EMPTY_RESPONSE_NUDGE };
 }
 
 /**

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { Console } from "#evals/runner/reporters/console.js";
+import { consoleReporter } from "#evals/runner/reporters/console.js";
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
 
-describe("Console", () => {
+describe("consoleReporter", () => {
   it("reports skipped evals and their reason", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
     const result = skippedResult();
 
     reporter.onEvalComplete(result);
@@ -19,7 +19,7 @@ describe("Console", () => {
 
   it("indents multiline assertion failure details", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -40,10 +40,11 @@ describe("Console", () => {
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "sourcing",
       result: {
+        sessionEnded: false,
         derived: createEmptyDerivedFacts(),
         events: [],
-        finalMessage: "No source.",
-        output: "No source.",
+        reply: "No source.",
+        data: "No source.",
         status: "completed",
         traceContexts: [],
       },
@@ -58,7 +59,7 @@ describe("Console", () => {
 
   it("warns when repeated soft assertions merge different scores and leaves gates quiet", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -78,10 +79,11 @@ describe("Console", () => {
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "quality",
       result: {
+        sessionEnded: false,
         derived: createEmptyDerivedFacts(),
         events: [],
-        finalMessage: "ok",
-        output: "ok",
+        reply: "ok",
+        data: "ok",
         status: "completed",
         traceContexts: [],
       },
@@ -98,7 +100,7 @@ describe("Console", () => {
 
   it("aggregates repeated soft scores as one value per eval in the run summary", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
     const result: EveEvalResult = {
       assertions: [
         { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
@@ -107,10 +109,11 @@ describe("Console", () => {
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "quality",
       result: {
+        sessionEnded: false,
         derived: createEmptyDerivedFacts(),
         events: [],
-        finalMessage: "ok",
-        output: "ok",
+        reply: "ok",
+        data: "ok",
         status: "completed",
         traceContexts: [],
       },
@@ -125,7 +128,7 @@ describe("Console", () => {
 
   it("summarizes repeated attempts as a gate pass rate per eval", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
     const verdicts = [
       ["flaky", "passed"],
       ["flaky", "failed"],
@@ -154,7 +157,7 @@ describe("Console", () => {
 
   it("does not print diagnostics for passing assertions", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -171,10 +174,11 @@ describe("Console", () => {
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "sourcing",
       result: {
+        sessionEnded: false,
         derived: createEmptyDerivedFacts(),
         events: [],
-        finalMessage: "A sourced answer.",
-        output: "A sourced answer.",
+        reply: "A sourced answer.",
+        data: "A sourced answer.",
         status: "completed",
         traceContexts: [],
       },
@@ -192,10 +196,11 @@ function skippedResult(): EveEvalResult {
     completedAt: "2026-01-01T00:00:01.000Z",
     id: "schedule",
     result: {
+      sessionEnded: false,
       derived: createEmptyDerivedFacts(),
       events: [],
-      finalMessage: null,
-      output: null,
+      reply: undefined,
+      data: null,
       status: "completed",
       traceContexts: [],
     },

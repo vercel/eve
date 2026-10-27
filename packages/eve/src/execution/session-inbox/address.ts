@@ -7,6 +7,7 @@ export const SESSION_INBOX_SESSION_ID_METADATA_KEY = "sessionId";
 /** Stable inbox coordinates. The owner and deployment are intentionally absent. */
 export interface SessionInboxAddress {
   readonly sessionId: string;
+  readonly inbox?: string;
 }
 
 export function isSessionInboxAddress(value: unknown): value is SessionInboxAddress {

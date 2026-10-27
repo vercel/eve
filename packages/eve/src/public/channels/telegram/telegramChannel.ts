@@ -1,18 +1,20 @@
+import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
+export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
@@ -24,7 +26,6 @@ import {
   telegramContinuationToken,
   type TelegramApiOptions,
   type TelegramApiResponse,
-  type TelegramCredentials,
   type TelegramMessageBody,
   type TelegramMessageResult,
 } from "#public/channels/telegram/api.js";
@@ -44,9 +45,9 @@ import {
 import {
   TELEGRAM_HITL_CALLBACK_PREFIX,
   isTelegramSyntheticResponse,
-  resolveTelegramInputResponses,
-  telegramCallbackInputResponse,
-  telegramReplyInputResponses,
+  resolveTelegramAnswers,
+  telegramCallbackAnswer,
+  telegramReplyAnswers,
   telegramResolvedPromptText,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
@@ -69,19 +70,12 @@ import {
   stateFromTelegramMessage,
   telegramContinuationTokenFromState,
 } from "#public/channels/telegram/state.js";
-import {
-  verifyTelegramRequest,
-  type TelegramWebhookSecretToken,
-  type TelegramWebhookVerifier,
-} from "#public/channels/telegram/verify.js";
+import { verifyTelegramRequest } from "#public/channels/telegram/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { telegramInstrumentation } from "#public/channels/telegram/audience.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
@@ -89,7 +83,7 @@ export interface TelegramContext {
 }
 
 /** Channel-owned Telegram context returned by `context()`. */
-interface TelegramChannelContext extends TelegramContext {
+export interface TelegramChannelContext extends TelegramContext {
   state: TelegramChannelState;
 }
 
@@ -120,11 +114,6 @@ export interface TelegramChannelState extends TelegramHitlState {
 }
 
 /** Telegram channel credentials. `webhookVerifier` is a custom inbound webhook verifier for forwarded webhooks. */
-export interface TelegramChannelCredentials extends TelegramCredentials {
-  /** Webhook secret token configured via setWebhook. Falls back to `TELEGRAM_WEBHOOK_SECRET_TOKEN` when neither this nor `webhookVerifier` is set. */
-  readonly webhookSecretToken?: TelegramWebhookSecretToken;
-  readonly webhookVerifier?: TelegramWebhookVerifier;
-}
 
 /** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` resumes an existing thread; `initialMessage` posts a seed message and starts a new thread from it. The two are mutually exclusive: supplying both throws. */
 export interface TelegramReceiveTarget {
@@ -145,37 +134,29 @@ export type TelegramInboundResult = {
 } | null;
 
 /** Sync or async {@link TelegramInboundResult}. */
-export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
-type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: TelegramEventContext,
-  ctx: SessionContext,
+type TelegramEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TelegramEventContext>,
 ) => void | Promise<void>;
 
-type TelegramSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TelegramEventContext,
-) => void | Promise<void>;
-
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)` and exposes the ID as `data.sessionId`; all others also receive the {@link SessionContext}. */
+/**
+ * Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default
+ * (handlers merge over {@link defaultEvents}). Every handler receives the event and a `ctx` whose
+ * `channel` is the Telegram context.
+ */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
-  readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
-  readonly "action.partial"?: TelegramEventHandler<"action.partial">;
-  readonly "action.result"?: TelegramEventHandler<"action.result">;
-  readonly "message.completed"?: TelegramEventHandler<"message.completed">;
-  readonly "message.appended"?: TelegramEventHandler<"message.appended">;
-  readonly "input.requested"?: TelegramEventHandler<"input.requested">;
-  readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
-  readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TelegramSessionFailedHandler;
-  readonly "session.completed"?: TelegramEventHandler<"session.completed">;
-  readonly "session.waiting"?: TelegramEventHandler<"session.waiting">;
-  readonly "authorization.required"?: TelegramEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TelegramEventHandler<"authorization.completed">;
+  readonly "call.requested"?: TelegramEventHandler<"call.requested">;
+  readonly "call.progress"?: TelegramEventHandler<"call.progress">;
+  readonly "call.settled"?: TelegramEventHandler<"call.settled">;
+  readonly "content.completed"?: TelegramEventHandler<"content.completed">;
+  readonly "content.delta"?: TelegramEventHandler<"content.delta">;
+  readonly "interaction.opened"?: TelegramEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TelegramEventHandler<"interaction.settled">;
+  readonly "turn.settled"?: TelegramEventHandler<"turn.settled">;
+  readonly "session.ended"?: TelegramEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TelegramEventHandler<"delivery.settled">;
 }
 
 /** Configuration for {@link telegramChannel}. */
@@ -197,7 +178,7 @@ export interface TelegramChannelConfig {
   readonly onMessage?: (
     ctx: TelegramContext,
     message: TelegramMessage,
-  ) => TelegramInboundResultOrPromise;
+  ) => TelegramInboundResult | Promise<TelegramInboundResult>;
   /** Override the default webhook route path (`/eve/v1/telegram`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -259,7 +240,6 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     TelegramReceiveTarget,
     TelegramInstrumentationMetadata
   >({
-    kindHint: "telegram",
     turnPolicy: config.turnPolicy,
     uploadPolicy: config.uploadPolicy,
     state: initialTelegramState(config.botUsername),
@@ -366,7 +346,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
 
 function rebuildTelegramContext(
   state: TelegramChannelState,
-  session: SessionHandle,
+  session: ChannelContext,
   config: TelegramChannelConfig,
 ): TelegramChannelContext {
   return {
@@ -377,7 +357,7 @@ function rebuildTelegramContext(
 
 function buildTelegramHandle(input: {
   readonly config: TelegramChannelConfig;
-  readonly session?: SessionHandle;
+  readonly session?: ChannelContext;
   readonly state: TelegramChannelState;
 }): TelegramHandle {
   const api = input.config.api;
@@ -645,7 +625,7 @@ async function dispatchCallbackQuery(input: {
             () =>
               input
                 .from(telegramContinuationTokenFromState(state))
-                .respond([telegramCallbackInputResponse(data)], {
+                .respond([telegramCallbackAnswer(data)], {
                   auth: defaultTelegramAuth({ ...message, from: input.query.from }),
                 }),
             { retirePrompt: (label) => retireInactivePrompt(telegram, message, label) },
@@ -711,13 +691,13 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
     const state = payload.state as Partial<TelegramChannelState> | undefined;
     const responses = [
-      ...(payload.inputResponses ?? []),
-      ...telegramReplyInputResponses(state?.replyToBotMessageId, payload.message),
+      ...(payload.answers ?? []),
+      ...telegramReplyAnswers(state?.replyToBotMessageId, payload.message),
     ];
     if (responses.some(isTelegramSyntheticResponse)) {
-      const resolved = resolveTelegramInputResponses(ctx.state, responses);
+      const resolved = resolveTelegramAnswers(ctx.state, responses);
       if (resolved.length > 0) {
-        return { inputResponses: resolved, context: payload.context };
+        return { answers: resolved, context: payload.context };
       }
       if (payload.message !== undefined) {
         return { message: payload.message, context: payload.context };

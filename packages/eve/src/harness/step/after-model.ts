@@ -1,7 +1,7 @@
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import type { CompactionConfig, StepResult } from "#harness/types.js";
+import type { StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import {
@@ -17,27 +17,18 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import type { Step } from "#harness/step/context.js";
-import {
-  fail,
-  finishTurn,
-  hold,
-  suspendStep,
-  type ToolResultPart,
-  withResult,
-} from "#harness/session-machine/transitions.js";
+import { failTurnForReaction, type Step } from "#harness/step/context.js";
+import { turnSettled } from "#harness/facts.js";
+import { fail, suspendStep } from "#harness/session-machine/transitions.js";
+import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import {
-  extractToolApprovalInputRequests,
-  hasRunnableQueue,
-  parkOnApprovals,
-  stopForToolSignIn,
-} from "#harness/hitl/index.js";
+import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
+import { hasQueuedTurnInput, park } from "#harness/step/park.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -46,7 +37,7 @@ import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { setRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("harness.tool-loop");
@@ -105,33 +96,21 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  // eve runs approved calls itself, so the SDK's approval parts never reach history.
-  const responseMessages = await stageToolResultMedia(
-    withoutApprovalParts(normalizedProviderHistory.messages),
-  );
+  const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
 
-  step.session = setRequestEnvelopeTokens(
-    {
-      ...step.session,
-      compaction: createNextCompactionConfig(
-        step.session.compaction,
-        input.durableModelPromptMessageCount,
-        result,
-      ),
-    },
-    result.usage?.inputTokens !== undefined && input.durableModelPromptMessageCount !== undefined
-      ? input.requestEnvelopeTokens
-      : undefined,
-  );
+  step.session = {
+    ...step.session,
+    compaction: withPromptMeasurement(step.session.compaction, {
+      inputTokens: result.usage?.inputTokens,
+      promptMessageCount: input.durableModelPromptMessageCount,
+      requestEnvelopeTokens: input.requestEnvelopeTokens,
+    }),
+  };
 
-  const approvalRequests = extractToolApprovalInputRequests({
-    content: result.content ?? [],
-    excludedCallIds: invalidInputToolCallIds,
-    tools: input.catalog,
-  });
+  const approvalRequests = result.approvalRequests ?? [];
   // Only unanswered calls can dispatch: automatic denials already have results.
   const blockedCallIds = new Set([
-    ...approvalRequests.map((request) => request.action.callId),
+    ...approvalRequests.map((ask) => ask.call.callId),
     ...extractToolResultCallIds(responseMessages),
   ]);
   const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
@@ -140,7 +119,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
 
   const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
-    toolResults: result.toolResults,
+    signIns: result.signIns ?? [],
   });
 
   // --- Park on approvals or runtime calls ----------------------------------
@@ -159,29 +138,19 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests,
+      tasks: dispatched.workflowRequests.map((task) => ({
+        ...task,
+        clearedBy: result.policyApprovals?.[task.callId],
+      })),
     };
     if (approvalRequests.length > 0) {
-      const parkedResult = await parkOnApprovals(step, {
-        ...parked,
-        requests: approvalRequests,
-        tools: input.catalog,
-        waitsOn: authorizationInterrupt
-          ? "sign-in"
-          : workflowToolCalls.length > 0
-            ? "runtime"
-            : undefined,
-      });
-      // Approval only precedes sign-in for the same call, not an executing sibling.
-      if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
-      return parkedResult;
+      await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
+    } else {
+      await step.apply(suspendStep(step.view(), parked));
     }
-    await step.apply(suspendStep(step.view(), parked));
+    // Approval only precedes sign-in for the same call, not an executing sibling.
     if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
-    if (dispatched.workflowRequests.some((task) => task.entry.entryPoint === "execute")) {
-      await step.apply(hold(step.view(), { on: "tasks" }));
-    }
-    return { next: null, session: step.session };
+    return park(step);
   }
 
   // --- Continue or terminate ------------------------------------------------
@@ -216,12 +185,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
-      hasRunnableQueue(step.view()));
+      hasQueuedTurnInput(step.view()));
   if (continueLoop) return { next: step.runStep, session: step.session };
   // The turn rule: no turn ends while its tasks work. The session waits for
   // one to settle, then calls the model again in the same turn.
   if (workingTasks.length > 0) {
-    await step.apply(hold(step.view(), { on: "tasks" }));
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
 
@@ -254,18 +222,6 @@ function answerCallsThatWontRun(
   return answers
     .filter((part) => !answered.has(part.toolCallId))
     .reduce<ModelMessage[]>((next, part) => withResult(next, part), [...messages]);
-}
-
-/** The SDK's approval parts: eve answers approvals itself, so history never holds them. */
-export function withoutApprovalParts(messages: readonly ModelMessage[]): ModelMessage[] {
-  return messages.flatMap((message): ModelMessage[] => {
-    if (message.role !== "assistant" && message.role !== "tool") return [message];
-    if (!Array.isArray(message.content)) return [message];
-    const content = message.content.filter(
-      (part) => part.type !== "tool-approval-request" && part.type !== "tool-approval-response",
-    );
-    return content.length === 0 ? [] : [{ ...message, content } as ModelMessage];
-  });
 }
 
 /**
@@ -373,11 +329,17 @@ async function settleTurn(
   },
 ): Promise<StepResult> {
   const { history, result, stepOutput } = input;
+  // A hook that failed after the turn's last model call fails it rather than let it complete.
+  const hookFailure = await failTurnForReaction(step);
+  if (hookFailure !== undefined) return hookFailure;
   const schema = step.session.outputSchema;
   step.session = clearTurnClientContextState(step.session);
 
   if (schema === undefined) {
-    await step.apply(finishTurn(step.view()), step.session.history);
+    await step.apply(
+      turnSettled(step.view().projection, { outcome: "completed" }),
+      step.session.history,
+    );
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
@@ -399,31 +361,9 @@ async function settleTurn(
     history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
     outputSchema: undefined,
   };
-  await step.apply(finishTurn(step.view(), { result: structured }), step.session.history);
+  await step.apply(
+    turnSettled(step.view().projection, { outcome: "completed" }),
+    step.session.history,
+  );
   return { next: null, session: step.session, settledTurn: { output: structured } };
-}
-
-function createNextCompactionConfig(
-  current: CompactionConfig,
-  durablePromptMessageCount: number | undefined,
-  result: HarnessStepResult,
-): CompactionConfig {
-  const next: {
-    lastKnownInputTokens?: number;
-    lastKnownPromptMessageCount?: number;
-    recentWindowSize: number;
-    threshold: number;
-    thresholdPercent?: number;
-  } = {
-    recentWindowSize: current.recentWindowSize,
-    threshold: current.threshold,
-    thresholdPercent: current.thresholdPercent,
-  };
-
-  if (result.usage?.inputTokens !== undefined && durablePromptMessageCount !== undefined) {
-    next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = durablePromptMessageCount;
-  }
-
-  return next;
 }

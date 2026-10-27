@@ -18,7 +18,7 @@ export function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
 ): ClientOptions {
   if (target.kind === "local") {
-    return { host: target.url };
+    return { baseUrl: target.url };
   }
 
   const options = resolveDevelopmentClientOptions(target.url);

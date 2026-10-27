@@ -44,16 +44,23 @@ import { coveredLengthBetween, pairIntervals, stepKey } from "./measurements/int
 import { sessionMarks } from "./measurements/marks.mjs";
 
 /** Bump whenever a definition below changes meaning. */
-export const METRICS_VERSION = 2;
+export const METRICS_VERSION = 3;
 
 /**
  * Where the framework definitions come from. The conformance data in
- * fixtures/durable-harness/ was generated from this commit.
+ * fixtures/durable-harness/ was generated from this commit. `deviations`
+ * ships in every manifest, so a reader comparing with /compare sees where
+ * eve's values mean something else (see framework.mjs).
  */
 export const METRIC_DEFINITIONS = Object.freeze({
   repository: "vercel-labs/durable-harness",
   path: "packages/demo-ui/src/compare-glossary.ts",
   commit: "ea8aa4060cf4fb8cd39737ce8ab21c4e0f40c741",
+  deviations: Object.freeze({
+    "overhead.turn_ms": "concurrent tool time counts once",
+    "overhead.tool_hop_ms": "one sample per batch of calls a model step requested",
+    "overhead.tool_call_ms": "one sample per batch of calls a model step requested",
+  }),
 });
 
 const model = (unit, direction) => ({ unit, direction, scope: "model" });
@@ -80,12 +87,12 @@ export const STANDARD_METRICS = Object.freeze({
   "attribution.compaction_ms": model("ms", "lower"),
   "attribution.framework_ms": framework("ms", "lower", { pooled: false }),
   "overhead.pre_model_ms": framework("ms", "lower", { per: "turn", pooled: true }),
-  "overhead.tool_hop_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "overhead.tool_hop_ms": framework("ms", "lower", { per: "batch", pooled: true }),
   "overhead.finalize_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.agent_start_ms": framework("ms", "lower", { per: "call", pooled: true }),
   "overhead.first_output_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.turn_ms": framework("ms", "lower", { per: "turn", pooled: true }),
-  "overhead.tool_call_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "overhead.tool_call_ms": framework("ms", "lower", { per: "batch", pooled: true }),
   "session.not_ready_ms": framework("ms", "lower", { per: "send", pooled: true }),
   "session.create_ms": framework("ms", "lower", { per: "session", pooled: true }),
   "durability.workflow_steps_per_turn": framework("ratio", "lower", { pooled: true }),
@@ -119,6 +126,16 @@ export const STANDARD_METRICS = Object.freeze({
 });
 
 const TURN_TERMINALS = ["turn.completed", "turn.failed", "turn.cancelled"];
+// eve before 0.69.0 delegated through these events instead of `agent.started`
+// and `task.*`: its child sessions read as root sessions and its delegated
+// work as nothing, so no metric of such an attempt means what it does today.
+const LEGACY_DELEGATION_EVENTS = new Set([
+  "subagent.called",
+  "subagent.started",
+  "subagent.completed",
+  "subagent.event",
+  "execution.background_task",
+]);
 const FAILURE_EVENTS = ["step.failed", "turn.failed", "session.failed"];
 const TOOL_ACTION_KINDS = new Set(["tool-call", "workflow-tool-call"]);
 
@@ -146,6 +163,8 @@ export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
   }
   if (capture === undefined) return everyMetric(unavailable("missing-session-capture"));
   if (capture.bySession.size === 0) return everyMetric(notApplicable("no-sessions"));
+  if (capture.events.some((event) => LEGACY_DELEGATION_EVENTS.has(event.type)))
+    return everyMetric(unavailable("legacy-delegation-events"));
 
   const rootIds = rootSessionIds(capture);
   if (rootIds.length === 0) return everyMetric(unavailable("missing-root-session"));

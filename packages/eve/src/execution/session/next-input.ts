@@ -1,7 +1,12 @@
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { openInputs } from "#protocol/session-projection.js";
+import { openRequests } from "#protocol/session-projection/reader.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
+  ControlOrigin,
   SessionControl,
   SessionInputQueue,
   TurnSelection,
@@ -14,11 +19,11 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 export type NextTurnInstruction =
   | { readonly kind: "prewarm"; readonly targetDeploymentId: string }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  | { readonly kind: SessionControl }
+  | { readonly kind: SessionControl; readonly origin?: ControlOrigin }
   | { readonly kind: "closed" }
-  | { readonly kind: "cancel-turn" }
+  | { readonly kind: "cancel-turn"; readonly origin?: ControlOrigin }
   /** `session.cancel()` while no turn runs, but tasks are working. */
-  | { readonly kind: "cancel-working-tasks" }
+  | { readonly kind: "cancel-working-tasks"; readonly origin?: ControlOrigin }
   | TurnSelection;
 
 /**
@@ -30,6 +35,8 @@ export async function nextTurnDelivery(input: {
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
+  /** Settles a control that changes nothing; a session that hasn't started defers it. */
+  readonly ignore: (settlement: ControlSettlement) => Promise<void>;
 }): Promise<NextTurnInstruction> {
   const { inbox, cursor, queue } = input;
   // A delivery admitted while the owner was fully idle (nothing queued, nothing
@@ -39,7 +46,10 @@ export async function nextTurnDelivery(input: {
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
-    if (selected?.kind === "control") return { kind: selected.control };
+    if (selected?.kind === "control")
+      return selected.origin === undefined
+        ? { kind: selected.control }
+        : { kind: selected.control, origin: selected.origin };
     if (selected?.kind === "turn") {
       const routed = await routeSelectedDelivery(selected, cursor);
       if (routed.kind === "cancel-turn") return routed;
@@ -64,15 +74,24 @@ export async function nextTurnDelivery(input: {
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
-    if (
-      admitted.kind === "cancel" &&
-      openInputs(storedProjection(cursor.sessionState.snapshot.session.state)).some(
-        (input) => input.request.kind === "session-limit",
-      )
-    )
-      return { kind: "cancel-turn" };
-    if (admitted.kind === "cancel" && input.hasWorkingTasks()) {
-      return { kind: "cancel-working-tasks" };
+    if (admitted.kind !== "cancel") continue;
+    const projection = storedProjection(readDurableSession(cursor.sessionState).state);
+    const view = projection.view;
+    const stale =
+      payload.kind === "cancel" &&
+      payload.turnId !== undefined &&
+      payload.turnId !== activeTurnIdOf(projection);
+    if (!stale && openRequests(view).some((row) => row.request.kind === "budget")) {
+      return { kind: "cancel-turn", origin: admitted.origin };
     }
+    if (!stale && input.hasWorkingTasks()) {
+      return { kind: "cancel-working-tasks", origin: admitted.origin };
+    }
+    if (admitted.origin !== undefined)
+      await input.ignore({
+        control: controlDeliveryOf(admitted.origin),
+        outcome: "ignored",
+        source: "cancel",
+      });
   }
 }

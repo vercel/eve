@@ -8,6 +8,6 @@ export default defineEval({
     started.expectOk();
 
     t.succeeded();
-    t.calledSubagent("self-modification");
+    t.calledAgent("self-modification");
   },
 });

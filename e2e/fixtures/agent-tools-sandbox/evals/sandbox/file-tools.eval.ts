@@ -16,7 +16,7 @@ export default defineEval({
         "Alice is leaving a handoff note for Bob in the workspace.",
         `Use the write_file tool to create ${FILE_TOOLS_PATH} with exactly this content: ${FILE_TOOLS_TOKEN}`,
         `Then read ${FILE_TOOLS_PATH} back with the read_file tool.`,
-        `Then use the grep tool to search for ${FILE_TOOLS_TOKEN} in notes.`,
+        `Then use the grep tool to search for ${FILE_TOOLS_TOKEN} in notes with outputMode content.`,
         `Finally, run the bash command \`cat ${FILE_TOOLS_PATH}\` and reply with its output verbatim.`,
       ].join("\n"),
     );

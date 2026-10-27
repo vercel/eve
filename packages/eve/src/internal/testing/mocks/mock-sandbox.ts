@@ -267,11 +267,11 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     extensions: { setNetworkPolicy: session.setNetworkPolicy },
     readFile: async ({ path }) => fileBytes.get(path) ?? null,
     removePath,
-    spawn: session.spawn,
+    spawn: async (options) => await session.spawn(options),
     async stop() {
       await input.stop?.();
     },
-    writeFiles: session.writeFiles,
+    writeFiles: async (options) => await session.writeFiles(options),
   };
 
   // Queued preparation runs in order; `get()` waits for it, as the runtime's does.

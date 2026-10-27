@@ -1,4 +1,5 @@
-import type { LanguageModel, ModelMessage } from "ai";
+import type { LanguageModel } from "ai";
+import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
 import {
@@ -8,18 +9,16 @@ import {
 } from "#execution/catalog/step-catalog.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
+import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
+import { runRequested, runStarted } from "#harness/facts.js";
+import { activeTurnId } from "#harness/session-machine/view.js";
+import { nextRunId } from "#protocol/session-projection.js";
 import {
-  type ApprovedWork,
-  dispatchApprovedWorkflows,
-  enforceBudget,
-  hasApprovedWork,
-  humanInputContext,
-  runApprovedLocalCalls,
-} from "#harness/hitl/index.js";
-import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
-import { startStep } from "#harness/session-machine/transitions.js";
-import { activeTurnId, nextStepIndex } from "#harness/session-machine/view.js";
-import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
+  failBoundaryEvent,
+  failModelSelection,
+  prepareModelCall,
+  type Step,
+} from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
@@ -31,12 +30,10 @@ import {
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
-import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { ModelCaller } from "./call.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
-import { recoverModelCall } from "./recovery.js";
 import { recordModelUsage } from "./usage.js";
 
 /** A model step's response, for the session to act on. */
@@ -54,58 +51,32 @@ export interface ModelResponse {
 
 /**
  * One model step of the open turn: the prompt it reads, the model that serves it, and the call
- * with its retries and recoveries. `onResponse` decides what the session does with the response.
+ * with its retries and recoveries. The response handler applies what it returned.
  *
- * Approved work runs where the AI SDK ran it, between the step's start and the model call:
- * approved workflow calls join their runs, the budget gate passes, then approved local calls run
- * and the model reads their results.
+ * The budget gate passes first, after the session's dynamic values are evaluated with the
+ * conversation the call reads, which fixes its model, tools, and context. Then the turn requests
+ * a model run, and the run starts as its provider call begins.
  */
 export async function runModelStep(
   step: Step,
   input: {
-    readonly onResponse: (response: ModelResponse) => Promise<StepResult>;
     readonly turn: TurnInput;
-    readonly approved: ApprovedWork;
     readonly generation: GenerationSteering;
-    /** A child's caller and a schedule hear only the turn's real end. */
-    readonly hidesHeldText: boolean;
-    /** The attempt the step's events belong to, for instrumentation. */
-    readonly setAttemptScope: (scope: InstrumentationAttempt | undefined) => void;
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const approves = hasApprovedWork(step);
-  let prompt = approves ? previewPrompt(step, input.turn) : await buildPrompt(step, input.turn);
-  const model = await selectModel(step, prompt);
-  if (!("model" in model)) return model.failed;
-
-  const start = (messages: readonly ModelMessage[]) =>
-    step.apply(
-      startStep(step.view(), { modelId: requireSessionModelReference(step.session).id }),
-      messages,
-    );
-  let projectedMessages = projectPrompt(step, prompt);
-  try {
-    await start(projectedMessages);
-  } catch (error) {
-    return failBoundaryEvent(step, error);
-  }
-  // The turn waits on the runtime for the runs approved calls joined.
-  if (approves && (await dispatchApprovedWorkflows(step, input.approved))) {
-    return { next: null, session: step.session };
-  }
-  // Over budget, neither approved calls nor the model run: the step's messages park with the
-  // prompt.
+  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+  if (failed !== undefined) return failed;
+  const prompt = await buildPrompt(step, input.turn);
+  // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
-  if (approves) {
-    const held = await runApprovedLocalCalls(step, input.approved, input.setAttemptScope);
-    if (held !== undefined) return held;
-    prompt = await buildPrompt(step, input.turn);
-    projectedMessages = projectPrompt(step, prompt);
-  }
-  // Dynamic tools and subagents resolved when the step started, so the step's calls resolve once,
-  // against this catalog.
+
+  const run = await requestRun(step, prompt);
+  if ("failed" in run) return run.failed;
+  const projectedMessages = projectPrompt(prompt);
+  // Dynamic tools and subagents were evaluated before the run was requested, so the step's calls
+  // resolve once, against this catalog.
   const endsTurn = !step.hasDelegatedCaller && step.session.outputSchema === undefined;
   const catalog = buildStepCatalog({
     agentTools: step.config.tools,
@@ -115,49 +86,40 @@ export async function runModelStep(
   });
   recordOfferedCatalogTools(step.ctx, catalog);
   step.frameworkToolNames = frameworkToolNames(catalog);
-  const { approvedTools, pendingApprovalsNote } = humanInputContext(step, catalog);
+  const { approvalMemory, pendingApprovalsNote } = humanInputContext(step);
   const caller = new ModelCaller(step, prompt, {
-    approvedTools,
+    approvalMemory,
     catalog,
     generation,
-    hidesHeldText: input.hidesHeldText,
-    model: model.model,
+    model: run.model,
+    newRun: async () => {
+      const next = await requestRun(step, prompt);
+      if ("failed" in next) throw new Error("The model run's replacement found no model.");
+    },
+    startRun: async (attempt) => await startRun(step, attempt),
     pendingApprovalsNote,
     projectedMessages,
-    setAttemptScope: input.setAttemptScope,
-    startStep: start,
     turnMessages: input.turn.messages,
   });
 
   let result: HarnessStepResult;
   try {
-    result = await caller.call({ suppressStepStartedEmission: true });
+    result = await caller.call();
   } catch (error) {
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
-    const recovery = await recoverModelCall({
-      call: (options) => caller.call(options),
-      error,
-      sessionId: step.session.sessionId,
-      turnId: step.position().turnId,
-    });
-    const compactionFailedAgain = await caller.failIfCompactionFailed();
-    if (compactionFailedAgain !== undefined) return compactionFailedAgain;
-    throwIfTurnAborted(step.config.abortSignal);
-    if (generation.interrupted) return caller.steered();
-    if (!("result" in recovery)) return reportModelCallFailure(step, recovery.error);
-    result = recovery.result;
+    return reportModelCallFailure(step, error);
   }
 
-  await recordModelUsage(step, { model: model.model, result });
+  await recordModelUsage(step, { model: run.model });
   caller.clearInterruptedUsage();
 
   let stepResult: StepResult;
   try {
     generation.check();
-    stepResult = await input.onResponse({
+    stepResult = await handleStepResult(step, {
       catalog,
       // Usage measures what the model read only when no client context was spliced in.
       durableModelPromptMessageCount:
@@ -180,33 +142,35 @@ export async function runModelStep(
 }
 
 /**
- * The model that serves the step: a dynamic model resolver picks it from the prompt, or the
- * agent's model serves. No model fails the session.
+ * The turn requests a model run, which the dynamic model evaluated for it serves, or the agent's
+ * model. No model fails the session.
  */
-async function selectModel(
+async function requestRun(
   step: Step,
   prompt: Prompt,
 ): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
   const { config, ctx } = step;
   try {
-    if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
-      const position = step.position();
-      await config.dispatchDynamicModelEvent({
-        ctx,
-        event: stepStartedForResolvers({
-          modelId: step.session.agent.modelReference?.id ?? "dynamic",
-          sequence: position.sequence,
-          // Selection runs before `startStep` records the step, so the position is still the last one.
-          stepIndex: nextStepIndex(step.view().projection),
-          turnId: activeTurnId(position),
-        }),
-        messages: validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),
-      });
-    }
+    await step.apply(
+      [runRequested({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection))],
+      validateHarnessModelMessages(withClientContext(prompt)),
+    );
+  } catch (error) {
+    return { failed: await failBoundaryEvent(step, error) };
+  }
+  try {
     const resolved = await resolveEffectiveRuntimeModel({ config, ctx, session: step.session });
     step.session = resolved.session;
     return { model: resolved.model };
   } catch (error) {
     return { failed: await failModelSelection(step, error) };
   }
+}
+
+/** The run's model is chosen and its provider call begins. */
+async function startRun(step: Step, attempt: number): Promise<void> {
+  const runId = step.position().runId;
+  if (runId === undefined) return;
+  const modelId = requireSessionModelReference(step.session).id;
+  await step.apply([runStarted({ attempt, modelId, runId })]);
 }

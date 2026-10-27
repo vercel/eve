@@ -1,5 +1,3 @@
-export type { ModelMessage } from "ai";
-
 /**
  * Per-session instrumentation metadata for the Telegram channel, exposed to
  * observability tooling. The channel derives `chatId`, `chatType`, and
@@ -16,6 +14,7 @@ export {
   telegramChannel,
   type TelegramChannel,
   type TelegramChannelConfig,
+  type TelegramChannelContext,
   type TelegramChannelCredentials,
   type TelegramChannelEvents,
   type TelegramChannelState,
@@ -23,27 +22,14 @@ export {
   type TelegramEventContext,
   type TelegramHandle,
   type TelegramInboundResult,
-  type TelegramInboundResultOrPromise,
   type TelegramReceiveTarget,
 } from "#public/channels/telegram/telegramChannel.js";
 
 export {
-  callTelegramApi,
-  answerTelegramCallbackQuery,
-  downloadTelegramFile,
-  editTelegramMessageReplyMarkup,
-  editTelegramMessageText,
-  getTelegramFile,
-  resolveTelegramBotToken,
-  sendTelegramChatAction,
-  sendTelegramMessage,
-  splitTelegramMessageText,
   telegramContinuationToken,
-  TELEGRAM_MESSAGE_TEXT_MAX_LENGTH,
   type TelegramApiOptions,
   type TelegramApiResponse,
   type TelegramBotToken,
-  type TelegramCredentials,
   type TelegramEphemeralMessageParameters,
   type TelegramFetch,
   type TelegramMessageBody,
@@ -51,8 +37,6 @@ export {
 } from "#public/channels/telegram/api.js";
 
 export {
-  formatTelegramContextBlock,
-  parseTelegramUpdate,
   type TelegramAttachment,
   type TelegramCallbackQuery,
   type TelegramChat,
@@ -65,33 +49,13 @@ export {
 } from "#public/channels/telegram/inbound.js";
 
 export {
-  TELEGRAM_CALLBACK_RESPONSE_PREFIX,
-  TELEGRAM_HITL_CALLBACK_PREFIX,
-  TELEGRAM_REPLY_RESPONSE_PREFIX,
-  isTelegramSyntheticResponse,
-  registerTelegramFreeformPrompt,
-  renderTelegramInputRequest,
-  resolveTelegramInputResponses,
-  telegramCallbackInputResponse,
-  telegramReplyInputResponse,
   type TelegramHitlState,
-  type TelegramInputRequestMessage,
+  type TelegramInteractionMessage,
 } from "#public/channels/telegram/hitl.js";
-
-export {
-  TELEGRAM_FILE_URL_PROTOCOL,
-  buildTelegramTurnMessage,
-  collectTelegramFileParts,
-  createTelegramFetchFile,
-  createTelegramFileUrl,
-} from "#public/channels/telegram/attachments.js";
 
 export { defaultTelegramAuth } from "#public/channels/telegram/defaults.js";
 
 export {
-  resolveTelegramWebhookSecretToken,
-  verifyTelegramRequest,
-  type TelegramVerifyOptions,
   type TelegramWebhookSecretToken,
   type TelegramWebhookVerifier,
 } from "#public/channels/telegram/verify.js";

@@ -1,8 +1,14 @@
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  RunInput,
+  SessionCapabilities,
+  SessionAuthContext,
+} from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -25,6 +31,7 @@ import { hasDelegatedSessionContext } from "#execution/delegated-session-context
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
@@ -33,7 +40,6 @@ import {
 import {
   prepareSuccessorStep,
   signalSessionOwnerActivationStep,
-  stopUntrackedChildSessionsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
 import {
@@ -200,6 +206,8 @@ export async function bootInitialOwner(
         });
       }
       await inbox.dispose();
+      // This run never becomes the session, so nothing else would end its stream.
+      await closeSessionStreamStep({ sessionWritable });
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);
@@ -241,7 +249,6 @@ export async function bootInitialOwner(
 /** A successor that may continue the session, before it owns any of its hooks. */
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
-  readonly childRunIdsToStop: readonly string[];
   readonly serializedContext: Record<string, unknown>;
 }
 
@@ -277,10 +284,9 @@ async function prepareSuccessor(
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
-  const { checkpoint, childRunIdsToStop } = migration;
+  const { checkpoint } = migration;
   return {
     checkpoint,
-    childRunIdsToStop,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
 }
@@ -415,10 +421,7 @@ async function startSuccessor(
   prepared: PreparedSuccessor,
 ): Promise<BootOutcome> {
   const { sessionId } = input;
-  const { checkpoint, childRunIdsToStop, serializedContext } = prepared;
-  if (childRunIdsToStop.length > 0) {
-    await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
-  }
+  const { checkpoint, serializedContext } = prepared;
   return {
     inbox,
     session: {
@@ -429,7 +432,12 @@ async function startSuccessor(
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
       start:
-        input.delivery === undefined ? { kind: "parked" } : { input: input.delivery, kind: "turn" },
+        input.delivery !== undefined
+          ? { input: input.delivery, kind: "turn" }
+          : storedProjection(checkpoint.sessionState.snapshot.session.state).view.session.status ===
+              "new"
+            ? { kind: "first-message" }
+            : { kind: "parked" },
       retention: checkpoint.retention,
       serializedContext,
       sessionId,
@@ -451,6 +459,7 @@ function createInitialDelivery(
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
   return {
+    auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
     idempotencyKey: input.idempotencyKey,
     schedule: readSerializedSessionSchedule(serializedContext),
     deliveryMetadata:

@@ -10,14 +10,14 @@ replay events already consumed by that handle.
 ## Read and persist state
 
 Create the session with its first turn, then persist `session.state` after
-consuming the response:
+consuming the delivery:
 
 ```ts
-const { session, response } = await client.sessions.create({
+const { session, delivery } = await client.sessions.create({
   message: "Create a launch checklist.",
 });
 
-await response.result();
+await delivery.result();
 await saveSessionState(session.state);
 ```
 
@@ -65,13 +65,13 @@ result.
 
 ## Waiting, completed, and reset sessions
 
-A session that emits `session.waiting` accepts another message through the same
-handle. A terminal or reset session does not. Start a fresh conversation
+A session that hasn't ended (`session.ended`) accepts another message through the
+same handle. A terminal or reset session does not. Start a fresh conversation
 explicitly with another `client.sessions.create(firstTurn)` call.
 
 ```ts
 const reset = await session.reset({ reason: "Start over" });
-const { session: fresh, response } = await client.sessions.create({ message: "Begin again." });
+const { session: fresh, delivery } = await client.sessions.create({ message: "Begin again." });
 ```
 
 The old `session` remains pinned to its retired ID; `fresh` owns a different ID.
@@ -81,19 +81,19 @@ The old `session` remains pinned to its retired ID; `fresh` owns a different ID.
 Create one handle per conversation:
 
 ```ts
-const { session: research, response: researchResponse } = await client.sessions.create({
+const { session: research, delivery: researchDelivery } = await client.sessions.create({
   message: "Research competitors.",
 });
-const { session: support, response: supportResponse } = await client.sessions.create({
+const { session: support, delivery: supportDelivery } = await client.sessions.create({
   message: "Draft a support reply.",
 });
 
-await Promise.all([researchResponse.result(), supportResponse.result()]);
+await Promise.all([researchDelivery.result(), supportDelivery.result()]);
 await save("research", research.state);
 await save("support", support.state);
 ```
 
-The shared `Client` owns host, auth, headers, and redirect policy. Each
+The shared `Client` owns the base URL, auth, headers, and redirect policy. Each
 `ClientSession` owns its fixed ID and stream cursor.
 
 ## Reconnect an existing stream

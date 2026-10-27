@@ -1,20 +1,18 @@
-import type { UserContent } from "ai";
-import { openInputs } from "#protocol/session-projection.js";
+import type { MessageContent } from "#shared/message-content.js";
+import { openRequests, promptQueueHead } from "#protocol/session-projection/reader.js";
 
-import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
+import { answerFromText } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/hitl/stale-responses.js";
-import { isApprovalRequest } from "#harness/input-request-class.js";
-import { firstOpenInput } from "#harness/open-input-request.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
-import type { InputResponse } from "#shared/input.js";
-import type { SuspendedStep } from "#harness/session-machine/state.js";
-import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
+import type { Answer } from "#shared/input.js";
+import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";
+import { ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 
 // How a delivery reaches `answer`: queued input joins it, stale answers turn into text, and a
@@ -28,19 +26,19 @@ import type { SessionView } from "#harness/session-machine/view.js";
  */
 export function deliver(
   view: SessionView,
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
   options: { readonly takeQueued: boolean; readonly typedAnswers?: boolean },
 ): {
-  readonly input?: StepInput;
-  readonly displayMessage?: string | UserContent;
+  readonly input?: HarnessStepInput;
+  readonly displayMessage?: MessageContent;
   readonly takeQueued: boolean;
 } {
   const queued = options.takeQueued ? view.turn.queued : undefined;
-  const limit = openInputs(view.projection).find((entry) => entry.request.kind === "session-limit");
+  const limit = openRequests(view.projection.view).find((row) => row.request.kind === "budget");
   // Match the new typed answer before queued messages join it.
   const incoming =
     queued !== undefined && limit !== undefined && options.typedAnswers !== false
-      ? resolveTextInput({ requests: [limit.request] }, input)
+      ? resolveTextInput(view.projection.view, input)
       : input;
   const merged =
     queued === undefined
@@ -50,16 +48,19 @@ export function deliver(
         : coalesceTurnInputs(queued, incoming);
   // An approval settles on its own answer, before its batch resolves: the answer still counts
   // while its batch waits for the rest.
+  const tables = view.projection.view;
+  // An approval not asked yet, behind its step's tasks, still takes its answer.
   const pendingRequestIds = new Set([
     ...ownOpenRequestIds(view),
-    ...view.turn.suspended.flatMap((step) => step.requests.map((request) => request.requestId)),
+    ...view.turn.suspended.flatMap((step) =>
+      step.requests
+        .filter((ask) => tables.interactions[ask.interactionId] === undefined)
+        .map((ask) => ask.interactionId),
+    ),
   ]);
-  const known = new Map(
-    Object.values(view.projection.inputs).map((entry) => [entry.request.requestId, entry.request]),
-  );
   const converted = convertStaleResponsesToUserMessage({
     pendingRequestIds,
-    requests: known,
+    view: tables,
     stepInput: dropStaleSessionLimitContinuationResponses({ pendingRequestIds, stepInput: merged }),
   });
   return converted.kind === "converted"
@@ -71,34 +72,29 @@ export function deliver(
     : { input: converted.stepInput, takeQueued: options.takeQueued };
 }
 
-export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
+export type ResolvedStepInput = HarnessStepInput & { readonly messageConsumed?: boolean };
 
 /**
  * Plain text answers a budget prompt; `resolveTypedApproval` answers approvals. A channel
  * that wraps the typed text in an envelope for the model attaches the text itself to answer with.
- * The answer consumes the message and the context the channel sent about it: the model reads
- * neither.
+ * The answer consumes the message, with the context and history the channel sent with it: the
+ * model reads none of them.
  */
 export function resolveTextInput(
-  batch: Pick<SuspendedStep, "requests">,
-  stepInput: StepInput | undefined,
+  view: SessionTables,
+  stepInput: HarnessStepInput | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
-  const batchRequestIds = new Set(batch.requests.map((request) => request.requestId));
-  if (stepInput.inputResponses?.some((response) => batchRequestIds.has(response.requestId))) {
+  const batchRequestIds = new Set(openRequests(view).map((row) => row.interactionId));
+  if (stepInput.answers?.some((answer) => batchRequestIds.has(answer.interactionId))) {
     return stepInput;
   }
-  const responses = resolveTextToResponses(text, batch.requests);
-  if (responses.length === 0) return stepInput;
-  return compactInput({
-    ...stepInput,
-    context: undefined,
-    history: undefined,
-    inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
-    message: undefined,
-    messageConsumed: true,
-  });
+  const first = promptQueueHead(view);
+  const response = first === undefined ? undefined : answerFromText(text, first);
+  const answers = typedAnswers(stepInput, response === undefined ? [] : [response]);
+  if (answers === undefined) return stepInput;
+  return compactInput(consumeTypedMessage(stepInput, answers));
 }
 
 /**
@@ -109,61 +105,87 @@ export function resolveTextInput(
  */
 export function resolveTypedApproval(
   view: Pick<SessionView, "projection" | "turn">,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
-  const answered = new Set(
-    [
-      ...(stepInput.inputResponses ?? []),
-      ...(stepInput.attributedInputResponses ?? []).map(({ response }) => response),
-    ].map(({ requestId }) => requestId),
+  const answered = new Set((stepInput.answers ?? []).map(({ interactionId }) => interactionId));
+  const first = promptQueueHead(view.projection.view, (interactionId) =>
+    answered.has(interactionId),
   );
-  const first = firstOpenInput(view.projection, (requestId) => answered.has(requestId))?.request;
   const parked = view.turn.suspended.some((step) =>
-    step.requests.some((request) => request.requestId === first?.requestId),
+    step.requests.some((ask) => ask.interactionId === first?.interactionId),
   );
-  if (first === undefined || !parked || !isApprovalRequest(first)) return stepInput;
-  const response = resolveTextToResponse(text, first);
-  if (response === undefined) return stepInput;
+  if (first === undefined || !parked || first.request.kind !== "approval") return stepInput;
+  const response = answerFromText(text, first);
+  const answers = typedAnswers(stepInput, response === undefined ? [] : [response]);
+  if (answers === undefined) return stepInput;
+  return consumeTypedMessage(stepInput, answers);
+}
+
+function consumeTypedMessage(
+  input: HarnessStepInput,
+  answers: readonly SubmittedAnswer[],
+): ResolvedStepInput {
   return {
-    ...stepInput,
+    ...input,
+    answers: [...(input.answers ?? []), ...answers],
     context: undefined,
+    deliveries: withoutHistory(input.deliveries),
     history: undefined,
-    inputResponses: [...(stepInput.inputResponses ?? []), response],
     message: undefined,
     messageConsumed: true,
   };
 }
 
-export function canonicalize(responses: readonly InputResponse[]): readonly InputResponse[] {
-  const byRequestId = new Map<string, InputResponse>();
-  for (const response of responses) byRequestId.set(response.requestId, response);
-  return [...byRequestId.values()];
+/** A message consumed as an answer imports nothing, so its deliveries record no history. */
+function withoutHistory(
+  deliveries: HarnessStepInput["deliveries"],
+): HarnessStepInput["deliveries"] {
+  return deliveries?.map(({ history: _history, ...delivery }) => delivery);
 }
 
-export function isEmptyInput(input: StepInput): boolean {
+/**
+ * The answers a typed message stands for, submitted from the delivery that carried it, so they
+ * keep one identity through coalescing and policy passes as a press does. Text that arrived in
+ * no delivery answers nothing.
+ */
+function typedAnswers(
+  input: HarnessStepInput,
+  answers: readonly Answer[],
+): readonly SubmittedAnswer[] | undefined {
+  const deliveryId = input.deliveries?.at(-1)?.deliveryId;
+  if (deliveryId === undefined || answers.length === 0) return undefined;
+  return answers.map((answer, index) => ({
+    ...answer,
+    deliveryId,
+    responseId: typedResponseId(deliveryId, index),
+  }));
+}
+
+export function typedResponseId(deliveryId: string, index: number): string {
+  return `response_${deliveryId}_typed_${String(index)}`;
+}
+
+export function isEmptyInput(input: HarnessStepInput): boolean {
   return Object.keys(compactInput(input)).length === 0;
 }
 
-export function withoutResponses(input: ResolvedStepInput | undefined): StepInput | undefined {
+export function withoutResponses(
+  input: ResolvedStepInput | undefined,
+): HarnessStepInput | undefined {
   if (input === undefined) return undefined;
-  const {
-    attributedInputResponses: _attributed,
-    inputResponses: _responses,
-    messageConsumed: _consumed,
-    ...rest
-  } = input;
+  const { answers: _answers, messageConsumed: _consumed, ...rest } = input;
   return rest;
 }
 
-/** The turn's own input: the message a plain-text answer didn't consume, its history and context. */
-export function turnInputOnly(input: ResolvedStepInput | undefined): StepInput | undefined {
+/** The turn's own input: the message a plain-text answer didn't consume, and its context. */
+export function turnInputOnly(input: ResolvedStepInput | undefined): HarnessStepInput | undefined {
   if (input === undefined) return undefined;
   const result: {
-    context?: StepInput["context"];
-    history?: StepInput["history"];
-    message?: StepInput["message"];
+    context?: HarnessStepInput["context"];
+    history?: HarnessStepInput["history"];
+    message?: HarnessStepInput["message"];
   } = {};
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
   if ((input.history?.length ?? 0) > 0) result.history = input.history;
@@ -175,10 +197,12 @@ export function turnInputOnly(input: ResolvedStepInput | undefined): StepInput |
 /** What of the input isn't the turn's: answers, and the output the session asks for. */
 export function withoutTurnInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
   const result: {
-    inputResponses?: StepInput["inputResponses"];
-    outputSchema?: StepInput["outputSchema"];
+    answers?: HarnessStepInput["answers"];
+    outputSchema?: HarnessStepInput["outputSchema"];
+    deliveries?: HarnessStepInput["deliveries"];
   } = {};
-  if ((input?.inputResponses?.length ?? 0) > 0) result.inputResponses = input!.inputResponses;
+  if ((input?.answers?.length ?? 0) > 0) result.answers = input!.answers;
+  if ((input?.deliveries?.length ?? 0) > 0) result.deliveries = input!.deliveries;
   if (input?.outputSchema !== undefined) result.outputSchema = input.outputSchema;
   return result;
 }
@@ -186,16 +210,18 @@ export function withoutTurnInput(input: ResolvedStepInput | undefined): Resolved
 export function compactInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
   if (input === undefined) return {};
   const result: {
-    context?: StepInput["context"];
-    history?: StepInput["history"];
-    inputResponses?: StepInput["inputResponses"];
-    message?: StepInput["message"];
+    context?: HarnessStepInput["context"];
+    history?: HarnessStepInput["history"];
+    answers?: HarnessStepInput["answers"];
+    message?: HarnessStepInput["message"];
     messageConsumed?: boolean;
-    outputSchema?: StepInput["outputSchema"];
+    outputSchema?: HarnessStepInput["outputSchema"];
+    deliveries?: HarnessStepInput["deliveries"];
   } = {};
+  if ((input.deliveries?.length ?? 0) > 0) result.deliveries = input.deliveries;
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
   if ((input.history?.length ?? 0) > 0) result.history = input.history;
-  if ((input.inputResponses?.length ?? 0) > 0) result.inputResponses = input.inputResponses;
+  if ((input.answers?.length ?? 0) > 0) result.answers = input.answers;
   if (input.message !== undefined) result.message = input.message;
   if (input.messageConsumed === true) result.messageConsumed = true;
   if (input.outputSchema !== undefined) result.outputSchema = input.outputSchema;

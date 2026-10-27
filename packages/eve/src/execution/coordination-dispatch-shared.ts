@@ -22,6 +22,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { HarnessSessionBase } from "#harness/types.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { assertUniqueCoordinationCallIds } from "#harness/coordination.js";
 import {
   activeTurnId,
@@ -29,7 +30,8 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCallStart } from "#harness/session-machine/transitions.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -40,7 +42,7 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { readDynamicSubagentSelections } from "#context/dynamic-subagent-lifecycle.js";
+import { readDynamicSubagentSelections } from "#reactions/kinds/subagent.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
@@ -56,8 +58,18 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /** The tasks the dispatch started or sent to, for the step that publishes `task.started`. */
-  readonly started: readonly TaskStartedStreamEvent["data"][];
+  /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
+  readonly pending: PendingDispatchFacts;
+}
+
+/** The calls a dispatch started or refused, recorded on the session but not yet published. */
+export interface PendingDispatchFacts {
+  /** Calls the turn waits on, each running from now in a run of its own. */
+  readonly executing: readonly FactOf<"call.started">[];
+  /** Tasks the dispatch started or sent a call to. */
+  readonly started: readonly TaskCallStart[];
+  /** Calls a dispatch admission refused before any run started. */
+  readonly refused: readonly FactOf<"call.settled">[];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */
@@ -142,6 +154,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   assertUniqueCoordinationCallIds(batch.requests);
 
   const ctx = input.ctx;
+  enterSessionProjection(ctx, durableSession.state);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({

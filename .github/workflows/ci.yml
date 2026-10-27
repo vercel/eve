@@ -1,13 +1,11 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
-env:
-  EVE_SANDBOX_IMAGE_TAG: latest
 
 jobs:
   lint:
@@ -37,6 +35,9 @@ jobs:
 
       - name: Check dependency versions are in sync
         run: pnpm check:deps
+
+      - name: Check the pinned sandbox image tag matches the Dockerfile
+        run: pnpm check:sandbox-image-tag
 
       - name: Guard against committed test fixtures
         run: pnpm guard:fixtures
@@ -156,6 +157,10 @@ jobs:
         with:
           bun-version: "1.4.4"
 
+      # This job builds agents whose sandboxes pull eve's default image.
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -240,6 +245,10 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
+      # This job builds agents whose sandboxes pull eve's default image.
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -265,6 +274,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
+
+      # This job builds agents whose sandboxes pull eve's default image.
+      - name: Resolve eve sandbox image
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

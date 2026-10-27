@@ -17,9 +17,7 @@ import {
   type ModelRouting,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
-import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -112,7 +110,6 @@ export async function compileAgentConfig(
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
   if (dynamicModelDefinition !== undefined) {
     dynamicModel = {
-      eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
       exportName: configModule.exportName,
       sourceKind: "module",
       logicalPath: configModule.logicalPath,
@@ -297,12 +294,11 @@ async function normalizeAuthoredModelReference(input: {
         return {
           ...sourceBackedModel,
           id: providerResult.slug,
-          contextWindowTokens: providerResult.limits.contextWindowTokens,
-          maxOutputTokens: providerResult.limits.maxOutputTokens,
+          contextWindowTokens: providerResult.contextWindowTokens,
         };
       }
     } catch {
-      // Slug lookup below still resolves built-in limits and otherwise resurfaces the catalog error.
+      // The slug lookup below resurfaces the catalog error.
     }
   }
 
@@ -368,15 +364,11 @@ async function withCompiledRuntimeModelLimits(
     };
   }
 
-  let limits: CompiledRuntimeModelLimits | null;
-
-  try {
-    limits = await input.modelCatalog.getModelLimits(model.id);
-  } catch (error) {
+  const limits = await input.modelCatalog.getModelLimits(model.id).catch((error: unknown) => {
     throw new Error(
       `Failed to load AI Gateway model metadata for ${input.purpose} "${model.id}". ${toErrorMessage(error)}`,
     );
-  }
+  });
 
   if (limits === null) {
     throw new Error(
@@ -387,7 +379,6 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
-    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

@@ -167,11 +167,29 @@ export function listMarks(marks) {
   return list;
 }
 
-/** When the work just before a tool ended: the step that asked for it, or an earlier tool. */
-export function hopStart(turn, tool) {
+/**
+ * A turn's tool calls, grouped by the model step that requested them. eve
+ * may stream one `actions.requested` per call, so a step's calls can arrive
+ * as several events. Calls keep the turn's start order, so a batch's first call
+ * started first.
+ */
+export function toolBatches(turn) {
+  const batches = new Map();
+  for (const tool of turn.tools) {
+    // Every tool start has a step key: sessionMarks skips keyless outputs.
+    const key = stepKey(tool.start.via);
+    const batch = batches.get(key) ?? [];
+    batch.push(tool);
+    batches.set(key, batch);
+  }
+  return [...batches.values()];
+}
+
+/** When the work just before a batch of tools ended: the step that asked for it, or an earlier tool. */
+export function hopStart(turn, batch) {
   const ends = [
     ...turn.steps.map((step) => step.done?.t),
-    ...turn.tools.filter((other) => other !== tool).map((other) => other.end?.t),
-  ].filter((t) => t !== undefined && t <= tool.start.t);
+    ...turn.tools.filter((other) => !batch.includes(other)).map((other) => other.end?.t),
+  ].filter((t) => t !== undefined && t <= batch[0].start.t);
   return ends.length === 0 ? undefined : Math.max(...ends);
 }

@@ -31,54 +31,47 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.reasoning).toBe("high");
   });
 
-  it("accepts dynamic model definitions", () => {
-    const model = defineDynamic({
-      events: {
-        "session.started": () => "openai/gpt-5.5-mini",
-      },
-    });
-    const definition = normalizeAgentDefinition(
-      {
-        model,
-      },
-      FAILURE_MESSAGE,
-    );
+  it("accepts a dynamic model field beside static fields", () => {
+    const model = defineDynamic(() => "openai/gpt-5.5-mini");
+    const definition = normalizeAgentDefinition({ defaultTools: false, model }, FAILURE_MESSAGE);
 
-    expect(definition.model).toMatchObject({
-      kind: "eve:dynamic",
-    });
-    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
+    expect(definition.defaultTools).toBe(false);
+    expect(definition.model).toBe(model);
   });
 
-  it("rejects fallback-shaped dynamic models", () => {
+  it("rejects a dynamic agent.ts, pointing at the dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
-        {
-          model: {
-            events: { "session.started": () => "openai/gpt-5.5-mini" },
-            fallback: "openai/gpt-5.5",
-            kind: "eve:dynamic",
-          },
-        },
+        defineDynamic(() => ({ model: "openai/gpt-5.5-mini" })),
         FAILURE_MESSAGE,
       ),
-    ).toThrow('Unknown key "fallback"');
+    ).toThrow(/make the model field dynamic/);
   });
 
-  it("rejects definition-level model metadata for dynamic models", () => {
+  it("rejects model settings beside a dynamic model", () => {
     expect(() =>
       normalizeAgentDefinition(
         {
-          model: defineDynamic({
-            events: {
-              "session.started": () => "openai/gpt-5.5-mini",
-            },
-          }),
+          model: defineDynamic(() => "openai/gpt-5.5-mini"),
           modelContextWindowTokens: 128_000,
         },
         FAILURE_MESSAGE,
       ),
-    ).toThrow(/Dynamic model.*modelContextWindowTokens/);
+    ).toThrow(/returns its "modelContextWindowTokens" and "modelOptions" with the model/);
+  });
+
+  it("rejects keys beside a dynamic model's function", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: {
+            ...defineDynamic(() => "openai/gpt-5.5-mini"),
+            reasoning: "high",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/takes only a function; unknown key\(s\): reasoning/);
   });
 
   it("rejects a dynamic compaction model", () => {
@@ -86,11 +79,7 @@ describe("normalizeAgentDefinition", () => {
       normalizeAgentDefinition(
         {
           compaction: {
-            model: defineDynamic({
-              events: {
-                "session.started": () => "openai/gpt-5.5-mini",
-              },
-            }),
+            model: defineDynamic(() => "openai/gpt-5.5-mini"),
           },
           model: "openai/gpt-5.5",
         },
@@ -393,7 +382,7 @@ describe("normalizeScheduleDefinition", () => {
       normalizeScheduleDefinition(
         {
           cron: "0 9 * * *",
-          markdown: "Send a digest.",
+          content: "Send a digest.",
           [field]: () => "user-approval",
         },
         "Expected the schedule config to match the public eve shape.",
@@ -418,11 +407,10 @@ describe("normalizeInstructionsDefinition", () => {
     ).toEqual({ content: "Tenant context.", role: "user" });
   });
 
-  it("normalizes the deprecated markdown shape as system content", () => {
-    expect(normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toEqual({
-      content: "Legacy.",
-      role: "system",
-    });
+  it("rejects the retired markdown alias", () => {
+    expect(() => normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toThrow(
+      'Unknown key "markdown"',
+    );
   });
 
   it.each([
