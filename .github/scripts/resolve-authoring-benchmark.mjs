@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -29,7 +29,7 @@ export function parseDirective(body) {
 
 /**
  * `models` is required; `cases` defaults to the published cases (`all` selects
- * every case) and `runs` to 1.
+ * every case the native runner can run) and `runs` to 1.
  */
 export function resolveSelection({ models, cases, runs }, { caseExists, allCases }) {
   if (!models?.trim()) {
@@ -101,10 +101,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     appendFileSync(process.env.GITHUB_OUTPUT, "run=false\n");
     process.exit(0);
   }
-  const caseExists = (name) => existsSync(join(evalsRoot, name, "CASE.ts"));
+  // Loading cases needs the benchmark app's dependencies, so only `all` pays for it.
+  const allCases =
+    options.cases?.trim() === "all"
+      ? await (
+          await import("../../apps/benchmarks/lib/experiment-files.mjs")
+        ).nativeFixtureNames(evalsRoot)
+      : [];
   const selection = resolveSelection(options, {
-    caseExists,
-    allCases: () => readdirSync(evalsRoot).filter(caseExists).sort(),
+    caseExists: (name) => existsSync(join(evalsRoot, name, "CASE.ts")),
+    allCases: () => allCases,
   });
   console.log(JSON.stringify(selection, null, 2));
   appendFileSync(

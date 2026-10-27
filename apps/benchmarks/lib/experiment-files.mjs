@@ -10,6 +10,16 @@ export function fixtureNames(evalsRoot) {
     .sort();
 }
 
+/** Fixtures the native agent-eval runner can run, which excludes multi-turn cases. */
+export async function nativeFixtureNames(evalsRoot) {
+  const names = [];
+  for (const name of fixtureNames(evalsRoot)) {
+    const prompts = await casePrompts(await loadCase(join(evalsRoot, name)));
+    if (prompts.length === 1) names.push(name);
+  }
+  return names;
+}
+
 export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(evalsRoot)) {
   let timeoutSeconds;
   for (const name of names) {
@@ -54,7 +64,7 @@ async function loadCase(fixtureRoot) {
   return authoringCase;
 }
 
-async function promptForCase(authoringCase, fixtureRoot) {
+async function casePrompts(authoringCase) {
   const prompts = [];
   await authoringCase.interact({
     send: async (prompt) => {
@@ -62,6 +72,11 @@ async function promptForCase(authoringCase, fixtureRoot) {
       return { text: "", toolCalls: [] };
     },
   });
+  return prompts;
+}
+
+async function promptForCase(authoringCase, fixtureRoot) {
+  const prompts = await casePrompts(authoringCase);
   if (prompts.length !== 1) {
     throw new Error(
       `${fixtureRoot}/CASE.ts is multi-turn and cannot run on a native agent-eval runner.`,

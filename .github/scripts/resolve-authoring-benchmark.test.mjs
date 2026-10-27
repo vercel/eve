@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { publishedBenchmark } from "../../apps/benchmarks/lib/benchmark-config.ts";
+import {
+  fixtureNames,
+  nativeFixtureNames,
+  prepareFixtures,
+} from "../../apps/benchmarks/lib/experiment-files.mjs";
 import {
   parseDirective,
   requestOptions,
@@ -103,4 +109,12 @@ test("reads dispatch inputs, or the PR body for label runs", () => {
     requestOptions({ GITHUB_EVENT_NAME: "pull_request", PR_BODY: "Fixes a bug." }),
     null,
   );
+});
+
+test("all selects only the cases the native runner can prepare", async () => {
+  const evalsRoot = join(import.meta.dirname, "../../apps/benchmarks/evals");
+  const cases = await nativeFixtureNames(evalsRoot);
+  assert.ok(fixtureNames(evalsRoot).includes("author-000-imessage"));
+  assert.ok(!cases.includes("author-000-imessage"));
+  await prepareFixtures(evalsRoot, { revision: "main" }, cases);
 });

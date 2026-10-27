@@ -14,12 +14,12 @@ authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-010-ops-agent ru
 ```
 
 `models` is required, and `models=all` selects every supported model. `cases` defaults to the
-published cases (`cases=all` selects every case) and `runs` to 1. Each model runs as its own job
+published cases (`cases=all` selects every single-prompt case) and `runs` to 1. Each model runs as its own job
 with its own summary and results artifact. Remove and re-add the label to run again. The workflow
 can also be dispatched from the Actions tab on a branch with the same options as inputs.
 
-Every night, the workflow runs Haiku 5.5 three times on every case against `main`. It skips the run
-when `main` has not moved since the last successful nightly run. Nightly runs, dispatches on `main`,
+Every night, the workflow runs Haiku 5.5 three times on every single-prompt case against `main`.
+It skips the run when `main` has not moved since the last successful nightly run. Nightly runs, dispatches on `main`,
 and labeled PR runs publish to the private benchmark Blob store, like the nightly Eval Benchmark.
 Every model runs the same eve package: the workflow pins `main`'s package to one commit before any
 model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
