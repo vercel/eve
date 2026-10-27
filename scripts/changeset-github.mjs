@@ -26,11 +26,11 @@ export async function pullRequestFor(commit, id) {
     );
   const message = execFileSync("git", ["show", "-s", "--format=%B", commit], { encoding: "utf8" });
   const coauthors = [
-    ...message.matchAll(/^Co-authored-by:.*<\d+\+([^@>]+)@users\.noreply\.github\.com>/gimu),
+    ...message.matchAll(/^Co-authored-by:.*<(?:\d+\+)?([^@>]+)@users\.noreply\.github\.com>/gimu),
   ].map((match) => match[1]);
   return {
     number: pulls[0].number,
-    title: pulls[0].title,
+    subject: message.split(/\r?\n/u)[0],
     author: pulls[0].user?.login,
     coauthors,
   };

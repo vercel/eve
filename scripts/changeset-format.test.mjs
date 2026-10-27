@@ -7,17 +7,27 @@ import test from "node:test";
 import { classifyTitle, parseSummary } from "./changeset-format.mjs";
 import formatter from "../.changeset/changelog.mjs";
 
-test("changeset summaries are plain sentences and PR titles select the category", () => {
-  assert.deepEqual(parseSummary("Clarify the setup.\n\nThanks @Alice.", "doc"), {
-    summary: "Clarify the setup.",
-    contributors: ["Alice"],
-  });
+test("changeset summaries preserve details and credit only thanked handles", () => {
+  assert.deepEqual(
+    parseSummary(
+      "Clarify the setup.\n\nUpgrade @ai-sdk/provider and visit https://example.com/@user/page.\n\nThanks @Alice and @Bob for `@vercel/blob` and @ai-sdk/provider.",
+      "doc",
+    ),
+    {
+      summary: "Clarify the setup.",
+      details:
+        "Upgrade @ai-sdk/provider and visit https://example.com/@user/page.\n\nThanks @Alice and @Bob for `@vercel/blob` and @ai-sdk/provider.",
+      contributors: ["Alice", "Bob"],
+    },
+  );
   for (const text of ["Missing punctuation", "First sentence. Second sentence."]) {
     assert.throws(() => parseSummary(text, "bad"), /Changeset bad:/u);
   }
   for (const [title, category] of [
     ["feat(eve): Add a tool", "feature"],
     ["fix: Repair a tool", "bugfix"],
+    ["[7/7] fix(eve): Repair a tool", "bugfix"],
+    ["perf(eve): Speed up a tool", "feature"],
     ["docs(feature): Add a guide", "feature"],
     ["docs(bugfix): Correct a guide", "bugfix"],
     ["chore: Update tooling", "internal"],
@@ -39,7 +49,23 @@ test("proposed PR titles can be validated locally without GitHub", () => {
 });
 
 test("the Changesets formatter produces readable Markdown without encoded metadata", async (t) => {
-  const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const originalCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "eve-formatter-test-"));
+  t.after(async () => {
+    process.chdir(originalCwd);
+    await rm(root, { recursive: true, force: true });
+  });
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: root, stdio: "pipe" }).toString().trim();
+  git("init", "-q");
+  git("config", "user.name", "Test Author");
+  git("config", "user.email", "test@example.com");
+  git("config", "commit.gpgsign", "false");
+  await writeFile(join(root, "change.txt"), "change\n");
+  git("add", "change.txt");
+  git("commit", "-qm", "fix: Add a tool");
+  const commit = git("rev-parse", "HEAD");
+  process.chdir(root);
   const oldToken = process.env.GITHUB_TOKEN;
   process.env.GITHUB_TOKEN = "fixture";
   t.after(() => {
@@ -54,7 +80,7 @@ test("the Changesets formatter produces readable Markdown without encoded metada
         JSON.stringify([
           {
             number: 10,
-            title: "feat: Add a tool",
+            title: "Edited title without a category",
             user: { login: "Alice" },
             merged_at: "2026-01-01",
             base: { ref: "main" },
@@ -65,7 +91,7 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   const line = await formatter.getReleaseLine({ id: "example", summary: "Add a tool.", commit });
   assert.match(
     line,
-    /#### 🚀 Features\n\n- Add a tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
+    /#### 🐛 Bug Fix\n\n- Add a tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
   );
   assert.match(line, /#### Contributors\n\n- \[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.doesNotMatch(line, /<!--/u);
@@ -115,25 +141,31 @@ test("version-packages assembles changesets across bump types and preserves old 
     stdio: "pipe",
     env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "No changeset" },
   });
-  await write(".changeset/a.md", '---\n"eve": minor\n---\n\nAdd a new tool.\n\nThanks @Alice.\n');
+  await write(
+    ".changeset/a.md",
+    '---\n"eve": minor\n---\n\nAdd a new tool.\n\nMigrate old callers to the new tool.\n\nThanks @Alice.\n',
+  );
   await write(".changeset/d.md", '---\n"eve": patch\n---\n\nImprove the new tool.\n');
   git("add", ".changeset/a.md", ".changeset/d.md");
-  git("commit", "-qm", "Add feature\n\nCo-authored-by: Bob <123+Bob@users.noreply.github.com>");
+  git(
+    "commit",
+    "-qm",
+    "feat: Add a tool\n\nCo-authored-by: Bob <123+Bob@users.noreply.github.com>\nCo-authored-by: Carol <Carol@users.noreply.github.com>",
+  );
   const first = git("rev-parse", "HEAD");
   await write(".changeset/b.md", '---\n"eve": patch\n---\n\nCorrect the setup guide.\n');
   await write(".changeset/c.md", '---\n"eve": patch\n---\n\nUpdate the release tooling.\n');
   git("add", ".changeset/b.md");
-  git("commit", "-qm", "Update docs");
+  git("commit", "-qm", "docs(bugfix): Correct the guide");
   const second = git("rev-parse", "HEAD");
   git("add", ".changeset/c.md");
-  git("commit", "-qm", "Update tooling");
+  git("commit", "-qm", "chore: Update tooling");
+  await write(".changeset/e.md", '---\n"eve": patch\n---\n\nKeep the legacy change visible.\n');
+  git("add", ".changeset/e.md");
+  git("commit", "-qm", "Legacy change");
   await write(
     "mock-github.mjs",
-    `globalThis.fetch = async (url) => new Response(JSON.stringify([{number: url.includes(${JSON.stringify(first)}) ? 10 : url.includes(${JSON.stringify(second)}) ? 11 : 12, title: url.includes(${JSON.stringify(first)}) ? "feat: Add a tool" : url.includes(${JSON.stringify(second)}) ? "docs(bugfix): Correct the guide" : "chore: Update tooling", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]), {status: 200});`,
-  );
-  await write(
-    "mock-invalid-github.mjs",
-    `globalThis.fetch = async () => new Response(JSON.stringify([{number: 10, title: "Update the tool", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]));`,
+    `globalThis.fetch = async (url) => new Response(JSON.stringify([{number: url.includes(${JSON.stringify(first)}) ? 10 : url.includes(${JSON.stringify(second)}) ? 11 : 12, title: "Edited title", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]), {status: 200});`,
   );
   assert.throws(() =>
     execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
@@ -160,21 +192,6 @@ test("version-packages assembles changesets across bump types and preserves old 
     "1.0.0",
   );
   assert.match(await readFile(join(root, ".changeset/a.md"), "utf8"), /Add a new tool\./u);
-  assert.throws(() =>
-    execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
-      cwd: root,
-      stdio: "pipe",
-      env: {
-        ...process.env,
-        GITHUB_TOKEN: "fixture",
-        NODE_OPTIONS: `--import=${join(root, "mock-invalid-github.mjs")}`,
-      },
-    }),
-  );
-  assert.equal(
-    JSON.parse(await readFile(join(root, "packages/eve/package.json"), "utf8")).version,
-    "1.0.0",
-  );
   execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
     cwd: root,
     stdio: "pipe",
@@ -193,8 +210,24 @@ test("version-packages assembles changesets across bump types and preserves old 
   assert.match(changelog, /- Improve the new tool\. \[#10\]/u);
   assert.equal([...changelog.matchAll(/^### 🚀 Features$/gmu)].length, 1);
   assert.match(changelog, /### 🐛 Bug Fix\n\n- Correct the setup guide\. \[#11\]/u);
+  assert.match(changelog, /### Other Changes\n\n- Keep the legacy change visible\. \[#12\]/u);
   assert.match(changelog, /\[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.match(changelog, /\[@Bob\]\(https:\/\/github\.com\/Bob\)/u);
+  assert.match(changelog, /\[@Carol\]\(https:\/\/github\.com\/Carol\)/u);
+  assert.match(changelog, /\n\n  Migrate old callers to the new tool\./u);
   assert.doesNotMatch(changelog, /Update the release tooling|eve-changeset:/u);
   assert.match(changelog, /## 1\.0\.0\n\nOld release\./u);
+  await write(
+    "packages/eve/CHANGELOG.md",
+    "# eve\n\n## 1.1.0\n\n### Minor Changes\n\n#### 🚀 Features\n\n- Recover the release. [#10](https://github.com/vercel/eve/pull/10)\n\n## 1.0.0\n\nOld release.\n",
+  );
+  execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
+    cwd: root,
+    stdio: "pipe",
+    env: envWithoutToken,
+  });
+  assert.match(
+    await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8"),
+    /### 🚀 Features\n\n- Recover the release\./u,
+  );
 });

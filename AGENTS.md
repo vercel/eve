@@ -257,13 +257,14 @@ Every PR that touches the published `eve` package must include a
 changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
 cases, including bug fixes and new features. Use `minor` only when the change
 breaks a public API. Start the changeset body with one sentence for someone
-reading release notes, then put contributor thanks in a separate paragraph.
-For PRs with changesets, use `feat:`, `fix:`, `docs(feature):`,
+reading release notes; put migration details and contributor thanks in later
+paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`, `docs(feature):`,
 `docs(bugfix):`, or an internal type (`chore:`, `refactor:`, `test:`, `ci:`,
 `build:`, or `internal:`) in the PR title. An optional scope is allowed for
 all types except `docs`, where the scope selects the feature or bug fix section.
-The title determines the release section independently of the version bump;
-internal changes are omitted from both public sections. Run
+Keep this prefix in the squash-merge commit subject: the committed subject
+determines the release section independently of the version bump. Internal
+changes are omitted from both public sections. Run
 `pnpm guard:invariants` to validate changeset summaries and
 `pnpm check:pr-title "feat: description"` to check a proposed PR title locally.
 CI validates the actual PR title. See
