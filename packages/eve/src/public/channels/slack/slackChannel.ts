@@ -23,7 +23,6 @@ import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import type { CardElement } from "#public/channels/slack/cards.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -43,6 +42,7 @@ import {
   type SlackBotToken,
   type SlackHandle,
   type SlackThread,
+  type SlackPostInput,
   type SlackWorkspaceHandle,
 } from "#public/channels/slack/api.js";
 import {
@@ -391,13 +391,10 @@ export interface SlackCodeChannelTarget {
 
 /**
  * Pre-agent post issued by `slackChannel().receive` when the caller
- * provides `target.initialMessage`. Mirrors `ctx.thread.post`'s card
- * variant so the same `Card({...})` construction can be reused.
+ * provides `target.initialMessage`. Accepts the same explicit message forms
+ * as `ctx.thread.post`: Markdown, text, blocks, or a card, plus optional files.
  */
-export interface SlackInitialMessage {
-  readonly card: CardElement;
-  readonly fallbackText?: string;
-}
+export type SlackInitialMessage = SlackPostInput;
 
 /**
  * Options for one turn requested by a generic Slack event handler.
@@ -1147,13 +1144,7 @@ async function receiveOnSlack(
       installationTeamId,
       teamId: deps.teamId,
     });
-    const postInput: { card: CardElement; fallbackText?: string } = {
-      card: initialMessage.card,
-    };
-    if (initialMessage.fallbackText !== undefined) {
-      postInput.fallbackText = initialMessage.fallbackText;
-    }
-    const posted = await thread.post(postInput);
+    const posted = await thread.post(initialMessage);
     threadTs = posted.id;
   }
 
