@@ -30,5 +30,10 @@ export default defineEval({
     });
     await t.require(allowed.status, equals(200));
     await allowed.text();
+
+    const greeting = await session.start(
+      "Alice has confirmed her workspace access. Greet her briefly without calling tools.",
+    );
+    (await greeting.result()).expectOk();
   },
 });
