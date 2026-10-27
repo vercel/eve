@@ -376,6 +376,12 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/goal": {
+      "eve-source": "./dist/src/extensions/goal/extension/extension.js",
+      "types": "./dist/src/extensions/goal/extension/extension.d.ts",
+      "import": "./dist/src/extensions/goal/extension/extension.js",
+      "default": "./dist/src/extensions/goal/extension/extension.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -768,6 +774,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/goal": {
+        "dist": "./dist/src/extensions/goal/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
