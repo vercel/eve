@@ -11,21 +11,21 @@ if (typeof directory !== "string" || !/^packages\/[a-z0-9][a-z0-9-]*$/u.test(dir
 const source = await readFile(join(packageRoot, "CHANGELOG.md"), "utf8");
 const lines = source.split(/\r?\n/u);
 const headings = [];
+function nextFence(fence, line) {
+  const delimiter = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
+  if (!fence) return delimiter;
+  return delimiter &&
+    delimiter[0] === fence[0] &&
+    delimiter.length >= fence.length &&
+    /^ {0,3}(?:`+|~+)\s*$/u.test(line)
+    ? undefined
+    : fence;
+}
 let fence;
 for (const [index, line] of lines.entries()) {
-  const delimiter = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
-  if (fence) {
-    if (
-      delimiter &&
-      delimiter[0] === fence[0] &&
-      delimiter.length >= fence.length &&
-      /^ {0,3}(?:`+|~+)\s*$/u.test(line)
-    )
-      fence = undefined;
-    continue;
-  }
-  if (delimiter) {
-    fence = delimiter;
+  const next = nextFence(fence, line);
+  if (fence || next) {
+    fence = next;
     continue;
   }
   const heading = /^##[ \t]+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)[ \t]*$/u.exec(
@@ -39,8 +39,22 @@ const index = headings.findIndex(({ version }) => version === requested);
 const selected = index >= 0 ? index : headings.findIndex(({ version }) => version === base);
 if (selected < 0) throw new Error(`No changelog entry for ${manifest.name}@${requested}.`);
 
-const entry = lines
-  .slice(headings[selected].index, headings[selected + 1]?.index)
+const entryLines = lines.slice(headings[selected].index + 1, headings[selected + 1]?.index);
+const first = entryLines.findIndex((line) => line.trim());
+const releasePrefix = `### Release ${manifest.name}@${headings[selected].version} | `;
+const hasReleaseHeading = first >= 0 && entryLines[first].startsWith(releasePrefix);
+const releaseHeading = hasReleaseHeading
+  ? `# ${entryLines[first].slice(4)}`
+  : `# Release ${manifest.name}@${headings[selected].version}`;
+const bodyLines = entryLines.slice(hasReleaseHeading ? first + 1 : 0);
+let bodyFence;
+const entry = bodyLines
+  .map((line) => {
+    const next = nextFence(bodyFence, line);
+    const inside = bodyFence || next;
+    bodyFence = next;
+    return inside ? line : line.replace(/^### /u, "## ");
+  })
   .join("\n")
   .trim();
 const gitRevision = /\+git\.([a-f0-9]{16})$/iu.exec(requested)?.[1];
@@ -58,6 +72,6 @@ const fullSha =
     : undefined;
 const ref = gitRevision && selected === 0 ? (fullSha ?? gitRevision) : `refs/tags/${tag}`;
 const fullHistory = `https://raw.githubusercontent.com/vercel/eve/${ref}/${directory}/CHANGELOG.md`;
-const content = `# ${manifest.name}\n\n${preview}${entry}\n\nFor upgrades across versions, review the [full changelog through this version](${fullHistory}).\n`;
+const content = `${releaseHeading}\n\n${preview}${entry}\n\nFor upgrades across versions, review the [full changelog through this version](${fullHistory}).\n`;
 await mkdir(join(packageRoot, "dist"), { recursive: true });
 await writeFile(join(packageRoot, "dist", "CHANGELOG.md"), content);
