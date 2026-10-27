@@ -44,7 +44,7 @@ test("npm and pnpm pack only the current release without changing the repository
     assert.doesNotMatch(changelog, /Future change/u);
     assert.match(
       changelog,
-      /https:\/\/raw\.githubusercontent\.com\/vercel\/eve\/refs\/tags\/eve%401\.2\.3\/packages\/eve\/CHANGELOG\.md/u,
+      /\[full changelog through this version\]\(https:\/\/raw\.githubusercontent\.com\/vercel\/eve\/refs\/tags\/eve%401\.2\.3\/packages\/eve\/CHANGELOG\.md\)/u,
     );
   }
   assert.equal(await readFile(join(root, "CHANGELOG.md"), "utf8"), source);
