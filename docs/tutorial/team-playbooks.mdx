@@ -3,13 +3,13 @@ title: "Team Playbooks"
 description: "Part 6 of the Build an Agent tutorial. Load the caller's team playbook with a dynamic skill keyed on the principal."
 ---
 
-The glossary from [Step 5](./remember-definitions) is per-session. But your teams have standing analysis conventions for the analytics assistant (Growth groups revenue by date, Finance reconciles customer totals), and those shouldn't bleed across tenants. Load the right team's playbook for whoever is asking.
+The glossary from [Step 5](./remember-definitions) is per-session. But your teams have standing analysis conventions: Growth groups revenue by date, and Finance reconciles customer totals. One team's conventions shouldn't reach another team, so load the playbook for whoever is asking.
 
-A skill is an on-demand procedure. The model pulls it in with `eve__skill({ name })` only when a turn needs it. Make it dynamic and the skill gets decided at runtime instead of baked in. A `defineDynamic` function reads the session and returns a `defineSkill` or `null`. Here the caller's identity in `ctx.session.auth` decides which playbook is available.
+A skill is an on-demand procedure the model loads with `eve__skill({ name })` only when a turn needs it. A dynamic skill is decided at runtime: a `defineDynamic` function reads the session and returns a `defineSkill` or `null`. Here the signed-in caller in `ctx.session.auth` decides which playbook is available. eve calls this signed-in identity the principal.
 
 ## A playbook per principal
 
-`ctx.session.auth.current` holds the most recent caller, or `null` if there isn't one. Its `attributes` are the claims your auth layer stamped on, including the team. Select the team, then return that team's playbook as a skill:
+`ctx.session.auth.current` holds the most recent caller, or `null` if there isn't one. Its `attributes` are the values your auth code added, including the team. Select the team, then return that team's playbook as a skill:
 
 ```ts title="agent/skills/team-playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
@@ -44,17 +44,17 @@ export default defineDynamic((ctx) => {
 });
 ```
 
-The function reads the caller's team and returns its skill before each model call, so later caller changes update the playbook. Returning `null` produces no skill, so a caller with no team gets no playbook.
+The function runs before each model call, so a later caller change updates the playbook. A caller with no team gets `null` and no playbook.
 
 ## See it route
 
-The team comes from authenticated claims, which the auth layer stamps on in [Step 8](./ship-it). Until then `ctx.session.auth.current` has no `team`, so the function returns `null` and no playbook loads. To verify routing now, stamp a team in local dev. Add a dev-only entry to `agent/channels/eve.ts` ahead of `localDev()`, and remove it before Step 8 wires real auth:
+Your auth code adds the team in [Step 8](./ship-it). Until then `ctx.session.auth.current` has no `team`, so the function returns `null` and no playbook loads. To check the routing now, add a team in local dev. Add a dev-only entry to `agent/channels/eve.ts` ahead of `localDev()`, and remove it before Step 8 wires real auth:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
 import { localDev, placeholderAuth, vercelOidc, type AuthFn } from "eve/channels/auth";
 
-// Dev-only: stamp a team so Step 6's playbook has something to select.
+// Dev-only: add a team so Step 6's playbook has something to select.
 // Remove before Step 8.
 const devTeam: AuthFn<Request> = () =>
   process.env.NODE_ENV === "production"
@@ -71,11 +71,11 @@ export default eveChannel({
 });
 ```
 
-Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model loads the skill with `eve__skill`, queries the sample data, and applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and ask again. The selected team changed, so eve offers Finance's playbook before the next model call, and the same question uses Finance's reconciliation rules.
+Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model loads the skill with `eve__skill` and queries the sample data. It applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and ask again. The same question uses Finance's reconciliation rules.
 
-Because the team comes from authenticated claims, not from the message, one tenant can't borrow another's playbook through the message content.
+The team comes from auth, not from the message, so one team can't get another team's playbook by asking for it.
 
-The same `defineDynamic` form drives dynamic tools and instructions too. For the full mechanism, see [Dynamic capabilities](../guides/dynamic-capabilities).
+The same `defineDynamic` form also works for dynamic tools and instructions. For details, see [Dynamic capabilities](../guides/dynamic-capabilities).
 
 → Next: [Guard the spend](./guard-the-spend)
 

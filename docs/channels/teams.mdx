@@ -4,7 +4,7 @@ description: "Reach your agent from Microsoft Teams via the Bot Framework Activi
 type: integration
 ---
 
-The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT and its `serviceurl` binding on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
+The Teams channel runs your agent as a Microsoft Teams bot. It lives in `agent/channels/teams.ts`. It checks each incoming Bot Framework Activity's Bot Connector bearer JWT and `serviceurl` claim. It replies through the Bot Framework Connector REST API. Approvals and questions render as Adaptive Cards.
 
 ## Add the channel
 
@@ -22,9 +22,7 @@ For a managed Teams bot on Vercel, run:
 eve add channel/teams
 ```
 
-The guided flow runs the Vercel Connect CLI, which takes you through managed
-Microsoft Teams app creation and installation. It routes verified Activities to
-`/eve/v1/teams` and writes:
+The guided flow runs the Vercel Connect CLI to create and install a managed Microsoft Teams app, and routes verified Activities to `/eve/v1/teams`. It writes:
 
 ```ts title="agent/channels/teams.ts"
 import { connectTeamsCredentials } from "@vercel/connect/eve";
@@ -35,13 +33,11 @@ export default teamsChannel({
 });
 ```
 
-Vercel Connect owns the Microsoft administrator consent and app installation
-flow. After deployment, mention the bot in a channel or send it a personal
-message.
+Vercel Connect handles Microsoft administrator consent and app installation. After you deploy, mention the bot in a channel or send it a personal message.
 
 ### Portable credentials
 
-To manage the bot registration and credentials yourself, configure:
+To manage the bot registration and credentials yourself, set:
 
 ```bash
 MICROSOFT_APP_ID=...
@@ -49,21 +45,24 @@ MICROSOFT_APP_PASSWORD=...
 MICROSOFT_TENANT_ID=...   # optional, single-tenant bots
 ```
 
-By default the channel mounts at `POST /eve/v1/teams`. Point your Azure Bot or Teams app messaging endpoint at that public URL. To mount somewhere else, pass `route: "/api/teams/activity"`.
+The channel mounts at `POST /eve/v1/teams`. Pass `route`, such as `route: "/api/teams/activity"`, to mount it elsewhere. Point your Azure Bot or Teams app messaging endpoint at that public URL.
 
 ## How the channel handles messages
 
 ### Dispatch
 
-The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Return `title` alongside `auth` to set the title when the dispatch starts a run. Before dispatch, eve strips the mention, adds `<teams_context>` with `user_id`, `bot_id`, and `is_mentioned`, and scopes channel and group threads by root activity id (`replyToId ?? id`).
+By default, the bot answers personal-chat messages, and channel or group-chat messages that mention it. It ignores messages that reach it through resource-specific consent without a mention. Each channel or group-chat thread gets its own session, keyed by its root activity id.
 
-For example, use the contextual `isSubscribed()` helper to continue active threads without requiring another mention:
+eve strips the bot mention from the text. The model sees a `<teams_context>` block with `user_id`, `bot_id`, and `is_mentioned`.
+
+A custom `onMessage` returns `{ auth }` to run the agent, optionally with `title` to set the run title, or `null` to ignore the message. To continue active threads without another mention, use `ctx.isSubscribed()`. It reports whether a session already answers in the thread:
 
 ```ts
 import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
 
 export default teamsChannel({
   async onMessage(ctx, message) {
+    // Never answer bots, including this one.
     if (message.from.role === "bot" || message.from.id === message.recipient.id) return null;
     const isDirectMessage = message.scope === "personal";
     return isDirectMessage || message.isBotMentioned || (await ctx.isSubscribed())
@@ -73,41 +72,44 @@ export default teamsChannel({
 });
 ```
 
-`isSubscribed()` checks whether the conversation has previously involved the agent.
-
 ### Delivery
 
-Native Bot Connector verification requires the activity's `serviceUrl` to match the verified token's `serviceurl` claim. A custom `webhookVerifier` replaces this verification and must authenticate the forwarded activity and its service URL. Proactive conversation references are trusted application input: load them from your own verified records, not a caller-supplied URL. Outbound Connector requests require HTTPS without URL credentials, query strings, or fragments, and do not follow redirects.
+Replies post as Markdown (`textFormat: "markdown"`), and long text is split across messages. A typing indicator shows when a turn starts and on each tool call. `thread.mentionUser()` shows the display name, or the user ID, as literal text, while the mention still targets the original user.
 
-HTTP service URLs used by Bot Framework Emulator are not supported, even with a custom verifier. Use an HTTPS endpoint or proxy for local Connector testing.
+Each activity's `serviceUrl` must match the `serviceurl` claim in its verified token. A custom `webhookVerifier` replaces this check, so it must authenticate both the activity and its service URL. Load proactive conversation references from your own verified records, never from a URL a caller supplies.
 
-Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests. `thread.mentionUser()` escapes the display name (or fallback user ID) as literal text inside the mention; the mention entity retains the original identity fields.
+Outbound Connector requests need an HTTPS URL without credentials, a query string, or a fragment, and don't follow redirects. Bot Framework Emulator's HTTP service URLs don't work, even with a custom verifier. Use an HTTPS endpoint or proxy to test the Connector locally.
 
 ### Human-in-the-loop (HITL)
 
-A human-in-the-loop (HITL) request, an `interaction.opened` fact, renders as an Adaptive Card. Approval cards show the tool input in the card and fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. Teams may return a submission as a message or invoke; eve handles both before the normal message mention gate and resumes the thread recorded in the card.
+Each approval or question (`interaction.opened`) renders as an Adaptive Card. Approval cards show the tool input in the card and in the fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and free text to `Input.Text`. Submissions don't need a mention, and each one resumes the thread recorded in its card.
 
-By default, submissions use the Teams identity of the user who clicked the card. If you customize `onMessage` for an allowlist, configure the same policy in `onAnswers`; eve otherwise rejects HITL submissions rather than bypassing the message gate.
+By default, a submission answers as the Teams user who clicked. If you customize `onMessage`, for example for an allowlist, set the same policy in `onAnswers`. Otherwise eve rejects every card submission.
 
-When a tool approval settles, eve replaces its Adaptive Card with the outcome and responder name. A response rejected by an approval policy leaves the shared card unchanged. A submission to a card whose session is no longer active, for example because its run was cancelled outside eve, replaces the card with its prompt and `No longer active`, and the invoke response tells the person who submitted to send a new message.
+When a tool approval is decided, eve replaces its card with the outcome and the responder's name. A response the approval policy rejects leaves the card unchanged. A submission to a card whose session has ended replaces the card with its prompt and `No longer active`. eve then tells the submitter to send a new message.
 
 ### Connection sign-ins
 
-When a connection needs the person to sign in, eve's `interaction.opened` handler posts an Adaptive Card for the sign-in. In a personal chat, the card includes the sign-in link and any confirmation code. In group chats and channels, the shared card only says who has to sign in and has a **Sign in** button (`Action.Execute`). When someone presses it, eve resolves who they are the same way it does for HITL answers (`onAnswers`). If that's the person who needs to sign in, eve sends back a card with the link and code, and Teams shows that card only to them. Anyone else is told they can't open it. That way another member can't finish the sign-in with their own account and have it saved under the requester's identity.
+When a connection needs the person to sign in, eve posts an Adaptive Card:
 
-If you customize `onMessage` without also setting `onAnswers`, nobody can open a sign-in from a group chat or channel, because eve rejects every press.
+- **In a personal chat**, the card has the sign-in link and any confirmation code.
+- **In group chats and channels**, the shared card says who has to sign in and has a **Sign in** button (`Action.Execute`). eve identifies whoever presses it through `onAnswers`. The requester gets a card with the link and code that only they can see. Anyone else is told they can't open it, so no other member can save their account under the requester's identity.
 
-For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
+If you customize `onMessage` without setting `onAnswers`, eve rejects every press, so nobody can open a sign-in from a group chat or channel.
 
 ### Proactive sessions
 
-Proactive sessions need an existing conversation reference, because the Bot Framework v1 surface cannot create new chats by Azure Active Directory (AAD) user id. Pass `serviceUrl`, `conversationId`, and the other reference fields to `receive(teams, { target })`.
+Proactive sessions need an existing conversation reference, because the Bot Framework v1 API can't create chats by Azure Active Directory (AAD) user id. Pass `serviceUrl`, `conversationId`, and the other reference fields as the target. Call `to(teams, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(teams, target).send(message, { auth })` from another channel.
 
 ### Attachments
 
-Inbound files reach the agent as file parts. eve downloads images pasted into a message from Microsoft Bot Connector hosts with your bot credentials, and files uploaded in a personal chat from their pre-authenticated SharePoint download URL (`*.sharepoint.com` or `*.sharepoint.us`). A failed download, or one over the upload limit (25 MB unless `files.uploadPolicy` sets `maxBytes`), reaches the agent as a short note. Personal-chat uploads need `supportsFiles: true` on the bot in your Teams app manifest.
+Inbound files reach the agent as files:
 
-Use `allowedHosts` to download from other hosts, unauthenticated, or `enabled: false` to drop attachments:
+- eve downloads pasted images from Microsoft Bot Connector hosts with your bot credentials.
+- eve downloads personal-chat uploads from their pre-authenticated SharePoint URL (`*.sharepoint.com` or `*.sharepoint.us`). They need `supportsFiles: true` on the bot in your Teams app manifest.
+- A failed download, or a file over the upload limit (25 MB unless `files.uploadPolicy` sets `maxBytes`), reaches the agent as a short note.
+
+Use `allowedHosts` to download from other hosts without credentials, or `enabled: false` to drop attachments:
 
 ```ts
 export default teamsChannel({
@@ -115,7 +117,19 @@ export default teamsChannel({
 });
 ```
 
+## Options
+
+| Option                     | Default                                                             | What it does                                                          |
+| -------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `credentials`              | `MICROSOFT_APP_ID`, `MICROSOFT_APP_PASSWORD`, `MICROSOFT_TENANT_ID` | Bot credentials, or `connectTeamsCredentials()`.                      |
+| `route`                    | `/eve/v1/teams`                                                     | Path of the messaging endpoint.                                       |
+| `onMessage(ctx, message)`  | Personal chats and mentions, as the sender                          | Returns `{ auth }` to run the agent, or `null` to ignore the message. |
+| `onAnswers(ctx, activity)` | The user who clicked; rejects all with a custom `onMessage`         | Decides who a card submission or **Sign in** press comes from.        |
+| `onInvoke(ctx, activity)`  | `200 OK`                                                            | Handles Teams invokes that aren't card submissions or sign-ins.       |
+| `files`                    | Downloads from Microsoft hosts, up to 25 MB                         | `allowedHosts`, `uploadPolicy`, and `enabled` for inbound files.      |
+| `events`                   | Built-in handlers                                                   | Replaces the default handler for each event you set.                  |
+
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](./overview): what every channel shares, and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

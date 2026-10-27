@@ -3,9 +3,9 @@ title: "Next.js"
 description: "Run an eve agent and a Next.js app as one project with withEve."
 ---
 
-`eve/next` connects a Next.js app to one or more eve agents. Wrap your Next.js config with `withEve(nextConfig)` to run the app and agents with one development command and deploy them as one Vercel project. Browser requests use same-origin routes; the agent runtimes remain separate services.
+`eve/next` connects a Next.js app to one or more eve agents. Wrap your Next.js config with `withEve(nextConfig)` to run the app and agents with one development command and deploy them as one Vercel project. Browser requests use same-origin routes, and each agent still runs as its own service.
 
-Use this integration when Next.js owns the application's development and deployment lifecycle. If the frontend is a peer of an agent workspace, compose the services with [`eve/vercel`](../deployment/vercel#compose-agents-with-other-vercel-services) on Vercel or your [self-hosted process manager and proxy](../deployment/self-hosting#run-workspace-members). A peer frontend can use `eve/react` without `eve/next`. See [Project Structure](/docs/concepts/project-structure#configure-a-web-deployment) for the choice.
+Use this integration when the Next.js app runs and deploys the whole project. If the frontend and an agent workspace deploy as separate services, compose them with [`eve/vercel`](../deployment/vercel#compose-agents-with-other-vercel-services) on Vercel or your [self-hosted process manager and proxy](../deployment/self-hosting#run-workspace-members). A separately deployed frontend can use `eve/react` without `eve/next`. See [Project Structure](/docs/concepts/project-structure#configure-a-web-deployment) for the choice.
 
 ## Prerequisites
 
@@ -27,18 +27,11 @@ For an agent workspace, select the member the chat should call:
 eve add channel/web --agent support
 ```
 
-The installer configures the chat for the selected agent. By default, it adds a shared Next.js
-application under `apps/web`; if a root Web Chat app already exists, it configures that app instead.
-For Next.js hosting, the installer wraps `next.config.ts` with `withEve()`. When setting up a new
-app, choose **Next.js** to host the integration. The generated chat uses same-origin `/eve/v1/*`
-routes for a standalone agent or `/eve/<name>/v1/*` routes for a workspace member. Running the
-installer from a workspace root without selecting a member is not supported.
+The installer adds a Next.js application under `apps/web`, or configures an existing root Web Chat app. With **Next.js** hosting, it wraps `next.config.ts` with `withEve()`. The chat uses same-origin `/eve/v1/*` routes for a standalone agent or `/eve/<name>/v1/*` for a workspace member. From a workspace root, the installer requires a selected member.
 
 Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 
-To integrate an existing Next.js application without generating a chat UI, follow the steps below.
-To deploy the frontend and agents as separate Vercel services, choose **Vercel services** during
-setup instead; see the [workspace layout guidance](/docs/concepts/project-structure#configure-a-web-deployment).
+To deploy the frontend and agents as separate Vercel services, choose **Vercel services** during setup instead. See the [workspace layout guidance](/docs/concepts/project-structure#configure-a-web-deployment). To integrate an existing Next.js application without generating a chat UI, follow the steps below.
 
 ## Wrap the Next.js config
 
@@ -51,7 +44,7 @@ const nextConfig: NextConfig = {};
 export default withEve(nextConfig);
 ```
 
-By default `withEve(nextConfig)` looks for an `agent/` folder inside your Next.js project root and mounts its API at `/eve/v1/*`. When the project root is an eve workspace with `agents/<name>/` members, it discovers every member and mounts each at `/eve/<name>/v1/*` instead. You do not need an explicit `agents` map for this layout.
+By default `withEve(nextConfig)` looks for an `agent/` folder inside your Next.js project root and mounts its API at `/eve/v1/*`. When the project root is an eve workspace with `agents/<name>/` members, it discovers every member and mounts each at `/eve/<name>/v1/*`, without an explicit `agents` map.
 
 If one agent lives somewhere else, point at it with `eveRoot`:
 
@@ -63,7 +56,7 @@ export default withEve(nextConfig, {
 
 ## Mount agents outside a workspace
 
-To mount agents that are not members of the project-level `agents/` workspace, use `agents`. String values are agent roots; object values can override the build command or private production service prefix for that agent:
+To mount agents that aren't members of the project-level `agents/` workspace, use `agents`. String values are agent roots; object values can override the build command or private production service prefix for that agent:
 
 ```ts
 export default withEve(nextConfig, {
@@ -85,23 +78,23 @@ const support = useEveAgent({ agent: "support" });
 const billing = useEveAgent({ agent: "billing" });
 ```
 
-Use either `eveRoot` or `agents`, not both. `eveRoot` remains the shorthand for a single unnamed agent mounted at `/eve/v1/*`.
+Use either `eveRoot` or `agents`, not both. `eveRoot` is the shorthand for a single unnamed agent mounted at `/eve/v1/*`.
 
-Generated agent services build with `EVE_PUBLIC_ROUTE_PREFIX` set to the agent's public mount (for example `/eve/support`) so framework-minted callback URLs — OAuth connection callbacks and remote-subagent session callbacks — resolve to the public per-agent path. If you configure eve services manually in `vercel.json` instead, export that variable in each named agent's build command.
+Generated agent services build with `EVE_PUBLIC_ROUTE_PREFIX` set to the agent's public mount, such as `/eve/support`. OAuth connection callbacks and remote-subagent session callbacks then resolve to that public path. If you configure eve services manually in `vercel.json`, export that variable in each named agent's build command.
 
 ### `withEve` options
 
 All fields are optional.
 
-| Option               | Type                  | Default                  | Purpose                                                                                                                                                                                                                                     |
-| -------------------- | --------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eveRoot`            | `string`              | Next.js app root         | Eve project root, relative to the Next.js app root unless absolute. It may contain either one `agent/` or an `agents/` workspace. Do not combine with `agents`.                                                                             |
-| `agents`             | `Record<string, ...>` | inferred for a workspace | Named eve agents to mount under `/eve/<name>/v1/*`. `withEve()` discovers project-level `agents/<name>/` members when `agents` and `eveRoot` are unset; otherwise each value is a root string or `{ root, buildCommand?, servicePrefix? }`. |
-| `eveBuildCommand`    | `string`              | generated                | Build command for generated eve Vercel services. In multi-agent mode this is the default for agents without their own `buildCommand`.                                                                                                       |
-| `servicePrefix`      | `string`              | `"/_eve_internal/eve"`   | Private route namespace for legacy manual Vercel service configs and non-Vercel production proxying. Named agents derive unique defaults from this prefix.                                                                                  |
-| `devServerTimeoutMs` | `number`              | `180000`                 | Maximum time to wait for each eve development server to become available.                                                                                                                                                                   |
+| Option               | Type                  | Default                  | Purpose                                                                                                                                                                                   |
+| -------------------- | --------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eveRoot`            | `string`              | Next.js app root         | Eve project root, relative to the Next.js app root unless absolute. It may contain either one `agent/` or an `agents/` workspace. Do not combine with `agents`.                           |
+| `agents`             | `Record<string, ...>` | inferred for a workspace | Named eve agents to mount under `/eve/<name>/v1/*`. Each value is a root string or `{ root, buildCommand?, servicePrefix? }`. Omit it and `eveRoot` to discover `agents/<name>/` members. |
+| `eveBuildCommand`    | `string`              | generated                | Build command for generated eve Vercel services. In multi-agent mode this is the default for agents without their own `buildCommand`.                                                     |
+| `servicePrefix`      | `string`              | `"/_eve_internal/eve"`   | Private route namespace for manual Vercel service configs and non-Vercel production proxying. Named agents derive unique defaults from this prefix.                                       |
+| `devServerTimeoutMs` | `number`              | `180000`                 | Maximum time to wait for each eve development server to become available.                                                                                                                 |
 
-When the Next.js app is a peer of an eve project, select its root without repeating every agent path. The root may contain either one `agent/` or an `agents/` workspace:
+When the Next.js app sits next to an eve project, point `eveRoot` at the project root instead of listing every agent path:
 
 ```ts title="apps/web/next.config.ts"
 import type { NextConfig } from "next";
@@ -124,7 +117,7 @@ export default withEve(nextConfig, {
 
 ## Call the hook
 
-For a single unnamed agent, call [`useEveAgent`](./overview) without `agent` or `baseUrl`. For named agents, whether discovered from a workspace or configured explicitly, pass the name:
+For a single unnamed agent, call [`useEveAgent`](./overview) without `agent` or `baseUrl`. For a named agent, discovered or configured, pass the name:
 
 ```tsx
 "use client";
@@ -139,9 +132,9 @@ export function SupportStatus() {
 
 See [Basic chat](./overview#basic-chat-react) for rendering messages and sending turns.
 
-Bind each chat route to its agent, and include the agent identity in durable-session URLs so the UI does not restore a session through the wrong agent route. Remount the chat component when switching agents: the hook reads `agent` when it creates its store.
+Bind each chat route to its agent. Include the agent name in session URLs so the UI doesn't restore a session through the wrong agent. Remount the chat component when switching agents, because the hook reads `agent` when it creates its store.
 
-Requests are same-origin, so the browser sends application cookies to the agent. Each agent must verify those credentials through its own channel authentication policy. For non-cookie schemes, attach the credentials yourself:
+Requests are same-origin, so the browser sends application cookies to the agent. Each agent must verify them through its own channel authentication policy. For non-cookie schemes, attach the credentials yourself:
 
 ```tsx
 const agent = useEveAgent({
@@ -151,19 +144,19 @@ const agent = useEveAgent({
 });
 ```
 
-Configure authorization for every exposed agent before accepting production browser traffic. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
+Configure authorization for every exposed agent before accepting production browser traffic. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default policy, which rejects unverified requests, and for channel configuration.
 
 ## Use the generated Web Chat routes
 
-`eve init --channel-web-nextjs` and `eve add channel/web` generate a chat UI with URL-addressed durable sessions:
+`eve init --channel-web-nextjs` and `eve add channel/web` generate a chat UI that gives each session its own URL:
 
 - `/` is the initial landing page.
 - `/s` opens the conversation layout without creating an eve session. The first message creates the session.
-- `/s/[sessionId]` attaches to that durable session, replays its transcript, and follows an in-flight turn.
+- `/s/[sessionId]` attaches to that session, replays its transcript, and follows a turn that is still running.
 
-After the first message is accepted, Web Chat replaces the browser URL with `/s/{sessionId}` without remounting the active stream. Reloading that URL passes the session to `useEveAgent` with `resume: true`, so completed history is replayed and an unfinished response continues streaming. **New chat** navigates to the sessionless `/s` route; it does not reset or delete the prior session, which remains available at its URL.
+After the first message is accepted, Web Chat replaces the browser URL with `/s/{sessionId}` without remounting the active stream. Reloading that URL passes the session to `useEveAgent` with `resume: true`, so completed history replays and an unfinished response keeps streaming. **New chat** navigates to `/s` without resetting or deleting the prior session, which stays available at its URL.
 
-The generated UI keeps transcript scroll position in browser `sessionStorage`. This is presentation state only and is not written to the eve session.
+The generated UI keeps transcript scroll position in browser `sessionStorage`, not in the eve session.
 
 For a custom Next.js chat route, pass the route session ID explicitly:
 
@@ -178,8 +171,8 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` boots the eve dev server next to `next dev` and rewrites the eve routes over to it. The browser only ever talks to the Next.js origin.
-- **Vercel.** The web app and the eve runtime deploy as a single project. `withEve()` writes Build Output `services` for eve and `routes` that send `/eve/v1/**` to that service before filesystem routing; the Next.js app itself remains the default app. Vercel assembles authored [schedules](../../schedules) into the project config as Vercel Cron Jobs, including correctly prefixed jobs for named agents, while cron entries owned by the Next.js app are preserved. By default, generated services run the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Local dev.** `npm run dev` starts the eve dev server next to `next dev` and proxies the eve routes to it. The browser talks only to the Next.js origin.
+- **Vercel.** The web app and the eve runtime deploy as a single project. `/eve/v1/**` requests reach the eve service before Next.js filesystem routes, and the Next.js app serves everything else. Authored [schedules](../../schedules) become Vercel Cron Jobs, prefixed for named agents, alongside the Next.js app's own cron entries. By default, generated services run the installed eve binary from the agent root, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default withEve(nextConfig, {
@@ -194,7 +187,7 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
   npm run build && npm start
   ```
 
-- **Non-Vercel hosts.** `withEve()` provides both agent process startup and Next.js proxy rewrites; self-hosters using this path do not need to recreate the browser-facing routing. The Vercel service output is a separate integration, not a self-hosting requirement. By default, `next start` runs each built eve service on its derived loopback port. If your host supervises eve services itself, run each service separately and set `EVE_NEXT_PRODUCTION_ORIGIN` to the origin that serves its private route prefix:
+- **Non-Vercel hosts.** `withEve()` starts the agent processes and provides the Next.js proxy rewrites, so you don't recreate the browser-facing routing. By default, `next start` runs each built eve service on its own loopback port. If your host supervises eve services itself, run each service separately. Then set `EVE_NEXT_PRODUCTION_ORIGIN` to the origin that serves its private route prefix:
 
   ```bash
   export EVE_NEXT_PRODUCTION_ORIGIN=https://agent.example.com
@@ -203,7 +196,7 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
 
   This setting disables automatic production agent startup. The destination includes `servicePrefix`: for named agents, the default is `/_eve_internal/eve/<name>/eve/v1/*`. Configure that routing on the destination host, and use the same origin setting when building and starting Next.js.
 
-  If the public routing layer mounts an agent below a path, set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments so callback URLs use the public path. Process restarts, persistent workflow storage, sandbox configuration, and workflow callback routing remain hosting responsibilities; see [Self-host eve](../deployment/self-hosting).
+  If the public routing layer mounts an agent below a path, set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Callback URLs then use the public path. Process restarts, persistent workflow storage, sandbox configuration, and workflow callback routing are your host's responsibility; see [Self-host eve](../deployment/self-hosting).
 
 ## What to read next
 

@@ -3,15 +3,13 @@ title: "Overview"
 description: "Define repeatable scored checks for an eve agent with defineEval and run them with eve eval."
 ---
 
-An eval is a scored check that runs your agent against real sessions and grades the result, catching regressions when you change a prompt or a tool. Drive the agent through one or more turns, assert on what it did (the run completed, the right tool ran, the reply contains the right text), and optionally ship the results to Braintrust.
+An eval is a scored check that sends messages to your agent and grades what it did. Each eval lives in a `.eval.ts` file under `evals/`, and `eve eval` runs them. Use evals to catch regressions when you change a prompt or a tool.
 
-Evals exercise the same HTTP surface your users hit. The runner boots (or targets) a real agent server, drives sessions through the [TypeScript client](../guides/client/overview) protocol, and grades what comes back, so a passing eval means the agent booted, accepted a request, and produced the result you asserted.
-
-Define [tool stubs](./tool-stubs) in your eval to control tool results, then assert on the agent's tool calls and responses.
+Evals talk to a real agent server over the same HTTP API as your users, through the [TypeScript client](../guides/client/overview). A passing eval means the agent started, accepted a request, and produced the asserted result. To control what tools return, define [tool stubs](./tool-stubs) in the eval.
 
 ## `defineEval`
 
-eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
+The `evals/` directory sits at the app root. Each `.eval.ts` file exports one eval, or an array of evals that runs once per [dataset](./cases#datasets-exporting-an-array) row. The file path is the eval's id, so `evals/weather/brooklyn-forecast.eval.ts` becomes `weather/brooklyn-forecast`. Don't add an `id` or `name`.
 
 ```text
 my-agent/
@@ -25,7 +23,7 @@ my-agent/
 └── package.json
 ```
 
-An eval is a single `async test(t)` function. You drive the agent with `t` and assert on the run with the same `t`:
+An eval is one `async test(t)` function. It sends messages and records assertions through `t`:
 
 ```ts title="evals/weather/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
@@ -42,11 +40,11 @@ export default defineEval({
 });
 ```
 
-`test` is the only required field. The rest are optional: `description`, `judge`, `tags`, `metadata`, `timeoutMs`, and `reporters`. The init template adds `evals/**/*.ts` to `tsconfig.json`, so your eval code type-checks alongside the app.
+`test` is the only required field; `description`, `judge`, `tags`, `metadata`, `timeoutMs`, and `reporters` are optional. The init template adds `evals/**/*.ts` to `tsconfig.json`, so eval code type-checks with the app.
 
 ## `evals.config.ts`
 
-Every `evals/` directory needs exactly one `evals.config.ts` at its root. It declares the defaults every eval shares:
+Every `evals/` directory needs exactly one `evals.config.ts` at its root. It sets the defaults that all evals share:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
@@ -58,11 +56,22 @@ export default defineEvalConfig({
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, `timeoutMs`, and `repeat` round out the defaults. Config `reporters` observe every eval in the run, so set one `braintrustReporter()` here instead of adding it to each eval. `repeat` runs every eval several times to measure repeatability; see [Repeat evals](./running#repeat-evals). CLI flags (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take precedence over the config defaults.
+Every field is optional:
+
+| Field               | Sets                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| `judge`             | The model for [LLM-as-judge](./judge) assertions (`t.judge(...)`). Omit it to use `typesafe-ai/jev`. |
+| `reporters`         | Reporters that observe every eval in the run, so one `braintrustReporter()` here covers all evals.   |
+| `maxConcurrency`    | The concurrent eval limit.                                                                           |
+| `timeoutMs`         | The per-eval timeout.                                                                                |
+| `repeat`            | How many times each eval runs, to measure repeatability. See [Repeat evals](./running#repeat-evals). |
+| `setup`, `teardown` | Run-wide hooks before and after the run. See [Run setup and teardown](#run-setup-and-teardown).      |
+
+CLI flags (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take precedence over config defaults.
 
 ### Run setup and teardown
 
-Use `setup` to start shared resources or run migrations before eve starts the local agent server. Return shared context directly from `setup`, then release resources in `teardown`:
+Use `setup` to start shared resources or run migrations before eve starts the local agent server. Return shared values from `setup`, and release resources in `teardown`:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
@@ -79,7 +88,7 @@ export default defineEvalConfig({
 });
 ```
 
-`context` is inferred from the setup return value. To use that type in an eval file, pass the config's type to `defineEval`:
+`context` is typed from the setup return value. To use that type in an eval file, pass the config's type to `defineEval`:
 
 ```ts title="evals/database.eval.ts"
 import { defineEval } from "eve/evals";
@@ -94,18 +103,15 @@ export default defineEval<typeof config>({
 });
 ```
 
-Setup, eval bodies, and teardown share the same context object in the runner process. Class instances and functions keep their identity; context is neither serialized nor sent to the agent server. Concurrent evals share these resources, so isolate any database records they modify.
+`setup`, every eval, and `teardown` share one context object in the `eve eval` process. The agent server never sees it, so class instances and functions work as values. Evals that run at the same time share these resources, so isolate any database records they change.
 
-`setup` can also return nothing.
+`setup` runs once per `eve eval` command, before the agent server starts. `teardown` runs after the local server and its sandboxes stop, even when setup, startup, or an eval fails. A `teardown` failure fails the command. The per-eval `timeoutMs` doesn't apply to either hook.
 
-- Setup runs once per `eve eval` invocation, after discovery and config loading, before target startup.
-- Teardown runs after the local server and its sandbox handles shut down, including after setup, startup, or eval failures. Cleanup failures fail the command.
-
-`teardown` receives `undefined` when setup returns no context or throws before returning. In that case, setup must clean up resources that only it can access. Teardown can also be used without setup. The per-eval `timeoutMs` does not apply to setup or teardown.
+`setup` can return nothing, and `teardown` works without `setup`. `teardown` receives `undefined` when `setup` returns nothing or throws, so `setup` must clean up anything only it can reach.
 
 ## Deterministic fixture models
 
-Use `mockModel` when an eval fixture needs to exercise eve's runtime without calling a model provider. A static fixture can be one line:
+`mockModel` gives a test agent fixed replies, so it runs without calling a model provider. A fixed reply is one line:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -116,7 +122,7 @@ export default defineAgent({
 });
 ```
 
-Pass a callback when the reply depends on the conversation. The callback receives an eve-owned view of the prompt, including `lastUserMessage`, `userMessages`, `userMessageCount`, available `tools`, and prior `toolResults`:
+Pass a callback when the reply depends on the conversation. It receives `lastUserMessage`, `userMessages`, `userMessageCount`, the available `tools`, and prior `toolResults`:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -126,7 +132,7 @@ export default defineAgent({
 });
 ```
 
-The callback may return `{ text, toolCalls, usage }` for deterministic tool loops or explicit token counts. Use the options form only when a fixture also needs a custom model identity:
+The callback can return `{ text, toolCalls, usage }` for deterministic tool loops or explicit token counts. Use the options form when a fixture also needs a custom model identity:
 
 ```ts title="agent/agent.ts"
 model: mockModel({
@@ -139,32 +145,32 @@ model: mockModel({
 });
 ```
 
-`mockModel()` uses `"Mock response"` when no response is supplied. It handles both generated and streamed responses, derives deterministic response metadata, and estimates token usage. It compiles with a 1,000,000-token context window, so compaction stays out of the way; set `modelContextWindowTokens` on the agent to exercise compaction with a smaller window. Because the model is part of the agent definition, use it for a dedicated fixture agent; it remains mocked whether that fixture runs locally or as a deployed eval target.
+Omit the response to reply `"Mock response"`. `mockModel` supports streamed and non-streamed replies and estimates token usage. Its context window is 1,000,000 tokens, so eve never compacts the conversation. To test compaction, set `modelContextWindowTokens` on the agent.
+
+The model is part of the agent definition, so use `mockModel` in a separate test agent. That agent stays mocked locally and when you deploy it as an eval target.
 
 ## The `t` context
 
-`t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
+`t` both sends messages and records assertions, so an eval is ordinary code that sends a message, then asserts on the reply.
 
-- **Drive** the agent: `t.session()` creates an empty session; `t.send(...)` creates a session with its first message and returns a turn. Continue through `turn.session.send(...)`. Session handles also expose `start`, `cancel`, `respond`, `respondAll`, `sendFile`, and `requireInteraction`. Read output from `turn.reply`, and conversation state from `turn.session`. See [Cases](./cases).
-- **Assert** with three surfaces, covered next.
+- **Send:** `t.send(...)` starts a conversation with its first message and returns the turn. `t.session()` starts an empty conversation. Send follow-ups with `turn.session.send(...)`, and read the reply from `turn.reply`. The full list of session methods is in [the drive API](./cases#the-drive-api).
+- **Assert:** use the three surfaces in the next section.
 
 ## Three assertion surfaces
 
-Each surface matches a genuinely different kind of judgment:
+| Surface                                       | Grades                                                                                                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Methods such as `t.calledTool("get_weather")` | What the agent did: on `t` for the whole run, or on one session or turn. See [Assertions](./assertions).                       |
+| `t.check(value, assertion)` and `t.score(…)`  | Any value, such as `turn.reply` or parsed JSON, or a 0–1 score you compute. See [Assertions](./assertions#scores-with-tscore). |
+| `t.judge("cites a source")`                   | Quality, graded by a separate judge model. See [Judge](./judge).                                                               |
 
-- **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
-- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.reply, includes("sunny"))`. Grade `turn.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
-- **`t.score(evaluation)`** records a score, such as a length ratio or an evaluator's result. Chain `.label(key)` to name it, and `.gate(threshold)` or `.atLeast(threshold)` to let it decide the eval. See [Assertions](./assertions#scores-with-tscore).
-- **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
+`t.judge` grades the reply of the most recently finished turn. Pass `{ on: turn.session.transcript }` to grade a whole conversation.
 
 ## Gate vs soft
 
-Every assertion returns a chainable handle, so severity rides on the assertion itself. There is no separate thresholds map.
+A failed **gate** marks the eval `failed`, and `eve eval` exits non-zero. A **soft** assertion appears in reports. A soft assertion below its threshold marks the eval `scored`, which fails the run only under `--strict`. A soft assertion with no threshold never fails.
 
-- **Gates** are hard. A failed gate marks the eval `failed` and `eve eval` exits non-zero. Run-level methods, `includes`, `equals`, and `matches` are gates by default.
-- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` (visible but not fatal, unless you pass `--strict`). `similarity`, every `t.judge(...)` assertion, and every `t.score(...)` are soft by default. A soft assertion with no threshold records no verdict and never fails.
-
-Override per assertion: `.gate(threshold?)` promotes to a hard gate, `.soft(threshold?)` demotes to tracked, and `.atLeast(threshold)` is a soft assertion with a bar.
+`t.judge(...)`, `t.score(...)`, and `similarity` are soft by default; the rest are gates. Chain `.gate(threshold?)`, `.soft(threshold?)`, or `.atLeast(threshold)` to change one. See [Severity](./assertions#severity).
 
 ```ts
 t.succeeded(); // gate
@@ -175,7 +181,7 @@ t.judge("The response is consistent with output.reference.", {
 }).atLeast(0.7); // soft, gated under --strict at 0.7
 ```
 
-Use `await t.require(value, assertion)` for a gate that must pass before the script can safely continue. Use `t.skip(reason)` as the first operation for an intentionally unsupported target capability.
+Use `await t.require(value, assertion)` for a gate that must pass before the eval continues. Call `t.skip(reason)` first to skip an eval on a target that doesn't support it.
 
 ## Run evals with eve eval
 
@@ -189,11 +195,9 @@ Exit code `0` means every eval passed its gates. See [Running evals](./running) 
 
 ## A good baseline
 
-Most apps do fine with a few small smoke evals. Assert behavior with `t.succeeded()` plus one or two content checks, keep dataset fixtures in `evals/data/`, and reach for a judge or Braintrust only when you need fuzzy grading or shared result review. In CI, run `eve eval --strict` so soft threshold misses fail the build too.
+Start with a few small smoke evals: `t.succeeded()` plus one or two content checks, with dataset files in `evals/data/`. Add a judge or Braintrust when you need fuzzy grading or a shared place to review results. In CI, run `eve eval --strict` so soft threshold misses fail the build.
 
 ## What to read next
-
-The rest of this section covers each piece:
 
 - [Cases](./cases): single-turn evals, scripted multi-turn evals, and dataset fan-out
 - [Assertions](./assertions): run-level methods and `t.check` value assertions, with matchers and severity
