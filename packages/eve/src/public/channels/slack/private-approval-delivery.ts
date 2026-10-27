@@ -1,77 +1,81 @@
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
-import { renderInteractionPostParts, type SlackHitlRoute } from "#public/channels/slack/hitl.js";
-import type { SlackPendingApprovalCard } from "#public/channels/slack/slackChannel.js";
-import type { Interaction } from "#channel/interaction-prompts.js";
+import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import type { SlackInteractionMessage } from "#public/channels/slack/renderers.js";
+import {
+  type RenderedRequestCard,
+  sendWithFallback,
+} from "#public/channels/slack/request-card-render.js";
 
 const log = createLogger("slack.private-approval-delivery");
 type PrivateApprovalSlack = Pick<SlackHandle, "channelId" | "request" | "threadTs">;
 
+/** Where a direct-message request's messages landed. */
+export interface PrivateInteractionDelivery {
+  readonly channelId: string;
+  readonly ts: string;
+  readonly detailsTs?: string;
+  /** The controls blocks posted: the rendered ones, or eve's default if Slack rejected them. */
+  readonly blocks: readonly BlockKitBlock[];
+}
+
+/**
+ * Posts one rendered request to `reviewer`'s DM: a permalink to the thread, its details, then
+ * its controls. A failure deletes what it posted, so a reviewer never sees half a request.
+ */
 export async function deliverPrivateInteraction(input: {
   readonly previewMessageTs: string;
-  readonly request: Interaction;
+  readonly card: RenderedRequestCard;
   readonly reviewer: string;
   readonly slack: PrivateApprovalSlack;
-}): Promise<SlackPendingApprovalCard> {
+}): Promise<PrivateInteractionDelivery> {
   const open = await input.slack.request("conversations.open", { users: input.reviewer });
-  const messageChannelId =
+  const channelId =
     open.ok === true ? (open.channel as { id?: unknown } | undefined)?.id : undefined;
-  if (typeof messageChannelId !== "string" || messageChannelId.length === 0) {
+  if (typeof channelId !== "string" || channelId.length === 0) {
     throw new Error(`Slack conversations.open failed: ${open.error ?? "unknown_error"}`);
   }
 
-  const route: SlackHitlRoute = {
-    channelId: input.slack.channelId,
-    threadTs: input.slack.threadTs,
-  };
-  const parts = renderInteractionPostParts(input.request, route);
+  const { fallback, parts } = input.card;
   const postedMessageIds: string[] = [];
+  const post = async (body: Record<string, unknown>): Promise<string> => {
+    const ts = await postMessage(input.slack, {
+      channel: channelId,
+      unfurl_links: false,
+      unfurl_media: false,
+      ...body,
+    });
+    postedMessageIds.push(ts);
+    return ts;
+  };
+  const postPart = async (message: SlackInteractionMessage) => {
+    const ts = await post({ blocks: message.blocks, text: message.text });
+    return { blocks: message.blocks, ts };
+  };
 
   try {
     const permalink = await resolveMessagePermalink(input.slack, input.previewMessageTs);
     if (permalink !== undefined) {
-      postedMessageIds.push(
-        await postMessage(input.slack, {
-          channel: messageChannelId,
-          markdown_text: permalink,
-          unfurl_links: true,
-          unfurl_media: false,
-        }),
-      );
+      await post({ markdown_text: permalink, unfurl_links: true });
     }
-    let detailsMessageTs: string | undefined;
-    if (parts.details !== undefined) {
-      detailsMessageTs = await postMessage(input.slack, {
-        blocks: parts.details.blocks,
-        channel: messageChannelId,
-        text: parts.details.text,
-        unfurl_links: false,
-        unfurl_media: false,
-      });
-      postedMessageIds.push(detailsMessageTs);
-    }
-    const messageTs = await postMessage(input.slack, {
-      blocks: parts.controls.blocks,
-      channel: messageChannelId,
-      text: parts.controls.text,
-      unfurl_links: false,
-      unfurl_media: false,
-    });
-    postedMessageIds.push(messageTs);
-    return {
-      detailsMessageTs,
-      messageBlocks: parts.controls.blocks,
-      messageChannelId,
-      messageTs,
-    };
+    const details =
+      parts.details === undefined
+        ? undefined
+        : await sendWithFallback(postPart, parts.details, fallback.details);
+    const controls = (await sendWithFallback(postPart, parts.controls, fallback.controls))!;
+    const delivery: {
+      -readonly [K in keyof PrivateInteractionDelivery]: PrivateInteractionDelivery[K];
+    } = { blocks: controls.blocks, channelId, ts: controls.ts };
+    if (details !== undefined) delivery.detailsTs = details.ts;
+    return delivery;
   } catch (error) {
     await Promise.allSettled(
       postedMessageIds.map(async (ts) => {
         try {
-          await input.slack.request("chat.delete", { channel: messageChannelId, ts });
+          await input.slack.request("chat.delete", { channel: channelId, ts });
         } catch (cleanupError) {
           logError(log, "failed to roll back partial private approval delivery", cleanupError, {
-            channelId: messageChannelId,
+            channelId,
             messageTs: ts,
           });
         }

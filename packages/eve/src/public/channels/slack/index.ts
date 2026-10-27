@@ -73,6 +73,9 @@ export {
 
 export {
   defineSlackRenderer,
+  type SlackInteractionCard,
+  type SlackInteractionCardParts,
+  type SlackInteractionMessage,
   type SlackRenderer,
   type SlackRendererEvents,
   type SlackRenderHandler,

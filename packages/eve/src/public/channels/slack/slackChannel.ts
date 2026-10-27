@@ -19,6 +19,8 @@ import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#public/channels/slack/cards.js";
+import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import type { SlackHitlRoute } from "#public/channels/slack/hitl.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -49,12 +51,13 @@ import {
 } from "#public/channels/slack/attachments.js";
 import {
   defaultEvents,
-  defaultInteractionOpenedHandler,
+  defaultInteractionEvents,
   defaultOnMessage,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
 import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
 import {
+  composeInteractionCards,
   composeSlackRenderers,
   type SlackRenderChain,
   type SlackRenderedEvent,
@@ -193,22 +196,38 @@ export interface SlackAuthorizationEventContext {
   readonly state: SlackChannelState;
 }
 
+/** One request's controls in a posted card message. */
+export interface SlackInteractionCardRequest {
+  readonly interactionId: string;
+  /** The controls blocks the message shows for this request now. */
+  readonly blocks: readonly BlockKitBlock[];
+  /**
+   * How many blocks the controls had when posted. A later rendering never grows past it, so a
+   * message that held 50 blocks when posted never holds more.
+   */
+  readonly count: number;
+  /** The separate details message, deleted once none of its requests is open. */
+  readonly detailsTs?: string;
+}
+
+/** A message eve posted holding the controls of one or more input requests. */
+export interface SlackInteractionCardRecord {
+  /** The message's conversation: the session's channel, or the reviewer's DM. */
+  readonly channelId: string;
+  readonly ts: string;
+  readonly destination: SlackApprovalChannel;
+  /** The thread a direct-message card's controls answer back to. */
+  readonly route?: SlackHitlRoute;
+  /** Thread post announcing a direct-message request; updated with the outcome. */
+  readonly announcementTs?: string;
+  readonly requests: readonly SlackInteractionCardRequest[];
+}
+
 /**
  * JSON-serializable per-session state, stored verbatim across workflow
  * step boundaries. Anything written here must round-trip through
  * `JSON.stringify` / `JSON.parse`.
  */
-export interface SlackPendingApprovalCard {
-  /** Thread post announcing a direct-message approval; updated with the outcome. */
-  readonly announcementTs?: string;
-  /** Separate tool-input details post; deleted once none of its approvals are pending. */
-  readonly detailsMessageTs?: string;
-  /** Channel containing the approval card; differs from the session channel for DM delivery. */
-  readonly messageChannelId?: string;
-  readonly messageBlocks: readonly unknown[];
-  readonly messageTs: string;
-}
-
 export interface SlackChannelState extends UndeliveredReplyState {
   /** Audience classification captured before the session is dispatched. */
   audience?: ChannelAudience;
@@ -248,7 +267,11 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
-  pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
+  /**
+   * The messages holding open or recently answered approvals, questions, and budget prompts.
+   * Each is updated as its requests change and forgotten once all of them settle.
+   */
+  interactionCards?: readonly SlackInteractionCardRecord[];
   /**
    * Each recent turn's tool calls and the task card eve last wrote for it, by
    * turn id. The default `turn.paused` handler names the working tasks.
@@ -848,10 +871,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     maxBytes: maxBytesOf(uploadPolicy),
   });
   const onAnswers = config.onAnswers ?? defaultOnAnswers;
+  const interactionCard = composeInteractionCards(config.renderers ?? []);
   const rendering = composeSlackRenderers(config.renderers ?? [], {
     events: {
       ...defaultEvents,
-      "interaction.opened": defaultInteractionOpenedHandler(config.approvalChannel),
+      ...defaultInteractionEvents(config.approvalChannel, interactionCard),
     },
     received: defaultReceived,
     taskCard: renderDefaultSlackTaskCard,
@@ -894,7 +918,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       triggeringMessageTs: null,
       pendingToolCallMessage: null,
       pendingAuthMessageTs: {},
-      pendingApprovalCards: {},
+      interactionCards: [],
       slackUsersByPrincipal: {},
     },
     fetchFile: slackFetchFile,

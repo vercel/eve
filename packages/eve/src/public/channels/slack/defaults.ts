@@ -22,15 +22,12 @@ import {
 } from "#public/channels/slack/connections.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
-  defaultInteractionsHandler,
   notifyRefusedResponder,
-  settleApproval,
-} from "#public/channels/slack/approval-cards.js";
-import {
-  refusedAnswerOf,
-  requestBatchOf,
-  requestSettlementOf,
-} from "#channel/interaction-prompts.js";
+  postRequestCards,
+  refreshRequestCard,
+} from "#public/channels/slack/request-cards.js";
+import type { SlackInteractionCardChain } from "#public/channels/slack/renderers.js";
+import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js";
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
@@ -306,22 +303,55 @@ async function settleSlackSignIn(
 }
 
 /**
- * Default `interaction.opened` handler: a commit's requests render as one batch, and a sign-in
- * as its public status and private challenge.
+ * eve's default handlers for input requests, rendering cards through the composed
+ * `interactionCard` chain. A commit's requests post as one batch on its first
+ * `interaction.opened`, and each card updates when an answer is admitted or refused and when its
+ * request settles. A sign-in renders as its public status and private challenge instead.
  */
-export function defaultInteractionOpenedHandler(
-  approvalChannel?: SlackApprovalChannelResolver,
-): NonNullable<SlackChannelInternalEvents["interaction.opened"]> {
-  const showRequests = defaultInteractionsHandler(approvalChannel);
-  return async ({ data }, ctx) => {
-    const view = sessionTables(ctx.view);
-    const batch = requestBatchOf(view, data);
-    if (batch !== undefined) {
-      await showRequests(batch, ctx);
-      return;
-    }
-    const signIn = signInOf(view, data.interactionId);
-    if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
+export function defaultInteractionEvents(
+  approvalChannel: SlackApprovalChannelResolver | undefined,
+  interactionCard: SlackInteractionCardChain,
+): Pick<
+  SlackChannelInternalEvents,
+  "interaction.opened" | "interaction.settled" | "response.admitted" | "response.settled"
+> {
+  return {
+    async "interaction.opened"({ data }, ctx) {
+      const view = sessionTables(ctx.view);
+      const batch = requestBatchOf(view, data);
+      if (batch !== undefined) {
+        await postRequestCards(batch, ctx, interactionCard, approvalChannel);
+        return;
+      }
+      const signIn = signInOf(view, data.interactionId);
+      if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
+    },
+
+    async "response.admitted"({ data }, ctx) {
+      const response = sessionTables(ctx.view).responses[data.responseId];
+      if (response !== undefined) {
+        await refreshRequestCard(response.interactionId, ctx, interactionCard);
+      }
+    },
+
+    async "response.settled"({ data }, ctx) {
+      const view = sessionTables(ctx.view);
+      const refused = refusedAnswerOf(view, data);
+      if (refused !== undefined) await notifyRefusedResponder(refused, ctx.channel);
+      const response = view.responses[data.responseId];
+      if (response !== undefined) {
+        await refreshRequestCard(response.interactionId, ctx, interactionCard);
+      }
+    },
+
+    async "interaction.settled"({ data }, ctx) {
+      const signIn = signInOf(sessionTables(ctx.view), data.interactionId);
+      if (signIn !== undefined) {
+        await settleSlackSignIn(signIn, data, ctx.channel);
+        return;
+      }
+      await refreshRequestCard(data.interactionId, ctx, interactionCard);
+    },
   };
 }
 
@@ -333,24 +363,6 @@ export function defaultInteractionOpenedHandler(
  * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
-  async "interaction.settled"({ data }, ctx) {
-    const { channel } = ctx;
-    const view = sessionTables(ctx.view);
-    const signIn = signInOf(view, data.interactionId);
-    if (signIn !== undefined) {
-      await settleSlackSignIn(signIn, data, channel);
-      return;
-    }
-    const resolution = requestSettlementOf(view, data);
-    if (resolution !== undefined) await settleApproval(resolution, channel);
-  },
-
-  async "response.settled"({ data }, ctx) {
-    const { channel } = ctx;
-    const refused = refusedAnswerOf(sessionTables(ctx.view), data);
-    if (refused !== undefined) await notifyRefusedResponder(refused, channel);
-  },
-
   // A turn held on a person's approval, answer, or sign-in isn't working, and
   // the prompt asking them says so. Its status comes back when it resumes.
   async "turn.paused"(_event, { channel }) {
