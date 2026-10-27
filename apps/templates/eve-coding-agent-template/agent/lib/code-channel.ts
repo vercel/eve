@@ -4,6 +4,12 @@ import type { SlackHandle } from "eve/channels/slack";
 import { defineState } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 
+/**
+ * Set to `false` to keep all Slack work in the thread. The agent then never
+ * opens a code channel, and its instructions leave code channels out.
+ */
+export const CODE_CHANNELS = true;
+
 /** What only the agent knows about its task, reported with `update_code_channel_status`. */
 export interface CodeChannelStatus {
   readonly pullRequest?: {

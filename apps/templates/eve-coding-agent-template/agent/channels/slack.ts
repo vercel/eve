@@ -2,7 +2,7 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
 import { call } from "eve/events";
 
-import { syncCodeChannel } from "../lib/code-channel";
+import { CODE_CHANNELS, syncCodeChannel } from "../lib/code-channel";
 
 // Tools that can change the workspace or what the context bar shows.
 const SYNC_AFTER = new Set(["bash", "code__apply_patch", "git__gh", "update_code_channel_status"]);
@@ -51,6 +51,6 @@ const codeChannelSurfaces = defineSlackRenderer({
 // UID here, so keep it a string literal.
 export default slackChannel({
   credentials: connectSlackCredentials("slack/coding-agent"),
-  codeChannels: true,
+  codeChannels: CODE_CHANNELS,
   renderers: [codeChannelSurfaces],
 });

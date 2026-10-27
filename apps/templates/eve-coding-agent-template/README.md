@@ -9,12 +9,13 @@ The coding capabilities come from eve's built-in [code extension](https://eve.de
 ```txt
 agent/
   agent.ts                              model and reasoning
-  instructions.md                       identity, when to open a code channel, delivery
+  instructions.md                       identity, workspace, delivery
+  instructions/code-channels.ts         when to open a code channel and how to work in one
   sandbox.ts                            Vercel Sandbox with gh, git, and TypeScript tooling
   extensions/code.ts                    mounts eve/extensions/code
   extensions/git.ts                     mounts eve/extensions/git with Connect-brokered GitHub access
   lib/github.ts                         Connect connector and the firewall credential broker
-  lib/code-channel.ts                   reads the sandbox and updates the context bar and diff view
+  lib/code-channel.ts                   the CODE_CHANNELS switch, and the context bar and diff view sync
   hooks/                                clears the checkout token before each GitHub turn's model call
   channels/slack.ts                     @mentions in Slack, plus code channels and their context bar and diff view
   channels/github.ts                    @coding-agent comments from trusted repository members
@@ -46,7 +47,7 @@ pnpm dev
 
 ## Connect Slack and GitHub
 
-**Slack.** Run `eve add channel/slack`. It creates or picks a Slack app through Vercel Connect, routes its events to `/eve/v1/slack`, and writes the connector UID into `agent/channels/slack.ts`. Because the channel sets `codeChannels: true`, the generated app manifest enables Slack's code channels feature and adds its scopes and events. For an existing Connect connector, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` scopes and the `message.session` and `agent_session_stopped` events under **Advanced**. Remove `codeChannels: true` and `tools/open_code_channel.ts` to keep all Slack work in the thread.
+**Slack.** Run `eve add channel/slack`. It creates or picks a Slack app through Vercel Connect, routes its events to `/eve/v1/slack`, and writes the connector UID into `agent/channels/slack.ts`. Because the channel sets `codeChannels`, the generated app manifest enables Slack's code channels feature and adds its scopes and events. For an existing Connect connector, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` scopes and the `message.session` and `agent_session_stopped` events under **Advanced**. To keep all Slack work in the thread, set `CODE_CHANNELS` to `false` in `agent/lib/code-channel.ts`. The agent then never opens a code channel, its instructions leave code channels out, and the generated manifest skips their scopes and events.
 
 **GitHub.** Don't use `eve add channel/github` here. It stops with an error because `agent/channels/github.ts` already exists, and `--overwrite` replaces the file along with its rule that only repository owners, members, and collaborators can start a turn. Create the connector with the Vercel CLI instead:
 
@@ -71,7 +72,7 @@ Deploy with `eve deploy`, then install the GitHub App on your repositories from 
 ## Customize
 
 - Change the model in `agent/agent.ts`.
-- Edit `agent/instructions.md` for tone, team conventions, and when the agent opens a code channel. The extensions add their own coding guidance, so keep this file short.
+- Edit `agent/instructions.md` for tone and team conventions, and `agent/instructions/code-channels.ts` for when the agent opens a code channel. The extensions add their own coding guidance, so keep this file short.
 - Change what the code channel's context bar shows in `agent/lib/code-channel.ts`. Slack shows at most five items.
 - Add skills under `agent/skills/`, tools under `agent/tools/`, or override an extension contribution by name. See [Extensions](https://eve.dev/docs/extensions#override-a-contribution).
 - The default HTTP channel accepts the eve TUI, Vercel OIDC, and local development. Add `agent/channels/eve.ts` to put your own auth in front of it. See [Auth and route protection](https://eve.dev/docs/guides/auth-and-route-protection).

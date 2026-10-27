@@ -3,11 +3,12 @@ import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
 import slack from "../channels/slack";
+import { CODE_CHANNELS } from "../lib/code-channel";
 
 // Only Slack threads can open a code channel, and Slack doesn't open one from
 // inside another.
 export default defineDynamic((ctx) =>
-  ctx.channel.kind === "channel:slack" && ctx.channel.metadata.codeChannel !== true
+  CODE_CHANNELS && ctx.channel.kind === "channel:slack" && ctx.channel.metadata.codeChannel !== true
     ? defineTool({
         description: [
           "Move this Slack conversation into a new code channel: a dedicated channel for one task, where you continue the work with the conversation so far.",
