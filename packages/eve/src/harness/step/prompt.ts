@@ -150,7 +150,18 @@ function withFollowUpNotes(messages: readonly HarnessModelMessage[]): HarnessMod
   });
 }
 
-/** The prompt as the model reads it: with the client's context. */
+/**
+ * Whether the model reads exactly the durable messages: no client context or follow-up note is
+ * placed among them, so a measured prompt's message count matches history.
+ */
+export function readsOnlyHistory(prompt: Prompt): boolean {
+  return (
+    (prompt.clientContext?.messages.length ?? 0) === 0 &&
+    !prompt.messages.some((message) => followUpHookOf(message) !== undefined)
+  );
+}
+
+/** The prompt as the model reads it: with the client's context and follow-up notes. */
 export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {
   return validateHarnessModelMessages(normalizeModelMessages(withClientContext(prompt)));
 }

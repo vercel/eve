@@ -3,7 +3,6 @@ import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
 import type { Memo, Occurrence, SessionFrame } from "../../dynamic/definition.js";
 import type { SessionSendOptions } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
@@ -75,18 +74,17 @@ export type HookFollowUpEventKey = {
   [K in HookEventKey]: (typeof HOOK_FOLLOW_UP_KEYS)[K] extends true ? K : never;
 }[HookEventKey];
 
-/** Options for `ctx.followUp()`: the shared send options, with `auth` optional. */
-export type HookFollowUpOptions = Pick<SessionSendOptions, "context" | "idempotencyKey"> & {
-  /**
-   * Who the message acts for. Omitted, the message names no sender, and the turn runs as the
-   * session's current identity.
-   */
-  readonly auth?: SessionAuthContext | null;
-};
+/**
+ * Options for `ctx.followUp()`: the shared send options, with `auth` optional. Omitted, `auth`
+ * names no sender, and the turn runs as the session's current identity. A principal makes the
+ * turn act for them, and `null` runs it with no caller, as with `session.send()`.
+ */
+export type HookFollowUpOptions = Pick<SessionSendOptions, "context" | "idempotencyKey"> &
+  Partial<Pick<SessionSendOptions, "auth">>;
 
 /**
  * What `ctx.followUp()` did, decided when it's called. `queued` means eve recorded the message;
- * another turn that starts first, a cancel, or a reset still drops it.
+ * another turn that starts first, a cancel, a clear, or a reset still drops it.
  */
 export type HookFollowUpResult =
   | { readonly queued: true }

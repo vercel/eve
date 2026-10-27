@@ -298,6 +298,8 @@ Only `turn.settled` and `*` handlers receive `ctx.followUp`; on any other key it
 | `context`        | none                                                                                     |
 | `idempotencyKey` | `ctx.occurrence.idempotencyKey`                                                          |
 
+Pass a principal as `auth` to make the turn act for them, or `null` to run it with no caller, as with `session.send()`.
+
 The model reads the message and its `context` exactly as the hook passed them. Its `delivery.admitted` records `source: { channel, hook: "until-green" }` and no principal unless you pass `auth`, so UIs can tell it from a person's message. From that source, eve places a note ahead of the message in each prompt saying the hook sent it and no person wrote it; the note never joins history. It passes through the channel's `deliver` hook like any other message.
 
 `ctx.followUp()` returns synchronously what eve did with the request:
