@@ -56,7 +56,8 @@ export default defineHook({
       });
       const next = settle(current, verdict, checked.idleRuns);
       goal.update(() => next.goal);
-      // `queued: false` only when another hook already followed up this turn; it goes on either way.
+      // Other hooks' follow-ups share the turn; one for another principal refuses this one, and the
+      // goal goes on from the next turn that settles.
       if (next.message !== undefined) ctx.followUp(next.message);
     },
   },
