@@ -4,6 +4,7 @@ import { USER_HEADER } from "../../fixture";
 
 /** Fixture-only authentication: evals name the speaker, so turns have a user to forward. */
 export default eveChannel({
+  authorizeSession: () => true,
   auth: (request) => {
     const principalId = request.headers.get(USER_HEADER) ?? "e2e-eval";
     return {

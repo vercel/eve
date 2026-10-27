@@ -69,6 +69,107 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 }
 
 describe("eve ID-addressed session routes", () => {
+  it.each([
+    ["POST", "/eve/v1/session/:sessionId"],
+    ["POST", "/eve/v1/session/:sessionId/cancel"],
+    ["POST", "/eve/v1/session/:sessionId/compact"],
+    ["POST", "/eve/v1/session/:sessionId/clear"],
+    ["POST", "/eve/v1/session/:sessionId/reset"],
+    ["GET", "/eve/v1/session/:sessionId/stubs"],
+    ["GET", "/eve/v1/session/:sessionId/stream"],
+    ["GET", "/eve/v1/session/:sessionId/descendants/stream"],
+    ["GET", "/eve/v1/session/:parentSessionId/subagents/:callId/:childSessionId/stream"],
+  ] as const)("checks session policy before accessing %s %s", async (method, path) => {
+    const session = createFixedSession();
+    const attachSession = vi.fn(() => session);
+    const authorizeSession = vi.fn(() => false);
+    const args = {
+      ...createArgs(session),
+      attachSession,
+      params: {
+        sessionId: "wrun_A",
+        parentSessionId: "wrun_A",
+        callId: "call-1",
+        childSessionId: "child-1",
+      },
+    };
+    const response = await route(method, path, { auth: none(), authorizeSession })(
+      new Request(`https://eve.test${path}`, { method }),
+      args,
+    );
+    expect(response.status).toBe(403);
+    expect(authorizeSession).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ sessionId: "wrun_A" }),
+    );
+    expect(attachSession).not.toHaveBeenCalled();
+    expect(session.prewarm).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit existing-session policy for user principals", async () => {
+    const session = createFixedSession();
+    const response = await route("POST", "/eve/v1/session/:sessionId", {
+      auth: () => ({
+        attributes: {},
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user",
+      }),
+    })(
+      new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST" }),
+      createArgs(session),
+    );
+
+    expect(response.status).toBe(403);
+    expect(session.prewarm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["alice", true],
+    ["bob", false],
+  ] as const)(
+    "checks server-owned permissions for %s without authenticating twice",
+    async (principalId, allowed) => {
+      const session = createFixedSession();
+      const auth = vi.fn(() => ({
+        attributes: {},
+        authenticator: "test",
+        principalId,
+        principalType: "user",
+      }));
+      const owners = new Map([["wrun_A", "alice"]]);
+      const response = await route("POST", "/eve/v1/session/:sessionId", {
+        auth,
+        authorizeSession: ({ caller, sessionId }) => owners.get(sessionId) === caller.principalId,
+      })(
+        new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST" }),
+        createArgs(session),
+      );
+
+      expect(response.status).toBe(allowed ? 202 : 403);
+      expect(auth).toHaveBeenCalledOnce();
+      expect(session.prewarm).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    },
+  );
+
+  it("does not access the session when the policy throws", async () => {
+    const session = createFixedSession();
+    const error = new Error("Ownership store unavailable");
+    const handler = route("POST", "/eve/v1/session/:sessionId", {
+      auth: none(),
+      authorizeSession: () => {
+        throw error;
+      },
+    });
+
+    await expect(
+      handler(
+        new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST" }),
+        createArgs(session),
+      ),
+    ).rejects.toBe(error);
+    expect(session.prewarm).not.toHaveBeenCalled();
+  });
+
   it("does not prepare a session when resource authentication rejects the request", async () => {
     const session = createFixedSession();
     const response = await route("POST", "/eve/v1/session/:sessionId", {

@@ -102,6 +102,21 @@ export interface EveChannelConfig {
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
+   * Authorizes access to an existing session after route authentication and
+   * before reading it, preparing it, sending input, or applying controls.
+   * Return exactly `true` to allow access. Check an application-owned session
+   * record against `caller`; the URL's session ID alone is not authorization.
+   *
+   * Without this policy, user principals cannot access existing sessions.
+   * Non-user principals retain deployment-wide access for shared transports.
+   * For descendant streams, `sessionId` is the parent/root session being read.
+   */
+  readonly authorizeSession?: (input: {
+    readonly caller: SessionAuthContext;
+    readonly request: Request;
+    readonly sessionId: string;
+  }) => boolean | Promise<boolean>;
+  /**
    * Conversation audience classification, fixed when the session is created.
    *
    * By default, `user`, `service`, and `runtime` principals are `private`.

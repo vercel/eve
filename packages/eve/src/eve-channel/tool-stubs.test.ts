@@ -185,7 +185,7 @@ async function request(
   body?: unknown,
   create?: Parameters<typeof attachRouteSessionCreator>[1],
 ): Promise<Response> {
-  const route = eveChannel(config).routes!.find(
+  const route = eveChannel({ authorizeSession: () => true, ...config }).routes!.find(
     (route) => route.method === method && route.path === path,
   )!;
   const args = {

@@ -1,6 +1,7 @@
 import { eveChannel } from "eve/channels/eve";
 
 export default eveChannel({
+  authorizeSession: () => true,
   auth: (request) => {
     const forwarded = request.headers.get("x-eve-forwarded-principal-id");
     const principalId = forwarded ?? "workflow-e2e-user";

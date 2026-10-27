@@ -80,6 +80,7 @@ const guardTenantStreams: AuthFn<Request> = (request) => {
 const authenticateDefaultUser: AuthFn<Request> = () => createFixtureUserPrincipal("e2e-user");
 
 export default eveChannel({
+  authorizeSession: () => true,
   auth: [
     authenticateRouter,
     authenticateBob,

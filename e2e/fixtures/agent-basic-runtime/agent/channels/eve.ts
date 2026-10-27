@@ -17,6 +17,11 @@ function principal(issuer: string): SessionAuthContext {
   };
 }
 
+const authenticateRestricted: AuthFn<Request> = (request) =>
+  request.headers.get("authorization") === "Bearer e2e-restricted-session-access"
+    ? principal("restricted-session-access")
+    : null;
+
 const authenticateA: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_A ? principal("issuer-a") : null;
 const authenticateB: AuthFn<Request> = (request) =>
@@ -35,12 +40,14 @@ const SERVER_CONTEXT_TOKEN = "serverctx-K3M8";
 
 export default eveChannel({
   auth: [
+    authenticateRestricted,
     authenticateA,
     authenticateB,
     authenticateMember,
     authenticateRetentionCheck,
     authenticateEvalDriver,
   ],
+  authorizeSession: ({ caller }) => caller.issuer !== "restricted-session-access",
   onMessage(ctx) {
     const auth = defaultEveAuth(ctx);
     const { clientContext } = ctx.eve;

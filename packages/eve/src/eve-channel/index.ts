@@ -415,7 +415,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
 
         const sessionId = requireSessionId(params);
@@ -512,7 +512,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       POST(EVE_SESSION_CANCEL_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
@@ -537,7 +537,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
@@ -561,7 +561,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
@@ -585,7 +585,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
@@ -610,7 +610,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       GET(EVE_SESSION_STUBS_ROUTE_PATTERN, async (req, { params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
         if (authResult.allowToolStubs !== true) {
           return Response.json(
@@ -643,7 +643,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       GET(EVE_SESSION_STREAM_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, params.sessionId);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
@@ -651,7 +651,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       GET(EVE_DESCENDANT_STREAM_ROUTE_PATTERN, async (req, args) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, args.params.sessionId);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(args.params);
         if (sessionId instanceof Response) return sessionId;
@@ -664,7 +664,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       }),
 
       GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, async (req, args) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await authorizeSessionRequest(req, input, args.params.parentSessionId);
         if (authResult instanceof Response) return authResult;
 
         const parentSessionId = args.params.parentSessionId;
@@ -758,4 +758,27 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
     fetchFile: input.fetchFile,
     uploadPolicy: input.uploadPolicy,
   });
+}
+
+async function authorizeSessionRequest(
+  request: Request,
+  input: EveChannelConfig,
+  sessionId: string | undefined,
+) {
+  const caller = await routeAuth(request, input.auth);
+  if (caller instanceof Response) return caller;
+  if (!sessionId) {
+    return Response.json({ error: "Missing session ID.", ok: false }, { status: 400 });
+  }
+  const allowed =
+    input.authorizeSession === undefined
+      ? caller.principalType !== "user"
+      : await input.authorizeSession({ caller, request, sessionId });
+  if (allowed !== true) {
+    return Response.json(
+      { code: "session_access_denied", error: "Session access denied.", ok: false },
+      { status: 403 },
+    );
+  }
+  return caller;
 }

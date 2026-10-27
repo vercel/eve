@@ -314,6 +314,25 @@ Neither admits browser users or external clients in production. For a public app
 
 `eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve selects its default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
 
+### Existing-session authorization
+
+`auth` identifies the caller; `authorizeSession` decides whether that caller may access the session ID in the route. For a `user` principal, existing-session requests return `403 session_access_denied` unless you configure this policy. Creation and inspection still use `auth` alone. Non-user principals retain deployment-wide access by default for intentionally shared channels and infrastructure; configure a policy for them too when they represent separate tenants.
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { authenticateRequest } from "../lib/auth";
+import { canAccessSession } from "../lib/session-access";
+
+export default eveChannel({
+  auth: authenticateRequest,
+  authorizeSession: ({ caller, sessionId }) => canAccessSession(caller, sessionId),
+});
+```
+
+Load ownership or membership from an application-owned server record, using the verified caller's issuer and identity. Record that association before returning a session ID, for example in the custom conversation-creation route under [Start from prior history](#start-from-prior-history). Do not trust a client-supplied owner, tenant, or role. Returning exactly `true` allows access; every other return value denies it. A thrown error fails the request without accessing the session.
+
+The policy runs on every existing-session message, answer, preparation, control, stub read, and stream request. Descendant and subagent streams authorize the parent/root session first. It runs after authentication but before reading the body or attaching the session. `onMessage` is not a substitute: it does not run on streams, controls, preparation, or answers. An intentionally shared user channel can opt into shared access with `authorizeSession: () => true`; only do this when every authenticated caller may read and modify every session served by that channel.
+
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
 ## Audience

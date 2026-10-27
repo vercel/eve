@@ -2,6 +2,7 @@ import { eveChannel } from "eve/channels/eve";
 
 /** Fixture-only authentication for interactive authorization evals. */
 export default eveChannel({
+  authorizeSession: () => true,
   auth: (request) => {
     const principalId = request.headers.get("x-eve-fixture-user") ?? "e2e-approval-responder";
     return {
