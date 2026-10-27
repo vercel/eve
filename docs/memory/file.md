@@ -180,7 +180,8 @@ export function kvBackend(store: KvStore): MemoryDocumentBackend {
 
 Both methods receive a `signal: AbortSignal`. Check it before starting work and
 pass it to storage operations that support cancellation. When upgrading from
-`eve@0.84.0`, rename the backend input's `abortSignal` property to `signal`.
+`eve@0.84.x`, rename the backend input's `abortSignal` property to `signal`.
+Backends written for `0.83.x` or earlier already use `signal` and need no change.
 Memory and tool execution contexts still expose `ctx.abortSignal`; pass that
 value as the backend's `signal`.
 
