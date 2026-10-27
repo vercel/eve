@@ -1170,8 +1170,17 @@ async function receiveOnSlack(
       installationTeamId,
       teamId: deps.teamId,
     });
-    const posted = await thread.post(initialMessage);
+    // Upload-only posts return a file ID, not a message ts; always anchor the root first.
+    const { files, ...message } = initialMessage;
+    const posted = await thread.post(message);
     threadTs = posted.id;
+    if (files?.length) {
+      try {
+        await thread.uploadFiles(files);
+      } catch (error) {
+        log.warn("file upload after initial message post failed", { error });
+      }
+    }
   }
 
   // Threadless proactive runs need distinct identities until their first

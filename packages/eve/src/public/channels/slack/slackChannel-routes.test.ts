@@ -22,11 +22,21 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubEnv("SLACK_SIGNING_SECRET", SIGNING_SECRET);
-  fetchMock = vi.fn(async (request: string | URL | Request) =>
-    String(request).includes("conversations.info")
-      ? Response.json({ channel: { is_private: false }, ok: true })
-      : Response.json({ ok: true, ts: "1700000001.000001" }),
-  );
+  fetchMock = vi.fn(async (request: string | URL | Request) => {
+    const url = String(request);
+    if (url.includes("conversations.info"))
+      return Response.json({ channel: { is_private: false }, ok: true });
+    if (url.endsWith("files.getUploadURLExternal"))
+      return Response.json({
+        ok: true,
+        upload_url: "https://files.slack.com/upload/report",
+        file_id: "F01",
+      });
+    if (url.startsWith("https://files.slack.com/upload/")) return new Response("OK");
+    if (url.endsWith("files.completeUploadExternal"))
+      return Response.json({ ok: true, files: [{ id: "F01" }] });
+    return Response.json({ ok: true, ts: "1700000001.000001" });
+  });
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -309,6 +319,13 @@ describe("slackChannel thread history", () => {
     { message: { markdown: "*Alice's update*" }, expected: { markdown_text: "*Alice's update*" } },
     { message: { text: "Alice's update" }, expected: { text: "Alice's update" } },
     {
+      message: {
+        text: "Alice's report",
+        files: [{ data: Buffer.from("report"), filename: "report.txt" }],
+      },
+      expected: { text: "Alice's report" },
+    },
+    {
       message: { blocks: [{ type: "divider" }], text: "Update" },
       expected: { blocks: [{ type: "divider" }], text: "Update" },
     },
@@ -349,6 +366,18 @@ describe("slackChannel thread history", () => {
       ]);
       expect(slackCalls("chat.postMessage")[0]).not.toHaveProperty("thread_ts");
       expect(send).toHaveBeenCalledWith("C01:1700000001.000001", expect.anything());
+      if (message.files?.length) {
+        expect(slackCalls("files.completeUploadExternal")).toEqual([
+          expect.objectContaining({ channel_id: "C01", thread_ts: "1700000001.000001" }),
+        ]);
+        expect(
+          fetchMock.mock.calls.findIndex(([url]) => String(url).endsWith("chat.postMessage")),
+        ).toBeLessThan(
+          fetchMock.mock.calls.findIndex(([url]) =>
+            String(url).endsWith("files.getUploadURLExternal"),
+          ),
+        );
+      }
     },
   );
 
