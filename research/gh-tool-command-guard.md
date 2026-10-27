@@ -91,7 +91,9 @@ of argv values that reach `exec` stays the same, and only the accepted spellings
    directory, `git -c` points at `git config` in bash, and `--no-pager` is dropped. Other
    git subcommands list the supported ones. When a quote is left open, the refusal
    reports the open quote before any operator the misquoted text exposed, and explains
-   that an apostrophe ends single-quoted text. An environment-assignment message echoes
+   that an apostrophe ends single-quoted text. The parser stops at the end of a heredoc
+   line, so an apostrophe in the body reports the heredoc, and it reports `$'` where it
+   starts, because its escapes differ from plain quotes. An environment-assignment message echoes
    the variable name, not the value.
 2. **Backticks only inside double quotes.** This is an explicit exception to "no silent
    literals": bash runs a backtick inside double quotes, and the tool sends it as text.
@@ -115,9 +117,11 @@ of argv values that reach `exec` stays the same, and only the accepted spellings
    other than `origin` after the subcommand), `unterminated_quote`, and `invalid_input`
    (empty command, NUL character, bad permission, or missing description).
 7. **One source for usage rules.** The tool description states every rule a model needs:
-   one command per call, the refused syntax, `--jq '<expr>'`, `--body-file <path>`,
-   `workingDirectory`, and the supported git subcommands. The GitHub instructions point
-   at it, and `docs/code-extension.mdx` states the rule in one sentence.
+   one command per call, the refused syntax including brace lists, unquoted backticks,
+   `$'…'`, and `$((…))`, `--jq '<expr>'`, `--body-file <path>`, `workingDirectory`, the
+   supported git subcommands, and `origin` right after the subcommand with options after
+   the refs. The GitHub instructions point at it, and `docs/code-extension.mdx` states
+   the rule in one sentence.
 
 A separate follow-up carries the code to the tool span as `agent.action.denial.reason`.
 
@@ -154,10 +158,14 @@ the test if bash exits non-zero. The test passes with bash 3.2.57 (macOS) and ba
 - Accepted commands produce the same argv as bash, including `{owner}`, `{..}`, and
   `{a..}`, quoted and escaped brace lists, literal `$`, any token inside single quotes,
   line continuations, and backslashes inside double quotes.
-- Accepted commands diverge from bash only here. A backtick inside double quotes
-  runs a command in bash. Unquoted parentheses are a bash syntax error. An unquoted `#`
-  that starts a word starts a comment. A `~` that starts a word expands to the home
-  directory. A `*` or `?` that matches files expands to their names.
+- Accepted commands diverge from bash only here. A backtick inside double quotes runs a
+  command in bash. Unquoted parentheses are a bash syntax error. An unquoted `#` that
+  starts a word starts a comment. A `~` that starts a word, or follows the `=` of an
+  assignment-like word such as `body=~/n.md`, expands to the home directory. A `*`, `?`,
+  or bracket expression such as `[ax]` that matches files expands to their names.
+- bash 3.2 leaves a brace sequence with an increment, such as `{1..3..+1}`, literal, and
+  bash 4 and later expand it. The parser refuses it, and the unit tests cover it outside
+  the parity table.
 - Each refused command makes bash exit non-zero or produce an argv that differs from the
   literal text.
 - The single-quoted `exec` form survives `sh` (dash on Debian) and `bash -lc` unchanged
