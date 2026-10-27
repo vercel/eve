@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  githubCommandDenial,
   githubShellApproval,
   parseCommand,
   type GitHubShellInput,
@@ -47,6 +48,10 @@ test("parses text that cannot expand without a shell into the argv bash produces
       ["gh", "pr", "comment", "1", "--body", "for 5$ or US$"],
     ],
     ["gh pr create \\\n  --title Fix", ["gh", "pr", "create", "--title", "Fix"]],
+    ['gh pr comment 1 --body "one \\\ntwo"', ["gh", "pr", "comment", "1", "--body", "one two"]],
+    ["gh pr comment 1 --body 'one \\\ntwo'", ["gh", "pr", "comment", "1", "--body", "one \\\ntwo"]],
+    ["gh pr view {..} {a..} {foo..bar}", ["gh", "pr", "view", "{..}", "{a..}", "{foo..bar}"]],
+    ["gh pr comment 1 --body a\u00a0b\rc", ["gh", "pr", "comment", "1", "--body", "a\u00a0b\rc"]],
     ['gh pr comment 1 --body "C:\\path"', ["gh", "pr", "comment", "1", "--body", "C:\\path"]],
     [
       'gh pr comment 1 --body "\\$ \\" \\\\ \\`"',
@@ -78,6 +83,7 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
     ["gh pr view 1 && gh pr view 2", "chain", /"&&" cannot chain commands\. Send each command/u],
     ["gh pr view 1; env", "chain", /";" cannot chain commands/u],
     ["gh pr view 1\ngh pr view 2", "chain", /"\\n" cannot chain commands/u],
+    ["gh pr view 1\\\\\ngh pr view 2", "chain", /"\\n" cannot chain commands/u],
     ["gh pr view 1 > out", "redirect", /">" cannot redirect/u],
     ["gh pr create --body-file - <<EOF", "heredoc", /"<<" cannot start a heredoc.*--body-file/u],
     [
@@ -86,6 +92,13 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
       /"\$\(" is not expanded.*--body-file/u,
     ],
     ["gh pr view $(printenv)", "substitution", /"\$\(" is not expanded/u],
+    ["gh pr view $\\\n(printenv)", "substitution", /"\$\(" is not expanded/u],
+    [
+      "gh pr view $((1 + 1))",
+      "substitution",
+      /"\$\(\(" is not evaluated\. Write the computed value/u,
+    ],
+    ["gh pr comment 1 --body $'a\\nb'", "substitution", /quoting is not interpreted\. Use plain/u],
     ["gh pr comment 1 --body `id`", "substitution", /"`" is not expanded.*single quotes/u],
     ['gh pr comment 1 --body "${BODY}"', "variable", /"\$\{" is not expanded/u],
     [
@@ -95,6 +108,8 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
     ],
     ["gh pr view {1,2}", "brace_expansion", /"\{1,2\}" is not expanded into separate arguments/u],
     ["gh pr view pr-{1..3}", "brace_expansion", /"\{1\.\.3\}" is not expanded/u],
+    ["gh pr view pr-{1.\\\n.3}", "brace_expansion", /"\{1\.\.3\}" is not expanded/u],
+    ['gh pr comment 1 --body "costs $5"', "variable", /"\$5" is not expanded\..*write \\\$5/u],
     ["GH_TOKEN=stolen gh auth status", "env_assignment", /"GH_TOKEN=" cannot set the environment/u],
     ["env GH_TOKEN=stolen gh auth status", "env_assignment", /"env" cannot set the environment/u],
     [
@@ -111,17 +126,35 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
     ],
     ["git commit -m fix", "git_subcommand", /"git commit" is not an authenticated git command/u],
     [
+      "git -c core.pager=cat push origin main",
+      "git_option",
+      /"-c" is not a subcommand\. Set .*git config/u,
+    ],
+    ["git --no-pager push origin main", "git_option", /never pages output/u],
+    ["git push -u origin main", "git_remote", /Put "-u" after the remote and refs/u],
+    ["git push upstream main", "git_remote", /runs only against origin/u],
+    [
       "gh pr comment 1 --body 'it's ready'",
       "unterminated_quote",
       /unterminated ' quote near .*An apostrophe ends single-quoted text/u,
     ],
+    [
+      "gh pr comment 1 --body 'It's done.\nNext'",
+      "unterminated_quote",
+      /unterminated ' quote near .*An apostrophe ends single-quoted text/u,
+    ],
+    ["gh pr comment 1 --body 'It's $(done) | next'", "unterminated_quote", /unterminated ' quote/u],
     ["gh pr comment 1 --body a\0b", "invalid_input", /NUL character/u],
   ] as const) {
-    const decision = githubShellApproval({ ...WRITE, command });
-    assert.ok(typeof decision === "object", command);
-    assert.equal(decision.code, code, command);
-    assert.match(decision.reason, reason, command);
-    assert.doesNotMatch(decision.reason, /stolen/u, command);
+    const denial = githubCommandDenial({ ...WRITE, command });
+    assert.ok(denial, command);
+    assert.equal(denial.code, code, command);
+    assert.match(denial.reason, reason, command);
+    assert.doesNotMatch(denial.reason, /stolen/u, command);
+    assert.deepEqual(githubShellApproval({ ...WRITE, command }), {
+      type: "denied",
+      reason: denial.reason,
+    });
   }
 });
 
@@ -148,11 +181,9 @@ test("fails closed on invalid permissions and descriptions", () => {
   assert.deepEqual(githubShellApproval(readPush), {
     type: "denied",
     reason: "GitHub App commands require explicit write-capable access.",
-    code: "invalid_input",
   });
   assert.deepEqual(githubShellApproval({ ...WRITE, description: " " }), {
     type: "denied",
     reason: "description must describe the intended result.",
-    code: "invalid_input",
   });
 });

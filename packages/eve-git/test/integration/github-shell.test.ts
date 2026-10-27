@@ -144,7 +144,6 @@ test("rejects empty or multiple permissions before sandbox access or token minti
     assert.deepEqual(githubShellApproval(input), {
       type: "denied",
       reason: "Exactly one GitHub permission is required.",
-      code: "invalid_input",
     });
     await assert.rejects(
       executeGitHubShell(input, CONFIG, {
