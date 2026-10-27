@@ -9,8 +9,10 @@ export interface Goal {
   /** Follow-ups the goal has queued. */
   readonly runs: number;
   readonly maxRuns: number;
-  /** Continuation turns in a row that made no tool calls. */
+  /** Follow-up turns in a row that made no tool calls. */
   readonly idleRuns: number;
+  /** The goal queued the follow-up the next turn runs on. */
+  readonly followedUp?: boolean;
   /** Session spend when the goal was set, once a call settles after it. */
   readonly costAtStart?: number;
   /** Why the goal last continued, paused, or settled. */

@@ -9,6 +9,19 @@ export type { Goal, GoalStatus } from "./lib/state.ts";
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 
+/** An AI SDK language model instance, checked by shape as eve checks an agent's model. */
+const languageModel = z.custom<LanguageModel>((value) => {
+  if (typeof value !== "object" || value === null) return false;
+  const model = value as Record<string, unknown>;
+  return (
+    typeof model.specificationVersion === "string" &&
+    typeof model.provider === "string" &&
+    typeof model.modelId === "string" &&
+    typeof model.doGenerate === "function" &&
+    typeof model.doStream === "function"
+  );
+}, "Expected a model ID or an AI SDK language model instance.");
+
 export default defineExtension({
   config: z.object({
     /**
@@ -16,14 +29,15 @@ export default defineExtension({
      * Gateway, or a model instance such as `openai("gpt-6-luna-fast")` from
      * `eve/models/openai`. Ignored when `judge` is set.
      */
-    model: z
-      .union([z.string().min(1), z.custom<LanguageModel>((value) => typeof value === "object")])
-      .default("openai/gpt-6-luna-fast"),
+    model: z.union([z.string().min(1), languageModel]).default("openai/gpt-6-luna-fast"),
     /** Replaces the default judge, for example to verify with your own checks. */
     judge: fn<GoalJudge>().optional(),
     /** Continuations a goal may run before it pauses. */
     maxRuns: z.number().int().positive().default(50),
-    /** Model spend, in US dollars, a goal may add before it pauses. Unlimited when unset. */
+    /**
+     * Model spend, in US dollars, the agent's turns may add before the goal pauses. The judge's
+     * own calls aren't counted. Unlimited when unset.
+     */
     maxCostUsd: z.number().positive().optional(),
   }),
 });

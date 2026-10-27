@@ -1,8 +1,8 @@
-import { calls, deliveries, usage } from "eve/events";
+import { calls, deliveries, reply, usage } from "eve/events";
 import { defineHook } from "eve/hooks";
 
 import extension from "../extension.ts";
-import { modelJudge } from "../lib/judge.ts";
+import { modelJudge, type GoalVerdict } from "../lib/judge.ts";
 import { check, pause, settle } from "../lib/policy.ts";
 import { goal } from "../lib/state.ts";
 
@@ -21,44 +21,58 @@ export default defineHook({
       const { turnId } = event.data;
       const turnCalls = calls(ctx.view, { turnId });
       const input = deliveries(ctx.view, { turnId });
-      const checked = check(
-        current,
-        {
-          continued:
-            input.length > 0 &&
-            input.every(
-              ({ source }) => source !== undefined && "hook" in source && source.hook !== undefined,
-            ),
-          costUsd: usage(ctx.view).total.costUsd,
-          outcome: event.data.outcome,
-          toolCalls: turnCalls.length,
-        },
-        extension.config,
-      );
+      const costUsd = usage(ctx.view).total.costUsd;
+      // A turn is the goal's own when it queued the follow-up and no person's message joined it.
+      const followedUp =
+        current.followedUp === true &&
+        input.length > 0 &&
+        input.every(({ source }) => source !== undefined && "hook" in source && !!source.hook);
+      const checked = check(current, {
+        costUsd,
+        followedUp,
+        outcome: event.data.outcome,
+        toolCalls: turnCalls.length,
+      });
       if (checked.kind === "pause") {
         goal.update((g) => g && pause(g, checked.reason));
         return;
       }
 
-      const judge = extension.config.judge ?? modelJudge(extension.config.model);
-      const verdict = await judge({
-        abortSignal: ctx.occurrence.abortSignal,
-        calls: turnCalls.map(({ input, name, output, state }) => ({ input, name, output, state })),
-        input: input
-          .flatMap(({ parts }) => parts ?? [])
-          .flatMap((part) => (part.kind === "text" ? [part.text] : []))
-          .join("\n"),
-        objective: current.objective,
-        reply: (event.data.reply ?? []).join("\n"),
-      }).catch((error: unknown) => {
+      let verdict: GoalVerdict | undefined;
+      try {
+        const judge = extension.config.judge ?? modelJudge(extension.config.model);
+        verdict = await judge({
+          abortSignal: ctx.occurrence.abortSignal,
+          calls: turnCalls.map(({ input, name, output, state }) => ({
+            input,
+            name,
+            output,
+            state,
+          })),
+          input: input
+            .flatMap(({ parts }) => parts ?? [])
+            .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+            .join("\n"),
+          objective: current.objective,
+          reply: reply(ctx.view, turnId)
+            .flatMap((part) =>
+              part.kind === "text" && typeof part.value === "string" ? [part.value] : [],
+            )
+            .join(""),
+        });
+      } catch (error) {
         console.warn("The goal judge failed; the goal pauses.", { error });
-        return undefined;
-      });
-      const next = settle(current, verdict, checked.idleRuns);
-      goal.update(() => next.goal);
-      // Other hooks' follow-ups share the turn; one for another principal refuses this one, and the
-      // goal goes on from the next turn that settles.
-      if (next.message !== undefined) ctx.followUp(next.message);
+      }
+      const next = settle(
+        current,
+        verdict,
+        { costUsd, idleRuns: checked.idleRuns },
+        extension.config,
+      );
+      // Another hook's follow-up for a different principal refuses this one; the goal goes on
+      // from the next turn that settles.
+      const queued = next.message !== undefined && ctx.followUp(next.message).queued;
+      goal.update(() => (queued ? next.goal : { ...next.goal, followedUp: false }));
     },
   },
 });

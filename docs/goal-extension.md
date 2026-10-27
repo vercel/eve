@@ -13,12 +13,12 @@ import goal from "eve/extensions/goal";
 export default goal({ maxRuns: 30, maxCostUsd: 25 });
 ```
 
-| Option       | Default                    | Meaning                                                                |
-| ------------ | -------------------------- | ---------------------------------------------------------------------- |
-| `model`      | `"openai/gpt-6-luna-fast"` | The default judge's model: an AI Gateway model ID or a model instance. |
-| `judge`      | a structured-output call   | Replaces the default judge: `(input) => Promise<{ verdict, reason }>`. |
-| `maxRuns`    | `50`                       | Follow-ups a goal may queue before it pauses.                          |
-| `maxCostUsd` | unlimited                  | Model spend, in US dollars, a goal may add before it pauses.           |
+| Option       | Default                    | Meaning                                                                                                             |
+| ------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `model`      | `"openai/gpt-6-luna-fast"` | The default judge's model: an AI Gateway model ID or a model instance.                                              |
+| `judge`      | a structured-output call   | Replaces the default judge: `(input) => Promise<{ verdict, reason }>`.                                              |
+| `maxRuns`    | `50`                       | Follow-ups a goal may queue before it pauses.                                                                       |
+| `maxCostUsd` | unlimited                  | Model spend, in US dollars, the agent's turns may add before the goal pauses. The judge's own calls aren't counted. |
 
 A model ID goes through AI SDK's default provider, AI Gateway, so the deployment needs Gateway credentials such as `AI_GATEWAY_API_KEY` or Vercel OIDC. To judge with eve's provider authentication instead, pass a model instance such as `openai("gpt-6-luna-fast")` from `eve/models/openai`.
 
@@ -41,11 +41,10 @@ Setting a goal is the only lifecycle action the model takes on its own. The mode
 After each turn of an active goal settles, the extension pauses the goal when:
 
 - the turn failed or was cancelled,
-- two continuation turns in a row made no tool calls,
-- the goal reached `maxRuns`, or its spend reached `maxCostUsd`, or
+- two of the goal's own follow-up turns in a row made no tool calls, or
 - the judge failed.
 
-Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. On `continue`, the extension follows up with `Continue working toward the goal. <reason>` as the session's next message. The model reads it with a note that the hook sent it, not a person.
+Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. Every completed turn is judged, so one that finishes the work at a limit is still met. On `continue`, the goal pauses instead if it reached `maxRuns` or its spend reached `maxCostUsd`; otherwise the extension follows up with `Continue working toward the goal. <reason>` as the session's next message. The model reads it with a note that the hook sent it, not a person.
 
 The judge sees the turn's input, its reply, and its settled tool calls, not the whole transcript, so the agent should prove progress with tool output. A person's message always wins: the continuation yields to any turn that starts first, and that turn is judged next with the person's input in view. A "stop" or a change of direction reaches the verdict.
 
