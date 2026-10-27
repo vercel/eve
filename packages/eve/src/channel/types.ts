@@ -238,7 +238,7 @@ export type SessionSendCommandResult =
       readonly retryable?: boolean;
     };
 
-/** Result of terminally resetting a session. */
+/** Result of ending a session. The `"reset"` status is kept for wire compatibility. */
 export type EndSessionResult =
   | { readonly status: "reset"; readonly previousSessionId: string }
   | { readonly status: "no_active_session" };
