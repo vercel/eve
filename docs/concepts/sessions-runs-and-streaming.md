@@ -341,7 +341,7 @@ A structured response matches any currently pending request by ID, not only the 
 
 One delivery can answer requests from several batches. Each answer stands as it arrives (`response.admitted`), and a later answer to the same request replaces it until the request settles. A batch of approvals the model asked for in one step settles together once each has an answer: the approved calls run then, and the model reads their results next. If you answer only some approvals in a batch, those answers stand until the rest arrive. A message that steers the turn instead settles the answered approvals on their answers and withdraws the rest. An answer a response policy weighs stays `response.submitted` until the policy allows it (`response.admitted`) or refuses it (`response.settled`).
 
-When steering interrupts pending model generation, the interrupted run settles `interrupted`, with any usage the provider reported. The correction's `delivery.consumed` and the next `model.requested` for the same `turnId` follow.
+When steering cuts pending model generation, the run settles `outcome: "completed"` with `finishReason: "steered"`, plus `steeredBy` when the steering delivery has an id and the usage of any calls that finished before the cut. A cancel that lands first settles the run `interrupted` with no `steeredBy`. The correction's `delivery.consumed` and the next `model.requested` for the same `turnId` follow.
 
 Multiple steering messages retain their durable arrival order and may be folded into one input at the next boundary. A message accepted after turn settlement starts the next turn. See [message delivery and steering](./execution-model-and-durability#message-delivery-and-steering).
 

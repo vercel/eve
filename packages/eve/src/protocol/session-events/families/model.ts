@@ -38,7 +38,10 @@ export type ModelOutcome = "completed" | "failed" | "interrupted" | "abandoned";
 export interface ModelSettledData {
   readonly runId: string;
   readonly outcome: ModelOutcome;
-  /** The provider's finish reason, as an open string: `stop`, `tool-calls`, `length`, …. */
+  /**
+   * Why the run ended, as an open string: the provider's `stop`, `tool-calls`, `length`, …, or
+   * `steered` when a steering message cut it.
+   */
   readonly finishReason?: string;
   /**
    * The delivery id of the steering message that cut the run, set only with

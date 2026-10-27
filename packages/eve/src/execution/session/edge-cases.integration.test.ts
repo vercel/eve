@@ -1018,7 +1018,10 @@ describe("calls in flight", () => {
     ]);
     // Nothing was cut, so no run settles as steered.
     expect(
-      ofType(events, "model.settled").map((event) => [event.data.finishReason, event.data.steeredBy]),
+      ofType(events, "model.settled").map((event) => [
+        event.data.finishReason,
+        event.data.steeredBy,
+      ]),
     ).toEqual([
       ["stop", undefined],
       ["stop", undefined],

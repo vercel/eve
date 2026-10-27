@@ -131,13 +131,17 @@ describe("SessionInputQueue", () => {
 });
 
 describe("steeringDeliveryId", () => {
-  const meta = (deliveryId: string, payloadIndex: number) =>
-    ({ deliveryId, payloadIndex }) as NonNullable<DeliverHookPayload["deliveryMetadata"]>[number];
+  const meta = (deliveryId: string, payloadIndex: number) => ({
+    channelKind: "test",
+    channelName: "test",
+    deliveryId,
+    payloadIndex,
+  });
 
   it("names the delivery of the message, not of an answer batched before it", () => {
     const delivery: DeliverHookPayload = {
       kind: "deliver",
-      payloads: [{ answers: [] } as never, { message: "correction" }],
+      payloads: [{ answers: [{ interactionId: "i", text: "yes" }] }, { message: "correction" }],
       deliveryMetadata: [meta("dlv_answer", 0), meta("dlv_message", 1)],
     };
     expect(steeringDeliveryId(delivery)).toBe("dlv_message");
