@@ -23,12 +23,18 @@ test("installs trusted GitHub executables, compiler, and diagnostics worker outs
 
   await installCodeTooling(sandbox as SandboxSession);
 
-  assert.match(CODE_TOOLING_REVALIDATION_KEY, /eve-code-tooling:3:/u);
+  assert.match(CODE_TOOLING_REVALIDATION_KEY, /eve-code-tooling:3:2\.103\.3:/u);
   assert.ok(writes.every((path) => path.startsWith("/workspace/.eve-code/")));
   assert.match(
     commands[0] ?? "",
-    /\$INSTALL -m 755 \/usr\/bin\/gh '\/usr\/local\/lib\/eve-code\/gh'/u,
+    /https:\/\/github\.com\/cli\/cli\/releases\/download\/v2\.103\.3\/gh_2\.103\.3_linux_\$GH_ARCH\.tar\.gz/u,
   );
+  assert.match(commands[0] ?? "", /sha256sum -c -/u);
+  assert.match(
+    commands[0] ?? "",
+    /\$INSTALL -m 755 "\$GH_TMP\/gh" '\/usr\/local\/lib\/eve-code\/gh'/u,
+  );
+  assert.doesNotMatch(commands[0] ?? "", /apt-get|\/usr\/bin\/gh/u);
   assert.match(
     commands[0] ?? "",
     /\$INSTALL -m 755 '\/workspace\/\.eve-code\/gh-signed-commit' '\/usr\/local\/lib\/eve-code\/gh-signed-commit'/u,

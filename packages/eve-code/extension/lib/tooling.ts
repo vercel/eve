@@ -9,6 +9,12 @@ import { shellQuote } from "./shell.ts";
 
 export { GH_SIGNED_COMMIT_SOURCE, GH_SIGNED_COMMIT_VERSION };
 export const TYPESCRIPT_VERSION = "6.0.3";
+export const GH_VERSION = "2.103.3";
+/** SHA-256 of `gh_${GH_VERSION}_linux_<arch>.tar.gz` from the release's `gh_${GH_VERSION}_checksums.txt`. */
+const GH_TARBALL_SHA256 = {
+  amd64: "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d",
+  arm64: "ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63",
+} as const;
 const TOOLING_DIR = ".eve-code";
 const TRUSTED_TOOLING_ROOT = "/usr/local/lib/eve-code";
 const TYPESCRIPT_MODULE = `${TRUSTED_TOOLING_ROOT}/typescript/node_modules/typescript/lib/typescript.js`;
@@ -40,6 +46,24 @@ export function ghWrapperSource(sandbox: Pick<SandboxSession, "resolvePath">): s
 export function vercelWrapperSource(sandbox: Pick<SandboxSession, "resolvePath">): string {
   const paths = toolingPaths(sandbox);
   return `#!/usr/bin/env bash\nset -euo pipefail\n[[ ! -f ${JSON.stringify(paths.env)} ]] || source ${JSON.stringify(paths.env)}\nexport VERCEL_TOKEN="\${VERCEL_TOKEN:-eve-code-firewall-placeholder}"\nexec node "$(npm root -g)/vercel/dist/index.js" "$@"\n`;
+}
+
+/** Installs GitHub's release build of `gh` at `ghReal`. Expects `$INSTALL` from the caller's script. */
+export function ghInstallCommand(): string {
+  const release = `https://github.com/cli/cli/releases/download/v${GH_VERSION}`;
+  return [
+    'case "$(uname -m)" in',
+    `  x86_64) GH_ARCH=amd64 GH_SHA256=${GH_TARBALL_SHA256.amd64} ;;`,
+    `  aarch64 | arm64) GH_ARCH=arm64 GH_SHA256=${GH_TARBALL_SHA256.arm64} ;;`,
+    `  *) echo "eve-code has no gh build for $(uname -m)" >&2; exit 1 ;;`,
+    "esac",
+    'GH_TMP="$(mktemp -d)"',
+    `curl -fsSL -o "$GH_TMP/gh.tar.gz" "${release}/gh_${GH_VERSION}_linux_$GH_ARCH.tar.gz"`,
+    'echo "$GH_SHA256  $GH_TMP/gh.tar.gz" | sha256sum -c -',
+    `tar -xzf "$GH_TMP/gh.tar.gz" -C "$GH_TMP" --strip-components=2 "gh_${GH_VERSION}_linux_$GH_ARCH/bin/gh"`,
+    `$INSTALL -m 755 "$GH_TMP/gh" ${shellQuote(GITHUB_TOOLING_PATHS.ghReal)}`,
+    'rm -rf "$GH_TMP"',
+  ].join("\n");
 }
 
 export function typescriptInstallCommand(sandbox: Pick<SandboxSession, "resolvePath">): string {

@@ -6,6 +6,8 @@ import {
   DIAGNOSTICS_WORKER_SOURCE,
   GH_SIGNED_COMMIT_SOURCE,
   GH_SIGNED_COMMIT_VERSION,
+  GH_VERSION,
+  ghInstallCommand,
   ghWrapperSource,
   toolingPaths,
   TYPESCRIPT_VERSION,
@@ -16,7 +18,7 @@ import {
 type ToolingSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 /** Include in the consumer's sandbox `revalidationKey` so cached templates rebuild when the tooling changes. */
-export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
+export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_VERSION}:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
 
 /** Install CLI wrappers, signed commits, and TypeScript diagnostics. */
 export async function installCodeTooling(
@@ -56,16 +58,10 @@ function toolingInstallCommand(
   return [
     "set -e",
     `mkdir -p ${quote(paths.root)}`,
-    "if ! command -v gh >/dev/null 2>&1; then",
-    "  command -v apt-get >/dev/null 2>&1 || { echo 'eve-code requires gh or apt-get' >&2; exit 1; }",
-    "  if [ \"$(id -u)\" = 0 ]; then APT=apt-get; else command -v sudo >/dev/null 2>&1 || { echo 'eve-code needs root or sudo to install gh' >&2; exit 1; }; APT='sudo -n apt-get'; fi",
-    "  $APT update && $APT install -y gh",
-    "fi",
     `chmod 755 ${quote(paths.ghWrapper)} ${quote(paths.signedCommit)}`,
     "if [ \"$(id -u)\" = 0 ]; then INSTALL=install; else INSTALL='sudo -n install'; fi",
     `$INSTALL -d -o root -g root -m 755 ${quote(paths.trustedRoot)} ${quote(paths.typescriptRoot)}`,
-    `[ -x /usr/bin/gh ] || { echo 'eve-code requires gh at /usr/bin/gh' >&2; exit 1; }`,
-    `$INSTALL -m 755 /usr/bin/gh ${quote(paths.ghReal)}`,
+    ghInstallCommand(),
     `$INSTALL -m 755 ${quote(paths.signedCommit)} ${quote(paths.trustedSignedCommit)}`,
     `$INSTALL -m 644 ${quote(paths.workerSource)} ${quote(paths.worker)}`,
     `$INSTALL -m 755 ${quote(paths.ghWrapper)} /usr/local/bin/gh`,

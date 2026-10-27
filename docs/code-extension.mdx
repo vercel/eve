@@ -176,7 +176,7 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-Preparation installs `gh`, wrappers for `gh`, `vc`, and `gh-signed-commit`, and TypeScript diagnostics. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
+Preparation installs a pinned `gh` release downloaded from github.com, wrappers for `gh`, `vc`, and `gh-signed-commit`, and TypeScript diagnostics. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers. Upgrading eve alone does not rebuild an existing prepared environment.
 
