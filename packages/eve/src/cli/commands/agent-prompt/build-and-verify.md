@@ -7,8 +7,8 @@ the installed `eve` package location first and read its `docs/` directory. If
 package docs are unavailable, use https://eve.dev/docs as a fallback. Read
 `quick-reference.md` in the package docs first: it has a checked snippet for each
 common requirement. Open `README.md` to find the full guide for anything it
-doesn't cover, and read only the sections you need (`grep -n '^#' <page>` lists
-them).
+doesn't cover. A long page is an outline whose sections live in files next to
+it; read only the section files you need.
 
 Before implementing an integration yourself, use `eve registry search <query>` or
 `eve registry list` to discover available integrations. Inspect one with

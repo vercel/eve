@@ -311,7 +311,7 @@ ls node_modules/eve/docs
 
 Start with \`docs/quick-reference.md\`: one checked, copy-ready snippet per common requirement (tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, evals). For anything it doesn't cover, \`docs/README.md\` maps each task to the page that covers it. In a workspace or local package install, resolve the installed \`eve\` package location first. If the package docs are missing, use https://eve.dev/docs.
 
-Pages are long. List a page's sections with \`grep -n '^#' <page>\` and read only the sections you need instead of the whole file. Prefer the docs over \`node_modules/eve/dist\` type declarations; check a declaration only when a typecheck error leaves a question open.
+A long page is a short outline whose sections live in files next to it, such as \`channels/slack.mdx\` and \`channels/slack/*.md\`. Read the outline, then only the section files you need; one \`cat\` can read several. Prefer the docs over \`node_modules/eve/dist\` type declarations; check a declaration only when a typecheck error leaves a question open.
 
 Use a bounded authoring loop:
 

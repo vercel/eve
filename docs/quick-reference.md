@@ -97,26 +97,7 @@ export default slackChannel({
 });
 ```
 
-To also answer follow-ups in a thread without a new mention, such as replies under a thread the agent started, add an `onMessage` hook:
-
-```ts title="agent/channels/slack.ts"
-import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
-
-export default slackChannel({
-  credentials: {
-    botToken: process.env.SLACK_BOT_TOKEN,
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-  },
-  async onMessage(ctx, message) {
-    if (message.author?.isBot) return null;
-    const addressed =
-      (await ctx.isDMOrPrivateChannel()) || ctx.isBotMentioned() || (await ctx.isSubscribed());
-    return addressed ? { auth: defaultSlackAuth(message, ctx) } : null;
-  },
-});
-```
-
-Follow-ups in channels need the `message.channels` event and `channels:history` scope on the Slack app. `slackChannel()` with no `credentials` reads the same two variables. The defaults answer app mentions and DMs, reply in the thread, and render approvals as buttons. Each sender becomes a `user` principal. See [Slack](./channels/slack.mdx).
+`slackChannel()` with no `credentials` reads the same two variables. The defaults answer app mentions and DMs, reply in the thread, and render approvals as buttons. Each sender becomes a `user` principal. See [Slack](./channels/slack.mdx).
 
 ## Protect the HTTP API with your SSO
 
