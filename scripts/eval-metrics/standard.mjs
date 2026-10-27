@@ -36,16 +36,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  UnsupportedCaptureError,
   captureSessions,
   eventKey,
   notApplicable,
   selectEvents,
-  timestamp,
   unavailable,
 } from "./measurements/events.mjs";
 import { clientOverheads, durability, median, readClock, serverOverheads } from "./framework.mjs";
 import { coveredLengthBetween, pairIntervals } from "./measurements/intervals.mjs";
-import { predatesTasks } from "./measurements/legacy.mjs";
 import { sessionMarks } from "./measurements/marks.mjs";
 import { indexSession, sessionFailures } from "./measurements/session.mjs";
 
@@ -140,13 +139,15 @@ export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
   let capture;
   try {
     capture = captureSessions(sessions);
-  } catch {
-    return everyMetric(unavailable("invalid-session-capture"));
+  } catch (error) {
+    return everyMetric(
+      unavailable(
+        error instanceof UnsupportedCaptureError ? error.reason : "invalid-session-capture",
+      ),
+    );
   }
   if (capture === undefined) return everyMetric(unavailable("missing-session-capture"));
   if (capture.bySession.size === 0) return everyMetric(notApplicable("no-sessions"));
-  if (sessions.some((session) => predatesTasks(session.events)))
-    return everyMetric(unavailable("legacy-delegation-events"));
 
   const indexes = new Map(
     [...capture.bySession].map(([sessionId, events]) => [sessionId, indexSession(events)]),
@@ -238,12 +239,7 @@ function sessionTimeline(events, index, marks) {
   const actions = pairIntervals(
     selectEvents(events, "call.requested"),
     [
-      ...calls.flatMap((call) => {
-        const ends = [call.taskStarted, call.settled].filter((e) => e !== undefined);
-        return ends.length === 0
-          ? []
-          : [ends.reduce((a, b) => (timestamp(b) < timestamp(a) ? b : a))];
-      }),
+      ...calls.flatMap((call) => (call.end === undefined ? [] : [call.end])),
       ...selectEvents(events, "call.settled").filter((e) => !index.calls.has(e.data?.callId)),
     ],
     {

@@ -1,7 +1,8 @@
 // One-way upgrade of a pre-v27 session capture (eve before 0.84.0) into the
 // v27 facts the measurements read, so release backfills of older eve keep
 // their metrics. Nothing else may read the old vocabulary: when backfills no
-// longer reach eve before 0.84.0, delete this file and its call in events.mjs.
+// longer reach eve before 0.84.0, delete this file and its imports in events.mjs
+// (the upgrade, and the pre-0.69 check in `captureSessions`).
 //
 // Upgraded events keep their source's `meta`, so `meta.id` still identifies
 // them and `meta.at` is still when they were written (pre-v27 deltas carried
@@ -11,8 +12,8 @@
 // Old                          v27
 //   step.started                 model.requested + model.started (run `<turnId>/<stepIndex>`)
 //   step.completed / .failed     model.settled (+ usage.recorded)
-//   message|reasoning.appended   content.delta
-//   message|reasoning.completed  content.completed (synthesized for parts that never completed)
+//   message|reasoning.appended   content.delta (the part's first is scoped to its run)
+//   message|reasoning.completed  content.completed
 //   action.input.appended        call.input
 //   actions.requested            call.requested, one per action (an agent task's call is `agent`)
 //   action.result                call.settled, except a task's start acknowledgement
@@ -83,15 +84,25 @@ export function upgradeLegacyEvents(events) {
       .map((e) => e.data?.requestId),
   );
   const out = [];
-  const completedParts = new Set();
-  const openParts = new Map();
+  const announcedParts = new Set();
   events.forEach((event, line) => {
     let index = 0;
-    const emit = (type, data) =>
-      out.push({ type, data, meta: { ...event.meta, position: { line, index: index++ } } });
+    const emit = (type, data, scope) =>
+      out.push({
+        type,
+        ...(scope !== undefined && { scope }),
+        data,
+        meta: { ...event.meta, position: { line, index: index++ } },
+      });
     const d = event.data ?? {};
     const runId = `${d.turnId}/${d.stepIndex}`;
     const part = (kind) => `${runId}:${kind}`;
+    // As in v27, a part's first delta names the run it belongs to.
+    const announce = (partId) => {
+      if (announcedParts.has(partId)) return undefined;
+      announcedParts.add(partId);
+      return { runId, turnId: d.turnId };
+    };
     const error = { code: d.code ?? "UNKNOWN", message: d.message ?? "", details: d.details };
     switch (event.type) {
       case "session.started":
@@ -133,17 +144,15 @@ export function upgradeLegacyEvents(events) {
       case "message.appended":
       case "reasoning.appended": {
         const kind = event.type === "message.appended" ? "text" : "reasoning";
-        openParts.set(part(kind), { runId, kind, event });
-        return emit("content.delta", {
-          partId: part(kind),
-          kind,
-          delta: d.messageDelta ?? d.reasoningDelta ?? "",
-        });
+        return emit(
+          "content.delta",
+          { partId: part(kind), kind, delta: d.messageDelta ?? d.reasoningDelta ?? "" },
+          announce(part(kind)),
+        );
       }
       case "message.completed":
       case "reasoning.completed": {
         const kind = event.type === "message.completed" ? "text" : "reasoning";
-        completedParts.add(part(kind));
         return emit("content.completed", { partId: part(kind), runId, kind, phase: "reply" });
       }
       case "action.input.appended":
@@ -152,12 +161,11 @@ export function upgradeLegacyEvents(events) {
         // Old eve could stream a call's input and never request the call (v27
         // requests it with `inputError`); such input was streamed output of its
         // step, measured as a first token but never shown, like reasoning.
-        openParts.set(part("input"), { runId, kind: "reasoning", event });
-        return emit("content.delta", {
-          partId: part("input"),
-          kind: "reasoning",
-          delta: d.inputTextDelta ?? "",
-        });
+        return emit(
+          "content.delta",
+          { partId: part("input"), kind: "reasoning", delta: d.inputTextDelta ?? "" },
+          announce(part("input")),
+        );
       case "actions.requested":
         for (const action of Array.isArray(d.actions) ? d.actions : [])
           emit("call.requested", {
@@ -240,15 +248,5 @@ export function upgradeLegacyEvents(events) {
         });
     }
   });
-  // v27 completes every part it streams, interrupted or not, which is how a part names its run.
-  let index = 0;
-  for (const [partId, { runId, kind, event }] of openParts) {
-    if (completedParts.has(partId)) continue;
-    out.push({
-      type: "content.completed",
-      data: { partId, runId, kind, phase: "reply" },
-      meta: { ...event.meta, position: { line: events.length, index: index++ } },
-    });
-  }
   return out;
 }

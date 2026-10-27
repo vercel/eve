@@ -7,7 +7,8 @@
 //   1. the run's records.jsonl and manifest.json are copied to
 //      superseded/metrics-v<old>/<run prefix>/
 //   2. its manifest is removed, so readers stop treating the run as complete
-//   3. records.jsonl is replaced, then the manifest is written last
+//   3. records.jsonl is replaced, then the manifest is written last; if either
+//      write fails, the published records and manifest are put back
 //
 // A re-derivation only changes metrics: one whose records name different
 // attempts than the published run fails before anything is written. Readers
@@ -117,16 +118,43 @@ export async function rederiveRun({ store, prefix, dryRun = false }) {
       },
     };
     await store.remove(`${prefix}/manifest.json`);
-    await store.replace(recordsPath, recordsBody, "application/x-ndjson");
-    await store.replace(
-      `${prefix}/manifest.json`,
-      Buffer.from(`${JSON.stringify(next, null, 2)}\n`),
-      "application/json",
-    );
+    try {
+      await store.replace(recordsPath, recordsBody, "application/x-ndjson");
+      await store.replace(
+        `${prefix}/manifest.json`,
+        Buffer.from(`${JSON.stringify(next, null, 2)}\n`),
+        "application/json",
+      );
+    } catch (error) {
+      // Without its manifest the run is gone from readers and later re-derivations skip it.
+      await restore({ store, recordsPath, publishedBody, prefix, manifestBody, superseded, error });
+    }
     return { status: "rederived", from, records: records.length };
   } finally {
     rmSync(legsDir, { recursive: true, force: true });
   }
+}
+
+/** Put the published records and manifest back after a failed rewrite, then rethrow. */
+async function restore({
+  store,
+  recordsPath,
+  publishedBody,
+  prefix,
+  manifestBody,
+  superseded,
+  error,
+}) {
+  try {
+    await store.replace(recordsPath, publishedBody, "application/x-ndjson");
+    await store.replace(`${prefix}/manifest.json`, manifestBody, "application/json");
+  } catch {
+    throw new Error(
+      `${prefix}: rewrite failed and the published run could not be restored; copy it back from ${superseded}/.`,
+      { cause: error },
+    );
+  }
+  throw new Error(`${prefix}: rewrite failed; restored the published run.`, { cause: error });
 }
 
 /** Download each uploaded leg's JSON artifacts into the layout records.mjs reads. */

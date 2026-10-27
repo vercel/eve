@@ -18,10 +18,18 @@ import { indexSession, sessionFailures } from "./measurements/session.mjs";
 
 const NETWORK_FAILURE =
   /\b(UND_ERR_(?:BODY|CONNECT|HEADERS)_TIMEOUT|UND_ERR_SOCKET|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND)\b/;
-// eve's messages for transient provider failures (harness/semantic-errors/rules):
-// v27 failures carry only a code and message, not the provider's status.
-const PROVIDER_UNAVAILABLE =
-  /^(AI Gateway rate-limited the request\.|The model provider is overloaded or timing out upstream of AI Gateway\.|AI Gateway temporarily throttled its credit balance check\.|A network request failed before completing \()/;
+// v27 failures carry only a code and message, not the provider's status. eve
+// words the transient failures it recognizes (harness/semantic-errors/rules,
+// pinned by standard.test.mjs). Other 408, 429, and 5xx failures keep the
+// provider's message (model-call/errors.ts), which is often its status text.
+export const PROVIDER_UNAVAILABLE_MESSAGES = [
+  "AI Gateway rate-limited the request.",
+  "The model provider is overloaded or timing out upstream of AI Gateway.",
+  "AI Gateway temporarily throttled its credit balance check.",
+  "A network request failed before completing (",
+];
+const TRANSIENT_STATUS_TEXT =
+  /^(Request Timeout|Request timed out|Too Many Requests|Rate limit exceeded|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout|Overloaded)\b/i;
 const TIMEOUT_ERROR = /aborted due to timeout|TimeoutError/i;
 
 /**
@@ -80,6 +88,9 @@ export function isProviderFailure({ code, message, details } = {}) {
     if (typeof status === "number" && (status === 429 || status >= 500)) return true;
   }
   if (details?.semanticErrorId === "network-request-failed") return true;
-  if (typeof message === "string" && PROVIDER_UNAVAILABLE.test(message)) return true;
+  if (typeof message === "string") {
+    if (PROVIDER_UNAVAILABLE_MESSAGES.some((prefix) => message.startsWith(prefix))) return true;
+    if (TRANSIENT_STATUS_TEXT.test(message)) return true;
+  }
   return NETWORK_FAILURE.test(JSON.stringify(details ?? {}) + (message ?? ""));
 }

@@ -1,4 +1,4 @@
-import { isLegacyCapture, upgradeLegacyEvents } from "./legacy.mjs";
+import { isLegacyCapture, predatesTasks, upgradeLegacyEvents } from "./legacy.mjs";
 
 /**
  * @typedef {{ status: "measured", value: number }
@@ -45,6 +45,14 @@ export function sessionEvents(session) {
   return isLegacyCapture(events) ? upgradeLegacyEvents(events) : events;
 }
 
+/** A well-formed capture that no metric can measure; `reason` says why. */
+export class UnsupportedCaptureError extends Error {
+  constructor(reason) {
+    super(`Unsupported session capture: ${reason}.`);
+    this.reason = reason;
+  }
+}
+
 /**
  * Merge repeated session captures and validate event identities before
  * measuring. Events come back in the v27 vocabulary.
@@ -80,7 +88,10 @@ export function captureSessions(sessions) {
     }
     bySession.set(session.sessionId, events);
   }
-  for (const [sessionId, events] of bySession) bySession.set(sessionId, sessionEvents({ events }));
+  for (const [sessionId, events] of bySession) {
+    if (predatesTasks(events)) throw new UnsupportedCaptureError("legacy-delegation-events");
+    bySession.set(sessionId, sessionEvents({ events }));
+  }
 
   return { bySession, events: [...bySession.values()].flat() };
 }

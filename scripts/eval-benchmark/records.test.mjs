@@ -535,6 +535,43 @@ test("re-derives a published run in place, keeping what it replaces", async (t) 
   });
 });
 
+test("a re-derivation whose rewrite fails restores the published run", async (t) => {
+  const legsDir = legsDirectory(t);
+  const store = memoryStore();
+  await publishRun({
+    plan,
+    legs: readLegs(plan, legsDir),
+    recordsJsonl: build(legsDir)
+      .map((record) => `${JSON.stringify(record)}\n`)
+      .join(""),
+    frameworkRecordsJsonl: "",
+    githubRunId: "123",
+    runAttempt: 1,
+    eveVersion: "0.71.2",
+    store,
+  });
+  const prefix = "runs/123/1";
+  const manifest = JSON.parse(store.objects.get(`${prefix}/manifest.json`));
+  manifest.metrics.metrics_version = METRICS_VERSION - 1;
+  store.objects.set(`${prefix}/manifest.json`, Buffer.from(JSON.stringify(manifest)));
+  const published = new Map(store.objects);
+  const { replace } = store;
+  let failed = false;
+  store.replace = async (pathname, body) => {
+    if (!failed && pathname.endsWith("/manifest.json")) {
+      failed = true;
+      throw new Error("network");
+    }
+    return replace(pathname, body);
+  };
+  await assert.rejects(rederiveRun({ store, prefix }), /rewrite failed; restored/);
+  for (const path of [`${prefix}/manifest.json`, `${prefix}/records.jsonl`])
+    assert(store.objects.get(path).equals(published.get(path)), path);
+  // The superseded copies are immutable and identical, so a retry goes through.
+  store.replace = replace;
+  assert.equal((await rederiveRun({ store, prefix })).status, "rederived");
+});
+
 test("a re-derivation that changes which attempts a run holds writes nothing", async (t) => {
   const legsDir = legsDirectory(t);
   const store = memoryStore();

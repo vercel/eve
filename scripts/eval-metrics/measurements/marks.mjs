@@ -15,8 +15,10 @@
 // has a server time `t` and the event that carried it to the client (`via`).
 // They differ only for a back-dated `model.done`, whose time is the step's last
 // output but which arrives with `model.settled`. A progress record (a delta)
-// has no server time of its own, so its time is its client arrival less the
-// session's smallest delivery lag, which needs the eval's client clock.
+// has no server time of its own. It was written between the commits around it,
+// so its time is its client arrival less the next commit's delivery lag (the
+// session's smallest when no commit followed), clamped between those commits.
+// That needs the eval's client clock.
 import { hasOwnTime, selectEvents, timestamp, unavailable } from "./events.mjs";
 import { indexSession } from "./session.mjs";
 
@@ -84,14 +86,8 @@ export function sessionMarks(events, { index = indexSession(events), arrival } =
     if (step === undefined) continue;
     const start = mark(call.requested);
     if (start === undefined) return unavailable("missing-timestamp");
-    const endEvent = [call.taskStarted, call.settled]
-      .filter((event) => event !== undefined)
-      .reduce(
-        (a, b) => ((timestamp(b) ?? Infinity) < (timestamp(a) ?? Infinity) ? b : a),
-        undefined,
-      );
-    const end = endEvent === undefined ? undefined : mark(endEvent);
-    if (endEvent !== undefined && end === undefined) return unavailable("missing-timestamp");
+    const end = call.end === undefined ? undefined : mark(call.end);
+    if (call.end !== undefined && end === undefined) return unavailable("missing-timestamp");
     tools.push({ callId: call.callId, runId: call.runId, turnId: step.turnId, start, end });
   }
 
@@ -184,7 +180,7 @@ export function sessionMarks(events, { index = indexSession(events), arrival } =
     for (const tool of turn.tools)
       for (const m of [tool.start, tool.end]) if (m) carriers.push(m.via);
   }
-  return { status: "ready", turns, carriers: [...new Set(carriers)], timeOf };
+  return { status: "ready", turns, carriers: [...new Set(carriers)] };
 }
 
 /** For each progress record, the first fact after it in its stream. */

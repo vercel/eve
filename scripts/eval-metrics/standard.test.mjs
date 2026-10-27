@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { classifyOutcome } from "./gaps.mjs";
+import { PROVIDER_UNAVAILABLE_MESSAGES, classifyOutcome } from "./gaps.mjs";
 import { sessionEvents } from "./measurements/events.mjs";
 import { listMarks, sessionMarks } from "./measurements/marks.mjs";
 import {
@@ -377,6 +377,33 @@ test("a delta is placed between the commits around it, and unknown without a cli
   });
 });
 
+test("a retried attempt's streamed output counts though it never completed", () => {
+  // v27 names a part's run only on its first delta; a retry abandons the run's parts.
+  const abandoned = { ...delta("r1", 100), scope: { runId: "r1", turnId: "t" } };
+  const retried = { ...delta("r2", 300), scope: { runId: "r2", turnId: "t" } };
+  const events = turn(0, 600, [
+    ...run("r1", 100),
+    abandoned,
+    fact("model.settled", 200, { runId: "r1", outcome: "abandoned" }),
+    ...run("r2", 300),
+    retried,
+    completed("r2", 500),
+    ...settled("r2", 500, { outputTokens: 10 }),
+  ]);
+  const arrivals = new Map([
+    [abandoned, Date.parse(at(160))],
+    [retried, Date.parse(at(410))],
+  ]);
+  const zero = Date.parse(at(0));
+  const sends = [
+    { kind: "message", deliveryId: "d-t", startedAt: zero, notReadyMs: 0, acceptedAt: zero },
+  ];
+  const { metrics } = deriveAttemptMetrics(clocked(events, { arrivals, sends }));
+  // The abandoned run's first token (50 ms) counts, and the client saw output at 160, not 410.
+  assert.equal(values(metrics)["latency.ttft_ms_p50"], 75);
+  assert.deepEqual(metrics["overhead.first_output_ms"].samples, [110]);
+});
+
 test("partial captures make attribution unavailable instead of guessing", () => {
   const openTurn = [fact("turn.started", 0, { turnId: "t" }), ...run("r", 10)];
   assert.equal(
@@ -439,6 +466,19 @@ test("counts failures by kind and code", () => {
   assert.equal(values(metrics)["reliability.turn_failures"], 1);
 });
 
+test("provider-unavailable messages are eve's own wording", () => {
+  const rules = ["gateway.ts", "system.ts"]
+    .map((name) =>
+      readFileSync(
+        new URL(`../../packages/eve/src/harness/semantic-errors/rules/${name}`, import.meta.url),
+        "utf8",
+      ),
+    )
+    .join("\n");
+  for (const message of PROVIDER_UNAVAILABLE_MESSAGES)
+    assert(rules.includes(message), `eve no longer words a failure "${message}"`);
+});
+
 test("classifies outcomes and every gap reason", () => {
   const failed = (code, message = "failed") =>
     synthetic(
@@ -465,6 +505,9 @@ test("classifies outcomes and every gap reason", () => {
     "The model provider is overloaded or timing out upstream of AI Gateway.",
     "A network request failed before completing (ECONNRESET).",
     "fetch failed: UND_ERR_HEADERS_TIMEOUT",
+    // Transient statuses eve has no rule for keep the provider's status text.
+    "Service Unavailable",
+    "Too Many Requests",
   ])
     assert.deepEqual(classifyOutcome(failed("MODEL_CALL_FAILED", message)), {
       outcome: "gap",

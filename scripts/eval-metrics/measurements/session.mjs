@@ -20,7 +20,9 @@ import { timestamp } from "./events.mjs";
  *   requested: object,
  *   taskStarted: object | undefined,
  *   settled: object | undefined,
+ *   end: object | undefined,
  * }} Call `taskStarted` is the `call.started` that handed the call to a task.
+ *   `end` is where the call's own work ends: the earlier of `taskStarted` and `settled`.
  */
 
 const earliest = (a, b) =>
@@ -60,6 +62,7 @@ export function indexSession(events) {
           requested: event,
           taskStarted: undefined,
           settled: undefined,
+          end: undefined,
         });
       else call.requested = earliest(call.requested, event);
     } else if (event.type === "turn.started" && typeof data.turnId === "string") {
@@ -68,6 +71,14 @@ export function indexSession(events) {
       tasks.set(data.taskId, event);
     } else if (event.type === "content.completed" && typeof data.partId === "string") {
       parts.set(data.partId, { runId: data.runId, kind: data.kind });
+    } else if (
+      event.type === "content.delta" &&
+      typeof event.scope?.runId === "string" &&
+      !parts.has(data.partId)
+    ) {
+      // A part's first delta names its run. An attempt that failed and was retried never
+      // completes its parts, but the client saw what it streamed.
+      parts.set(data.partId, { runId: event.scope.runId, kind: data.kind });
     } else {
       later.push(event);
     }
@@ -87,6 +98,11 @@ export function indexSession(events) {
     else if (event.type === "call.settled" && call !== undefined)
       call.settled = earliest(call.settled, event);
   }
+  for (const call of calls.values())
+    call.end = [call.taskStarted, call.settled].reduce(
+      (end, event) => (event === undefined ? end : earliest(end, event)),
+      undefined,
+    );
 
   const callTurn = (callId, depth = 0) => {
     const call = calls.get(callId);
