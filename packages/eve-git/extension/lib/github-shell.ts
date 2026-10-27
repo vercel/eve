@@ -104,9 +104,12 @@ interface GitHubShellDependencies {
 
 /** Why the `gh` tool refused a command: a stable, low-cardinality value for telemetry. */
 export type GitHubCommandDenialCode =
+  | "brace_expansion"
   | "cd"
   | "chain"
   | "env_assignment"
+  | "gh_subcommand"
+  | "git_option"
   | "git_subcommand"
   | "heredoc"
   | "invalid_input"
@@ -127,8 +130,16 @@ class GitHubCommandError extends Error {
 }
 
 interface ShellSyntax {
-  readonly code: "chain" | "heredoc" | "pipe" | "redirect" | "substitution" | "variable";
+  readonly code: Extract<
+    GitHubCommandDenialCode,
+    "brace_expansion" | "chain" | "heredoc" | "pipe" | "redirect" | "substitution" | "variable"
+  >;
   readonly token: string;
+}
+
+interface BraceGroup {
+  readonly start: number;
+  expands: boolean;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
@@ -136,7 +147,10 @@ const leaseQueues = new Map<string, Promise<void>>();
 const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
 const NO_SHELL = "GitHub commands run without a shell";
 const GIT_REMOTE_COMMANDS = "Authenticated git supports fetch, ls-remote, pull, and push";
+const DOUBLE_QUOTE_ESCAPES = '$`"\\';
 const SHELL_SYNTAX_FIXES: Record<ShellSyntax["code"], string> = {
+  brace_expansion:
+    "is not expanded into separate arguments. Write each argument out, or quote the braces to send them literally.",
   chain: "cannot chain commands. Send each command in its own call.",
   heredoc:
     "cannot start a heredoc. Write the text to a file and pass it with --body-file, or --input for gh api.",
@@ -144,7 +158,7 @@ const SHELL_SYNTAX_FIXES: Record<ShellSyntax["code"], string> = {
   redirect:
     "cannot redirect. The tool returns stdout and stderr; read files with flags such as --body-file or --input.",
   substitution:
-    "is not expanded. Run the inner command separately and use its output, or write long text to a file and pass it with --body-file.",
+    "is not expanded. Run the inner command separately and use its output, or put literal text in single quotes or a --body-file.",
   variable: "is not expanded. Write the value itself, or single-quote it to send it literally.",
 };
 
@@ -327,23 +341,30 @@ async function withGitHubCredentialLease<T>(
 export function parseCommand(command: string): string[] {
   const value = command.trim();
   if (!value) throw new GitHubCommandError("invalid_input", "GitHub command must not be empty.");
+  if (value.includes("\0")) {
+    throw new GitHubCommandError("invalid_input", "GitHub command contains a NUL character.");
+  }
   const argv: string[] = [];
+  const braces: BraceGroup[] = [];
   let token = "";
   let quote: "single" | "double" | null = null;
   let quoteStart = 0;
   let escaped = false;
   let started = false;
+  const refuse = (syntax: ShellSyntax) =>
+    shellSyntaxError(started ? [...argv, token] : argv, syntax);
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]!;
     if (escaped) {
-      token += character;
       escaped = false;
+      if (character === "\n") continue;
+      if (quote === "double" && !DOUBLE_QUOTE_ESCAPES.includes(character)) token += "\\";
+      token += character;
       started = true;
       continue;
     }
     if (character === "\\" && quote !== "single") {
       escaped = true;
-      started = true;
       continue;
     }
     if (quote === "single") {
@@ -357,7 +378,7 @@ export function parseCommand(command: string): string[] {
         : quote === null
           ? operatorAt(value, index)
           : undefined;
-    if (syntax) throw shellSyntaxError(started ? [...argv, token] : argv, syntax);
+    if (syntax) throw refuse(syntax);
     if (quote === "double") {
       if (character === '"') quote = null;
       else token += character;
@@ -368,12 +389,15 @@ export function parseCommand(command: string): string[] {
       quoteStart = index;
       started = true;
     } else if (/\s/u.test(character)) {
+      braces.length = 0;
       if (started) {
         argv.push(token);
         token = "";
         started = false;
       }
     } else {
+      const expansion = braceExpansionAt(value, index, braces);
+      if (expansion) throw refuse(expansion);
       token += character;
       started = true;
     }
@@ -401,7 +425,10 @@ function operatorAt(value: string, index: number): ShellSyntax | undefined {
   if (pair === "&>") return { code: "redirect", token: pair };
   const character = value[index]!;
   if (character === "|") return { code: "pipe", token: character };
-  if (character === "&" || character === ";") return { code: "chain", token: character };
+  if (character === "&" || character === ";" || character === "\n") {
+    return { code: "chain", token: character };
+  }
+  if (character === "`") return { code: "substitution", token: character };
   if (character === "<" || character === ">") return { code: "redirect", token: character };
   return undefined;
 }
@@ -415,6 +442,28 @@ function expansionAt(value: string, index: number, quoted: boolean): ShellSyntax
   if (next === "{") return { code: "variable", token: "${" };
   const name = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9*@#?!$-])/u.exec(value.slice(index + 1));
   return name ? { code: "variable", token: `$${name[0]}` } : undefined;
+}
+
+/**
+ * Tracks the unquoted braces of the current word. Returns the brace expansion bash performs
+ * when a group that holds an unquoted `,` or `..` closes.
+ */
+function braceExpansionAt(
+  value: string,
+  index: number,
+  open: BraceGroup[],
+): ShellSyntax | undefined {
+  const character = value[index];
+  if (character === "{") open.push({ start: index, expands: false });
+  else if (character === "}") {
+    const group = open.pop();
+    if (group?.expands) {
+      return { code: "brace_expansion", token: value.slice(group.start, index + 1) };
+    }
+  } else if (open.length > 0 && (character === "," || value.startsWith("..", index))) {
+    open.at(-1)!.expands = true;
+  }
+  return undefined;
 }
 
 function shellSyntaxError(words: readonly string[], syntax: ShellSyntax): GitHubCommandError {
@@ -457,7 +506,7 @@ function gitSubcommandError(subcommand: string | undefined, value: string | unde
         ? ` Set the workingDirectory parameter${value ? ` to ${JSON.stringify(value)}` : ""}.`
         : "";
     return new GitHubCommandError(
-      "git_subcommand",
+      "git_option",
       `${GIT_REMOTE_COMMANDS} as its first argument, and ${JSON.stringify(subcommand)} is not a subcommand.${fix}`,
     );
   }
@@ -490,7 +539,9 @@ function validateGitHubShellInput(input: GitHubShellInput): string[] {
   }
   const [executable, subcommand, value] = argv as [string, ...string[]];
   if (executable === "gh") {
-    if (!subcommand) throw new GitHubCommandError("invalid_input", "A gh subcommand is required.");
+    if (!subcommand) {
+      throw new GitHubCommandError("gh_subcommand", "Name a gh subcommand, such as gh pr view.");
+    }
   } else if (executable === "git") {
     if (!subcommand || !ALLOWED_GIT_REMOTE_COMMANDS.has(subcommand)) {
       throw gitSubcommandError(subcommand, value);

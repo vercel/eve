@@ -3,7 +3,6 @@ export {
   executeGitHubShell,
   githubShellApproval,
   type GitHubCoAuthor,
-  type GitHubCommandDenialCode,
   type GitHubConfig,
   type GitHubLeaseRule,
   type GitHubShellInput,

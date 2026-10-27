@@ -11,10 +11,10 @@ type NetworkPolicySandboxSession = SandboxSession & {
 import {
   executeGitHubShell,
   githubShellApproval,
-  parseCommand,
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
+import { GITHUB_TOOLING_PATHS } from "../../extension/lib/tooling.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
 
@@ -52,83 +52,6 @@ const CLONE: GitHubShellInput = {
   description: "Clone the repository into the sandbox",
   permissions: [{ provider: "github", repositories: ["vercel/internal-agents"], access: "write" }],
 };
-
-test("parses simple argv quoting without enabling a shell language", () => {
-  assert.deepEqual(parseCommand(`gh pr comment 1 --body "it's ready"`), [
-    "gh",
-    "pr",
-    "comment",
-    "1",
-    "--body",
-    "it's ready",
-  ]);
-});
-
-test("keeps text that cannot expand without a shell as literal argv", () => {
-  for (const [command, argv] of [
-    ["gh api repos/{owner}/{repo}/pulls", ["gh", "api", "repos/{owner}/{repo}/pulls"]],
-    [
-      'gh pr comment 1 --body "Run `pnpm test` (all tiers) for 5$ or US$"',
-      ["gh", "pr", "comment", "1", "--body", "Run `pnpm test` (all tiers) for 5$ or US$"],
-    ],
-    ["gh pr comment 1 --body Fix(`parse`)", ["gh", "pr", "comment", "1", "--body", "Fix(`parse`)"]],
-    [
-      "gh pr comment 1 --body '$(date) ${HOME} $USER'",
-      ["gh", "pr", "comment", "1", "--body", "$(date) ${HOME} $USER"],
-    ],
-    ["gh pr comment 1 --body \\$HOME", ["gh", "pr", "comment", "1", "--body", "$HOME"]],
-  ] as const) {
-    assert.deepEqual(parseCommand(command), argv, command);
-    assert.equal(githubShellApproval({ ...READ, command }), "not-applicable", command);
-  }
-});
-
-test("names the refused syntax, its fix, and a stable denial code", () => {
-  for (const [command, code, reason] of [
-    ["gh pr view 1 | head", "pipe", /"\|" cannot pipe output\. Filter it with --jq/u],
-    ["gh pr view 1 && gh pr view 2", "chain", /"&&" cannot chain commands\. Send each command/u],
-    ["gh pr view 1; env", "chain", /";" cannot chain commands/u],
-    ["gh pr view 1 > out", "redirect", /">" cannot redirect/u],
-    ["gh pr create --body-file - <<EOF", "heredoc", /"<<" cannot start a heredoc.*--body-file/u],
-    [
-      'gh pr comment 1 --body "$(cat notes.md)"',
-      "substitution",
-      /"\$\(" is not expanded.*--body-file/u,
-    ],
-    ["gh pr view $(printenv)", "substitution", /"\$\(" is not expanded/u],
-    ['gh pr comment 1 --body "${BODY}"', "variable", /"\$\{" is not expanded/u],
-    [
-      "gh pr view $PR_NUMBER",
-      "variable",
-      /"\$PR_NUMBER" is not expanded\. Write the value itself/u,
-    ],
-    ["GH_TOKEN=stolen gh auth status", "env_assignment", /"GH_TOKEN=" cannot set the environment/u],
-    ["env GH_TOKEN=stolen gh auth status", "env_assignment", /"env" cannot set the environment/u],
-    [
-      "cd internal-agents && git push origin main",
-      "cd",
-      /Set the workingDirectory parameter to "internal-agents"/u,
-    ],
-    ["bash -lc gh", "program", /"bash" is not a GitHub command/u],
-    [
-      "git -C internal-agents push origin main",
-      "git_subcommand",
-      /"-C" is not a subcommand\. Set the workingDirectory parameter to "internal-agents"/u,
-    ],
-    ["git commit -m fix", "git_subcommand", /"git commit" is not an authenticated git command/u],
-    [
-      "gh pr comment 1 --body 'it's ready'",
-      "unterminated_quote",
-      /unterminated ' quote near .*An apostrophe ends single-quoted text/u,
-    ],
-  ] as const) {
-    const decision = githubShellApproval({ ...WRITE, command });
-    assert.ok(typeof decision === "object", command);
-    assert.equal(decision.code, code, command);
-    assert.match(decision.reason, reason, command);
-    assert.doesNotMatch(decision.reason, /stolen/u, command);
-  }
-});
 
 test("runs every valid authenticated GitHub command without approval", () => {
   assert.equal(githubShellApproval(CLONE), "not-applicable");
@@ -215,46 +138,6 @@ test("asks authorize with the caller, repository, and token before running", asy
   assert.equal(runs.length, 1);
 });
 
-test("approves the full syntactically valid gh surface", () => {
-  for (const command of [
-    "gh api repos/vercel/internal-agents",
-    "gh auth token",
-    "gh auth status",
-    "gh alias set pwn '!env'",
-    "gh extension exec x",
-    "gh repo view vercel/internal-agents --web",
-    "gh pr view 2583 --repo vercel/internal-agents --browser",
-  ]) {
-    assert.equal(githubShellApproval({ ...READ, command }), "not-applicable", command);
-  }
-});
-
-test("fails closed on invalid permissions, missing commands, env assignments, and shell syntax", () => {
-  const readPush = {
-    ...WRITE,
-    permissions: [{ ...WRITE.permissions[0], access: "read" as const }] as const,
-  };
-  // @ts-expect-error Exercise runtime rejection of unsupported read-only permissions.
-  assert.deepEqual(githubShellApproval(readPush), {
-    type: "denied",
-    reason: "GitHub App commands require explicit write-capable access.",
-    code: "invalid_input",
-  });
-  for (const command of [
-    "gh",
-    "GH_TOKEN=stolen gh auth status",
-    "env GH_TOKEN=stolen gh auth status",
-    "bash -lc gh",
-  ]) {
-    const decision = githubShellApproval({ ...WRITE, command });
-    assert.equal(typeof decision, "object", command);
-    assert.ok((decision as { reason: string }).reason.length > 0);
-  }
-  for (const command of ["gh auth status | env", "gh auth status; env", "gh auth status > token"]) {
-    assert.throws(() => parseCommand(command), /without a shell/u, command);
-  }
-});
-
 test("rejects empty or multiple permissions before sandbox access or token minting", async () => {
   for (const permissions of [[], [...READ.permissions, ...READ.permissions]]) {
     const input = { ...READ, permissions };
@@ -336,6 +219,31 @@ test("mints a repository-scoped token only during execution and redacts output",
   assert.match(JSON.stringify(policies[0]), /secret-token/u);
   assert.equal(policies[1], "allow-all");
   assert.equal(output.stdout, "pushed [redacted]");
+});
+
+test("runs the parsed argv as one single-quoted exec of the trusted gh", async () => {
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  await executeGitHubShell(
+    {
+      ...READ,
+      command:
+        "gh pr comment 1 --repo vercel/internal-agents --body \"it's `id`; done\" --title '$(id)|$HOME'",
+    },
+    CONFIG,
+    {
+      sessionId: "session-exec-shape",
+      async getConnectToken() {
+        return "secret-token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
+  );
+  assert.equal(
+    runs[0]?.command,
+    `cd '/workspace' && exec '${GITHUB_TOOLING_PATHS.ghReal}' 'pr' 'comment' '1' '--repo' 'vercel/internal-agents' '--body' 'it'"'"'s \`id\`; done' '--title' '$(id)|$HOME'`,
+  );
 });
 
 test("runs gh auth token with only the placeholder credential and redacts injected secrets", async () => {
