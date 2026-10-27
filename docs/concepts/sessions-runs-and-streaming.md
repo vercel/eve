@@ -242,9 +242,7 @@ const observed = call(agent.view, callId);
 if (observed?.state === "failed") console.error(observed.error.message);
 ```
 
-`callOutputSource(view, callId)` returns the call observation that owns a shared
-result. Use it when a call's output belongs to another call via `outputOf`, rather
-than assuming each call stores its own result.
+`callOutputSource(view, callId)` returns the observation of the call that produced a call's output. `call(view, callId)?.output` already follows `outputOf`, so use `callOutputSource` when you need the producing call itself, such as its `callId` or label.
 
 Calls include their resolved `turnId`, `runId`, and `taskId` when known, so applications do not
 join calls to runs to find their turn. `turns`, `deliveries`, `tasks`, `runs`, `parts`, and
