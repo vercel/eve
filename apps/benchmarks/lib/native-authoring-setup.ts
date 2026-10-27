@@ -14,6 +14,7 @@ const sessionSetups: readonly AuthoringSetup[] = [
 interface FixtureBootstrap {
   readonly startingPoint: "scaffolded" | "empty";
   readonly projectDirectory?: string;
+  readonly skipSandboxPrewarm?: boolean;
   readonly revision: string;
   readonly setupIds: readonly string[];
 }
@@ -58,12 +59,21 @@ export function createNativeAuthoringSetup(options: {
       if (bootstrap.projectDirectory === undefined) {
         throw new Error("An empty native fixture must declare its project directory.");
       }
+      let build = `npm --prefix ${bootstrap.projectDirectory} run build`;
+      if (bootstrap.skipSandboxPrewarm === true) {
+        // Kept outside the workspace so the flag doesn't hint at the case's answer.
+        build = "eve-benchmark-build";
+        await sandbox.writeFiles({
+          "/usr/local/bin/eve-benchmark-build": `#!/bin/sh\ncd ${shellQuote(bootstrap.projectDirectory)} && exec npm exec -- eve build --skip-sandbox-prewarm\n`,
+        });
+        await run(sandbox, "chmod +x /usr/local/bin/eve-benchmark-build", "build wrapper");
+      }
       await sandbox.writeFiles({
         "package.json": `${JSON.stringify({
           private: true,
           scripts: {
             typecheck: `npm --prefix ${bootstrap.projectDirectory} run typecheck`,
-            build: `npm --prefix ${bootstrap.projectDirectory} run build`,
+            build,
           },
         })}\n`,
       });

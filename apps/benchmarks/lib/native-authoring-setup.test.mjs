@@ -70,6 +70,47 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
 });
 
+test("builds an empty-workspace case without sandbox preparation when it opts out", async () => {
+  const commands = [];
+  const writes = {};
+  const setup = createNativeAuthoringSetup({
+    packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
+    revision: "commit",
+    treatment: "guided",
+  });
+  await setup({
+    async readFile() {
+      return JSON.stringify({
+        startingPoint: "empty",
+        projectDirectory: "mender",
+        skipSandboxPrewarm: true,
+        revision: "commit",
+        setupIds: [],
+      });
+    },
+    async writeFiles(files) {
+      Object.assign(writes, files);
+    },
+    async runCommand(command, args) {
+      commands.push(args[1]);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    getWorkingDirectory: () => "/workspace",
+    setWorkingDirectory() {},
+  });
+
+  const { scripts } = JSON.parse(writes["package.json"]);
+  assert.equal(scripts.build, "eve-benchmark-build");
+  assert.doesNotMatch(writes["package.json"], /skip-sandbox-prewarm/u);
+  assert.match(
+    writes["/usr/local/bin/eve-benchmark-build"],
+    /cd 'mender' && exec npm exec -- eve build --skip-sandbox-prewarm/u,
+  );
+  assert.ok(
+    commands.some((command) => /chmod \+x \/usr\/local\/bin\/eve-benchmark-build/u.test(command)),
+  );
+});
+
 test("registers the setup of every case the native runner can run", async () => {
   const evalsRoot = new URL("../evals", import.meta.url).pathname;
   for (const name of fixtureNames(evalsRoot)) {

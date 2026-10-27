@@ -36,6 +36,11 @@ export interface AuthoringCase {
   readonly projectDirectory?: string;
   /** Agent time limit for large cases. A run uses the longest limit among its selected cases. */
   readonly timeoutSeconds?: number;
+  /**
+   * Validate the result with `eve build --skip-sandbox-prewarm`, for an empty-workspace case
+   * whose sandbox needs Vercel credentials the eval sandbox doesn't have.
+   */
+  readonly skipSandboxPrewarm?: boolean;
   readonly setup?: AuthoringSetup;
   readonly interact: (context: AuthoringInteractionContext) => Promise<void>;
 }

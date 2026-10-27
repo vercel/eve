@@ -27,6 +27,7 @@ export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(e
       `${JSON.stringify({
         startingPoint: authoringCase.startingPoint.workspace,
         projectDirectory: authoringCase.projectDirectory,
+        skipSandboxPrewarm: authoringCase.skipSandboxPrewarm,
         revision: subject.revision,
         setupIds: [authoringCase.startingPoint.setup, authoringCase.setup]
           .filter(Boolean)
