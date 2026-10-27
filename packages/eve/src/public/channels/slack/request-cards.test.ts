@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
@@ -43,14 +44,19 @@ function harness(
   options: {
     readonly approvalChannel?: SlackApprovalChannelResolver;
     readonly renderers?: readonly SlackRenderer[];
-    readonly rejects?: (sent: Sent) => boolean;
+    /** Slack's error code for a call it fails, or `NETWORK` for one that never gets an answer. */
+    readonly fails?: (sent: Sent) => string | undefined;
+    /** Event types whose handlers don't run, as when a renderer skips `next()` for them. */
+    readonly skip?: readonly string[];
   } = {},
 ) {
   const sent: Sent[] = [];
   let ts = 0;
   const respond = (method: string, body: Record<string, unknown>) => {
     sent.push({ body, method });
-    if (options.rejects?.({ body, method })) return { error: "invalid_blocks", ok: false };
+    const error = options.fails?.({ body, method });
+    if (error === NETWORK) throw new TypeError("fetch failed");
+    if (error !== undefined) return { error, ok: false };
     ts += 1;
     return { channel: { id: "D_ALICE" }, ok: true, ts: `ts_${ts}` };
   };
@@ -75,7 +81,9 @@ function harness(
           "thread.post",
           typeof message === "string" ? { text: message } : message,
         );
-        if (!response.ok) throw new Error("Slack rejected the message");
+        if (!response.ok) {
+          throw Object.assign(new Error("Slack refused the message"), { response });
+        }
         return { id: response.ts };
       },
       async postEphemeral(user: string, text: string) {
@@ -96,6 +104,7 @@ function harness(
     position += 1;
     const ctx = { channel, session: { auth: {}, id: "s_0" }, view: snapshotOf(view) };
     for (const fact of facts) {
+      if (options.skip?.includes(fact.type)) continue;
       const handler = events[fact.type as keyof typeof events] as
         | ((event: SessionEvent, ctx: unknown) => Promise<void>)
         | undefined;
@@ -141,11 +150,15 @@ function harness(
     );
   }
 
-  /** Bob's answer to `interactionId`, submitted and admitted. */
-  async function answer(interactionId: string, value: Record<string, string>): Promise<void> {
+  /** An answer to `interactionId`, submitted and admitted; Bob's unless `principal` says. */
+  async function answer(
+    interactionId: string,
+    value: Record<string, string>,
+    principal = "p_bob",
+  ): Promise<void> {
     await commit(
       {
-        data: { deliveryId: `d_${interactionId}`, principal: { id: "p_bob", type: "user" } },
+        data: { deliveryId: `d_${interactionId}`, principal: { id: principal, type: "user" } },
         type: "delivery.admitted",
       },
       {
@@ -161,27 +174,33 @@ function harness(
     );
   }
 
-  /** Settles `interactionId`, decided by Bob's answer when it has one. */
-  async function settle(
-    interactionId: string,
-    outcome: "accepted" | "declined" | "withdrawn",
-    response?: Record<string, string>,
-  ): Promise<void> {
-    await commit({
-      data: {
-        interactionId,
-        outcome,
-        ...(response === undefined
-          ? {}
-          : { cause: { responseId: `r_${interactionId}` }, response }),
-      },
-      type: "interaction.settled",
-    });
+  /** Settles `interactionId` in its own commit. */
+  async function settle(...args: Parameters<typeof settled>): Promise<void> {
+    await commit(settled(...args));
   }
 
   const calls = (method: string) => sent.filter((call) => call.method === method);
   const blocksOf = (call: Sent | undefined) => (call?.body.blocks ?? []) as BlockKitBlock[];
   return { answer, ask, blocksOf, calls, channel, commit, sent, settle };
+}
+
+const NETWORK = "network";
+
+/** `interactionId`'s settlement, decided by the answer `answer` recorded when `response` is given. */
+function settled(
+  interactionId: string,
+  outcome: "accepted" | "declined" | "withdrawn",
+  response?: Record<string, string>,
+): SessionEvent {
+  const data: { -readonly [K in keyof InteractionSettledData]: InteractionSettledData[K] } = {
+    interactionId,
+    outcome,
+  };
+  if (response !== undefined) {
+    data.cause = { responseId: `r_${interactionId}` };
+    data.response = response;
+  }
+  return { data, type: "interaction.settled" };
 }
 
 const approval = (interactionId: string, name: string, input?: Record<string, string>) => ({
@@ -255,6 +274,18 @@ const doneRenderer = defineSlackRenderer({
     return { controls: { blocks: [section(text)], text } };
   },
 });
+
+/** A renderer that retitles every card, which a test's Slack can refuse by that title. */
+const styledRenderer = defineSlackRenderer({
+  interactionCard(card, next) {
+    const parts = next(card);
+    const [first] = parts.controls.blocks;
+    return controls(parts, [{ ...first, title: { text: "Styled", type: "plain_text" } }]);
+  },
+});
+
+const refusesStyled = ({ body }: Sent) =>
+  JSON.stringify(body).includes("Styled") ? "invalid_blocks" : undefined;
 
 describe("Slack input request cards", () => {
   it("posts a two-approval batch as one details message and one controls message", async () => {
@@ -373,7 +404,7 @@ describe("Slack input request cards", () => {
     expect(approvalChannel).toHaveBeenCalledOnce();
     expect(calls("chat.update").map((update) => [update.body.channel, update.body.text])).toEqual([
       ["D_ALICE", "Answered: Approve"],
-      ["C1", "Approved by <@U_BOB>."],
+      ["C1", "Answered: Approve by <@U_BOB>."],
     ]);
   });
 
@@ -387,23 +418,16 @@ describe("Slack input request cards", () => {
       render: (parts) => controls(parts, [...parts.controls.blocks, ...parts.controls.blocks]),
     },
     {
-      name: "invents an eve action ID",
-      render: (parts) =>
-        controls(parts, [
-          ...parts.controls.blocks,
-          {
-            elements: [{ action_id: "eve_input:other:button:0", type: "button", value: "approve" }],
-            type: "actions",
-          },
-        ]),
-    },
-    {
       name: "changes a control's value",
       render: (parts) =>
         controls(
           parts,
           JSON.parse(JSON.stringify(parts.controls.blocks).replace('"approve"', '"deny"')),
         ),
+    },
+    {
+      name: "returns blocks JSON can't hold",
+      render: (parts) => controls(parts, [...parts.controls.blocks, { size: 1n, type: "divider" }]),
     },
     {
       name: "puts eve's controls in its details",
@@ -477,23 +501,14 @@ describe("Slack input request cards", () => {
 
     await settle("a_deploy", "withdrawn");
 
-    const blocks = blocksOf(calls("chat.update")[0]);
-    expect(blocks).toHaveLength(1);
-    expect(JSON.stringify(blocks)).toContain("No longer needed");
+    const [update] = calls("chat.update");
+    expect(blocksOf(update)).toHaveLength(1);
+    expect(JSON.stringify(blocksOf(update))).toContain("No longer needed");
+    expect(update?.body.text).toBe("No longer needed");
   });
 
   it("posts and updates once more with eve's default when Slack rejects a rendered message", async () => {
-    const styled = defineSlackRenderer({
-      interactionCard(card, next) {
-        const parts = next(card);
-        const [first] = parts.controls.blocks;
-        return controls(parts, [{ ...first, title: { text: "Styled", type: "plain_text" } }]);
-      },
-    });
-    const { ask, calls, settle } = harness({
-      rejects: ({ body }) => JSON.stringify(body).includes("Styled"),
-      renderers: [styled],
-    });
+    const { ask, calls, settle } = harness({ fails: refusesStyled, renderers: [styledRenderer] });
 
     await ask(approval("a_deploy", "deploy"));
     await settle("a_deploy", "withdrawn");
@@ -509,6 +524,30 @@ describe("Slack input request cards", () => {
       false,
     ]);
     expect(updates.map((update) => update.body.ts)).toEqual(["ts_1", "ts_1"]);
+  });
+
+  it.each([
+    { error: "rate_limited", name: "rate limits an update" },
+    { error: NETWORK, name: "never answers an update" },
+  ])("doesn't resend eve's default when Slack $name", async ({ error }) => {
+    const { ask, calls, channel, settle } = harness({
+      fails: ({ method }) => (method === "chat.update" ? error : undefined),
+      renderers: [doneRenderer],
+    });
+    await ask(approval("a_deploy", "deploy"));
+
+    await settle("a_deploy", "withdrawn");
+
+    expect(calls("chat.update")).toHaveLength(1);
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("doesn't repost a batch when its post never gets an answer", async () => {
+    const { ask, calls } = harness({ fails: () => NETWORK, renderers: [styledRenderer] });
+
+    await expect(ask(approval("a_deploy", "deploy"))).rejects.toThrow("fetch failed");
+
+    expect(calls("thread.post")).toHaveLength(1);
   });
 
   it.each([
@@ -543,6 +582,197 @@ describe("Slack input request cards", () => {
     expect(JSON.stringify(answered)).toContain("Mostly the billing migration");
     expect(JSON.stringify(answered)).toContain("<@U_BOB>");
     expect(neighbor).toEqual(posted.slice(2));
+  });
+
+  it("withdraws two grouped approvals settled in one commit with one update", async () => {
+    const { ask, blocksOf, calls, channel, commit } = harness();
+    await ask(approval("a_one", "deploy"), approval("a_two", "migrate"));
+
+    await commit(settled("a_one", "withdrawn"), settled("a_two", "withdrawn"));
+
+    const [update, ...more] = calls("chat.update");
+    expect(more).toEqual([]);
+    expect(eveActionIds(update?.body)).toEqual([]);
+    expect(blocksOf(update)).toHaveLength(2);
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("settles an accepted approval and a withdrawn neighbor from one commit", async () => {
+    const { answer, ask, blocksOf, calls, channel, commit } = harness();
+    await ask(approval("a_one", "deploy"), approval("a_two", "migrate"));
+    await answer("a_one", { optionId: "approve" });
+
+    // A message steering the turn withdraws the neighbor as the answer decides the first.
+    await commit(
+      settled("a_one", "accepted", { optionId: "approve" }),
+      settled("a_two", "withdrawn"),
+    );
+
+    const update = calls("chat.update").at(-1);
+    expect(eveActionIds(update?.body)).toEqual([]);
+    const [accepted, withdrawn] = blocksOf(update);
+    expect(JSON.stringify(accepted)).toContain("<@U_BOB>");
+    expect(JSON.stringify(withdrawn)).toContain("No longer needed");
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("leaves a request that settled in the same commit to interaction.settled", async () => {
+    // As if a renderer skipped `next()` on `interaction.settled`: no handler writes the card.
+    const { ask, calls, commit } = harness({ skip: ["interaction.settled"] });
+    await ask(approval("a_deploy", "deploy"));
+
+    await commit(
+      {
+        data: { deliveryId: "d_bob", principal: { id: "p_bob", type: "user" } },
+        type: "delivery.admitted",
+      },
+      {
+        data: {
+          deliveryId: "d_bob",
+          interactionId: "a_deploy",
+          responseId: "r_a_deploy",
+          value: { optionId: "approve" },
+        },
+        type: "response.submitted",
+      },
+      { data: { responseId: "r_a_deploy" }, type: "response.admitted" },
+      settled("a_deploy", "accepted", { optionId: "approve" }),
+      { data: { outcome: "applied", responseId: "r_a_deploy" }, type: "response.settled" },
+    );
+
+    expect(calls("chat.update")).toEqual([]);
+  });
+
+  it("keeps the controls messages posted before a later group fails", async () => {
+    let postsSeen = 0;
+    const { ask, calls, channel } = harness({
+      fails: ({ method }) => (method === "thread.post" && postsSeen++ === 1 ? NETWORK : undefined),
+    });
+    const approvals = Array.from({ length: 51 }, (_, index) => approval(`a_${index}`, "deploy"));
+
+    await expect(ask(...approvals)).rejects.toThrow("fetch failed");
+
+    expect(calls("thread.post")).toHaveLength(2);
+    expect(channel.state.interactionCards?.map((record) => record.requests.length)).toEqual([50]);
+  });
+
+  it("regroups a refused batch's defaults across as many messages as they need", async () => {
+    // One block per question, where eve's default needs a prompt and a select: two.
+    const compact = defineSlackRenderer({
+      interactionCard(card, next) {
+        const parts = next(card);
+        if (card.interaction.status !== "open") return parts;
+        const blocks = [{ child_blocks: parts.controls.blocks, type: "container" }];
+        return controls(parts, blocks);
+      },
+    });
+    const { ask, blocksOf, calls, channel } = harness({
+      fails: ({ body }) =>
+        JSON.stringify(body).includes("container") ? "invalid_blocks" : undefined,
+      renderers: [compact],
+    });
+
+    await ask(...Array.from({ length: 30 }, (_, index) => dayQuestion(`q_${index}`)));
+
+    expect(calls("thread.post").map((post) => blocksOf(post).length)).toEqual([30, 50, 10]);
+    expect(channel.state.interactionCards?.map((record) => record.requests.length)).toEqual([
+      25, 5,
+    ]);
+  });
+
+  it("brings the controls back when an admitted answer is refused", async () => {
+    const { answer, ask, blocksOf, calls, commit } = harness();
+    await ask(approval("a_deploy", "deploy"));
+    const [posted] = calls("thread.post");
+    await answer("a_deploy", { optionId: "approve" });
+    expect(eveActionIds(calls("chat.update")[0]?.body)).toEqual([]);
+
+    await commit({
+      data: { outcome: "refused", reason: "Only owners approve.", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    expect(blocksOf(calls("chat.update")[1])).toEqual(blocksOf(posted));
+  });
+
+  it("deletes a details message shared by two controls messages once both settle", async () => {
+    // Two blocks of controls per approval and one of details: 26 approvals post one details
+    // message and two controls messages.
+    const tall = defineSlackRenderer({
+      interactionCard(card, next) {
+        const parts = next(card);
+        if (card.interaction.status !== "open") return parts;
+        return controls(parts, [...parts.controls.blocks, section("Needs an owner")]);
+      },
+    });
+    const { ask, calls, channel, commit, settle } = harness({ renderers: [tall] });
+    const approvals = Array.from({ length: 26 }, (_, index) =>
+      approval(`a_${index}`, "deploy", { env: "prod" }),
+    );
+    await ask(...approvals);
+    expect(calls("thread.post")).toHaveLength(3);
+
+    await commit(
+      ...approvals.slice(0, 25).map(({ interactionId }) => settled(interactionId, "withdrawn")),
+    );
+    expect(calls("chat.delete")).toEqual([]);
+
+    await settle("a_25", "withdrawn");
+    expect(calls("chat.delete").map((call) => call.body.ts)).toEqual(["ts_1"]);
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("posts a direct-message request's default when Slack refuses the rendered one", async () => {
+    const { ask, calls, channel } = harness({
+      approvalChannel: () => "direct-message",
+      fails: refusesStyled,
+      renderers: [styledRenderer],
+    });
+
+    await ask(approval("a_deploy", "deploy"));
+
+    const posts = calls("chat.postMessage").filter((call) => call.body.blocks !== undefined);
+    expect(posts.map((post) => JSON.stringify(post.body).includes("Styled"))).toEqual([
+      true,
+      false,
+    ]);
+    expect(calls("chat.delete")).toEqual([]);
+    expect(channel.state.interactionCards?.[0]?.channelId).toBe("D_ALICE");
+  });
+
+  it("credits nobody for an answer from a responder with no Slack user", async () => {
+    const { answer, ask, calls } = harness();
+    await ask(approval("a_deploy", "deploy"));
+
+    await answer("a_deploy", { optionId: "approve" }, "p_unmapped");
+
+    const [update] = calls("chat.update");
+    expect(update?.body.text).toBe("Answered: Approve");
+    expect(JSON.stringify(update?.body)).not.toContain("<@");
+  });
+
+  it("reads a declined approval the same on its card and its thread note", async () => {
+    const { ask, calls, settle } = harness({ approvalChannel: () => "direct-message" });
+    await ask(approval("a_deploy", "deploy"));
+
+    await settle("a_deploy", "declined");
+
+    expect(calls("chat.update").map((update) => update.body.text)).toEqual([
+      "Declined",
+      "Declined.",
+    ]);
+  });
+
+  it("ignores cards recorded before the upgrade", async () => {
+    const { ask, calls, channel, settle } = harness();
+    await ask(approval("a_deploy", "deploy"));
+    const legacy = channel.state as SlackChannelState & Record<string, unknown>;
+    legacy.interactionCards = undefined;
+    legacy.pendingApprovalCards = { a_deploy: { messageBlocks: [], messageTs: "ts_1" } };
+
+    await settle("a_deploy", "withdrawn");
+
+    expect(calls("chat.update")).toEqual([]);
   });
 });
 

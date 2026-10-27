@@ -1,7 +1,7 @@
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import type { SlackInteractionMessage } from "#public/channels/slack/renderers.js";
+import type { SlackCardMessage } from "#public/channels/slack/renderers.js";
 import {
   type RenderedRequestCard,
   sendWithFallback,
@@ -48,7 +48,7 @@ export async function deliverPrivateInteraction(input: {
     postedMessageIds.push(ts);
     return ts;
   };
-  const postPart = async (message: SlackInteractionMessage) => {
+  const postPart = async (message: SlackCardMessage) => {
     const ts = await post({ blocks: message.blocks, text: message.text });
     return { blocks: message.blocks, ts };
   };
@@ -105,7 +105,11 @@ async function postMessage(
 ): Promise<string> {
   const response = await slack.request("chat.postMessage", body);
   if (response.ok !== true || typeof response.ts !== "string" || response.ts.length === 0) {
-    throw new Error(`Slack chat.postMessage failed: ${response.error ?? "unknown_error"}`);
+    // `response` carries Slack's error code, which decides whether eve's default is worth sending.
+    throw Object.assign(
+      new Error(`Slack chat.postMessage failed: ${response.error ?? "unknown_error"}`),
+      { response },
+    );
   }
   return response.ts;
 }

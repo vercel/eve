@@ -1,6 +1,7 @@
 export {
   slackChannel,
   type SlackApiResponse,
+  type SlackApprovalChannel,
   type SlackAuthorizationEventContext,
   type SlackBotToken,
   type SlackChannel,
@@ -24,6 +25,8 @@ export {
   type SlackAnswerSubmission,
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
+  type SlackInteractionCardRecord,
+  type SlackInteractionCardRequest,
   type SlackInteractionContext,
   type SlackSlashCommand,
   type SlackSlashCommandContext,
@@ -73,14 +76,13 @@ export {
 
 export {
   defineSlackRenderer,
+  type SlackCardMessage,
   type SlackInteractionCard,
   type SlackInteractionCardParts,
-  type SlackInteractionMessage,
   type SlackRenderer,
   type SlackRendererEvents,
   type SlackRenderHandler,
   type SlackRenderNext,
-  type SlackTaskCard,
 } from "#public/channels/slack/renderers.js";
 
 export type { TaskCard } from "#channel/task-card.js";

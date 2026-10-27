@@ -24,7 +24,8 @@ import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
   notifyRefusedResponder,
   postRequestCards,
-  refreshRequestCard,
+  settleRequestCard,
+  showAnswerChange,
 } from "#public/channels/slack/request-cards.js";
 import type { SlackInteractionCardChain } from "#public/channels/slack/renderers.js";
 import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js";
@@ -305,8 +306,9 @@ async function settleSlackSignIn(
 /**
  * eve's default handlers for input requests, rendering cards through the composed
  * `interactionCard` chain. A commit's requests post as one batch on its first
- * `interaction.opened`, and each card updates when an answer is admitted or refused and when its
- * request settles. A sign-in renders as its public status and private challenge instead.
+ * `interaction.opened`. Each card shows an open request's answer when it is admitted or refused,
+ * and its settled rendering on `interaction.settled`. A sign-in renders as its public status and
+ * private challenge instead.
  */
 export function defaultInteractionEvents(
   approvalChannel: SlackApprovalChannelResolver | undefined,
@@ -330,7 +332,7 @@ export function defaultInteractionEvents(
     async "response.admitted"({ data }, ctx) {
       const response = sessionTables(ctx.view).responses[data.responseId];
       if (response !== undefined) {
-        await refreshRequestCard(response.interactionId, ctx, interactionCard);
+        await showAnswerChange(response.interactionId, ctx, interactionCard);
       }
     },
 
@@ -340,7 +342,7 @@ export function defaultInteractionEvents(
       if (refused !== undefined) await notifyRefusedResponder(refused, ctx.channel);
       const response = view.responses[data.responseId];
       if (response !== undefined) {
-        await refreshRequestCard(response.interactionId, ctx, interactionCard);
+        await showAnswerChange(response.interactionId, ctx, interactionCard);
       }
     },
 
@@ -350,7 +352,7 @@ export function defaultInteractionEvents(
         await settleSlackSignIn(signIn, data, ctx.channel);
         return;
       }
-      await refreshRequestCard(data.interactionId, ctx, interactionCard);
+      await settleRequestCard(data.interactionId, ctx, interactionCard);
     },
   };
 }

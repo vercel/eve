@@ -182,8 +182,13 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
   });
 }
 
+/** Whether Slack's error `code` means it refused the message's content and posted nothing. */
+export function isRefusedPayloadCode(code: unknown): code is string {
+  return typeof code === "string" && REFUSED_PAYLOAD_ERRORS.has(code);
+}
+
 /** Slack's error code when `error` is a refused-payload error, checking its causes. */
-function refusedPayloadError(error: unknown): string | undefined {
+export function refusedPayloadError(error: unknown): string | undefined {
   let current = error;
   for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
     const candidate = current as {
@@ -193,7 +198,7 @@ function refusedPayloadError(error: unknown): string | undefined {
     };
     // eve's Slack client reports the code on `response`; `@slack/web-api` on `data`.
     const code = candidate.response?.error ?? candidate.data?.error;
-    if (typeof code === "string" && REFUSED_PAYLOAD_ERRORS.has(code)) return code;
+    if (isRefusedPayloadCode(code)) return code;
     current = candidate.cause;
   }
   return undefined;

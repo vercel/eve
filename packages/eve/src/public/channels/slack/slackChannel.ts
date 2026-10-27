@@ -206,8 +206,13 @@ export interface SlackInteractionCardRequest {
    * message that held 50 blocks when posted never holds more.
    */
   readonly count: number;
-  /** The separate details message, deleted once none of its requests is open. */
+  /** The separate details message, deleted once every request it covers settled. */
   readonly detailsTs?: string;
+  /**
+   * Set once eve sent the request's settled rendering, even if Slack refused it, so a failed
+   * update is never retried forever. The message is forgotten once every request has it.
+   */
+  readonly settled?: true;
 }
 
 /** A message eve posted holding the controls of one or more input requests. */
@@ -269,7 +274,9 @@ export interface SlackChannelState extends UndeliveredReplyState {
   pendingAuthMessageTs?: Record<string, string>;
   /**
    * The messages holding open or recently answered approvals, questions, and budget prompts.
-   * Each is updated as its requests change and forgotten once all of them settle.
+   * Each is updated as its requests change and forgotten once all of them settle. eve ignores
+   * the `pendingApprovalCards` field that earlier versions wrote, so cards posted before an
+   * upgrade keep their buttons.
    */
   interactionCards?: readonly SlackInteractionCardRecord[];
   /**

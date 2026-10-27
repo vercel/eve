@@ -72,8 +72,11 @@ export type SlackRendererEvents = {
   ) => void | Promise<void>;
 };
 
-/** The message eve posts for a turn's tasks: Block Kit blocks and notification text. */
-export interface SlackTaskCard {
+/**
+ * One Slack message a renderer hook returns, such as a task card or an input request's controls:
+ * Block Kit blocks and notification text.
+ */
+export interface SlackCardMessage {
   readonly blocks: readonly BlockKitBlock[];
   readonly text: string;
 }
@@ -98,18 +101,15 @@ export interface SlackInteractionCard {
   readonly view: SessionView;
 }
 
-/** One Slack message of an input request: Block Kit blocks and notification text. */
-export interface SlackInteractionMessage {
-  readonly blocks: readonly BlockKitBlock[];
-  readonly text: string;
-}
-
 /** The messages of one input request. */
 export interface SlackInteractionCardParts {
   /** The message holding eve's controls. Slack echoes it back on every click, so keep it small. */
-  readonly controls: SlackInteractionMessage;
-  /** Posted as a separate message before the controls, and deleted once the request settles. */
-  readonly details?: SlackInteractionMessage;
+  readonly controls: SlackCardMessage;
+  /**
+   * Posted as a separate message before the controls, for any kind of request. Requests asked
+   * together share one details message, which eve deletes once its last open request settles.
+   */
+  readonly details?: SlackCardMessage;
 }
 
 /**
@@ -140,8 +140,8 @@ export interface SlackRenderer {
    */
   readonly taskCard?: (
     card: TaskCard,
-    next: (card: TaskCard) => SlackTaskCard | null,
-  ) => SlackTaskCard | null;
+    next: (card: TaskCard) => SlackCardMessage | null,
+  ) => SlackCardMessage | null;
   /**
    * Returns the messages for one approval, question, or budget prompt. Runs when the request
    * opens, and again when an answer is admitted or refused and when it settles. Pure and
@@ -173,7 +173,7 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
-  readonly taskCard: (card: TaskCard) => SlackTaskCard | null;
+  readonly taskCard: (card: TaskCard) => SlackCardMessage | null;
 }
 
 type AnyHandler = (...args: unknown[]) => void | Promise<void>;
@@ -313,7 +313,7 @@ function composeTaskCard(
   defaults: SlackRenderChain,
   view: TaskCard,
   index: number,
-): SlackTaskCard | null {
+): SlackCardMessage | null {
   if (index === renderers.length) return defaults.taskCard(view);
   const taskCard = renderers[index]!.taskCard;
   if (taskCard === undefined) return composeTaskCard(renderers, defaults, view, index + 1);

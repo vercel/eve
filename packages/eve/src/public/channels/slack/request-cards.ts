@@ -27,11 +27,16 @@ import {
 } from "#public/channels/slack/limits.js";
 import { deliverPrivateInteraction } from "#public/channels/slack/private-approval-delivery.js";
 import type {
+  SlackCardMessage,
   SlackInteractionCard,
   SlackInteractionCardChain,
-  SlackInteractionMessage,
 } from "#public/channels/slack/renderers.js";
 import {
+  isRefusedPayloadCode,
+  refusedPayloadError,
+} from "#public/channels/slack/reply-delivery.js";
+import {
+  endingOf,
   type RenderedRequestCard,
   renderRequestCard,
   sameJson,
@@ -78,7 +83,7 @@ interface CardEntry extends RenderedRequestCard {
 
 interface CardPart {
   readonly interactionId: string;
-  readonly message: SlackInteractionMessage;
+  readonly message: SlackCardMessage;
 }
 
 async function postThreadCards(
@@ -87,66 +92,64 @@ async function postThreadCards(
   chain: SlackInteractionCardChain,
 ): Promise<void> {
   const { channel } = ctx;
-  if (requests.length === 0) return;
+  const channelId = channel.state.channelId;
+  if (requests.length === 0 || channelId === null) return;
   const entries = requests.map((request): CardEntry => ({
     interactionId: request.interactionId,
     ...renderRequestCard(chain, cardOf(request, "thread", ctx)),
   }));
-  const post = async (message: SlackInteractionMessage) =>
+  const post = async (message: SlackCardMessage) =>
     (await channel.thread.post({ blocks: [...message.blocks], text: message.text })).id;
 
   const detailsTs = new Map<string, string>();
-  for (const posted of await postGroups(entries, "details", post)) {
-    for (const part of posted.parts) detailsTs.set(part.interactionId, posted.ts);
-  }
-  const channelId = channel.state.channelId;
-  for (const posted of await postGroups(entries, "controls", post)) {
-    if (channelId === null) continue;
+  await postGroups(entries, "details", post, (parts, ts) => {
+    for (const part of parts) detailsTs.set(part.interactionId, ts);
+  });
+  // Each controls message is recorded as it posts, so a later group's failure keeps it tracked.
+  await postGroups(entries, "controls", post, (parts, ts) =>
     remember(channel.state, {
       channelId,
       destination: "thread",
-      requests: posted.parts.map(({ interactionId, message }) =>
+      requests: parts.map(({ interactionId, message }) =>
         cardRequest(interactionId, message.blocks, detailsTs.get(interactionId)),
       ),
-      ts: posted.ts,
-    });
-  }
+      ts,
+    }),
+  );
 }
 
 /**
- * Posts each group of `kind` messages. A group Slack rejects posts again with each request's
- * default, regrouped, since the defaults can need more blocks than the rendered messages.
+ * Posts each group of `kind` messages. A group whose content Slack refuses posts again with each
+ * request's default, regrouped, since the defaults can need more blocks than the rendered ones.
  */
 async function postGroups(
   entries: readonly CardEntry[],
   kind: "controls" | "details",
-  post: (message: SlackInteractionMessage) => Promise<string>,
-): Promise<{ readonly parts: readonly CardPart[]; readonly ts: string }[]> {
-  const posted: { parts: readonly CardPart[]; ts: string }[] = [];
-  const sendGroup = async (parts: readonly CardPart[]) => {
+  post: (message: SlackCardMessage) => Promise<string>,
+  posted: (parts: readonly CardPart[], ts: string) => void,
+): Promise<void> {
+  const send = async (parts: readonly CardPart[]) => {
     const ts = await post(joinParts(parts));
-    if (ts) posted.push({ parts, ts });
+    if (ts) posted(parts, ts);
   };
   for (const group of groupParts(entries, (entry) => entry.parts[kind])) {
-    const members = entries.filter((entry) =>
-      group.some((part) => part.interactionId === entry.interactionId),
-    );
     try {
-      await sendGroup(group);
+      await send(group);
     } catch (error) {
-      if (members.every((entry) => sameJson(entry.parts[kind], entry.fallback[kind]))) throw error;
-      logError(log, "Slack rejected rendered input requests; posting eve's defaults", error);
-      for (const retry of groupParts(members, (entry) => entry.fallback[kind])) {
-        await sendGroup(retry);
-      }
+      const members = entries.filter((entry) =>
+        group.some((part) => part.interactionId === entry.interactionId),
+      );
+      const unchanged = members.every((entry) => sameJson(entry.parts[kind], entry.fallback[kind]));
+      if (refusedPayloadError(error) === undefined || unchanged) throw error;
+      logError(log, "Slack refused rendered input requests; posting eve's defaults", error);
+      for (const retry of groupParts(members, (entry) => entry.fallback[kind])) await send(retry);
     }
   }
-  return posted;
 }
 
 function groupParts(
   entries: readonly CardEntry[],
-  messageOf: (entry: CardEntry) => SlackInteractionMessage | undefined,
+  messageOf: (entry: CardEntry) => SlackCardMessage | undefined,
 ): CardPart[][] {
   const groups: CardPart[][] = [];
   let blocks = 0;
@@ -165,7 +168,7 @@ function groupParts(
   return groups;
 }
 
-function joinParts(parts: readonly CardPart[]): SlackInteractionMessage {
+function joinParts(parts: readonly CardPart[]): SlackCardMessage {
   return {
     blocks: parts.flatMap((part) => part.message.blocks),
     text: truncateMessageText(parts.map((part) => part.message.text).join("\n")),
@@ -209,8 +212,9 @@ async function postDirectMessageCard(
     const announcement = await channel.thread.post(
       `Waiting on ${request.request.kind === "approval" ? "approval" : "a response"} from <@${reviewer}>…`,
     );
-    if (announcement.id)
+    if (announcement.id) {
       replace(channel.state, record, { ...record, announcementTs: announcement.id });
+    }
   } catch (error) {
     logError(log, "failed to announce private input request", error, {
       requestId: request.interactionId,
@@ -220,77 +224,142 @@ async function postDirectMessageCard(
 }
 
 /**
- * Brings one request's card in line with the session: renders it again, updates its message
- * when the blocks changed, and once it settles, deletes its details message when no open request
- * shares it and reports the outcome in a DM request's thread announcement. A card whose requests
- * have all settled is forgotten, even if a Slack call failed, so a failure is never retried
- * forever.
+ * Shows an open request's changed answer: an admitted one, or the controls again once it was
+ * refused. A request already settled in the commit is left to `interaction.settled`.
  */
-export async function refreshRequestCard(
+export async function showAnswerChange(
+  interactionId: string,
+  ctx: RequestCardContext,
+  chain: SlackInteractionCardChain,
+): Promise<void> {
+  const record = recordOf(ctx.channel.state, interactionId);
+  if (record === undefined) return;
+  if (sessionTables(ctx.view).interactions[interactionId]?.status !== "open") return;
+  replace(ctx.channel.state, record, await writeRequests(ctx, chain, record, [interactionId]));
+}
+
+/**
+ * Writes a settled request's card. Every request of its message that settled in the same commit
+ * without its settled rendering written joins the one update, since the commit's view already
+ * shows them settled. Then deletes each details message whose requests have all written their
+ * settled rendering, reports the outcome in a DM request's thread note, and forgets the message
+ * once every request in it has.
+ */
+export async function settleRequestCard(
   interactionId: string,
   ctx: RequestCardContext,
   chain: SlackInteractionCardChain,
 ): Promise<void> {
   const { channel } = ctx;
-  const record = channel.state.interactionCards?.find((candidate) =>
-    candidate.requests.some((request) => request.interactionId === interactionId),
-  );
+  const record = recordOf(channel.state, interactionId);
   const tables = sessionTables(ctx.view);
-  const interaction = interactionOf(tables, interactionId);
-  if (record === undefined || interaction === undefined) return;
-
-  const card = cardOf(interaction, record.destination, ctx);
-  const updated = await updateCard(
-    channel,
-    record,
-    interactionId,
-    renderRequestCard(chain, card, record.route),
+  const settling = (record?.requests ?? []).filter(
+    (request) =>
+      request.settled !== true && tables.interactions[request.interactionId]?.status === "settled",
   );
-  let current = updated ?? record;
-  if (interaction.status === "settled") {
-    current = await retireDetails(channel, tables, current, interactionId);
-    if (current.announcementTs !== undefined && channel.state.channelId !== null) {
-      await callSlack(channel, "chat.update", interactionId, {
+  if (record === undefined || settling.length === 0) return;
+
+  const ids = settling.map((request) => request.interactionId);
+  const written = await writeRequests(ctx, chain, record, ids);
+  const current: SlackInteractionCardRecord = {
+    ...written,
+    requests: written.requests.map((request) =>
+      ids.includes(request.interactionId) ? { ...request, settled: true } : request,
+    ),
+  };
+  replace(channel.state, record, current);
+
+  if (current.announcementTs !== undefined && channel.state.channelId !== null) {
+    for (const id of ids) {
+      const interaction = interactionOf(tables, id);
+      if (interaction === undefined) continue;
+      const by = answeredByOf(tables, interaction, channel.state);
+      await callSlack(channel, "chat.update", id, {
         channel: channel.state.channelId,
-        text: announcementOf(interaction, card.answeredBy),
+        text: `${endingOf(interaction).text}${by === undefined ? "" : ` by <@${by}>`}.`,
         ts: current.announcementTs,
       });
     }
   }
-  const open = current.requests.some(
-    (request) => tables.interactions[request.interactionId]?.status === "open",
-  );
-  replace(channel.state, record, open ? current : undefined);
+  for (const request of settling) {
+    if (request.detailsTs !== undefined) await retireDetails(channel, current, request.detailsTs);
+  }
+  if (current.requests.every((request) => request.settled === true)) {
+    replace(channel.state, current, undefined);
+  }
 }
 
-/** Updates the message with the request's new blocks, or with eve's default if Slack rejects them. */
-async function updateCard(
-  channel: SlackEventContext,
+interface RequestChange {
+  readonly interactionId: string;
+  /** The rendered controls, or `undefined` to keep the recorded blocks. */
+  readonly rendered: SlackCardMessage | undefined;
+  readonly fallback: SlackCardMessage | undefined;
+}
+
+/**
+ * Renders `ids` again and updates the message once if their blocks changed, sending eve's
+ * defaults once more when Slack refuses the rendered content. Returns the record as Slack now
+ * shows it.
+ */
+async function writeRequests(
+  ctx: RequestCardContext,
+  chain: SlackInteractionCardChain,
   record: SlackInteractionCardRecord,
-  interactionId: string,
-  card: RenderedRequestCard,
-): Promise<SlackInteractionCardRecord | undefined> {
-  const recorded = record.requests.find((request) => request.interactionId === interactionId)!;
-  const rendered = withinCount(card.parts.controls.blocks, card, recorded);
-  if (sameJson(rendered, recorded.blocks)) return undefined;
-  const attempts = [{ blocks: rendered, text: card.parts.controls.text }];
-  const fallback = withinCount(card.fallback.controls.blocks, card, recorded);
-  if (!sameJson(fallback, rendered) && !sameJson(fallback, recorded.blocks)) {
-    attempts.push({ blocks: fallback, text: card.fallback.controls.text });
-  }
-  for (const attempt of attempts) {
-    const requests = record.requests.map((request) =>
-      request.interactionId === interactionId ? { ...request, blocks: attempt.blocks } : request,
+  ids: readonly string[],
+): Promise<SlackInteractionCardRecord> {
+  const tables = sessionTables(ctx.view);
+  const changes = ids.flatMap((id): RequestChange[] => {
+    const interaction = interactionOf(tables, id);
+    const recorded = record.requests.find((request) => request.interactionId === id);
+    if (interaction === undefined || recorded === undefined) return [];
+    const card = renderRequestCard(
+      chain,
+      cardOf(interaction, record.destination, ctx),
+      record.route,
     );
-    const ok = await callSlack(channel, "chat.update", interactionId, {
-      blocks: requests.flatMap((request) => request.blocks),
+    return [
+      {
+        fallback: withinCount(card.fallback.controls, card.fallback.controls, recorded),
+        interactionId: id,
+        rendered: withinCount(card.parts.controls, card.fallback.controls, recorded),
+      },
+    ];
+  });
+  const compose = (pick: (change: RequestChange) => SlackCardMessage | undefined) => {
+    const texts: string[] = [];
+    const requests = record.requests.map((request) => {
+      const change = changes.find((candidate) => candidate.interactionId === request.interactionId);
+      const message = change === undefined ? undefined : pick(change);
+      if (message === undefined) return request;
+      texts.push(message.text);
+      return { ...request, blocks: message.blocks };
+    });
+    return { requests, text: truncateMessageText(texts.join("\n")) };
+  };
+  const blocksOf = (requests: readonly SlackInteractionCardRequest[]) =>
+    requests.flatMap((request) => request.blocks);
+
+  const rendered = compose((change) => change.rendered);
+  if (sameJson(blocksOf(rendered.requests), blocksOf(record.requests))) return record;
+  const update = async (message: typeof rendered) =>
+    await callSlack(ctx.channel, "chat.update", ids.join(","), {
+      blocks: blocksOf(message.requests),
       channel: record.channelId,
-      text: attempt.text,
+      text: message.text,
       ts: record.ts,
     });
-    if (ok) return { ...record, requests };
+  const result = await update(rendered);
+  if (result === "ok") return { ...record, requests: rendered.requests };
+  if (result !== "refused") return record;
+  const fallback = compose((change) => change.fallback);
+  const fallbackBlocks = blocksOf(fallback.requests);
+  if (
+    sameJson(fallbackBlocks, blocksOf(rendered.requests)) ||
+    sameJson(fallbackBlocks, blocksOf(record.requests))
+  ) {
+    return record;
   }
-  return undefined;
+  return (await update(fallback)) === "ok" ? { ...record, requests: fallback.requests } : record;
 }
 
 /**
@@ -299,80 +368,64 @@ async function updateCard(
  * request is answered or settled, or keeps the recorded blocks if that is larger too.
  */
 function withinCount(
-  blocks: readonly BlockKitBlock[],
-  card: RenderedRequestCard,
-  recorded: { readonly blocks: readonly BlockKitBlock[]; readonly count: number },
-): readonly BlockKitBlock[] {
-  if (blocks.length <= recorded.count) return blocks;
+  message: SlackCardMessage,
+  fallback: SlackCardMessage,
+  recorded: SlackInteractionCardRequest,
+): SlackCardMessage | undefined {
+  if (message.blocks.length <= recorded.count) return message;
   log.warn("input request card grew past its posted size; using eve's default", {
-    blocks: blocks.length,
+    blocks: message.blocks.length,
     count: recorded.count,
   });
-  const fallback = card.fallback.controls.blocks;
-  return fallback.length <= recorded.count ? fallback : recorded.blocks;
+  return fallback.blocks.length <= recorded.count ? fallback : undefined;
 }
 
+/** Deletes a details message once every request it covers has written its settled rendering. */
 async function retireDetails(
   channel: SlackEventContext,
-  tables: SessionView,
   record: SlackInteractionCardRecord,
-  interactionId: string,
-): Promise<SlackInteractionCardRecord> {
-  const detailsTs = record.requests.find(
-    (request) => request.interactionId === interactionId,
-  )?.detailsTs;
-  if (detailsTs === undefined) return record;
+  detailsTs: string,
+): Promise<void> {
   const records = channel.state.interactionCards ?? [];
-  const shared = records.flatMap((candidate) =>
+  const covered = records.flatMap((candidate) =>
     candidate.requests.filter((request) => request.detailsTs === detailsTs),
   );
-  if (shared.some((request) => tables.interactions[request.interactionId]?.status === "open")) {
-    return record;
-  }
-  await callSlack(channel, "chat.delete", interactionId, {
-    channel: record.channelId,
-    ts: detailsTs,
-  });
-  // Requests settled in the same commit share the details message: delete it once.
-  const withoutDetails = (candidate: SlackInteractionCardRecord): SlackInteractionCardRecord => ({
+  // None covered means an earlier request of the same commit already deleted it.
+  if (covered.length === 0 || covered.some((request) => request.settled !== true)) return;
+  await callSlack(channel, "chat.delete", detailsTs, { channel: record.channelId, ts: detailsTs });
+  channel.state.interactionCards = records.map((candidate) => ({
     ...candidate,
     requests: candidate.requests.map((request) => {
       if (request.detailsTs !== detailsTs) return request;
       const { detailsTs: _deleted, ...rest } = request;
       return rest;
     }),
-  });
-  channel.state.interactionCards = records.map(withoutDetails);
-  return withoutDetails(record);
+  }));
 }
 
+/**
+ * Makes one Slack call, never throwing: `refused` when Slack refused the message's content, so
+ * eve's default is worth sending, and `failed` for anything else, which must not resend.
+ */
 async function callSlack(
   channel: SlackEventContext,
   operation: "chat.delete" | "chat.update",
   requestId: string,
   body: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<"ok" | "refused" | "failed"> {
   try {
     const response = await channel.slack.request(operation, body);
-    if (response.ok === true) return true;
+    if (response.ok === true) return "ok";
     log.warn("failed to update input request message", {
       error: response.error,
       operation,
       requestId,
     });
+    return isRefusedPayloadCode(response.error) ? "refused" : "failed";
   } catch (error) {
     logError(log, "failed to update input request message", error, { operation, requestId });
+    return "failed";
   }
-  return false;
-}
-
-function announcementOf(interaction: Interaction, answeredBy: string | undefined): string {
-  const by = answeredBy === undefined ? "" : ` by <@${answeredBy}>`;
-  const approval = interaction.request.kind === "approval";
-  if (approval && interaction.outcome === "accepted") return `Approved${by}.`;
-  if (approval && interaction.outcome === "declined") return `Cancelled${by}.`;
-  if (interaction.answer !== undefined) return `Answered${by}.`;
-  return approval ? "This approval is no longer needed." : "This request is no longer needed.";
 }
 
 function cardOf(
@@ -433,10 +486,20 @@ function answeredByOf(
   return slackUserIdForPrincipal(state, responderOf(tables, responseId)?.id);
 }
 
+function recordOf(
+  state: SlackChannelState,
+  interactionId: string,
+): SlackInteractionCardRecord | undefined {
+  return state.interactionCards?.find((candidate) =>
+    candidate.requests.some((request) => request.interactionId === interactionId),
+  );
+}
+
 function remember(state: SlackChannelState, record: SlackInteractionCardRecord): void {
   state.interactionCards = [...(state.interactionCards ?? []), record];
 }
 
+/** Replaces the record of `record`'s message with `next`, or forgets it. */
 function replace(
   state: SlackChannelState,
   record: SlackInteractionCardRecord,
@@ -444,13 +507,10 @@ function replace(
 ): void {
   const records = state.interactionCards ?? [];
   // Match by message, since `retireDetails` may already have replaced the record's object.
-  state.interactionCards = records.flatMap((candidate) =>
-    candidate.ts !== record.ts || candidate.channelId !== record.channelId
-      ? [candidate]
-      : next === undefined
-        ? []
-        : [next],
-  );
+  state.interactionCards = records.flatMap((candidate) => {
+    if (candidate.ts !== record.ts || candidate.channelId !== record.channelId) return [candidate];
+    return next === undefined ? [] : [next];
+  });
 }
 
 /**
