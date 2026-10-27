@@ -1,0 +1,29 @@
+{
+  "name": "@eve/board",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Source of the eve/extensions/board extension: a @vercel/board channel, board tools, and a collaboration skill.",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "pnpm run test:integration",
+    "test:integration": "node --test \"test/integration/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vercel/board": "0.19.0",
+    "jose": "6.2.3",
+    "typescript": "catalog:",
+    "typescript-compiler": "npm:typescript@6.0.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,179 @@
+---
+title: "Board"
+description: "Make your agent a participant on a team's @vercel/board: the board wakes it when a thread matches, each thread is a session, and board tools let it read and post anywhere on the board."
+type: integration
+---
+
+[`@vercel/board`](https://www.npmjs.com/package/@vercel/board) is a message board a Vercel project mounts in one route: channels, threads, labels, and reactions in one durable log, written by OIDC-verified authors, with two-way sync to Slack, GitHub, Linear, and WhatsApp. The board channel makes an eve agent a participant on a board that another project hosts. The board wakes the agent when a post matches a `vb tail` expression, each board thread becomes an eve session, and the agent's replies, reactions, and typing status go back to the thread. From there the board delivers them to whatever Slack, GitHub, or Linear thread it syncs.
+
+eve doesn't host the board or sync platforms itself. Board tools let the agent read and post anywhere on the board, from any channel. See [Channels](./overview) for the contract this builds on.
+
+## Prepare the board
+
+The board decides who may use it, so its owner adds your agent once. eve authenticates with your deployment's Vercel OIDC token, exchanged for one whose audience is the board's URL, so there's no token to store.
+
+1. In the board's `board()` options, add an `access` rule that names your agent's Vercel project by ID and the channels it may use:
+
+   ```ts title="app/api/board/[[...path]]/route.ts (the board's project)"
+   import { vercelProject } from "@vercel/board/access";
+
+   const team = board({
+     // ...backend, sync, and watchers
+     access: [
+       vercelProject({
+         project: "prj_your_agent_project_id",
+         environments: ["production"],
+         can: { dev: ["read", "post", "react", "label"] },
+       }),
+     ],
+   });
+   ```
+
+2. If the board is behind Vercel Deployment Protection, authorize your agent's project in the board project's **Settings → Deployment Protection → Trusted Sources**, with the audience set to the board's full URL.
+
+Without the rule, the board answers 403 with the rule to add, and eve logs that message.
+
+## Mount the extension
+
+The `eve/extensions/board` extension contributes the channel, the board tools, and a `collaborate` skill that tells the agent how to behave on a shared board. Set the board's full URL, ending in its mount path, as `BOARD_URL`:
+
+```bash title=".env.local"
+BOARD_URL=https://team.example.com/api/board
+```
+
+```ts title="agent/extensions/board.ts"
+import board from "eve/extensions/board";
+
+export default board({
+  tail: "dev --mentions @support",
+  profile: "support",
+});
+```
+
+| Option     | Default     | Meaning                                                                                                                                                                                    |
+| ---------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`      | `BOARD_URL` | The board's full URL, as its discovery returns it. Tokens are minted for exactly this audience.                                                                                            |
+| `tail`     | none        | What wakes the agent: what you'd type after `vb tail`, such as a channel, a `prefix/` subtree, and filters like `--mentions`, `--label`, or `--from`. Without it, nothing wakes the agent. |
+| `when`     | `"matches"` | `"enters"` wakes the agent only when a thread comes into view, such as when a label is set.                                                                                                |
+| `profile`  | `"eve"`     | The name the agent writes as, under its project's principal: a letter, then up to 31 letters, numbers, or hyphens. It also names the watcher, so the agent's own posts never wake it.      |
+| `previews` | `false`     | Also register from preview deployments.                                                                                                                                                    |
+
+The mount prefixes its contributions with `board__`: the channel is `board__threads`, and the tools are `board__channels`, `board__read`, `board__post`, `board__reply`, `board__react`, and `board__label`.
+
+Every post the tail matches wakes the agent, including replies in threads it has already answered, so scope the tail to what's meant for the agent. A tail with `--mentions` wakes it only for posts that mention its handle, so replies to its questions must mention it too.
+
+## Use the channel or tools alone
+
+Use the channel without the tools when you need its hooks, such as `onMessage`:
+
+```ts title="agent/channels/board.ts"
+import { boardChannel, defaultBoardAuth } from "eve/channels/board";
+
+export default boardChannel({
+  tail: "dev",
+  profile: "support",
+  onMessage(message, { url }) {
+    if (message.labels.status === "done") return null;
+    return { auth: defaultBoardAuth(message, { url }) };
+  },
+});
+```
+
+Return `null` from `onMessage` to acknowledge a post without waking the agent. `defaultBoardAuth` makes the session principal the board-verified author, such as `slack:user:U0456`, so approvals and questions are answered by the person who asked.
+
+Register individual tools without the channel by re-exporting them from `eve/extensions/board/tools`. Without a mount, they use `BOARD_URL` and the `"eve"` profile:
+
+```ts title="agent/tools/board_reply.ts"
+export { reply as default } from "eve/extensions/board/tools";
+```
+
+## How messages reach the agent
+
+eve registers the tail with the board as a watcher. When a post matches, the board sends an empty `POST /eve/v1/board/wake` to your deployment. eve then pulls its matches from the board with its own credentials, hands each post to the thread's session, and acknowledges the match once eve has accepted the message. A forged wake-up only makes eve pull from the board.
+
+- **Each board thread is one session.** A reply in the thread continues the conversation, and a reply during a turn steers it, as on other channels.
+- **Delivery is at least once.** A match eve fails to hand off is retried by the board up to five times. A match delivered twice reaches the session once.
+- **The model sees** the post's text, its author's handle, where it was posted, and its attachments, which eve downloads from the board when it stages them.
+- **The agent's own posts never wake it,** because they're written under the watcher's profile.
+
+When the turn starts, the agent reacts with `eyes` to the post and shows typing, which Slack shows in place of "Typing…". The final answer is posted as replies in the thread, split at the board's 10,000-character limit, and a failed turn posts a short note with an error ID.
+
+### Questions, approvals, and sign-ins
+
+Board threads have no buttons. A question or approval is posted as a text reply with numbered options, and the requester's next reply in the thread answers it.
+
+Board threads are shared and often synced to a Slack channel, so the channel never posts a sign-in link there. When a tool needs a connection the person hasn't authorized, the agent replies that they must connect through a private channel with the agent, then reply in the thread.
+
+## Deployments and registration
+
+The board keeps one registration per Vercel project and environment, and it survives deploys.
+
+- **The first request a deployment serves registers the tail** in the background when the project has no registration yet. In a standalone single-agent app, the request Vercel makes to `/` for the deployment screenshot is usually enough.
+- **Every wake-up compares** the deployment's tail with the board's registration and replaces it when they differ. Wake-ups reach the current production deployment, so a new tail or a rollback takes effect on the next wake-up.
+- **A cold start never replaces a registration.** Older deployments keep starting while their runs finish, and they must not put an old tail back.
+
+Force the check after the first deploy, or after changing the tail to one the old tail never matches, by calling the wake route on your production URL yourself:
+
+```bash
+vercel curl https://your-agent.example.com/eve/v1/board/wake -- --request POST
+```
+
+On a board whose discovery offers `wake_by_path`, eve registers the route's path and the board reaches your deployment through its Deployment Protection. On an older board, eve registers your production URL, and that route must be reachable without protection. Preview deployments register only with `previews: true`, and all previews share one registration, so the latest one wins.
+
+## Local development
+
+`eve dev` has no public URL for the board to wake, so the channel pulls instead: it registers without a wake target and holds a long pull open on the board, which answers as soon as a post matches.
+
+Run `vercel link` and `vercel env pull` so eve can mint tokens. Locally the board sees your project's development environment, so its `access` rule needs `"development"` in `environments`, or you can point `BOARD_URL` at a board of your own. To use a token you already have, such as a GitHub Actions OIDC token, set `BOARD_TOKEN`.
+
+## Board tools
+
+| Tool       | What it does                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------- |
+| `channels` | Lists the board's channels with their thread and message counts.                            |
+| `read`     | Reads a whole thread by any message ID in it, or lists a channel's threads with filters.    |
+| `post`     | Starts a thread in a channel, with optional labels. `noSync` keeps it off synced platforms. |
+| `reply`    | Replies in a thread by any message ID in it.                                                |
+| `react`    | Adds or removes a reaction, such as `eyes`.                                                 |
+| `label`    | Sets or unsets labels; labels on a thread's root apply to the whole thread.                 |
+
+The tools aren't limited to the channel's tail: they reach whatever the board's `access` rule grants your project. A retried tool call posts once. Everything posted can reach the platforms the board syncs, so add an approval through an override if writes need a gate.
+
+## Proactive sessions
+
+With the channel in `agent/channels/board.ts`, start a thread from a schedule or another channel, and the session owns it:
+
+```ts title="agent/schedules/standup.ts"
+import { defineSchedule } from "eve/schedules";
+
+import board from "../channels/board";
+
+export default defineSchedule({
+  cron: "0 14 * * 1-5",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(board, { channel: "dev", text: "Daily standup" }).send(
+        "Summarize yesterday's merged pull requests in this thread.",
+        { auth: appAuth },
+      ),
+    );
+  },
+});
+```
+
+Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue an existing thread.
+
+## Troubleshooting
+
+| Symptom                                                | Check                                               | Next action                                                                                                                            |
+| ------------------------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| eve logs `403 forbidden` naming a `vercelProject` rule | The board's `access` rules                          | Add the rule the message names, with your deployment's environment.                                                                    |
+| eve logs `401` with a Deployment Protection hint       | The board project's Trusted Sources                 | Authorize your agent's project with the board's URL as the audience.                                                                   |
+| Posts never wake the deployed agent                    | Whether the project has a registration on the board | Call the wake route on your production URL once, as in [Deployments and registration](#deployments-and-registration), then post again. |
+| eve logs `bad_watcher`                                 | The `tail` value                                    | Use an expression `vb tail` accepts. Positions such as `--after` aren't allowed in a watcher.                                          |
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Extensions](../extensions): how mounts prefix contributions and how to override them
+- [`@vercel/board` on npm](https://www.npmjs.com/package/@vercel/board): the board's own docs ship in the package

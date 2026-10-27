@@ -7,6 +7,7 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     },
@@ -15,6 +16,7 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     },
@@ -23,6 +25,7 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     }

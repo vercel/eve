@@ -10,6 +10,7 @@ import type { JsonObject } from "#shared/json.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
 const CHANNEL_BUILD_METADATA = Symbol.for("eve.channel.buildMetadata");
+const CHANNEL_START_HOOK = Symbol.for("eve.channel.startHook");
 const CHANNEL_INSTRUMENTATION_KIND = Symbol.for("eve.channel.instrumentationKind");
 const CHANNEL_INSTRUMENTATION_KINDS = Symbol.for("eve.channel.instrumentationKinds");
 
@@ -84,6 +85,35 @@ export function setChannelBuildMetadata(
     enumerable: true,
     value: factory,
   });
+}
+
+/** What a channel's start hook gets: the request that loaded the runtime, and its `waitUntil`. */
+export interface ChannelStartContext {
+  readonly request: Request;
+  waitUntil(task: Promise<unknown>): void;
+}
+
+export type ChannelStartHook = (ctx: ChannelStartContext) => void;
+
+/**
+ * Runs `hook` once per loaded runtime, on the first request it serves, whichever route that
+ * is. Internal: for built-in channels that must reach their platform before any of their own
+ * routes is called, such as registering where the platform wakes them.
+ */
+export function setChannelStartHook(channel: unknown, hook: ChannelStartHook): void {
+  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  // Enumerable so `{ ...channel, routes }` keeps the hook when an app wraps a channel's routes.
+  Object.defineProperty(channel, CHANNEL_START_HOOK, {
+    configurable: true,
+    enumerable: true,
+    value: hook,
+  });
+}
+
+export function getChannelStartHook(value: unknown): ChannelStartHook | undefined {
+  if (!isCompiledChannel(value)) return undefined;
+  const hook = Reflect.get(value, CHANNEL_START_HOOK);
+  return typeof hook === "function" ? (hook as ChannelStartHook) : undefined;
 }
 
 export function getChannelInstrumentationKind(value: unknown): string | undefined {

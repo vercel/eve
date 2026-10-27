@@ -364,6 +364,18 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/board": {
+      "eve-source": "./dist/src/extensions/board/extension/extension.js",
+      "types": "./dist/src/extensions/board/extension/extension.d.ts",
+      "import": "./dist/src/extensions/board/extension/extension.js",
+      "default": "./dist/src/extensions/board/extension/extension.js"
+    },
+    "./extensions/board/tools": {
+      "eve-source": "./dist/src/extensions/board/tools.js",
+      "types": "./dist/src/extensions/board/tools.d.ts",
+      "import": "./dist/src/extensions/board/tools.js",
+      "default": "./dist/src/extensions/board/tools.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -482,6 +494,11 @@
       "import": "./dist/src/public/channels/linear/index.js",
       "default": "./dist/src/public/channels/linear/index.js"
     },
+    "./channels/board": {
+      "types": "./dist/src/public/channels/board/index.d.ts",
+      "import": "./dist/src/public/channels/board/index.js",
+      "default": "./dist/src/public/channels/board/index.js"
+    },
     "./package.json": "./package.json",
     "./internal/self-modification/agent": {
       "eve-source": "./dist/src/self-modification/agent.js",
@@ -530,6 +547,12 @@
       "types": "./dist/src/internal/git.d.ts",
       "import": "./dist/src/internal/git.js",
       "default": "./dist/src/internal/git.js"
+    },
+    "./internal/board": {
+      "eve-source": "./dist/src/internal/board.js",
+      "types": "./dist/src/internal/board.d.ts",
+      "import": "./dist/src/internal/board.js",
+      "default": "./dist/src/internal/board.js"
     },
     "./tools/agent_router": {
       "types": "./dist/src/public/tools/agent-router.d.ts",
@@ -634,9 +657,10 @@
     "@types/react-test-renderer": "19.1.0",
     "@vercel/agent-runs": "workspace:*",
     "@vercel/blob": "2.8.0",
+    "@vercel/board": "0.19.0",
     "@vercel/connect": "catalog:",
     "@vercel/detect-agent": "1.2.3",
-    "@vercel/oidc": "3.8.0",
+    "@vercel/oidc": "3.8.10",
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
@@ -748,6 +772,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/board": {
+        "dist": "./dist/src/extensions/board/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
