@@ -18,6 +18,8 @@ EVE_CALLBACK_TRUSTED_ORIGINS=https://parent.example.com,https://second-parent.ex
 
 The remote sends its own ambient Vercel OIDC token in the trusted-OIDC header only to its own deployment origins or these explicitly configured HTTPS origins. Match origins exactly, including ports. Reject entries with credentials, paths, queries, or fragments. A callback request cannot extend this server-owned allowlist.
 
+Adding an origin is a trust grant. The ambient OIDC token is a bearer credential for the remote project's identity, not a recipient-scoped callback token. A listed parent can replay it against any other service, Trusted Sources rule, or federated role accepting that identity until expiry. Only explicitly trusted parents belong in this list.
+
 On a protected parent, configure Vercel Trusted Sources to admit the remote project and environment. The callback's message-scoped hook remains the application-level capability. Public-destination checks, redirect rejection, timeout, and response-byte bounds remain enforced by the existing callback transport.
 
 ## Boundaries and migration

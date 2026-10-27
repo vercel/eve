@@ -140,6 +140,8 @@ describe("postSessionCallbackRequest", () => {
 
   it("rejects invalid trusted-origin configuration before fetching", async () => {
     vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "child.example.com");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "child.example.com");
     vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", "https://parent.example.com/path");
     const fetchMock = stubFetch();
 
@@ -147,6 +149,21 @@ describe("postSessionCallbackRequest", () => {
       "EVE_CALLBACK_TRUSTED_ORIGINS",
     );
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps same-deployment callbacks independent of external-origin configuration", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "agent.example.com");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "test-only-oidc");
+    vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", "invalid-config,");
+    const fetchMock = stubFetch();
+
+    await postSessionCallbackRequest({ body: {}, url: callbackUrl });
+
+    expect(
+      new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-vercel-trusted-oidc-idp-token"),
+    ).toBe("test-only-oidc");
   });
 
   it("falls back to the deployment OIDC environment variable", async () => {

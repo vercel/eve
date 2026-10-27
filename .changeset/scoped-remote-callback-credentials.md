@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
-Stop including deployment-protection bypass secrets in remote callback URLs. Protected Vercel parents can admit callbacks through Trusted Sources, with remote OIDC credentials restricted to exact origins configured in `EVE_CALLBACK_TRUSTED_ORIGINS`.
+Protected cross-project callbacks now require reciprocal Vercel Trusted Sources and an explicit `EVE_CALLBACK_TRUSTED_ORIGINS` allowlist on the remote deployment. Callback URLs no longer include the parent's deployment-wide bypass secret; listed origins instead receive the remote's short-lived OIDC credential.

@@ -39,11 +39,12 @@ export async function postSessionCallbackRequest(input: {
 }): Promise<Response> {
   const timeoutMs = input.timeoutMs ?? SESSION_CALLBACK_TIMEOUT_MS;
   const signal = AbortSignal.timeout(timeoutMs);
+  const headers = await resolveSessionCallbackHeaders(input.url);
   let response: Response;
   try {
     response = await requestCallback(input.url, {
       body: JSON.stringify(input.body),
-      headers: await resolveSessionCallbackHeaders(input.url),
+      headers,
       signal,
     });
   } catch (error) {
@@ -151,8 +152,8 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
     const host = process.env[name]?.trim();
     return host !== undefined && host !== "" && URL.parse(`https://${host}`)?.origin === url.origin;
   });
-  const trustedOrigin = configuredCallbackOrigins().includes(url.origin);
-  if (url.protocol !== "https:" || (!currentHost && !trustedOrigin)) return headers;
+  if (url.protocol !== "https:") return headers;
+  if (!currentHost && !configuredCallbackOrigins().includes(url.origin)) return headers;
 
   const token = readAmbientVercelOidcToken();
   if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
