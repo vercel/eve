@@ -7,11 +7,14 @@ deployment. The capture reads the hydrated `startSuccessorStep` arguments and
 the original stream's raw NDJSON records (before the handoff).
 
 The model uses the existing integration harness's deterministic AI Gateway stub;
-no provider calls or channel credentials are involved. Capture used the release's
-source, workflow transform and test setup with the current checkout's installed
-dependencies and vendored artifacts (`@workflow/core` 5.2.3, also pinned by these
-releases). This is a real workflow-owner capture, not a published-package install
-or a two-deployment Vercel test.
+no provider calls or channel credentials are involved. Captures use the release's
+source, workflow transform and test setup, with shared installed development
+dependencies. The 0.83 captures use the current checkout's vendored artifacts
+(`@workflow/core` 5.2.3, also pinned by those releases). The 0.82.0 capture instead
+uses its published `eve@0.82.0` distribution for the vendored artifacts and `dist`
+imports, including its pinned Workflow 5.2.0 runtime. These are real workflow-owner
+captures, not complete dependency-pinned package installations or two-deployment
+Vercel tests.
 
 Only the synthetic session ID is replaced with `captured-session`. Event IDs,
 timestamps, model usage, context caches, history, compaction metadata, and state
@@ -40,8 +43,9 @@ pnpm exec vitest run --config vitest.integration.config.ts \
   src/execution/session/capture-v26.integration.test.ts
 ```
 
-For eve 0.82.0, also set `V26_CAPTURE_CHECKPOINT_VERSION=16`; the 0.83 releases
-write version 17, which is the harness default. The 16→17 upgrade changes no
+For eve 0.82.0, also set `V26_CAPTURE_CHECKPOINT_VERSION=16` and use its published
+`dist/src/compiled` artifacts and `dist` imports rather than the current build's
+vendored Workflow 5.2.3. The 0.83 releases write version 17, which is the harness default. The 16→17 upgrade changes no
 checkpoint data: version 17 introduced the proactive-preparation idle-deadline
 contract.
 
