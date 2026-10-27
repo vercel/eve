@@ -21,9 +21,9 @@ The verified transport caller, original request, and root/parent session ID are 
 
 ## Default ownership
 
-The HTTP channel records a hash of the creator's principal type, issuer (falling back to authenticator), and principal ID in a private, versioned side stream on the session's original run. It records ownership before returning an HTTP-created session ID, including bodyless creation, and reuses the same record on an idempotent create. A conflicting record is never replaced.
+The initial run attributes contain a versioned hash of the creator's principal type, tagged issuer/authenticator authority, and principal ID. The existing `audienceAuth` input carries the verified HTTP transport identity independently of mutable runtime auth. Seeding this attribute alongside the run's creation makes ownership available before returning its ID, including bodyless creation. Idempotent creates reuse the original run's attribute; later turns never replace it.
 
-Existing-session requests compare the verified user to this record before session attachment, body parsing, commands, or stream reads. Reads consume at most the first ownership record. This state does not depend on mutable turn auth, first-message initialization, the observability audience, or retention of the original workflow arguments. The existing workflow stream storage owns persistence; there is no new database, runtime dependency, or server secret. The execution core is unchanged.
+Existing-session requests read only run metadata (`resolveData: "none"`) and compare the verified user before session attachment, body parsing, commands, or stream reads. This state does not depend on mutable turn auth, first-message initialization, trace capture, workflow-input retention, or side-stream survival after external cancellation. There is no new database, runtime dependency, or server secret. The only execution-core change seeds the owner hash in initial run attributes; policy evaluation stays at the HTTP boundary.
 
 Non-user principals retain deployment-wide shared transport access. Tenant-scoped service principals should install an explicit policy. Callback capability semantics and forwarded principal projection are unchanged; the default owner is the verified HTTP transport caller, not a client-asserted body identity.
 
@@ -31,10 +31,10 @@ Non-user principals retain deployment-wide shared transport access. Tenant-scope
 
 Same-user linked-development/TUI, Basic auth, Auth.js, Better Auth, and first-party chat flows remain usable without a blanket shared-access grant. Authentication and per-user outbound connection identity remain unchanged.
 
-Sessions without a recorded HTTP owner, including sessions created by another channel or a previous release, are denied to user callers by default. There is no inference from current turn auth and no fail-open legacy fallback. Applications must provide a server-owned policy to grant access to those sessions, or create a new HTTP session. An explicit policy replaces the default owner check and owns its own permission lifecycle; HTTP creation under that policy does not publish a default owner record.
+Sessions without a recorded HTTP owner, including sessions created by another channel or a previous release, are denied to user callers by default. There is no inference from current turn auth and no fail-open legacy fallback. Applications must provide a server-owned policy to grant access to those sessions, or create a new HTTP session. An explicit policy replaces the default owner check and owns its own permission lifecycle.
 
 Descendant and subagent routes authorize the requested parent/root session before resolving child bindings. Synthetic descendant-reader histories deliberately grant their authenticated fixture operator shared access; they do not weaken production templates.
 
 ## Validation
 
-Owner-boundary unit tests exercise immutable recording, retries, issuer separation, unknown owners, and default route delegation. Focused integration tests exercise descendant proxies and the default client/TUI flow. A fixture-owned HTTP eval exercises user creation, permitted stream/send, and another issuer's denied read/reset through the real deployed API. Full integration, scenario, web-chat, and world suites remain CI's official validation boundary.
+Owner-boundary unit tests exercise issuer separation, unknown owners, backing-store failures, and default route delegation. A real Workflow integration test verifies transport identity wins over projected runtime identity and remains authorized after external cancellation. Focused integration tests also exercise descendant proxies and the default client/TUI flow. A fixture-owned HTTP eval exercises user creation, permitted stream/send, and another issuer's denied read/reset through the real deployed API. Full integration, scenario, web-chat, and world suites remain CI's official validation boundary.

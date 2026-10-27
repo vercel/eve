@@ -20,11 +20,11 @@ import { readClientContext } from "#internal/client-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
-import { isHttpSessionOwner, recordHttpSessionOwner } from "#eve-channel/session-owner.js";
+import { isHttpSessionOwner } from "#eve-channel/session-owner.js";
 
-vi.mock("#eve-channel/session-owner.js", () => ({
+vi.mock("#eve-channel/session-owner.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#eve-channel/session-owner.js")>()),
   isHttpSessionOwner: vi.fn(async () => false),
-  recordHttpSessionOwner: vi.fn(async () => {}),
 }));
 
 function route(
@@ -150,7 +150,7 @@ describe("eve ID-addressed session routes", () => {
     expect(session.prewarm).toHaveBeenCalledOnce();
   });
 
-  it("records creation ownership before returning the session ID", async () => {
+  it("pins creation metadata to the verified transport user", async () => {
     const createSession = vi.fn().mockResolvedValue({ sessionId: "created-for-alice" });
     const args = attachRouteSessionCreator(createArgs(), createSession);
     const caller = {
@@ -164,9 +164,10 @@ describe("eve ID-addressed session routes", () => {
       args,
     );
     expect(response.status).toBe(202);
-    expect(recordHttpSessionOwner).toHaveBeenLastCalledWith(
-      "created-for-alice",
-      expect.objectContaining({ principalId: "alice" }),
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audienceAuth: expect.objectContaining({ principalId: "alice", principalType: "user" }),
+      }),
     );
   });
 

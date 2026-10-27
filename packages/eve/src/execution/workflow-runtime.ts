@@ -23,6 +23,7 @@ import type {
   SessionCommandResult,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
+import { HTTP_SESSION_OWNER_ATTRIBUTE, httpSessionOwnerKey } from "#eve-channel/session-owner.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -236,6 +237,7 @@ export function createWorkflowRuntime(config: {
           });
     const attributes = {
       ...sessionAttributes,
+      [HTTP_SESSION_OWNER_ATTRIBUTE]: httpSessionOwnerKey(input.audienceAuth),
       [EVE_PREWARM_ATTRIBUTE]: "1",
       ...(input.externalInvocation === undefined
         ? {}

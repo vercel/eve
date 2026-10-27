@@ -36,15 +36,15 @@ export default defineEval({
     await t.require(refused.status, equals(403));
     await refused.text();
 
-    const sent = await t.target.fetch(path, {
-      method: "POST",
-      headers: { ...alice, "content-type": "application/json" },
-      body: JSON.stringify({
-        message: "Alice is returning to her workday planning. Greet her briefly.",
-      }),
+    const turn = await t.target
+      .attach(sessionId)
+      .start("Alice is returning to her workday planning. Greet her briefly.", { headers: alice });
+    (await turn.result()).expectOk();
+    const afterTurn = await t.target.fetch(`${path}/stream?follow=false`, {
+      headers: alice,
       signal: t.abortSignal,
     });
-    await t.require(sent.status, equals(202));
-    (await t.target.attach(sessionId).watch().result()).expectOk();
+    await t.require(afterTurn.status, equals(200));
+    await afterTurn.text();
   },
 });

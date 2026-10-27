@@ -496,9 +496,9 @@ export interface RunInput {
    */
   readonly auth: SessionAuthContext | null;
   /**
-   * Route-authenticated principal used to classify the conversation. This
-   * stays separate from `auth` because a channel may project a different
-   * principal into session auth after route authentication.
+   * Verified HTTP transport principal used for conversation classification
+   * and immutable creator ownership. This stays separate from `auth`
+   * because a channel may project a different runtime principal.
    */
   readonly audienceAuth?: SessionAuthContext | null;
   /**

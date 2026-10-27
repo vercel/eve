@@ -1,33 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isHttpSessionOwner, recordHttpSessionOwner } from "#eve-channel/session-owner.js";
+import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  HTTP_SESSION_OWNER_ATTRIBUTE,
+  httpSessionOwnerKey,
+  isHttpSessionOwner,
+} from "#eve-channel/session-owner.js";
 
-const records = vi.hoisted(() => new Map<string, unknown[]>());
-
+const readRun = vi.hoisted(() => vi.fn());
 vi.mock("#internal/workflow/runtime.js", () => ({
-  getRun: (sessionId: string) => ({
-    getReadable: ({ namespace }: { namespace: string }) => {
-      const values = records.get(`${sessionId}:${namespace}`) ?? [];
-      return Object.assign(
-        new ReadableStream({
-          start(controller) {
-            for (const value of values) controller.enqueue(value);
-            controller.close();
-          },
-        }),
-        { getTailIndex: async () => values.length - 1 },
-      );
-    },
-    getWritable: ({ namespace }: { namespace: string }) =>
-      new WritableStream({
-        write(value) {
-          const key = `${sessionId}:${namespace}`;
-          records.set(key, [...(records.get(key) ?? []), value]);
-        },
-      }),
-  }),
+  getWorld: async () => ({ runs: { get: readRun } }),
 }));
-
 const alice = {
   attributes: {},
   authenticator: "app",
@@ -36,12 +19,15 @@ const alice = {
   principalType: "user",
 };
 
-beforeEach(() => records.clear());
+beforeEach(() => {
+  readRun.mockReset();
+});
 
 describe("HTTP session ownership", () => {
   it("permits only the recorded creator, including the issuer boundary", async () => {
-    await recordHttpSessionOwner("alice-session", alice);
-
+    readRun.mockResolvedValue({
+      attributes: { [HTTP_SESSION_OWNER_ATTRIBUTE]: httpSessionOwnerKey(alice) },
+    });
     await expect(isHttpSessionOwner("alice-session", alice)).resolves.toBe(true);
     await expect(
       isHttpSessionOwner("alice-session", { ...alice, principalId: "bob" }),
@@ -49,39 +35,38 @@ describe("HTTP session ownership", () => {
     await expect(
       isHttpSessionOwner("alice-session", { ...alice, issuer: "workspace-b" }),
     ).resolves.toBe(false);
-    await expect(isHttpSessionOwner("another-session", alice)).resolves.toBe(false);
-    expect(JSON.stringify([...records.values()])).not.toContain("alice");
+    expect(readRun).toHaveBeenLastCalledWith("alice-session", { resolveData: "none" });
   });
 
   it("keeps an explicit issuer distinct from an authenticator with the same name", async () => {
-    await recordHttpSessionOwner("implicit-issuer-session", { ...alice, issuer: undefined });
-    await expect(
-      isHttpSessionOwner("implicit-issuer-session", { ...alice, issuer: "app" }),
-    ).resolves.toBe(false);
+    readRun.mockResolvedValue({
+      attributes: {
+        [HTTP_SESSION_OWNER_ATTRIBUTE]: httpSessionOwnerKey({ ...alice, issuer: undefined }),
+      },
+    });
+    await expect(isHttpSessionOwner("alice-session", { ...alice, issuer: "app" })).resolves.toBe(
+      false,
+    );
   });
 
-  it("does not replace or append to an existing ownership record on retries", async () => {
-    await recordHttpSessionOwner("alice-session", alice);
-    await recordHttpSessionOwner("alice-session", alice);
-    await expect(
-      recordHttpSessionOwner("alice-session", { ...alice, principalId: "bob" }),
-    ).rejects.toThrow("different HTTP owner");
-
-    expect([...records.values()][0]).toHaveLength(1);
-    await expect(isHttpSessionOwner("alice-session", alice)).resolves.toBe(true);
+  it("denies missing owner metadata and missing runs", async () => {
+    readRun.mockResolvedValueOnce({ attributes: {} });
+    await expect(isHttpSessionOwner("old-session", alice)).resolves.toBe(false);
+    readRun.mockRejectedValueOnce(new WorkflowRunNotFoundError("missing-session"));
+    await expect(isHttpSessionOwner("missing-session", alice)).resolves.toBe(false);
   });
 
-  it("snapshots identity independently of later caller changes", async () => {
-    const caller = { ...alice };
-    await recordHttpSessionOwner("alice-session", caller);
-    caller.principalId = "bob";
-
-    await expect(isHttpSessionOwner("alice-session", alice)).resolves.toBe(true);
-    await expect(isHttpSessionOwner("alice-session", caller)).resolves.toBe(false);
+  it("does not turn a backing-store failure into an access grant", async () => {
+    const error = new Error("Backing store unavailable");
+    readRun.mockRejectedValue(error);
+    await expect(isHttpSessionOwner("alice-session", alice)).rejects.toBe(error);
   });
 
-  it("does not create user ownership for deployment-wide transport principals", async () => {
-    await recordHttpSessionOwner("service-session", { ...alice, principalType: "service" });
-    expect(records.size).toBe(0);
+  it("does not issue a user owner key for shared transport principals", async () => {
+    const service = { ...alice, principalType: "service" };
+    expect(httpSessionOwnerKey(service)).toBeUndefined();
+    expect(httpSessionOwnerKey(null)).toBeUndefined();
+    await expect(isHttpSessionOwner("service-session", service)).resolves.toBe(false);
+    expect(readRun).not.toHaveBeenCalled();
   });
 });

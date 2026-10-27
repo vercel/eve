@@ -87,7 +87,7 @@ import {
   resolveTurnClientContext,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
-import { isHttpSessionOwner, recordHttpSessionOwner } from "#eve-channel/session-owner.js";
+import { isHttpSessionOwner } from "#eve-channel/session-owner.js";
 
 export * from "#eve-channel/types.js";
 
@@ -257,8 +257,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            if (input.authorizeSession === undefined)
-              await recordHttpSessionOwner(owner.id, authResult);
             return Response.json(createdSessionBody(owner.id, body, initialDeliveryId), {
               headers: {
                 "cache-control": "no-store",
@@ -394,8 +392,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
               });
             },
           );
-          if (input.authorizeSession === undefined)
-            await recordHttpSessionOwner(handle.sessionId, authResult);
         } catch (error) {
           if (error instanceof InvalidToolStubTargetError) {
             return Response.json({ error: error.message, ok: false }, { status: 400 });
