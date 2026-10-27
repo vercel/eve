@@ -62,13 +62,71 @@ test("parses simple argv quoting without enabling a shell language", () => {
     "--body",
     "it's ready",
   ]);
-  for (const command of [
-    "gh pr view 1 | cat",
-    "gh pr view $(printenv)",
-    "gh pr view 1 > out",
-    "gh pr view 1; env",
-  ]) {
-    assert.throws(() => parseCommand(command), /GitHub commands|argv syntax/u, command);
+});
+
+test("keeps text that cannot expand without a shell as literal argv", () => {
+  for (const [command, argv] of [
+    ["gh api repos/{owner}/{repo}/pulls", ["gh", "api", "repos/{owner}/{repo}/pulls"]],
+    [
+      'gh pr comment 1 --body "Run `pnpm test` (all tiers) for 5$ or US$"',
+      ["gh", "pr", "comment", "1", "--body", "Run `pnpm test` (all tiers) for 5$ or US$"],
+    ],
+    ["gh pr comment 1 --body Fix(`parse`)", ["gh", "pr", "comment", "1", "--body", "Fix(`parse`)"]],
+    [
+      "gh pr comment 1 --body '$(date) ${HOME} $USER'",
+      ["gh", "pr", "comment", "1", "--body", "$(date) ${HOME} $USER"],
+    ],
+    ["gh pr comment 1 --body \\$HOME", ["gh", "pr", "comment", "1", "--body", "$HOME"]],
+  ] as const) {
+    assert.deepEqual(parseCommand(command), argv, command);
+    assert.equal(githubShellApproval({ ...READ, command }), "not-applicable", command);
+  }
+});
+
+test("names the refused syntax, its fix, and a stable denial code", () => {
+  for (const [command, code, reason] of [
+    ["gh pr view 1 | head", "pipe", /"\|" cannot pipe output\. Filter it with --jq/u],
+    ["gh pr view 1 && gh pr view 2", "chain", /"&&" cannot chain commands\. Send each command/u],
+    ["gh pr view 1; env", "chain", /";" cannot chain commands/u],
+    ["gh pr view 1 > out", "redirect", /">" cannot redirect/u],
+    ["gh pr create --body-file - <<EOF", "heredoc", /"<<" cannot start a heredoc.*--body-file/u],
+    [
+      'gh pr comment 1 --body "$(cat notes.md)"',
+      "substitution",
+      /"\$\(" is not expanded.*--body-file/u,
+    ],
+    ["gh pr view $(printenv)", "substitution", /"\$\(" is not expanded/u],
+    ['gh pr comment 1 --body "${BODY}"', "variable", /"\$\{" is not expanded/u],
+    [
+      "gh pr view $PR_NUMBER",
+      "variable",
+      /"\$PR_NUMBER" is not expanded\. Write the value itself/u,
+    ],
+    ["GH_TOKEN=stolen gh auth status", "env_assignment", /"GH_TOKEN=" cannot set the environment/u],
+    ["env GH_TOKEN=stolen gh auth status", "env_assignment", /"env" cannot set the environment/u],
+    [
+      "cd internal-agents && git push origin main",
+      "cd",
+      /Set the workingDirectory parameter to "internal-agents"/u,
+    ],
+    ["bash -lc gh", "program", /"bash" is not a GitHub command/u],
+    [
+      "git -C internal-agents push origin main",
+      "git_subcommand",
+      /"-C" is not a subcommand\. Set the workingDirectory parameter to "internal-agents"/u,
+    ],
+    ["git commit -m fix", "git_subcommand", /"git commit" is not an authenticated git command/u],
+    [
+      "gh pr comment 1 --body 'it's ready'",
+      "unterminated_quote",
+      /unterminated ' quote near .*An apostrophe ends single-quoted text/u,
+    ],
+  ] as const) {
+    const decision = githubShellApproval({ ...WRITE, command });
+    assert.ok(typeof decision === "object", command);
+    assert.equal(decision.code, code, command);
+    assert.match(decision.reason, reason, command);
+    assert.doesNotMatch(decision.reason, /stolen/u, command);
   }
 });
 
@@ -180,6 +238,7 @@ test("fails closed on invalid permissions, missing commands, env assignments, an
   assert.deepEqual(githubShellApproval(readPush), {
     type: "denied",
     reason: "GitHub App commands require explicit write-capable access.",
+    code: "invalid_input",
   });
   for (const command of [
     "gh",
@@ -192,7 +251,7 @@ test("fails closed on invalid permissions, missing commands, env assignments, an
     assert.ok((decision as { reason: string }).reason.length > 0);
   }
   for (const command of ["gh auth status | env", "gh auth status; env", "gh auth status > token"]) {
-    assert.throws(() => parseCommand(command), /argv syntax/u, command);
+    assert.throws(() => parseCommand(command), /without a shell/u, command);
   }
 });
 
@@ -202,6 +261,7 @@ test("rejects empty or multiple permissions before sandbox access or token minti
     assert.deepEqual(githubShellApproval(input), {
       type: "denied",
       reason: "Exactly one GitHub permission is required.",
+      code: "invalid_input",
     });
     await assert.rejects(
       executeGitHubShell(input, CONFIG, {

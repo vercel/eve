@@ -102,9 +102,51 @@ interface GitHubShellDependencies {
   readonly sessionId: string;
 }
 
+/** Why the `gh` tool refused a command: a stable, low-cardinality value for telemetry. */
+export type GitHubCommandDenialCode =
+  | "cd"
+  | "chain"
+  | "env_assignment"
+  | "git_subcommand"
+  | "heredoc"
+  | "invalid_input"
+  | "pipe"
+  | "program"
+  | "redirect"
+  | "substitution"
+  | "unterminated_quote"
+  | "variable";
+
+class GitHubCommandError extends Error {
+  readonly code: GitHubCommandDenialCode;
+
+  constructor(code: GitHubCommandDenialCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+interface ShellSyntax {
+  readonly code: "chain" | "heredoc" | "pipe" | "redirect" | "substitution" | "variable";
+  readonly token: string;
+}
+
 const MAX_OUTPUT_BYTES = 100_000;
 const leaseQueues = new Map<string, Promise<void>>();
 const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
+const NO_SHELL = "GitHub commands run without a shell";
+const GIT_REMOTE_COMMANDS = "Authenticated git supports fetch, ls-remote, pull, and push";
+const SHELL_SYNTAX_FIXES: Record<ShellSyntax["code"], string> = {
+  chain: "cannot chain commands. Send each command in its own call.",
+  heredoc:
+    "cannot start a heredoc. Write the text to a file and pass it with --body-file, or --input for gh api.",
+  pipe: "cannot pipe output. Filter it with --jq or --template, or process it in a separate call.",
+  redirect:
+    "cannot redirect. The tool returns stdout and stderr; read files with flags such as --body-file or --input.",
+  substitution:
+    "is not expanded. Run the inner command separately and use its output, or write long text to a file and pass it with --body-file.",
+  variable: "is not expanded. Write the value itself, or single-quote it to send it literally.",
+};
 
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
@@ -112,9 +154,12 @@ export function githubShellApproval(input: GitHubShellInput | undefined) {
     validateGitHubShellInput(input);
     return "not-applicable" as const;
   } catch (error) {
+    const code: GitHubCommandDenialCode =
+      error instanceof GitHubCommandError ? error.code : "invalid_input";
     return {
       type: "denied" as const,
       reason: error instanceof Error ? error.message : "Invalid GitHub command.",
+      code,
     };
   }
 }
@@ -281,13 +326,15 @@ async function withGitHubCredentialLease<T>(
 
 export function parseCommand(command: string): string[] {
   const value = command.trim();
-  if (!value) throw new Error("GitHub command must not be empty.");
+  if (!value) throw new GitHubCommandError("invalid_input", "GitHub command must not be empty.");
   const argv: string[] = [];
   let token = "";
   let quote: "single" | "double" | null = null;
+  let quoteStart = 0;
   let escaped = false;
   let started = false;
-  for (const character of value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
     if (escaped) {
       token += character;
       escaped = false;
@@ -304,17 +351,21 @@ export function parseCommand(command: string): string[] {
       else token += character;
       continue;
     }
+    const syntax =
+      character === "$"
+        ? expansionAt(value, index, quote === "double")
+        : quote === null
+          ? operatorAt(value, index)
+          : undefined;
+    if (syntax) throw shellSyntaxError(started ? [...argv, token] : argv, syntax);
     if (quote === "double") {
       if (character === '"') quote = null;
-      else if (character === "$" || character === "`") throw unsupportedSyntax();
       else token += character;
       continue;
     }
-    if (character === "'") {
-      quote = "single";
-      started = true;
-    } else if (character === '"') {
-      quote = "double";
+    if (character === "'" || character === '"') {
+      quote = character === "'" ? "single" : "double";
+      quoteStart = index;
       started = true;
     } else if (/\s/u.test(character)) {
       if (started) {
@@ -322,41 +373,140 @@ export function parseCommand(command: string): string[] {
         token = "";
         started = false;
       }
-    } else if (";&|<>$`(){}".includes(character)) {
-      throw unsupportedSyntax();
     } else {
       token += character;
       started = true;
     }
   }
-  if (escaped || quote) throw new Error("GitHub command contains an unfinished quote or escape.");
+  if (escaped) {
+    throw new GitHubCommandError(
+      "unterminated_quote",
+      'GitHub command ends with an unfinished "\\" escape. Remove it, or write "\\\\" for a literal backslash.',
+    );
+  }
+  if (quote) throw unterminatedQuoteError(value, quote, quoteStart);
   if (started) argv.push(token);
-  if (argv.length === 0) throw new Error("GitHub command must not be empty.");
+  if (argv.length === 0) {
+    throw new GitHubCommandError("invalid_input", "GitHub command must not be empty.");
+  }
   return argv;
+}
+
+/** The control or redirection operator bash reads at `index` outside quotes. */
+function operatorAt(value: string, index: number): ShellSyntax | undefined {
+  const pair = value.slice(index, index + 2);
+  if (pair === "&&" || pair === "||") return { code: "chain", token: pair };
+  if (pair === "<(" || pair === ">(") return { code: "substitution", token: pair };
+  if (pair === "<<") return { code: "heredoc", token: pair };
+  if (pair === "&>") return { code: "redirect", token: pair };
+  const character = value[index]!;
+  if (character === "|") return { code: "pipe", token: character };
+  if (character === "&" || character === ";") return { code: "chain", token: character };
+  if (character === "<" || character === ">") return { code: "redirect", token: character };
+  return undefined;
+}
+
+/** The expansion bash performs at the `$` at `index`; bash leaves any other `$` literal. */
+function expansionAt(value: string, index: number, quoted: boolean): ShellSyntax | undefined {
+  const next = value[index + 1];
+  if (next === "(" || next === "[" || (!quoted && (next === "'" || next === '"'))) {
+    return { code: "substitution", token: `$${next}` };
+  }
+  if (next === "{") return { code: "variable", token: "${" };
+  const name = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9*@#?!$-])/u.exec(value.slice(index + 1));
+  return name ? { code: "variable", token: `$${name[0]}` } : undefined;
+}
+
+function shellSyntaxError(words: readonly string[], syntax: ShellSyntax): GitHubCommandError {
+  if (words[0] === "cd") return changeDirectoryError(words[1]);
+  return new GitHubCommandError(
+    syntax.code,
+    `${NO_SHELL}, so ${JSON.stringify(syntax.token)} ${SHELL_SYNTAX_FIXES[syntax.code]}`,
+  );
+}
+
+function changeDirectoryError(directory: string | undefined): GitHubCommandError {
+  const target = directory ? ` to ${JSON.stringify(directory)}` : "";
+  return new GitHubCommandError(
+    "cd",
+    `${NO_SHELL}, so "cd" cannot change directory. Set the workingDirectory parameter${target} and send only the GitHub command.`,
+  );
+}
+
+function unterminatedQuoteError(
+  value: string,
+  quote: "single" | "double",
+  start: number,
+): GitHubCommandError {
+  const near = JSON.stringify(value.slice(Math.max(0, start - 20), start + 20));
+  return new GitHubCommandError(
+    "unterminated_quote",
+    quote === "single"
+      ? `GitHub command has an unterminated ' quote near ${near}. An apostrophe ends single-quoted text, so put that text in double quotes or pass it with --body-file.`
+      : `GitHub command has an unterminated " quote near ${near}. Escape literal double quotes as \\", or pass long text with --body-file.`,
+  );
+}
+
+function gitSubcommandError(subcommand: string | undefined, value: string | undefined) {
+  if (subcommand === undefined) {
+    return new GitHubCommandError("git_subcommand", `${GIT_REMOTE_COMMANDS}; name one after git.`);
+  }
+  if (subcommand.startsWith("-")) {
+    const fix =
+      subcommand === "-C"
+        ? ` Set the workingDirectory parameter${value ? ` to ${JSON.stringify(value)}` : ""}.`
+        : "";
+    return new GitHubCommandError(
+      "git_subcommand",
+      `${GIT_REMOTE_COMMANDS} as its first argument, and ${JSON.stringify(subcommand)} is not a subcommand.${fix}`,
+    );
+  }
+  if (subcommand === "clone") {
+    return new GitHubCommandError(
+      "git_subcommand",
+      `${GIT_REMOTE_COMMANDS}; clone with gh repo clone owner/name.`,
+    );
+  }
+  return new GitHubCommandError(
+    "git_subcommand",
+    `${JSON.stringify(`git ${subcommand}`)} is not an authenticated git command. ${GIT_REMOTE_COMMANDS}; run other git commands with bash.`,
+  );
 }
 
 function validateGitHubShellInput(input: GitHubShellInput): string[] {
   const argv = parseCommand(input.command);
   const permission = input.permissions[0];
   if (input.permissions.length !== 1 || permission?.provider !== "github") {
-    throw new Error("Exactly one GitHub permission is required.");
+    throw new GitHubCommandError("invalid_input", "Exactly one GitHub permission is required.");
   }
   if (permission.access !== "write") {
-    throw new Error("GitHub App commands require explicit write-capable access.");
+    throw new GitHubCommandError(
+      "invalid_input",
+      "GitHub App commands require explicit write-capable access.",
+    );
   }
-  if (!input.description.trim()) throw new Error("description must describe the intended result.");
-  const [executable, subcommand] = argv;
+  if (!input.description.trim()) {
+    throw new GitHubCommandError("invalid_input", "description must describe the intended result.");
+  }
+  const [executable, subcommand, value] = argv as [string, ...string[]];
   if (executable === "gh") {
-    if (!subcommand) throw new Error("A gh subcommand is required.");
+    if (!subcommand) throw new GitHubCommandError("invalid_input", "A gh subcommand is required.");
   } else if (executable === "git") {
     if (!subcommand || !ALLOWED_GIT_REMOTE_COMMANDS.has(subcommand)) {
-      throw new Error(
-        "Authenticated git supports only fetch, ls-remote, pull, and push; clone with gh repo clone.",
-      );
+      throw gitSubcommandError(subcommand, value);
     }
+  } else if (executable === "cd") {
+    throw changeDirectoryError(subcommand);
+  } else if (executable === "env" || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(executable)) {
+    const assignment = executable === "env" ? executable : executable.split("=")[0] + "=";
+    throw new GitHubCommandError(
+      "env_assignment",
+      `${NO_SHELL}, so ${JSON.stringify(assignment)} cannot set the environment. Start with gh, git, or gh-signed-commit and pass settings as flags such as --repo; the tool supplies credentials.`,
+    );
   } else if (executable !== "gh-signed-commit") {
-    throw new Error(
-      "GitHub commands must use gh, an authenticated git remote command, or gh-signed-commit.",
+    throw new GitHubCommandError(
+      "program",
+      `${JSON.stringify(executable)} is not a GitHub command. Start with gh, git, or gh-signed-commit, and run other programs with bash.`,
     );
   }
   return argv;
@@ -485,10 +635,4 @@ function sanitizeOutput(
     value: `[output truncated: showing final ${MAX_OUTPUT_BYTES} bytes]\n${Buffer.from(redacted).subarray(-MAX_OUTPUT_BYTES).toString()}`,
     truncated: true,
   };
-}
-
-function unsupportedSyntax(): Error {
-  return new Error(
-    "GitHub commands support argv syntax only, not pipes, redirects, substitutions, or shell operators.",
-  );
 }
