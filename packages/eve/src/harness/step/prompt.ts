@@ -3,7 +3,7 @@ import {
   anchorToTurn,
   createFrameworkUserMessage,
   followsToolResults,
-  followUpHookOf,
+  followUpHooksOf,
   type HarnessModelMessage,
   normalizeModelMessages,
   validateHarnessModelMessages,
@@ -143,9 +143,10 @@ export function withClientContext(
 /** Tells the model which messages a hook sent, from the follow-up's delivery source. */
 function withFollowUpNotes(messages: readonly HarnessModelMessage[]): HarnessModelMessage[] {
   return messages.flatMap((message) => {
-    const hook = followUpHookOf(message);
-    if (hook === undefined) return [message];
-    const note = `The next message is a follow-up the "${hook}" hook sent after the last turn. No person wrote it.`;
+    const hooks = followUpHooksOf(message);
+    if (hooks === undefined) return [message];
+    const names = hooks.map((hook) => `"${hook}"`).join(" and ");
+    const note = `The next message is a follow-up the ${names} ${hooks.length === 1 ? "hook" : "hooks"} sent after the last turn. No person wrote it.`;
     return [createFrameworkUserMessage("context.instruction", note), message];
   });
 }
@@ -157,7 +158,7 @@ function withFollowUpNotes(messages: readonly HarnessModelMessage[]): HarnessMod
 export function readsOnlyHistory(prompt: Prompt): boolean {
   return (
     (prompt.clientContext?.messages.length ?? 0) === 0 &&
-    !prompt.messages.some((message) => followUpHookOf(message) !== undefined)
+    !prompt.messages.some((message) => followUpHooksOf(message) !== undefined)
   );
 }
 

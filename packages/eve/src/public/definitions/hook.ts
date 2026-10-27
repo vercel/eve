@@ -75,11 +75,12 @@ export type HookFollowUpEventKey = {
 }[HookEventKey];
 
 /**
- * Options for `ctx.followUp()`: the shared send options, with `auth` optional. Omitted, `auth`
- * names no sender, and the turn runs as the session's current identity. A principal makes the
- * turn act for them, and `null` runs it with no caller, as with `session.send()`.
+ * Options for `ctx.followUp()`: the shared send options' `context`, and `auth`, optional. Omitted,
+ * `auth` names no sender, and the turn runs as the session's current identity. A principal makes
+ * the turn act for them, and `null` runs it with no caller, as with `session.send()`. There's no
+ * `idempotencyKey`: a turn has one follow-up, which eve records with the step and admits once.
  */
-export type HookFollowUpOptions = Pick<SessionSendOptions, "context" | "idempotencyKey"> &
+export type HookFollowUpOptions = Pick<SessionSendOptions, "context"> &
   Partial<Pick<SessionSendOptions, "auth">>;
 
 /**
@@ -92,10 +93,11 @@ export type HookFollowUpResult =
       readonly queued: false;
       /**
        * `not-settled`: a `*` handler ran for an event other than `turn.settled`.
-       * `not-completed`: the turn failed or was cancelled.
-       * `already-queued`: this or another hook already followed up this turn.
+       * `not-completed`: the turn failed, or something other than this hook cancelled it.
+       * `already-queued`: this hook already followed up this turn.
+       * `auth-conflict`: another hook's follow-up to this turn acts for someone else.
        */
-      readonly reason: "not-settled" | "not-completed" | "already-queued";
+      readonly reason: "not-settled" | "not-completed" | "already-queued" | "auth-conflict";
     };
 
 /**
@@ -137,12 +139,14 @@ export interface HookBaseContext extends SessionContext, Omit<SessionFrame, "ses
 /** What `turn.settled` and `*` handlers receive besides {@link HookBaseContext}. */
 export interface HookFollowUp {
   /**
-   * Starts the session's next turn with `message` after a turn completes. The message is
-   * recorded now and admitted once the session is idle, as a delivery whose source names this
-   * hook and the channel. It yields: any other turn that starts first, a `session.cancel()`, or
-   * a reset drops it, so a person's input always wins. Unlike `session.send()`, it returns
-   * synchronously, at most one follow-up per turn is queued, and there's no receipt: the
-   * delivery doesn't exist until the session admits it. Throws after the handler has settled.
+   * Starts the session's next turn with `message` after a turn completes, or after a turn this
+   * hook cancelled, to redirect it. The message is recorded now and admitted once the session is
+   * idle, as a delivery whose source names this hook and the channel. Hooks that follow up the
+   * same turn share one next turn, each message its own payload, in hook order. It yields: any
+   * other turn that starts first, a `session.cancel()`, a clear, or a reset drops it, so a
+   * person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
+   * receipt: the delivery doesn't exist until the session admits it. Throws after the handler has
+   * settled.
    */
   followUp(message: MessageContent, options?: HookFollowUpOptions): HookFollowUpResult;
 }

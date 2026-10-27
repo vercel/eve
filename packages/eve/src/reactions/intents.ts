@@ -4,7 +4,8 @@ import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { followsUp } from "./follow-up.js";
+import { coalesceDeliveries } from "#harness/messages.js";
+import { followUpOf, type FollowUpIntent } from "./follow-up.js";
 import type { Reaction } from "./reaction.js";
 import { readReactionsState, writeReactionsState, type PendingIntent } from "./state.js";
 
@@ -19,8 +20,8 @@ export type Command =
   | { readonly type: "follow-up"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
 /**
- * Adds a hook's commands to the session's queue. Cancels between turns are dropped; a turn is
- * followed up at most once, which `ctx.followUp()` already reported to the hook.
+ * Adds a hook's commands to the session's queue. Cancels between turns are dropped; each hook's
+ * follow-up joins the turn's one follow-up delivery.
  */
 export function queueCommands(
   ctx: ContextContainer,
@@ -35,8 +36,16 @@ export function queueCommands(
   let changed = false;
   for (const command of commands) {
     if (command.type === "follow-up") {
-      if (followsUp(intents, command.turnId)) continue;
-      intents.push({ ...command, occurrence, reactionId: reaction.id });
+      // A hook joins the turn's follow-up; `ctx.followUp()` already refused one it can't join.
+      const index = intents.findIndex((queued) => queued === followUpOf(intents, command.turnId));
+      if (index === -1) intents.push({ ...command, occurrence, reactionId: reaction.id });
+      else {
+        const queued = intents[index] as FollowUpIntent;
+        intents[index] = {
+          ...queued,
+          delivery: coalesceDeliveries([queued.delivery, command.delivery]),
+        };
+      }
       changed = true;
       continue;
     }

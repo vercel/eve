@@ -85,19 +85,21 @@ export function createFrameworkUserMessage(
   return createUserMessage(kind, content, metadata);
 }
 
-/** The metadata key naming the hook whose `ctx.followUp()` brought a message into history. */
-const FOLLOW_UP_HOOK_KEY = "eve.followUpHook";
+/** The metadata key naming the hooks whose `ctx.followUp()` brought a message into history. */
+const FOLLOW_UP_HOOKS_KEY = "eve.followUpHooks";
 
-/** Marks a message a hook's follow-up delivered, from the delivery's `source.hook`. */
-export function markFollowUp<T extends UserModelMessage>(message: T, hook: string): T {
-  return { ...message, metadata: { ...message.metadata, [FOLLOW_UP_HOOK_KEY]: hook } };
+/** Marks a message hooks' follow-ups delivered, from the deliveries' `source.hook`. */
+export function markFollowUp<T extends UserModelMessage>(message: T, hooks: readonly string[]): T {
+  return { ...message, metadata: { ...message.metadata, [FOLLOW_UP_HOOKS_KEY]: hooks } };
 }
 
-/** The hook that sent a message, when a follow-up brought it. */
-export function followUpHookOf(message: HarnessModelMessage): string | undefined {
+/** The hooks that sent a message, when follow-ups brought it. */
+export function followUpHooksOf(message: HarnessModelMessage): readonly string[] | undefined {
   if (message.role !== "user") return undefined;
-  const hook = message.metadata?.[FOLLOW_UP_HOOK_KEY];
-  return typeof hook === "string" ? hook : undefined;
+  const hooks = message.metadata?.[FOLLOW_UP_HOOKS_KEY];
+  return Array.isArray(hooks) && hooks.length > 0 && hooks.every((hook) => typeof hook === "string")
+    ? (hooks as readonly string[])
+    : undefined;
 }
 
 /** The metadata key that marks the messages a turn's input brought into history. */

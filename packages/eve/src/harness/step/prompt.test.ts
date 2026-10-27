@@ -10,7 +10,7 @@ const history: HarnessModelMessage[] = [
   createUserMessage("user", "Alice asks for the report."),
   { content: "Working on it.", role: "assistant" },
 ];
-const followUp = markFollowUp(createUserMessage("user", "Keep going."), "until-done");
+const followUp = markFollowUp(createUserMessage("user", "Keep going."), ["until-done"]);
 const clientContext = { insertionIndex: 1, messages: ["Alice is on mobile."], turnId: "turn-1" };
 
 describe("readsOnlyHistory", () => {

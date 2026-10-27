@@ -5,8 +5,9 @@ import type { DeliverHookPayload } from "#channel/types.js";
 export const REACTIONS_STATE_KEY = "eve.reactions";
 
 /**
- * A hook's `ctx.followUp()`: the delivery that starts the session's next turn, for the turn that
- * settled. Any other turn that starts first discards it, as do a cancel and a reset.
+ * The session's follow-up to a settled turn: one delivery that starts its next turn, with a payload
+ * for each hook that called `ctx.followUp()`. Any other turn that starts first discards it, as do a
+ * cancel, a clear, and a reset.
  */
 export interface FollowUpIntent {
   readonly reactionId: string;
@@ -17,14 +18,20 @@ export interface FollowUpIntent {
   readonly delivery: DeliverHookPayload;
 }
 
-/** Whether `intents` already hold a follow-up to `turnId`. */
-export function followsUp(
+/** The follow-up queued for `turnId`, which every hook that follows up the turn adds to. */
+export function followUpOf(
   intents: readonly { readonly type: string }[] | undefined,
   turnId: string,
-): boolean {
-  return (intents ?? []).some(
-    (intent) => intent.type === "follow-up" && (intent as FollowUpIntent).turnId === turnId,
+): FollowUpIntent | undefined {
+  return (intents ?? []).find(
+    (intent): intent is FollowUpIntent =>
+      intent.type === "follow-up" && (intent as FollowUpIntent).turnId === turnId,
   );
+}
+
+/** The idempotency key of a turn's follow-up: one delivery per settled turn. */
+export function followUpKey(sessionId: string, turnId: string): string {
+  return `${sessionId}:follow-up:${turnId}`;
 }
 
 /**

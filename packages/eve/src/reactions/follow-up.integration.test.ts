@@ -266,4 +266,105 @@ describe("hook ctx.followUp()", () => {
     expect(inputs).toEqual(["Alice asks for the report."]);
     expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(1);
   }, 90_000);
+
+  it("merges follow-ups from several hooks into one next turn, for one principal", async () => {
+    const settled: Record<string, number> = { audit: 0, goal: 0, lint: 0 };
+    const results: Record<string, unknown[]> = { audit: [], goal: [], lint: [] };
+    const { inputs, log, prompts } = await runSession({
+      drive: async ({ log }) => {
+        await until(log, "turn:completed", 2);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      },
+      hooks: {
+        goal: defineHook({
+          events: {
+            "turn.settled": (_event, ctx) => {
+              if ((settled.goal! += 1) === 1) {
+                results.goal!.push(ctx.followUp("Keep working on the report."));
+              }
+            },
+          },
+        }),
+        lint: defineHook({
+          events: {
+            "turn.settled": (_event, ctx) => {
+              if ((settled.lint! += 1) === 1)
+                results.lint!.push(ctx.followUp("Fix the lint errors."));
+            },
+          },
+        }),
+        // A follow-up for Bob can't share a turn that acts as the session.
+        "zz-audit": defineHook({
+          events: {
+            "turn.settled": (_event, ctx) => {
+              if ((settled.audit! += 1) === 1) {
+                results.audit!.push(ctx.followUp("Audit it.", { auth: BOB }));
+              }
+            },
+          },
+        }),
+      },
+      name: "hook-follow-up-merges",
+    });
+
+    expect(results).toEqual({
+      audit: [{ queued: false, reason: "auth-conflict" }],
+      goal: [{ queued: true }],
+      lint: [{ queued: true }],
+    });
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain("Keep working on the report.");
+    expect(inputs[1]).toContain("Fix the lint errors.");
+    expect(inputs[1]).not.toContain("Audit it.");
+    expect(log.filter((entry) => entry.startsWith("admitted:"))).toEqual([
+      'admitted:{"channel":"http"}',
+      'admitted:{"channel":"http","hook":"goal"}',
+      'admitted:{"channel":"http","hook":"lint"}',
+    ]);
+    expect(prompts[1]).toContain('the \\"goal\\" and \\"lint\\" hooks sent');
+  }, 90_000);
+
+  it("lets the hook that cancelled a turn redirect it, and no other hook", async () => {
+    let started = 0;
+    const results: Record<string, unknown[]> = { guard: [], other: [] };
+    const { inputs, log } = await runSession({
+      drive: async ({ log }) => {
+        await until(log, "turn:completed", 1);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      },
+      hooks: {
+        guard: defineHook({
+          events: {
+            "turn.started": (_event, ctx) => {
+              started += 1;
+              if (started === 1) ctx.cancel("The agent was about to edit test files.");
+            },
+            "turn.settled": (event, ctx) => {
+              if (event.data.outcome !== "cancelled") return;
+              results.guard!.push(ctx.followUp("Fix the code without editing test files."));
+            },
+          },
+        }),
+        other: defineHook({
+          events: {
+            "turn.settled": (event, ctx) => {
+              if (event.data.outcome !== "cancelled") return;
+              results.other!.push(ctx.followUp("Keep going."));
+            },
+          },
+        }),
+      },
+      name: "hook-follow-up-redirects",
+    });
+
+    expect(results).toEqual({
+      guard: [{ queued: true }],
+      other: [{ queued: false, reason: "not-completed" }],
+    });
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual([
+      "turn:cancelled",
+      "turn:completed",
+    ]);
+    expect(inputs).toEqual(["Fix the code without editing test files."]);
+  }, 90_000);
 });

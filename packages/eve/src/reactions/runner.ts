@@ -396,7 +396,11 @@ function actOnCancels(
   if (first === undefined || cancelTurn === undefined) return;
   const hook = reactions.find(({ id }) => id === first.reactionId)?.label ?? first.reactionId;
   takeIntents(ctx, (intent) => intent.type === "cancel");
-  writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledTurnId: first.turnId });
+  writeReactionsState(ctx, {
+    ...readReactionsState(ctx),
+    cancelledBy: first.reactionId,
+    cancelledTurnId: first.turnId,
+  });
   cancelTurn({ hook, ...(first.reason !== undefined && { reason: first.reason }) });
 }
 

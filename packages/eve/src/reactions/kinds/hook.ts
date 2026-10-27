@@ -1,7 +1,3 @@
-import {
-  MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH,
-  validateDeliveryIdempotencyKey,
-} from "#channel/delivery-idempotency.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
@@ -15,6 +11,7 @@ import {
   type HookFollowUpResult,
   type HookEventKey,
 } from "#public/definitions/hook.js";
+import { principalOf } from "#execution/session/principal.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";
@@ -24,18 +21,12 @@ import type { ResolvedHookDefinition } from "#runtime/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
-import { followsUp } from "../follow-up.js";
+import { followUpKey, followUpOf } from "../follow-up.js";
 import { queueCommands, reportReactionFailure, type Command } from "../intents.js";
 import { sessionFrameOf } from "../frame.js";
 import type { CommitContext, CommitReaction } from "../reaction.js";
 import { openMemos } from "../records.js";
-import {
-  digestOf,
-  discardedByDeployment,
-  keepMemos,
-  mergeMemos,
-  readReactionsState,
-} from "../state.js";
+import { discardedByDeployment, keepMemos, mergeMemos, readReactionsState } from "../state.js";
 
 /**
  * An authored hook as a reaction: its handlers run after every commit, once for each fact of
@@ -119,23 +110,43 @@ async function runHandler(call: {
     assertOpen("followUp");
     const empty = typeof message === "string" ? message.trim().length === 0 : message.length === 0;
     if (empty) throw new TypeError(`Hook "${label}" called ctx.followUp() without a message.`);
-    validateDeliveryIdempotencyKey(options.idempotencyKey);
-    // `*` handlers receive it too, for every event; only a completed turn has a next turn.
+    // `*` handlers receive it too, for every event; only a settled turn has a next turn.
     if (call.event.type !== "turn.settled") return { queued: false, reason: "not-settled" };
     const settledTurn = call.event.data as TurnSettledData;
-    if (settledTurn.outcome !== "completed") return { queued: false, reason: "not-completed" };
+    // A hook that cancelled the turn can redirect it; a person's cancel stops the session.
+    const state = readReactionsState(ctx);
+    const cancelledHere =
+      settledTurn.outcome === "cancelled" &&
+      state.cancelledTurnId === settledTurn.turnId &&
+      state.cancelledBy === id;
+    if (settledTurn.outcome !== "completed" && !cancelledHere) {
+      return { queued: false, reason: "not-completed" };
+    }
     const { turnId } = settledTurn;
-    if (followsUp(requested, turnId) || followsUp(readReactionsState(ctx).intents, turnId)) {
+    const queued = [
+      ...requested.flatMap((command) =>
+        command.type === "follow-up" && command.turnId === turnId ? [command.delivery] : [],
+      ),
+      ...[followUpOf(state.intents, turnId)?.delivery ?? []].flat(),
+    ];
+    if (
+      queued.some(({ deliveryMetadata }) =>
+        deliveryMetadata?.some((entry) => entry.hook === call.slug),
+      )
+    ) {
       return { queued: false, reason: "already-queued" };
     }
-    // A long hook path can push the occurrence key past the delivery key limit.
-    const key =
-      options.idempotencyKey ??
-      (idempotencyKey.length <= MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH
-        ? idempotencyKey
-        : `${sessionId}:hook-follow-up:${digestOf(idempotencyKey)}`);
+    // One delivery acts for one principal, so follow-ups join only when they agree on it.
+    if (queued.length > 0 && authKey(queued[0]!.auth) !== authKey(options.auth)) {
+      return { queued: false, reason: "auth-conflict" };
+    }
     requested.push({
-      delivery: hookDelivery(ctx, { ...options, idempotencyKey: key, message, slug: call.slug }),
+      delivery: hookDelivery(ctx, {
+        ...options,
+        idempotencyKey: followUpKey(sessionId, turnId),
+        message,
+        slug: call.slug,
+      }),
       turnId,
       type: "follow-up",
     });
@@ -178,6 +189,13 @@ async function runHandler(call: {
     settled = true;
     memos.close();
   }
+}
+
+/** Who a follow-up acts for: the session's identity, no caller, or a principal. */
+function authKey(auth: DeliverHookPayload["auth"]): string {
+  if (auth === undefined) return "session";
+  if (auth === null) return "none";
+  return JSON.stringify(principalOf(auth));
 }
 
 function agentOf(ctx: ContextContainer): HookContext["agent"] {

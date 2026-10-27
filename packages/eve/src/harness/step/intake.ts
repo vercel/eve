@@ -136,8 +136,8 @@ export async function prepareTurnInput(
         : createFrameworkUserMessage(kind, staged),
       turnId,
     );
-    const hook = followUpHook(step, input);
-    messages.push(hook === undefined ? message : markFollowUp(message, hook));
+    const hooks = followUpHooks(step, input);
+    messages.push(hooks === undefined ? message : markFollowUp(message, hooks));
   }
   return {
     clientContext,
@@ -152,19 +152,24 @@ export async function prepareTurnInput(
 }
 
 /**
- * The hook whose follow-up the input is, read from its delivery's `source.hook`, which the
+ * The hooks whose follow-ups the input is, read from its deliveries' `source.hook`, which the
  * admission commit recorded before the step. Input that coalesced a person's message isn't one.
  */
-function followUpHook(step: Step, input: HarnessStepInput | undefined): string | undefined {
+function followUpHooks(
+  step: Step,
+  input: HarnessStepInput | undefined,
+): readonly string[] | undefined {
   const deliveries = input?.deliveries ?? [];
   if (deliveries.length === 0) return undefined;
   const rows = step.view().projection.view.deliveries;
-  const hooks = deliveries.map(({ deliveryId }) => {
+  const hooks: string[] = [];
+  for (const { deliveryId } of deliveries) {
     const source = rows[deliveryId]?.source;
-    return source !== undefined && "hook" in source ? source.hook : undefined;
-  });
-  const [hook] = hooks;
-  return hooks.every((each) => each !== undefined && each === hook) ? hook : undefined;
+    const hook = source !== undefined && "hook" in source ? source.hook : undefined;
+    if (hook === undefined) return undefined;
+    if (!hooks.includes(hook)) hooks.push(hook);
+  }
+  return hooks;
 }
 
 /** The turn's input as it follows tool results: a user message needs a boundary before it. */

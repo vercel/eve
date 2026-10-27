@@ -704,6 +704,35 @@ describe("runReactions", () => {
       return ctx;
     }
 
+    it("refuses a follow-up to a turn someone other than the hook cancelled", async () => {
+      const results: unknown[] = [];
+      const ctx = session(noTools, [
+        {
+          events: {
+            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
+              results.push(ctx.followUp("Keep going.")),
+          },
+          slug: "until-done",
+        },
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      // Alice cancelled turn-1 through `session.cancel()`, so no hook stopped it.
+      const cancelled = { outcome: "cancelled", turnId: "turn-1" };
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        {
+          at: "2026-01-01T00:00:00.000Z",
+          facts: [settledFacts[0]!, { data: cancelled, type: "turn.settled" }],
+        },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, { written: written(1, "turn.settled", cancelled) });
+      expect(results).toEqual([{ queued: false, reason: "not-completed" }]);
+      expect(readReactionsState(ctx).intents ?? []).toEqual([]);
+    });
+
     const control = (control: string) =>
       written(2, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
 

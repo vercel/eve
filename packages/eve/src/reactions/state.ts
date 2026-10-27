@@ -46,6 +46,8 @@ export interface ReactionsState {
   readonly intents?: readonly PendingIntent[];
   /** The turn a hook's cancel stopped: a cancel acts once on its turn. */
   readonly cancelledTurnId?: string;
+  /** The hook whose cancel stopped `cancelledTurnId`, which may follow the turn up. */
+  readonly cancelledBy?: string;
 }
 
 /** A command a hook queued, waiting for the session to act on it. */
