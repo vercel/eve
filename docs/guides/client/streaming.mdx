@@ -199,16 +199,7 @@ const response = await session.send("Run the long operation.", {
 });
 ```
 
-`maxAttempts` defaults to `12` for each connection open. It also bounds consecutive
-transport failures during a bounded read (`follow: false`). Following reads
-continue reconnecting until stopped. `baseDelayMs` and `maxDelayMs` tune retries
-when opening a connection; reconnects after an interrupted response body retain
-their default backoff.
-
-If you used `streamReconnectPolicy`, move its `streamOpenReconnectPolicy` fields
-directly under `reconnect` and rename `retryableErrorStatuses` to
-`retryableStatuses`. Replace `{ streamReconnectPolicy: { reconnect: false } }`
-with `{ reconnect: false }`.
+`maxAttempts` defaults to `12` for each connection open. It also bounds consecutive transport failures during a bounded read (`follow: false`). Following reads continue reconnecting until stopped. `baseDelayMs` and `maxDelayMs` tune retries when opening a connection; reconnects after an interrupted response body retain their default backoff.
 
 ## Open a stream manually
 
