@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { resolveCompiledRuntimeModelCatalogCachePath } from "../../src/compiler/model-catalog.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
+import { loadModelMetadata } from "../../src/runtime/loaders/model-metadata.js";
 
 const createAppRoot = useTemporaryAppRoots();
 
@@ -103,6 +105,68 @@ describe("compiler model catalog", () => {
       providerAliases: {},
       version: 2,
     });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("bakes the model metadata snapshot that runtime selections read", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-model-catalog-snapshot-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      ["export default {", '  model: "example/primary-model",', "};", ""].join("\n"),
+    );
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      mockCatalogResponse([
+        {
+          slug: "example/primary-model",
+          providers: [
+            {
+              provider: "example",
+              providerModelId: "primary-model",
+              contextWindowTokens: 123_456,
+              maxOutputTokens: 32_000,
+            },
+          ],
+        },
+        {
+          slug: "example/image-model",
+          providers: [
+            {
+              provider: "example",
+              providerModelId: "image-model",
+              contextWindowTokens: 0,
+              maxOutputTokens: 0,
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await compileAgent({ startPath: appRoot });
+
+    await expect(
+      loadModelMetadata(createDiskRuntimeCompiledArtifactsSource(appRoot)),
+    ).resolves.toEqual({
+      fetchedAt: expect.any(String),
+      kind: "eve-model-metadata",
+      models: [
+        {
+          slug: "example/primary-model",
+          providers: [
+            { contextWindowTokens: 123_456, provider: "example", providerModelId: "primary-model" },
+          ],
+        },
+      ],
+      providerAliases: {},
+      version: 1,
+    });
+    expect(result.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: "compile/model-metadata-unavailable" }),
+    );
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -466,41 +530,7 @@ describe("compiler model catalog", () => {
     );
   });
 
-  it("compiles source-backed models with built-in metadata when the catalog is unavailable", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-model-catalog-built-in-source-model-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await writeFile(
-      join(agentRoot, "agent.ts"),
-      [
-        "const sourceModel = {",
-        '  specificationVersion: "v3",',
-        '  provider: "openai.responses",',
-        '  modelId: "gpt-5.4",',
-        "  supportedUrls: {},",
-        '  async doGenerate() { throw new Error("not implemented"); },',
-        '  async doStream() { throw new Error("not implemented"); },',
-        "};",
-        "",
-        "export default { model: sourceModel };",
-        "",
-      ].join("\n"),
-    );
-
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("catalog offline"));
-
-    const result = await compileAgent({ startPath: appRoot });
-
-    expect(result.manifest.config.model).toMatchObject({
-      contextWindowTokens: 400_000,
-      id: "openai/gpt-5.4",
-      maxOutputTokens: 128_000,
-    });
-  });
-
-  it("uses authored modelContextWindowTokens and skips the AI Gateway lookup", async () => {
+  it("uses authored modelContextWindowTokens and warns when the catalog is unavailable", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-authored-window-",
       APP_ROOT_OPTIONS,
@@ -517,9 +547,7 @@ describe("compiler model catalog", () => {
       ].join("\n"),
     );
 
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("fetch should not be called"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
     const result = await compileAgent({
       startPath: appRoot,
@@ -529,10 +557,15 @@ describe("compiler model catalog", () => {
       contextWindowTokens: 128_000,
       id: "example/unlisted-model",
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "compile/model-metadata-unavailable", severity: "warning" }),
+    );
+    await expect(
+      loadModelMetadata(createDiskRuntimeCompiledArtifactsSource(appRoot)),
+    ).resolves.toMatchObject({ fetchedAt: null, models: [] });
   });
 
-  it("uses authored modelContextWindowTokens for source-backed models and skips the AI Gateway lookup", async () => {
+  it("uses authored modelContextWindowTokens for source-backed models when the catalog is unavailable", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-authored-window-source-model-",
       APP_ROOT_OPTIONS,
@@ -562,9 +595,7 @@ describe("compiler model catalog", () => {
       ].join("\n"),
     );
 
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("fetch should not be called"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
     const result = await compileAgent({
       startPath: appRoot,
@@ -579,10 +610,9 @@ describe("compiler model catalog", () => {
         sourceId: "agent.ts",
       },
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("uses authored compaction modelContextWindowTokens and skips the AI Gateway lookup", async () => {
+  it("uses authored compaction modelContextWindowTokens when the catalog is unavailable", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-authored-compaction-window-",
       APP_ROOT_OPTIONS,
@@ -603,9 +633,7 @@ describe("compiler model catalog", () => {
       ].join("\n"),
     );
 
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("fetch should not be called"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
     const result = await compileAgent({
       startPath: appRoot,
@@ -621,7 +649,6 @@ describe("compiler model catalog", () => {
         id: "example/unlisted-summary-model",
       },
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("compiles the one-line mockModel fixture without an authored context window", async () => {

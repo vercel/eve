@@ -18,7 +18,6 @@ import {
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
-import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -295,8 +294,7 @@ async function normalizeAuthoredModelReference(input: {
         return {
           ...sourceBackedModel,
           id: providerResult.slug,
-          contextWindowTokens: providerResult.limits.contextWindowTokens,
-          maxOutputTokens: providerResult.limits.maxOutputTokens,
+          contextWindowTokens: providerResult.contextWindowTokens,
         };
       }
     } catch {
@@ -366,15 +364,11 @@ async function withCompiledRuntimeModelLimits(
     };
   }
 
-  let limits: CompiledRuntimeModelLimits | null;
-
-  try {
-    limits = await input.modelCatalog.getModelLimits(model.id);
-  } catch (error) {
+  const limits = await input.modelCatalog.getModelLimits(model.id).catch((error: unknown) => {
     throw new Error(
       `Failed to load AI Gateway model metadata for ${input.purpose} "${model.id}". ${toErrorMessage(error)}`,
     );
-  }
+  });
 
   if (limits === null) {
     throw new Error(
@@ -385,7 +379,6 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
-    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

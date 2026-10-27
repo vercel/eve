@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import type { RuntimeAdapterRegistry } from "#runtime/channels/registry.js";
@@ -13,6 +14,7 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { getResolvedRuntimeAgentNode, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { loadModelMetadata } from "#runtime/loaders/model-metadata.js";
 import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -24,6 +26,8 @@ export interface CompiledRuntimeAgentBundle {
   readonly adapterRegistry: RuntimeAdapterRegistry;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
+  /** The build's model metadata snapshot, read on first use; runtime selections resolve from it. */
+  readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly moduleMap: CompiledModuleMap;
   /**
    * Id of the active node in the graph. `undefined` for root bundles.
@@ -74,6 +78,7 @@ async function loadFullBundle(
   ]);
   const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
   const rootNode = graph.root;
+  let modelMetadata: Promise<ModelMetadata> | undefined;
 
   return {
     adapterRegistry: createRuntimeAdapterRegistry({
@@ -81,6 +86,15 @@ async function loadFullBundle(
     }),
     compiledArtifactsSource: normalizedCompiledArtifactsSource,
     graph,
+    modelMetadata: () => {
+      modelMetadata ??= loadModelMetadata(normalizedCompiledArtifactsSource).catch(
+        (error: unknown) => {
+          modelMetadata = undefined;
+          throw error;
+        },
+      );
+      return modelMetadata;
+    },
     moduleMap,
     resolvedAgent: rootNode.agent,
     subagentRegistry: rootNode.subagentRegistry,
@@ -189,6 +203,7 @@ export async function getCompiledRuntimeAgentBundle(input: {
       nodesByNodeId: fullBundle.graph.nodesByNodeId,
       root: node,
     },
+    modelMetadata: fullBundle.modelMetadata,
     moduleMap: fullBundle.moduleMap,
     nodeId: input.nodeId,
     resolvedAgent: node.agent,

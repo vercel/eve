@@ -567,7 +567,6 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
   .object({
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
-    maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
     sourceField: z.literal("compaction.model").optional(),
     promptCache: z
@@ -1339,9 +1338,6 @@ function cloneCompiledRuntimeModelReference(
   };
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
-  }
-  if (model.maxOutputTokens !== undefined) {
-    clone.maxOutputTokens = model.maxOutputTokens;
   }
   if (model.providerOptions !== undefined) {
     clone.providerOptions = { ...model.providerOptions };

@@ -116,6 +116,7 @@ describe("withBundledCompiledArtifacts", () => {
       setRuntimeSessionCompiledArtifacts(session, {
         manifest: { ...compiled.manifest },
         metadata: createTestCompileMetadata(compiled.manifest, "stable"),
+        modelMetadata: { ...compiled.modelMetadata },
         moduleMap: { ...compiled.moduleMap },
       });
 

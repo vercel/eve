@@ -89,6 +89,7 @@ function isSameCompiledArtifactSnapshot(
   if (installedSourceGraphHash && inputSourceGraphHash) {
     return (
       installedSourceGraphHash === inputSourceGraphHash &&
+      installed.modelMetadata?.fetchedAt === input.modelMetadata?.fetchedAt &&
       JSON.stringify(installed.sandboxPreparedArtifacts) ===
         JSON.stringify(input.sandboxPreparedArtifacts)
     );

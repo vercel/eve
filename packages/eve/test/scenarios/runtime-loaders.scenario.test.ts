@@ -360,7 +360,6 @@ describe("runtime compiled artifact loaders", () => {
       model: {
         contextWindowTokens: expect.any(Number),
         id: "openai/gpt-5.4",
-        maxOutputTokens: 128_000,
         routing: { kind: "gateway", target: "openai" },
       },
       name: "runtime-loader-test-agent",

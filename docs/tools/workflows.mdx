@@ -613,6 +613,10 @@ const reviewer = ctx.agent("agent", {
 });
 ```
 
+Without `modelContextWindowTokens`, eve reads the model's context window from the AI Gateway model
+catalog recorded when the agent was built. Set it for a model that catalog doesn't list; otherwise
+the first `send` rejects.
+
 The selection must contain an AI Gateway model id. A live AI SDK `LanguageModel` cannot cross the
 durable workflow boundary. A remote agent rejects the option because its deployment owns its model
 configuration.

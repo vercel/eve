@@ -1,4 +1,3 @@
-import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { StaticModelReferenceKey, type LiveDynamicModelSelection } from "#context/keys.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
@@ -59,9 +58,9 @@ export async function loadModelReaction(
   });
   const label = `${dynamicModel.logicalPath}#model`;
   return {
-    contribute: async (result, { ctx }) => {
+    contribute: async (result) => {
       try {
-        return await contributionOf(result, ctx);
+        return await contributionOf(result, bundle);
       } catch (error) {
         throw new DynamicModelSelectionError(error);
       }
@@ -78,12 +77,12 @@ export async function loadModelReaction(
 /** Resolves a model result to what the slot records, and the provider the process holds. */
 async function contributionOf(
   result: unknown,
-  ctx: ContextContainer,
+  bundle: CompiledBundle,
 ): Promise<{ readonly value: JsonValue; readonly live?: LiveDynamicModelSelection }> {
   const selection = await resolveRuntimeModelSelection({
     durability: "live",
+    modelMetadata: bundle.modelMetadata,
     selection: result as PublicAgentDynamicModelResult,
-    state: ctx,
   });
   // Mock runs replace real providers, but keep explicitly scripted responders.
   const live =

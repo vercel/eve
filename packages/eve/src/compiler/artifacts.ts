@@ -13,6 +13,7 @@ import {
   summarizeCompilerDiagnostics,
   type CompilerDiagnostic,
 } from "#compiler/diagnostics.js";
+import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
@@ -50,6 +51,7 @@ export interface CompilerArtifactPaths {
   diagnosticsPath: string;
   discoveryManifestPath: string;
   discoveryDirectoryPath: string;
+  modelMetadataPath: string;
   moduleMapPath: string;
   sandboxPreparedArtifactsPath: string;
 }
@@ -144,6 +146,7 @@ function resolveCompilerArtifactPathsAt(
     diagnosticsPath: join(discoveryDirectoryPath, "diagnostics.json"),
     discoveryManifestPath: join(discoveryDirectoryPath, "agent-discovery-manifest.json"),
     discoveryDirectoryPath,
+    modelMetadataPath: join(compileDirectoryPath, "model-metadata.json"),
     moduleMapPath: join(compileDirectoryPath, "module-map.mjs"),
     sandboxPreparedArtifactsPath: join(compileDirectoryPath, "sandbox-prepared-artifacts.json"),
   };
@@ -229,11 +232,17 @@ export async function writeCompilerArtifacts(
   const diagnostics = input.diagnostics.map((diagnostic) =>
     projectDiscoverDiagnostic(diagnostic, ROOT_COMPILED_AGENT_NODE_ID),
   );
+  const modelCatalog = createCompiledRuntimeModelCatalogLoader(input.manifest.appRoot);
+  const modelMetadata = await modelCatalog.loadModelMetadata();
+  if (modelMetadata.fetchedAt === null) {
+    diagnostics.push(createModelMetadataUnavailableDiagnostic(paths.modelMetadataPath));
+  }
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
     manifest: await compileAgentManifest(input.manifest, {
       developmentExtensions: input.developmentExtensions,
       diagnostics,
+      modelCatalog,
     }),
   });
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
@@ -270,6 +279,7 @@ export async function writeCompilerArtifacts(
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
+    writeFile(paths.modelMetadataPath, serializeArtifactJson(modelMetadata)),
     writeFile(paths.sandboxPreparedArtifactsPath, sandboxPreparedArtifactsJson),
   ]);
 
@@ -279,6 +289,19 @@ export async function writeCompilerArtifacts(
     metadata,
     moduleMapSource,
     paths,
+  };
+}
+
+function createModelMetadataUnavailableDiagnostic(modelMetadataPath: string): CompilerDiagnostic {
+  return {
+    code: "compile/model-metadata-unavailable",
+    message:
+      "The AI Gateway model catalog was unavailable, so this build has no model metadata. " +
+      "Runtime model selections that omit modelContextWindowTokens, such as dynamic models and " +
+      "ctx.agent() model overrides, fail until you rebuild with network access to " +
+      "ai-gateway.vercel.sh or set modelContextWindowTokens on each selection.",
+    severity: "warning",
+    sources: [{ nodeId: ROOT_COMPILED_AGENT_NODE_ID, sourcePath: modelMetadataPath }],
   };
 }
 
