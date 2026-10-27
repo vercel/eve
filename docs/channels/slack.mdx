@@ -462,11 +462,12 @@ eve writes the card from the session's own events as they happen, and only when 
 
 ### Customize rendering
 
-Without `renderers`, eve renders everything above with its default renderer. Pass `renderers` to change what the agent posts without replacing that default. Each renderer wraps the ones after it, ending with eve's default renderer, and has three optional parts:
+Without `renderers`, eve renders everything above with its default renderer. Pass `renderers` to change what the agent posts without replacing that default. Each renderer wraps the ones after it, ending with eve's default renderer, and has four optional parts:
 
 - `received(message, channel, next)` acknowledges a mention or DM the moment it arrives, and another channel message once `onMessage` dispatches it. eve's default sets `Thinking...`.
 - `events` handles session facts such as `content.completed` or `interaction.opened`. Each handler receives `(event, ctx, next)`: the whole fact with its `type`, `data`, and `scope`, and a context whose `ctx.channel` holds Slack's platform handles, `ctx.channel.thread` and `ctx.channel.slack`, along with `ctx.position` and `ctx.view`.
 - `taskCard(view, next)` returns the task card's blocks and notification text, or `null` for no card.
+- `interactionCard(card, next)` returns the messages for one approval, question, or budget prompt.
 
 Call `next()` to run the rest of the chain, ending with eve's default. Call it after your own work, before it, or with a changed fact, as in `next({ ...event, data: { ...event.data, value } })`; the rest of the chain runs at most once. Skip `next` to replace the default for that event. This renderer adds feedback buttons below each final reply and a context row to the finished task card:
 
@@ -562,6 +563,48 @@ A turn keeps one card unless it starts a task after every task on its card ended
 
 `taskCard` is synchronous and pure: eve posts the card and updates it as the tables change. eve's default returns `null` for a card without tasks. Its block keeps the same `block_id` for the whole turn; keep that `block_id` on a block you build in its place. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
 
+`interactionCard` restyles the card for one approval, question, or budget prompt. It receives:
+
+- `interaction`: the request as the session holds it, with its `status`, `outcome`, `call` (including the tool `input`), and `answer`. While the request is open, `answer` is the answer that stands until it settles, if any.
+- `destination`: `"thread"` or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided.
+- `audience`: who reads the message. A direct message is always `private`; a thread request has the thread's audience, as on the task card.
+- `answeredBy`: the Slack user ID whose answer stands or decided the request, when known.
+- `view`: the session snapshot, for the selectors from `eve/events`.
+
+It returns `controls`, the message holding eve's buttons or select, and an optional `details` message, which eve posts before the controls and deletes once the request settles. Slack sends the whole controls message back with every click, so put long content such as tool input in `details`. This renderer shows a `plan-create` tool's steps as the approval's details:
+
+```ts title="agent/channels/slack.ts"
+import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
+
+const plan = defineSlackRenderer({
+  interactionCard(card, next) {
+    const parts = next(card);
+    const { call, status } = card.interaction;
+    if (call?.name !== "plan-create" || status !== "open") return parts;
+    const { steps = [] } = (call.input ?? {}) as { steps?: string[] };
+    if (steps.length === 0) return parts;
+    const text = steps.map((step, index) => `${index + 1}. ${step}`).join("\n");
+    return {
+      ...parts,
+      details: { blocks: [{ type: "section", text: { type: "mrkdwn", text } }], text },
+    };
+  },
+});
+
+export default slackChannel({ renderers: [plan] });
+```
+
+eve calls `interactionCard` when a request opens, when an answer is admitted or refused, and when the request settles, and updates the Slack message only when its blocks changed. Pass `next` a changed card, such as one with a shorter `interaction.request.prompt`, to have eve's default render it. eve's default renders an open request as buttons or a select, and an answered or settled one as a single block that names the answer and, when known, who gave it. `interactionCard` doesn't run for sign-ins.
+
+eve still routes, batches, and posts the messages, and owns the controls' action IDs, so clicks keep reaching the session. You can relabel eve's controls, reorder them, or nest them in your own blocks, within these rules:
+
+- While the request is open and unanswered, `controls` holds exactly the controls `next` renders, each once, with the same `value` or option values. Every eve control's `action_id` starts with `eve_input:` or `eve_input_freeform:`.
+- Once the request is answered or settled, `controls` holds no eve controls.
+- `details` never holds eve controls, and each message holds at most 50 blocks.
+- An update never uses more blocks than the request's controls had when eve posted them. A larger result falls back to eve's default, which is one block once the request is answered or settled.
+
+If `interactionCard` throws or breaks these rules, eve logs it and renders that request with its default, since a request nobody can answer would hold the turn. If Slack rejects a rendered message, eve sends that message once more with its defaults.
+
 Renderers run in the order you list them, and the first one is outermost. `onInteraction` receives clicks on buttons a renderer posts, such as the feedback buttons above.
 
 ### Show your own tool on the task card
@@ -652,7 +695,7 @@ export default slackChannel({
 
 The callback receives the `Interaction` and current `SessionContext`, so it can switch on `request.kind`, `call`, or prompt presentation properties. Omit it to keep every request in the thread, or return `"direct-message"` unconditionally to make every request private. If eve cannot resolve the triggering Slack user for a direct message, it logs the undelivered request and posts no fallback, so private delivery fails closed. The existing `onAnswers` or tool approval response policy still decides whether the person who clicks may respond.
 
-When a tool approval resolves, eve retires the messages it posted for it. The card loses its buttons and shows the answer and who gave it, the separate tool-input post is deleted, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This also happens when the approval ends without a click, for example when the person replies in the thread instead, in which case the card reads `No longer needed`.
+Each card updates from the session as its request changes. Once an answer is admitted, the card shows the answer and who gave it, even while other approvals from the same step still wait for theirs. Once the request settles, the card has no buttons, the separate tool-input post is deleted when no open request shares it, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This applies to approvals, questions, and budget prompts, however they end: a click, a typed reply in the thread, or a withdrawal, in which case the card reads `No longer needed`. When several requests share one message, answering one updates only its part of the message. To change how these cards look, use [`interactionCard`](#customize-rendering).
 
 A click on any request whose session is no longer active, for example because its run was cancelled outside eve, can never be answered. eve removes the card's buttons, marks it `No longer active`, and tells the person who clicked, in an ephemeral message, to send a new message.
 
@@ -710,7 +753,7 @@ answerFromSlackAction({ actionId: button.action_id, value: button.value });
 // { response: { optionId: "approve", interactionId: request.interactionId } }
 ```
 
-Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. A click on these controls in the session's Slack thread resumes the session through `onAnswers`, the same as eve's own controls. eve does not track controls you post yourself, so update or remove those messages from your renderer's `interaction.settled` handler. To pass `response` to `respond()` yourself, validate it first with `parseAnswers` from `eve/client`.
+Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. To restyle the cards eve posts, use `interactionCard` instead, which keeps eve's batching and card updates. A click on these controls in the session's Slack thread resumes the session through `onAnswers`, the same as eve's own controls. eve does not track controls you post yourself, so update or remove those messages from your renderer's `interaction.settled` handler. To pass `response` to `respond()` yourself, validate it first with `parseAnswers` from `eve/client`.
 
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. A sign-in is an `interaction.opened` with `request.kind: "sign-in"`. The default handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the interaction's `audience.principalIds`, device code included, and then updates that public status when its `interaction.settled` fires. For a sign-in, a renderer's `interaction.opened` handler receives a private-delivery context as `ctx.channel`, with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
 

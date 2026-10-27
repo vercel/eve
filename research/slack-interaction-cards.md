@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/issues/5462
-status: proposed
+status: implemented
 last_updated: "2026-10-27"
 ---
 
@@ -152,8 +152,9 @@ response.admitted / response.settled / interaction.settled
 - **When the hook runs.** eve renders a request when it opens, and again when its row changes: an
   answer is admitted, an answer is refused, or the request settles. Approvals in one step settle
   together once each has a standing answer, and relayed requests wait for their asker's batch. So
-  the admitted answer, not the settlement, is when a person sees their click land. eve updates a
-  message only when its rendered blocks changed.
+  the admitted answer, not the settlement, is when a person sees their click land. eve renders
+  again on every `response.settled`, since any settled response can change the standing answer, and
+  updates a message only when its rendered blocks changed.
 - **Actions.** eve renders its own default controls from the original `Interaction`, outside the
   chain. It then checks the chain's result against them:
   - **Open, unanswered.** `controls` must hold exactly eve's interactive elements: every
@@ -164,13 +165,16 @@ response.admitted / response.settled / interaction.settled
   - **Always.** `details` holds no eve action IDs, and each part fits in 50 blocks.
 - **Failures.** If the hook throws or fails the check, eve logs it and renders that request with
   its default. If Slack rejects a rendered message (`invalid_blocks`, a size limit), eve posts or
-  updates that message once more with its defaults. A dropped request would hold the turn, so a
+  updates that message once more with its defaults. A rejected batch message posts its requests'
+  defaults regrouped under the 50-block cap, since the defaults can need more blocks than the
+  rendered messages did. A dropped request would hold the turn, so a
   default card beats none. `taskCard` differs: a card that throws stays as last written, since a
   stale card holds nothing up.
 - **Block limits.** eve records the number of blocks each request's controls had when posted. A
-  rendering that would grow beyond that number falls back to eve's one-block default for that
-  request. Other requests in the message keep their recorded blocks, so a message never grows past
-  50 blocks after posting.
+  rendering that would grow beyond that number falls back to eve's default for that request, which
+  is one block once the request is answered or settled. An open request whose default would also
+  grow keeps its recorded blocks. Other requests in the message keep their recorded blocks, so a
+  message never grows past 50 blocks after posting.
 - **DM delivery.** The hook runs for requests that `approvalChannel` sends to a DM, with
   `destination: "direct-message"`. eve records the destination, so it never calls `approvalChannel`
   again when it re-renders.
@@ -181,9 +185,11 @@ response.admitted / response.settled / interaction.settled
 
 ## Boundaries
 
-- Card bookkeeping replaces `pendingApprovalCards` with a record per message: its `ts` and
-  channel, its details message, its destination, and each request's recorded controls blocks,
-  stored once. eve records every interaction except sign-ins, not just approvals. eve is pre-1.0,
+- Card bookkeeping replaces `pendingApprovalCards` with `interactionCards`, a record per message:
+  its `ts` and channel, its destination and a direct message's route, a direct message's thread
+  announcement, and each request's recorded controls blocks, stored once, with their posted count
+  and its details message. Details are recorded per request because details and controls group
+  separately, so one details message can serve requests in two controls messages. eve records every interaction except sign-ins, not just approvals. eve is pre-1.0,
   so cards posted before the upgrade get no compatibility shim and keep their live buttons.
 - Question and freeform cards update from session events, not the click webhook, so a freeform
   answer no longer erases its neighbors.
