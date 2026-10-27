@@ -155,8 +155,12 @@ and bash 5.2.15 (Debian).
 
 ## Externally observable semantics
 
-This change applies to every agent that mounts `git({ github })` or `defineGhTool`,
-including connect0, qwizard, sre, and v.
+This change applies to every agent that mounts `git({ github })` or `defineGhTool`. In
+Vercel's API monorepo, four agents run the parser: v, sre, qwizard, and the
+`preset-author` subagent of connect0. All four mount `code({ github })` on eve 0.83.3.
+v, sre, and connect0 also wrap the packaged `gh` tool and call `executeGitHubShell`,
+which applies the same parser. They take this change when they move to
+`git({ github })` and `eve/extensions/git/*`.
 
 - Commands that `main` refused now run: backticks inside double quotes, braces outside
   brace lists, unquoted parentheses, and literal `$`.
