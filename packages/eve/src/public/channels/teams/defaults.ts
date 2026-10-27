@@ -179,7 +179,10 @@ export function teamsMentionUser(user: {
   readonly id: string;
   readonly name?: string;
 }): TeamsMention {
-  const label = user.name ?? user.id;
+  const label = (user.name ?? user.id)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
   return {
     mentioned: { id: user.id, name: user.name },
     text: `<at>${label}</at>`,

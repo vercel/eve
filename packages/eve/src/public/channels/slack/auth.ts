@@ -8,7 +8,8 @@ interface SlackAuthContextInput {
   readonly installationTeamId?: string | null;
   readonly isBot?: boolean;
   readonly teamId?: string | null;
-  readonly threadTs: string;
+  /** Thread root ts; omit it in a code channel, which is one session across its threads. */
+  readonly threadTs?: string;
   readonly userId: string;
   readonly userName?: string;
 }
@@ -49,9 +50,9 @@ export function buildSlackAuthContext(input: SlackAuthContextInput): SessionAuth
   const attributes: Record<string, string> = {
     author_type: isBot ? "bot" : "user",
     channel_id: input.channelId,
-    thread_ts: input.threadTs,
     user_id: input.userId,
   };
+  if (input.threadTs) attributes.thread_ts = input.threadTs;
   if (input.userName) attributes.user_name = input.userName;
   if (input.fullName) attributes.full_name = input.fullName;
   if (input.teamId) attributes.team_id = input.teamId;

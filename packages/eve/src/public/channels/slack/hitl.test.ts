@@ -70,6 +70,19 @@ describe("private HITL routes", () => {
       route: { channelId: "C123", threadTs: "111.222" },
     });
   });
+
+  // A code channel's session has no thread, so its route says so instead of leaving it empty.
+  it("round-trips a code channel route and rejects an empty thread", () => {
+    const route = { channelId: "C123", codeChannel: true } as const;
+    const blocks = renderInteractionBlocks(
+      makeRequest({ options: [{ id: "yes", label: "Yes" }], interactionId: "q_1" }),
+      route,
+    );
+    const actionId = (blocks[0] as { actions: Array<{ action_id: string }> }).actions[0]!.action_id;
+
+    expect(decodeHitlActionId(actionId)?.route).toEqual(route);
+    expect(decodeHitlActionId(actionId.replace("code:C123:", "route:C123::"))).toBeNull();
+  });
 });
 
 describe("answerFromSlackAction", () => {

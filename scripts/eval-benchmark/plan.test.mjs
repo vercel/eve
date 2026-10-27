@@ -15,7 +15,7 @@ const registry = {
   attempts: 2,
   mockAttempts: 2,
   devStartup: { runs: 3, subjects: ["minimal"] },
-  concurrency: { legs: 3, evalsPerLeg: 1 },
+  concurrency: { legs: 2, evalsPerLeg: 1 },
 };
 const matrix = {
   worlds: [{ name: "vercel" }, { name: "postgres", package: "@workflow/world-postgres" }],
@@ -39,7 +39,7 @@ const select = (overrides = {}, narrow = {}) =>
 
 test("expands fixtures × models × attempts and mock worlds the fixture selects", () => {
   const selection = select();
-  assert.deepEqual(selection.concurrency, { legs: 3, evalsPerLeg: 1 });
+  assert.deepEqual(selection.concurrency, { legs: 2, evalsPerLeg: 1 });
   assert.deepEqual(selection.devStartup, { runs: 3, subjects: [{ name: "minimal", tools: 0 }] });
   const { live, mock } = planLegs(selection);
   assert.equal(live.length, 2 * 2 * 2);
@@ -87,6 +87,11 @@ test("dispatch inputs narrow every dimension and reject unknown names", () => {
     planLegs(selection).live.map((leg) => leg.leg_id),
     ["live__agent-two__beta__local__1"],
   );
+  // Narrowing models lowers the leg cap to the model count, never below one.
+  assert.equal(selection.concurrency.legs, 1);
+  assert.equal(select({}, { models: "none" }).concurrency.legs, 1);
+  // A registry cap below the model count stays, as in the nightly's 8 for 10.
+  assert.equal(select({ concurrency: { legs: 1, evalsPerLeg: 1 } }).concurrency.legs, 1);
   assert.deepEqual(planLegs(select({}, { fixtures: "none" })), { live: [], mock: [] });
   assert.throws(
     () => select({}, { models: "gamma" }),

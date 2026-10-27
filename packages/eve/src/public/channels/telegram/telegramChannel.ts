@@ -298,8 +298,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
       ),
     ],
 
-    async receive(input, { from }) {
-      const receiveTarget = input.target as Partial<TelegramReceiveTarget>;
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Partial<TelegramReceiveTarget>;
       const chatId = readChatId(receiveTarget.chatId);
       if (chatId === undefined) {
         throw new Error("telegramChannel().receive requires target.chatId.");
@@ -331,8 +331,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         await handle.sendMessage(initialMessage);
       }
 
-      return from(telegramContinuationTokenFromState(receiveState)).send(input.message, {
-        auth: input.auth,
+      return from(telegramContinuationTokenFromState(receiveState)).send(message, {
+        ...send,
         state: receiveState,
       });
     },

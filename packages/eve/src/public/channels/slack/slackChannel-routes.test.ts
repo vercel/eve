@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
+import { Card, CardText } from "#compiled/chat/index.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import {
@@ -260,14 +261,19 @@ describe("slackChannel thread history", () => {
     expect(history?.[1]?.text).toBe("Deploys are green.");
   });
 
-  it("passes history from a generic event's send", async () => {
+  it("passes every send option from a generic event's send", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
         await ctx.send("follow up", {
           auth: null,
+          context: ["Alice reacted with :eyes:."],
           history: [{ role: "user", text: "Earlier question" }],
+          idempotencyKey: "slack:EvReaction",
+          outputSchema: { type: "object" },
           target: { channelId: "C01", threadTs: "1700000000.000001" },
+          title: "Reaction follow-up",
+          turnPolicy: "queue",
         });
       },
     });
@@ -287,7 +293,52 @@ describe("slackChannel thread history", () => {
 
     expect(send).toHaveBeenCalledWith(
       "C01:1700000000.000001",
-      expect.objectContaining({ history: [{ role: "user", text: "Earlier question" }] }),
+      expect.objectContaining({
+        context: ["Alice reacted with :eyes:."],
+        history: [{ role: "user", text: "Earlier question" }],
+        idempotencyKey: "slack:EvReaction",
+        outputSchema: { type: "object" },
+        title: "Reaction follow-up",
+        turnPolicy: "queue",
+      }),
     );
+  });
+
+  it("rejects a generic event send's invalid key before posting its initial message", async () => {
+    let sendError: unknown;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        sendError = await ctx
+          .send("follow up", {
+            auth: null,
+            idempotencyKey: "",
+            target: {
+              channelId: "C01",
+              initialMessage: { card: Card({ children: [CardText("Alice reacted.")] }) },
+            },
+          })
+          .catch((error: unknown) => error);
+      },
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          event: { type: "reaction_added", user: "U01" },
+          event_id: "EvReaction",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+    );
+
+    expect(sendError).toEqual(
+      expect.objectContaining({ message: expect.stringContaining("idempotencyKey") }),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });

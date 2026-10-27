@@ -252,7 +252,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check templates against the packed eve package
+      - name: Check templates with their lockfiles and the packed eve package
         run: pnpm check:templates
 
   test-tui:

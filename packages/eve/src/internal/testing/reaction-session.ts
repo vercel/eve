@@ -8,12 +8,29 @@ import { SessionIdKey, SessionKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { DynamicContext } from "#dynamic/definition.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { createModelMetadata } from "#internal/model-catalog.js";
 import { evaluateValues } from "#reactions/runner.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 type Evaluate = (ctx: DynamicContext) => unknown;
+
+/** What a build would bake for the model the fixture agents name. */
+const MODEL_METADATA = createModelMetadata({
+  catalog: {
+    models: [
+      {
+        slug: "openai/gpt-5.4",
+        providers: [
+          { contextWindowTokens: 400_000, provider: "openai", providerModelId: "gpt-5.4" },
+        ],
+      },
+    ],
+    providerAliases: {},
+  },
+  fetchedAt: "2026-01-01T00:00:00.000Z",
+});
 
 export interface DynamicSource {
   readonly evaluate: Evaluate;
@@ -74,6 +91,7 @@ export function reactionSession(
     }),
   );
   ctx.set(BundleKey, {
+    modelMetadata: async () => MODEL_METADATA,
     nodeId: "root",
     resolvedAgent: {
       dynamicConnectionResolvers: (input.connections ?? []).map((source) =>

@@ -79,7 +79,9 @@ export default teamsChannel({
 
 Native Bot Connector verification requires the activity's `serviceUrl` to match the verified token's `serviceurl` claim. A custom `webhookVerifier` replaces this verification and must authenticate the forwarded activity and its service URL. Proactive conversation references are trusted application input: load them from your own verified records, not a caller-supplied URL. Outbound Connector requests require HTTPS without URL credentials, query strings, or fragments, and do not follow redirects.
 
-Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests.
+HTTP service URLs used by Bot Framework Emulator are not supported, even with a custom verifier. Use an HTTPS endpoint or proxy for local Connector testing.
+
+Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests. `thread.mentionUser()` escapes the display name (or fallback user ID) as literal text inside the mention; the mention entity retains the original identity fields.
 
 ### Human-in-the-loop (HITL)
 

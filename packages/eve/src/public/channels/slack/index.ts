@@ -1,4 +1,9 @@
 export {
+  openCodeChannel,
+  type SlackCodeChannelOpenResult,
+} from "#public/channels/slack/open-code-channel.js";
+
+export {
   slackChannel,
   type SlackApiResponse,
   type SlackAuthorizationEventContext,
@@ -8,6 +13,7 @@ export {
   type SlackChannelContext,
   type SlackChannelCredentials,
   type SlackChannelState,
+  type SlackCodeChannelTarget,
   type SlackContext,
   type SlackEventContext,
   type SlackEventRespondFn,
@@ -17,6 +23,8 @@ export {
   type SlackHandle,
   type SlackInboundEventContext,
   type SlackInboundMessageContext,
+  type SlackOpenCodeChannelOptions,
+  type SlackOpenedCodeChannel,
   type SlackInboundResult,
   type SlackInitialMessage,
   type SlackAnswerContext,
@@ -53,6 +61,7 @@ export type {
 export {
   callSlackApi,
   resolveSlackBotToken,
+  slackCodeChannelContinuationToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,

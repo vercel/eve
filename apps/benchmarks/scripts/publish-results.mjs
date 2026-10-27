@@ -9,6 +9,10 @@
 //   authoring/runs/<github_run_id>/<run_attempt>/records.jsonl
 //   authoring/runs/<github_run_id>/<run_attempt>/manifest.json
 //
+// Pull request runs benchmark unmerged branch code, so they publish under
+// authoring/pull-requests/<number>/<github_run_id>/<run_attempt>/ instead, and
+// their manifest and records carry `pull_request`, which is null for main.
+//
 // Each model job uploads one artifact, downloaded to
 // <artifacts-dir>/authoring-benchmark-<model_id>-<sha>/, holding:
 //
@@ -26,7 +30,7 @@
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT,
 // and the planned BENCHMARK_SHA, BENCHMARK_EVE_REVISION, BENCHMARK_TREATMENT,
 // BENCHMARK_MODELS (JSON array of model ids), BENCHMARK_CASES (comma-separated),
-// and BENCHMARK_RUNS.
+// and BENCHMARK_RUNS. BENCHMARK_PULL_REQUEST, when set, marks a pull request run.
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -41,10 +45,12 @@ import {
   vercelBlobStore,
 } from "../../../scripts/eval-benchmark/publish.mjs";
 import { findBenchmarkModel } from "../lib/benchmark-config.ts";
-import { modelPricing, priceUsage } from "./cost.mjs";
+import { modelPricing, priceRequests } from "./cost.mjs";
 import { analyzeRun, collectRuns } from "./run-analysis.mjs";
 
-export const RECORD_SCHEMA_VERSION = 1;
+// 2: Claude Code responses count once, and requests over a long-context threshold
+// are priced at its rates. Version 1 records overstate Claude Code tokens and cost.
+export const RECORD_SCHEMA_VERSION = 2;
 const ARTIFACT_PREFIX = "authoring-benchmark-";
 const UPLOAD_CONCURRENCY = 8;
 
@@ -87,7 +93,7 @@ function artifactDirs(artifactsDir) {
 }
 
 /** Derives one record per planned (model, case, run), in plan order. */
-export function buildRecords({ plan, artifacts, githubRunId, runAttempt }) {
+export function buildRecords({ plan, artifacts, githubRunId, runAttempt, pullRequest = null }) {
   const records = [];
   for (const { modelId, dir, meta } of artifacts) {
     const benchmark = findBenchmarkModel(modelId);
@@ -112,6 +118,7 @@ export function buildRecords({ plan, artifacts, githubRunId, runAttempt }) {
           schema_version: RECORD_SCHEMA_VERSION,
           github_run_id: String(githubRunId),
           run_attempt: runAttempt,
+          pull_request: pullRequest,
           sha: plan.sha,
           eve_revision: plan.eve_revision,
           treatment: plan.treatment,
@@ -155,7 +162,10 @@ function runMetrics(result, benchmark) {
             cache_read_tokens: usage.cacheRead,
             cache_write_tokens: usage.cacheWrite,
           },
-    cost_usd: usage === null || pricing === undefined ? null : priceUsage(usage, pricing),
+    cost_usd:
+      usage === null || pricing === undefined
+        ? null
+        : priceRequests(result.requests, pricing, benchmark.harness),
     docs_read: result.docsRead,
     docs_entry: result.docsEntry,
     registry_calls: result.registryCalls,
@@ -166,19 +176,23 @@ function runMetrics(result, benchmark) {
 }
 
 /**
- * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
+ * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, pullRequest?: number | null, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
  */
 export async function publishResults({
   plan,
   artifactsDir,
   githubRunId,
   runAttempt,
+  pullRequest = null,
   publishedAt,
   store,
 }) {
   const artifacts = readModelArtifacts(plan, artifactsDir);
-  const records = buildRecords({ plan, artifacts, githubRunId, runAttempt });
-  const prefix = `authoring/runs/${githubRunId}/${runAttempt}`;
+  const records = buildRecords({ plan, artifacts, githubRunId, runAttempt, pullRequest });
+  const prefix =
+    pullRequest === null
+      ? `authoring/runs/${githubRunId}/${runAttempt}`
+      : `authoring/pull-requests/${pullRequest}/${githubRunId}/${runAttempt}`;
 
   const uploads = artifacts.flatMap(({ modelId, dir }) =>
     dir === undefined
@@ -201,6 +215,7 @@ export async function publishResults({
     schema_version: RECORD_SCHEMA_VERSION,
     github_run_id: String(githubRunId),
     run_attempt: runAttempt,
+    pull_request: pullRequest,
     published_at: published === null ? publishedAt : JSON.parse(published).published_at,
     sha: plan.sha,
     eve_revision: plan.eve_revision,
@@ -258,11 +273,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     throw new Error(
       `BENCHMARK_RUNS must be a positive integer, got "${process.env.BENCHMARK_RUNS}".`,
     );
+  const pullRequest = process.env.BENCHMARK_PULL_REQUEST
+    ? Number(process.env.BENCHMARK_PULL_REQUEST)
+    : null;
+  if (pullRequest !== null && !(Number.isSafeInteger(pullRequest) && pullRequest > 0))
+    throw new Error(
+      `BENCHMARK_PULL_REQUEST must be a pull request number, got "${process.env.BENCHMARK_PULL_REQUEST}".`,
+    );
   const result = await publishResults({
     plan,
     artifactsDir,
     githubRunId: requiredEnv("GITHUB_RUN_ID"),
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
+    pullRequest,
     publishedAt: new Date().toISOString(),
     store: await vercelBlobStore(requiredEnv("EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN")),
   });

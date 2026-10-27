@@ -9,7 +9,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
-import { extractRunUsage } from "./cost.mjs";
+import { extractRunRequests, extractRunUsage } from "./cost.mjs";
 import { docsCounts, docsSequence, readTranscript, transcriptToolCalls } from "./docs-reads.mjs";
 
 // agent-eval names agents `<provider>/<harness>`; cost.mjs keys on display names.
@@ -58,6 +58,7 @@ export function analyzeRun(runPath) {
     toolCalls: toolCalls.length,
     commands: commands.length,
     usage: extractRunUsage(raw, harness),
+    requests: extractRunRequests(raw, harness),
     docsRead: docsCounts(docsSequence(toolCalls)),
     // Which page the agent opened first. `README.md` means the routing index did
     // its job; anything else means the agent guessed or searched its way in.

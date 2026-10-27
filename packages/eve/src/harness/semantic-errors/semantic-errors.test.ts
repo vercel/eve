@@ -48,6 +48,14 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-credit-exhausted",
     },
     {
+      title: "gateway credit balance check throttled despite insufficient_funds",
+      error: gatewayUpstreamBillingError(
+        "insufficient_funds",
+        "AI Gateway credit balance verification is temporarily throttled. Please retry shortly.",
+      ),
+      id: "gateway-credit-check-throttled",
+    },
+    {
       title: "gateway project budget exhausted by upstream type",
       error: gatewayUpstreamBillingError(
         "quota_for_entity_exceeded",

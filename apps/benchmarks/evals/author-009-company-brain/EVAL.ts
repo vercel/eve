@@ -218,15 +218,18 @@ test("analyze asks both specialists at the same time and returns both answers", 
       throw new Error("analyze should not ask the employee anything.");
     },
     agent: (name: string) => ({
-      send: async (message: unknown) => {
+      send: async (message: unknown, options?: { outputSchema?: unknown }) => {
         sent.push({ name, message });
         return {
           result: async () => {
             sentWhenFirstAnswerRead ??= sent.length;
+            // Like eve, a structured send settles with `data` and a plain one with `reply`.
+            const answer = `${name}-answer`;
             return {
               status: "completed",
-              reply: `${name}-answer`,
-              data: { answer: `${name}-answer` },
+              ...(options?.outputSchema === undefined
+                ? { reply: answer, data: undefined }
+                : { reply: undefined, data: { answer } }),
               sessionEnded: false,
             };
           },
@@ -522,10 +525,14 @@ async function resolveDynamic(definition: any, caller: Caller): Promise<unknown>
   expect(typeof definition.evaluate).toBe("function");
   return definition.evaluate({
     session: session(caller),
+    channel: { kind: caller === "schedule" ? "schedule" : "http", metadata: {} },
+    // eve's view is opaque; a gate has no reason to read it here.
+    view: {},
     turn: null,
     now: new Date(),
     model: { id: "anthropic/claude-sonnet-5" },
-    memo: async (_key: unknown, fn: () => unknown) => fn(),
+    memo: async (key: unknown, fn: (occurrence: unknown) => unknown) =>
+      fn({ idempotencyKey: JSON.stringify(key), abortSignal: new AbortController().signal }),
     messages: async () => [],
   });
 }

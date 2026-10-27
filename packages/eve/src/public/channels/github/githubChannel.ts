@@ -388,17 +388,17 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
       ),
     ],
 
-    async receive(input, { from }) {
-      const target = input.target as Partial<GitHubReceiveTarget>;
-      const owner = readNonEmptyString(target.owner);
-      const repo = readNonEmptyString(target.repo);
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Partial<GitHubReceiveTarget>;
+      const owner = readNonEmptyString(receiveTarget.owner);
+      const repo = readNonEmptyString(receiveTarget.repo);
       if (owner === undefined || repo === undefined) {
         throw new Error("githubChannel().receive requires target.owner and target.repo.");
       }
 
       const destinationCount = [
-        target.issueNumber !== undefined,
-        target.pullRequestNumber !== undefined,
+        receiveTarget.issueNumber !== undefined,
+        receiveTarget.pullRequestNumber !== undefined,
       ].filter(Boolean).length;
       if (destinationCount !== 1) {
         throw new Error(
@@ -407,31 +407,31 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
       }
 
       const repositoryId =
-        target.repositoryId ??
+        receiveTarget.repositoryId ??
         (
           await getGitHubRepository({
             api: config.api,
             credentials: config.credentials,
-            installationId: target.installationId,
+            installationId: receiveTarget.installationId,
             owner,
             repo,
           })
         ).id;
 
       const state = stateFromReceiveTarget({
-        target,
+        target: receiveTarget,
         owner,
         repo,
         repositoryId,
       });
 
-      if (target.initialMessage !== undefined) {
+      if (receiveTarget.initialMessage !== undefined) {
         const { thread } = buildGitHubBinding({ config, state });
-        await thread.post(target.initialMessage);
+        await thread.post(receiveTarget.initialMessage);
       }
 
-      return from(continuationTokenFromState(state)).send(input.message, {
-        auth: input.auth,
+      return from(continuationTokenFromState(state)).send(message, {
+        ...send,
         state,
       });
     },

@@ -61,17 +61,20 @@ interface SlackMessageBody {
 
 /**
  * Drives the Slack channel through its Events API and interactivity webhooks,
- * in a public channel thread by default or in a DM. `config` adds authored
+ * in a public channel thread by default, in a DM, or in a code channel, where
+ * people write top-level without mentioning the bot. `config` adds authored
  * channel hooks on top of the fake platform.
  */
 export function slackDriver(
-  surface: Exclude<Surface, "public"> = "shared",
+  conversation: Exclude<Surface, "public"> | "code-channel" = "shared",
   config: Pick<SlackChannelConfig, "onAnswers"> = {},
 ): ChannelDriver {
-  const dm = surface === "private";
+  const dm = conversation === "private";
+  const codeChannel = conversation === "code-channel";
+  const surface: Surface = dm ? "private" : "shared";
   // A fresh channel per driver keeps each test's session apart in the shared workflow world.
   nextChannel += 1;
-  const CHANNEL = `${dm ? "D" : "C"}${String(nextChannel).padStart(3, "0")}`;
+  const CHANNEL = `${dm ? "D" : codeChannel ? "C_CODE" : "C"}${String(nextChannel).padStart(3, "0")}`;
   let sequence = 0;
   // Every message is a reply in the thread the first one starts.
   const threadTs = "1700000000.000001";
@@ -123,6 +126,28 @@ export function slackDriver(
     const method = url.pathname.split("/").at(-1)!;
     const body = decodeSlackApiBody(await request.text(), request.headers.get("content-type"));
     const ts = nextTs();
+    if (codeChannel && method === "conversations.info") {
+      return {
+        body,
+        method,
+        response: {
+          channel: {
+            id: CHANNEL,
+            is_private: false,
+            properties: { record_channel: { record_type: "agent_channel" } },
+          },
+          ok: true,
+        },
+      };
+    }
+    // Everything the bot shows in a code channel posts top-level; Slack has no thread to find.
+    if (
+      codeChannel &&
+      method.startsWith("chat.") &&
+      (body as { thread_ts?: unknown }).thread_ts !== undefined
+    ) {
+      return { body, method, response: { error: "thread_not_found", ok: false } };
+    }
     return {
       body,
       method,
@@ -140,7 +165,7 @@ export function slackDriver(
   }
 
   return {
-    name: dm ? "slack-dm" : "slack",
+    name: dm ? "slack-dm" : codeChannel ? "slack-code-channel" : "slack",
     personId: PERSON,
     capabilities: dm
       ? ["attachments", "buttons", "text-replies"]
@@ -151,16 +176,20 @@ export function slackDriver(
         ...config,
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
+        ...(codeChannel && { codeChannels: true }),
       }),
     message: (text, person, files = []) => {
       const ts = threadStarted ? nextTs() : threadTs;
-      const thread = threadStarted ? { thread_ts: threadTs } : {};
+      const thread = threadStarted && !codeChannel ? { thread_ts: threadTs } : {};
       threadStarted = true;
       // In a channel the default policy hears only mentions, so a person mentions the bot each
       // time. On its own line, so the test model's line-based directives still read the message.
+      // A code channel hears every message.
       const event = dm
         ? { channel_type: "im", text, type: "message" }
-        : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
+        : codeChannel
+          ? { channel_type: "channel", text, type: "message" }
+          : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
       // A message with uploads is a `file_share` in a DM; a mention carries its files as is.
       const shared: Record<string, unknown> = {};
       if (files.length > 0) {
@@ -222,7 +251,7 @@ export function slackDriver(
       const payload = {
         actions: [action],
         channel: { id: CHANNEL },
-        message: { blocks, thread_ts: threadTs, ts: messageTs },
+        message: { blocks, ...(!codeChannel && { thread_ts: threadTs }), ts: messageTs },
         team: { id: TEAM },
         type: "block_actions",
         user: { id, name, team_id: TEAM, username: name },

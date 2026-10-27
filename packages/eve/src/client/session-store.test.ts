@@ -37,6 +37,7 @@ function store(options: SessionStoreInit = {}) {
 afterEach(() => {
   for (const current of stores.splice(0)) detachSessionStore(current);
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** An append-only agent stream, independent of when its POST acknowledgements arrive. */
@@ -677,6 +678,20 @@ describe("SessionStore acceptance and observation", () => {
     await expect(current.send({ message: "sunny." })).rejects.toThrow();
     expect(current.snapshot.error).toBeInstanceOf(Error);
     expect(current.snapshot.messages[0]?.metadata?.status).toBe("failed");
+  });
+
+  // Browsers expose `crypto.randomUUID` only in secure contexts (#5415).
+  it("sends where crypto.randomUUID is not exposed, as on a plain-HTTP origin", async () => {
+    const server = agent();
+    const webCrypto = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: webCrypto.getRandomValues.bind(webCrypto) });
+    const current = store({ initialSession });
+    await current.send({ message: "sunny." });
+    await current.send({ message: "sunny.", turnPolicy: "queue" });
+    expect(server.posts).toEqual(["/eve/v1/session/session_1", "/eve/v1/session/session_1"]);
+    const [first, second] = current.snapshot.messages;
+    expect(texts(current)).toEqual(["user: sunny.", "user: sunny."]);
+    expect(first?.id).not.toBe(second?.id);
   });
 });
 

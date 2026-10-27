@@ -13,6 +13,7 @@ import {
   waitingOnTasks,
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
+import { slackSessionTargetOf } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -240,11 +241,14 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   // the shared thread.
   const { instructions } = event;
   if (recipientUserId && (challengeUrl || instructions)) {
-    const { channelId, threadTs } = channel.state;
     // The turn's own sign-in holds it, so the prompt can cancel that turn.
+    const target = slackSessionTargetOf(channel.slack);
     const cancel =
-      event.responseId === undefined && channelId && threadTs && event.turnId
-        ? { channelId, threadTs, turnId: event.turnId }
+      event.responseId === undefined &&
+      target.channelId &&
+      (target.codeChannel || target.threadTs) &&
+      event.turnId
+        ? { ...target, turnId: event.turnId }
         : undefined;
     const prompt = {
       cancel,
@@ -489,6 +493,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await clearStatus(channel);
       return;
     }
+    // A thread's status clears when the error posts; a code channel's session stays `processing`.
+    if (channel.state.codeChannel === true) await clearStatus(channel);
     const hint = data.error?.hint;
     if (data.error !== undefined && hint !== undefined) {
       await channel.thread.post(

@@ -9,9 +9,10 @@ import { parseArgs } from "node:util";
 
 import {
   countToolInvocations,
+  extractRunRequests,
   extractRunUsage,
   modelPricing,
-  priceUsage,
+  priceRequests,
   tokenConsumption,
 } from "./cost.mjs";
 import {
@@ -269,11 +270,14 @@ function meanRunMetrics(summaryPath, model, harness) {
   const performanceUsage = performanceRuns.flatMap((run) =>
     run.usage === null ? [] : [run.usage],
   );
+  const performanceRequests = performanceRuns.flatMap((run) =>
+    run.usage === null ? [] : [run.requests],
+  );
   const result = {};
   const pricing = modelPricing[model];
   if (pricing !== undefined && performanceUsage.length > 0) {
     result.meanEstimatedListCostUsd = mean(
-      performanceUsage.map((value) => priceUsage(value, pricing)),
+      performanceRequests.map((requests) => priceRequests(requests, pricing, harness)),
     );
   }
   if (performanceUsage.length > 0) {
@@ -292,7 +296,13 @@ function runMetrics(summaryPath, harness) {
       const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
       if (!existsSync(transcriptPath)) return [];
       const raw = readFileSync(transcriptPath, "utf8");
-      return [{ usage: extractRunUsage(raw, harness), toolInvocations: countToolInvocations(raw) }];
+      return [
+        {
+          usage: extractRunUsage(raw, harness),
+          requests: extractRunRequests(raw, harness),
+          toolInvocations: countToolInvocations(raw),
+        },
+      ];
     });
 }
 

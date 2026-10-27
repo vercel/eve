@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCreateBody } from "#eve-channel/request.js";
+import { parseCreateBody, parseSessionMessageBody } from "#eve-channel/request.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
+
+describe("HTTP attachment reference boundary", () => {
+  it.each(["chat-sdk-file:?p=placeholder", "CHAT-SDK-FILE:?p=placeholder", "eve-url://["])(
+    "rejects internal attachment marker %s on creates and follow-ups",
+    (data) => {
+      const payload = { message: [{ type: "file", mediaType: "image/png", data }] };
+      for (const parse of [parseCreateBody, parseSessionMessageBody]) {
+        const result = parse(payload);
+        expect(result).toBeInstanceOf(Response);
+        expect((result as Response).status).toBe(400);
+      }
+    },
+  );
+
+  it("continues accepting ordinary attachment URLs", () => {
+    const message = [
+      { type: "file", mediaType: "image/png", data: "https://files.example/photo.png" },
+    ];
+    expect(parseCreateBody({ message })).toMatchObject({ message });
+    expect(parseSessionMessageBody({ message })).toMatchObject({ message });
+  });
+});
 
 const CALLBACK = {
   callId: "call-1",

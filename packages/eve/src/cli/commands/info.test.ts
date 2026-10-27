@@ -78,6 +78,7 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
       compileDirectoryPath: `${APP_ROOT}/.eve/compile`,
       compileMetadataPath: `${APP_ROOT}/.eve/compile/compile-metadata.json`,
       diagnosticsPath: `${APP_ROOT}/.eve/discovery/diagnostics.json`,
+      modelMetadataPath: `${APP_ROOT}/.eve/compile/model-metadata.json`,
       discoveryManifestPath: `${APP_ROOT}/.eve/discovery/agent-discovery-manifest.json`,
       discoveryDirectoryPath: `${APP_ROOT}/.eve/discovery`,
       moduleMapPath: `${APP_ROOT}/.eve/compile/module-map.mjs`,
