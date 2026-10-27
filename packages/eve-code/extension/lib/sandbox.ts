@@ -18,7 +18,7 @@ import {
 type ToolingSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 /** Include in the consumer's sandbox `revalidationKey` so cached templates rebuild when the tooling changes. */
-export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
+export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_VERSION}:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
 
 /** Install CLI wrappers, signed commits, and TypeScript diagnostics. */
 export async function installCodeTooling(
