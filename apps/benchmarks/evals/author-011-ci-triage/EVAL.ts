@@ -13,6 +13,8 @@ const projectRoot = "mender";
 const agentRoot = `${projectRoot}/agent`;
 const webhookSecret = "test-webhook-secret";
 const metricsUrl = "https://metrics.pinecone.dev/v1/agent-turns";
+// `pnpm@9`, `pnpm@^9`, pnpm's `latest-9` dist-tag, or the official installer's `PNPM_VERSION=9…`.
+const pnpm9Install = /pnpm@(?:[\^~]|latest-)?9(?!\d)|PNPM_VERSION=["']?9(?!\d)/;
 const { privateKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
@@ -99,7 +101,7 @@ test("prepares Vercel Sandboxes with pnpm 9", async () => {
   expect(runtime.prepare).toBeTypeOf("function");
   const sandbox = recordingSandbox();
   await runtime.prepare(sandbox);
-  expect(sandbox.commands.join("\n")).toMatch(/pnpm@[\^~]?9(?![\d])/);
+  expect(sandbox.commands.join("\n")).toMatch(pnpm9Install);
 });
 
 test("gives each sandbox 4 vCPUs", async () => {
@@ -149,19 +151,29 @@ test("reports each finished turn to the metrics service", async () => {
   });
 });
 
-test("a metrics outage does not fail the turn", async () => {
+// eve only logs a throwing `turn.settled` hook, so an outage can't fail the turn itself. What it
+// can break is the rest of the turn's cleanup, such as a sandbox stop after the metrics call.
+test("a metrics outage does not disrupt the rest of the turn's work", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => {
+    vi.fn(async () => new Response(null, { status: 202 })),
+  );
+  const healthyStops = (await settleTurn()).sandbox.stops;
+
+  const outages = [
+    async () => {
       throw new TypeError("fetch failed");
-    }),
-  );
-  await expect(settleTurn()).resolves.toBeDefined();
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => new Response("unavailable", { status: 503 })),
-  );
-  await expect(settleTurn()).resolves.toBeDefined();
+    },
+    async () => new Response("unavailable", { status: 503 }),
+  ];
+  for (const outage of outages) {
+    const fetch = vi.fn(outage);
+    vi.stubGlobal("fetch", fetch);
+    const { sandbox } = await settleTurn();
+    const urls = fetch.mock.calls.map(([input]) => new Request(input as RequestInfo).url);
+    expect(urls).toContain(metricsUrl);
+    expect(sandbox.stops).toBe(healthyStops);
+  }
 });
 
 test("stops the sandbox when a turn finishes", async () => {
@@ -376,7 +388,7 @@ function recordingSandbox() {
     const command = typeof input === "string" ? input : input.command;
     commands.push(command);
     // Answer version checks once pnpm 9 is installed, so a `prepare` that verifies its install passes.
-    const installed = /pnpm@[\^~]?9(?![\d])/.test(commands.join("\n"));
+    const installed = pnpm9Install.test(commands.join("\n"));
     const stdout = installed && /pnpm\s+(?:--version|-v)\b/.test(command) ? "9.15.4\n" : "";
     return { exitCode: 0, stdout, stderr: "" };
   };
@@ -389,8 +401,13 @@ function recordingSandbox() {
       return execute(input);
     },
     async spawn(input: string | { command: string }) {
-      const result = execute(input);
-      return { ...result, wait: async () => result };
+      const { exitCode, stdout, stderr } = execute(input);
+      return {
+        stdout: new Blob([stdout]).stream(),
+        stderr: new Blob([stderr]).stream(),
+        wait: async () => ({ exitCode }),
+        kill: async () => {},
+      };
     },
     async stop() {
       sandbox.stops += 1;
@@ -430,7 +447,13 @@ async function settleTurn() {
     handlers.push(...[events["turn.settled"], events["*"]].filter(Boolean));
   }
   expect(handlers.length).toBeGreaterThan(0);
-  for (const handler of handlers) await handler(event, ctx);
+  // Like eve, run each hook on its own and only log a failure, so one throwing hook can't
+  // hide another hook's work.
+  for (const handler of handlers) {
+    try {
+      await handler(event, ctx);
+    } catch {}
+  }
   return { sandbox };
 }
 
