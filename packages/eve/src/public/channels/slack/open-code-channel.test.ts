@@ -77,7 +77,7 @@ describe("openCodeChannel", () => {
         { role: "user", text: "Alice asks why the login test fails." },
         { role: "assistant", text: "Let me look." },
       ],
-      idempotencyKey: "call_1",
+      idempotencyKey: "session_thread:call_1",
     });
   });
 });

@@ -56,7 +56,8 @@ export async function openCodeChannel(
     .send(message, {
       auth: ctx.session.auth.current,
       history: textHistory(ctx.messages),
-      idempotencyKey: ctx.callId,
+      // Call ids repeat across sessions, and the key also picks the code channel's session.
+      idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
     });
   return { sessionId: delivery.sessionId, status: "opened" };
 }
