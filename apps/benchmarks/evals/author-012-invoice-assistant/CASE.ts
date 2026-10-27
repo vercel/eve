@@ -5,6 +5,7 @@ import { tallyAppSetup } from "../../lib/setups/tally-app.js";
 // own session cookie, tenant-scoped tools, per-person memory, uploads, and an eve/react chat
 // panel, which the other cases leave out. Each requirement is graded by its own check.
 export default defineAuthoringCase({
+  category: "full-agents",
   startingPoint: emptyProject,
   projectDirectory: "tally",
   setup: tallyAppSetup,

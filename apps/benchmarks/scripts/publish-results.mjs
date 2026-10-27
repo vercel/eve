@@ -22,7 +22,8 @@
 // The manifest's `published_at` is when the run was first published (ISO 8601).
 //
 // Each record is one run of one case on one model, keyed by (github_run_id,
-// run_attempt, model_id, case, run). Planned runs with no result, including
+// run_attempt, model_id, case, run), and carries its case's `category` from
+// CASE.ts so results can be narrowed to one. Planned runs with no result, including
 // every run of a model whose job uploaded nothing, become `missing` records so
 // coverage stays honest. A metric that can't be read is `null`, never zero.
 //
@@ -34,7 +35,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -45,6 +46,7 @@ import {
   vercelBlobStore,
 } from "../../../scripts/eval-benchmark/publish.mjs";
 import { findBenchmarkModel } from "../lib/benchmark-config.ts";
+import { loadAuthoringCase } from "../lib/load-authoring-case.ts";
 import { modelPricing, priceRequests } from "./cost.mjs";
 import { analyzeRun, collectRuns } from "./run-analysis.mjs";
 
@@ -93,7 +95,14 @@ function artifactDirs(artifactsDir) {
 }
 
 /** Derives one record per planned (model, case, run), in plan order. */
-export function buildRecords({ plan, artifacts, githubRunId, runAttempt, pullRequest = null }) {
+export function buildRecords({
+  plan,
+  artifacts,
+  githubRunId,
+  runAttempt,
+  pullRequest = null,
+  categories = new Map(),
+}) {
   const records = [];
   for (const { modelId, dir, meta } of artifacts) {
     const benchmark = findBenchmarkModel(modelId);
@@ -127,6 +136,7 @@ export function buildRecords({ plan, artifacts, githubRunId, runAttempt, pullReq
           harness: benchmark.harness,
           runner_os: meta?.runner_os ?? null,
           case: caseId,
+          ...(categories.has(caseId) ? { category: categories.get(caseId) } : {}),
           run,
           ...(result === undefined
             ? { outcome: "missing" }
@@ -176,7 +186,7 @@ function runMetrics(result, benchmark) {
 }
 
 /**
- * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, pullRequest?: number | null, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
+ * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, pullRequest?: number | null, categories?: Map<string, string>, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
  */
 export async function publishResults({
   plan,
@@ -184,11 +194,19 @@ export async function publishResults({
   githubRunId,
   runAttempt,
   pullRequest = null,
+  categories = new Map(),
   publishedAt,
   store,
 }) {
   const artifacts = readModelArtifacts(plan, artifactsDir);
-  const records = buildRecords({ plan, artifacts, githubRunId, runAttempt, pullRequest });
+  const records = buildRecords({
+    plan,
+    artifacts,
+    githubRunId,
+    runAttempt,
+    pullRequest,
+    categories,
+  });
   const prefix =
     pullRequest === null
       ? `authoring/runs/${githubRunId}/${runAttempt}`
@@ -249,6 +267,16 @@ export async function publishResults({
   return { prefix, objects: uploads.length + 2, records: records.length };
 }
 
+const evalsRoot = join(dirname(fileURLToPath(import.meta.url)), "../evals");
+
+/** Each planned case's category, read from its CASE.ts. */
+export async function caseCategories(cases, root = evalsRoot) {
+  const entries = await Promise.all(
+    cases.map(async (caseId) => [caseId, (await loadAuthoringCase(join(root, caseId))).category]),
+  );
+  return new Map(entries);
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required to publish authoring benchmark results.`);
@@ -286,6 +314,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     githubRunId: requiredEnv("GITHUB_RUN_ID"),
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
     pullRequest,
+    categories: await caseCategories(plan.cases),
     publishedAt: new Date().toISOString(),
     store: await vercelBlobStore(requiredEnv("EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN")),
   });

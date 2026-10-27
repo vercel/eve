@@ -129,12 +129,18 @@ case can be as small as:
 
 ```ts
 export default defineAuthoringCase({
+  category: "features/tools",
   startingPoint: simpleProject,
   async interact({ send }) {
     await send("Add a weather tool to this agent.");
   },
 });
 ```
+
+`category` is one of `authoringCategories` in `lib/authoring-case.ts`: what the case asks the agent to
+build, e.g. `features/tools` for one task on a scaffolded project or `full-agents` for a whole agent
+from an empty workspace. Published records carry it so results can be narrowed to a category. Add a
+category there when no existing one fits.
 
 Use `simpleProject` for the selected canary's `eve init` output and `emptyProject` for a project
 the coding agent creates. A setup can seed an existing app instead, as `lib/setups/tally-app.ts` does

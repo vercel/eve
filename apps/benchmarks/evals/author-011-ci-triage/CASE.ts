@@ -5,6 +5,7 @@ import { defineAuthoringCase, emptyProject } from "../../lib/authoring-case.js";
 // the other cases leave out. Each requirement is graded by its own check. The prompt
 // states outcomes rather than mechanisms, so the agent has to pick the eve feature itself.
 export default defineAuthoringCase({
+  category: "full-agents",
   startingPoint: emptyProject,
   projectDirectory: "mender",
   timeoutSeconds: 1800,

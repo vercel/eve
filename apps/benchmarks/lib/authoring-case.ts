@@ -32,7 +32,25 @@ export interface AuthoringInteractionContext {
   send(prompt: string): Promise<AuthoringTurn>;
 }
 
+/**
+ * What a case asks the agent to build. Published on every record, so results
+ * can be narrowed to a category (e.g. the eve-evals matrix's case filter). A
+ * `/` nests a category: selecting `features` selects every `features/*` case.
+ */
+export const authoringCategories = [
+  "features/channels",
+  "features/connections",
+  "features/schedules",
+  "features/skills",
+  "features/tools",
+  "projects",
+  "full-agents",
+] as const;
+
+export type AuthoringCategory = (typeof authoringCategories)[number];
+
 export interface AuthoringCase {
+  readonly category: AuthoringCategory;
   readonly startingPoint: AuthoringStartingPoint;
   /** Directory created by the agent, relative to the starting workspace. */
   readonly projectDirectory?: string;

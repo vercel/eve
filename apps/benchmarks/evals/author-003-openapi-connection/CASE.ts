@@ -2,6 +2,7 @@ import { defineAuthoringCase, simpleProject } from "../../lib/authoring-case.js"
 import { inventoryOpenApiSetup } from "../../lib/setups/inventory-openapi.js";
 
 export default defineAuthoringCase({
+  category: "features/connections",
   startingPoint: simpleProject,
   setup: inventoryOpenApiSetup,
   async interact({ send }) {

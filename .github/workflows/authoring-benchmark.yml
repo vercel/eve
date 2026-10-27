@@ -294,9 +294,10 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
-      # The publisher needs only the root workspace's @vercel/blob.
+      # The publisher needs the root workspace's @vercel/blob, and the benchmarks
+      # app's jiti to read each case's category from its CASE.ts.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter eve-monorepo
+        run: pnpm install --frozen-lockfile --filter eve-monorepo --filter @eve-internal/benchmarks
 
       - name: Prepare artifact directory
         run: mkdir -p "$RUNNER_TEMP/artifacts"
