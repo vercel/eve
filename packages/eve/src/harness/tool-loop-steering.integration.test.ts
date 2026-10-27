@@ -9,7 +9,7 @@ import {
   TOOL_RESULT_BOUNDARY,
 } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, StepResult } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -507,6 +507,10 @@ describe("generation steering with the real AI SDK", () => {
       },
     ],
   ]);
+  const continueFrom = (done: StepResult) => {
+    if (typeof done.next !== "function") throw new Error("expected a continuation step");
+    return done.next(done.session);
+  };
   const stepCompletions = (events: UnstampedMessageStreamEvent[]) =>
     events.filter((event) => event.type === "step.completed") as unknown as {
       data: { finishReason: string; stepIndex: number; steeredBy?: string };
@@ -586,7 +590,7 @@ describe("generation steering with the real AI SDK", () => {
       },
     });
     const first = await harness(session(), { message: "Save this" });
-    const running = first.next!(first.session);
+    const running = continueFrom(first);
     await pending.promise;
     steering.abort("dlv_last");
     expect((await running).steered).toBe(true);
@@ -621,7 +625,7 @@ describe("generation steering with the real AI SDK", () => {
       },
     });
     const first = await harness(session(), { message: "Save this" });
-    const second = await first.next!(first.session);
+    const second = await continueFrom(first);
     expect(second.steered).toBeUndefined();
     expect(stepCompletions(events).map(({ data }) => data.finishReason)).not.toContain("steered");
   });

@@ -43,17 +43,22 @@ export const EVE_STREAM_LEASE_ENDED_CONTROL = {
  *
  * `tool-calls` is the only non-terminal assistant step in the current
  * tool-loop harness. All other values indicate the assistant step ended the
- * current turn, except a step superseded by a steering message: it completes
- * with `steered` and the turn continues with the next step.
+ * current turn.
  */
 export type AssistantStepFinishReason =
   | "content-filter"
   | "error"
   | "length"
   | "other"
-  | "steered"
   | "stop"
   | "tool-calls";
+
+/**
+ * Finish reason of a `step.completed` event: an assistant finish reason, or
+ * `steered` when a steering message interrupted the model call. A `steered`
+ * step does not end the turn; the next step starts with the correction.
+ */
+export type StepCompletedFinishReason = AssistantStepFinishReason | "steered";
 
 type ProviderMetadataEntry = NonNullable<ProviderMetadata[string]>;
 type GatewayGenerationId = Extract<ProviderMetadataEntry["generationId"], string>;
@@ -565,15 +570,16 @@ export interface StepStartedStreamEvent {
 }
 
 /**
- * Stream event emitted when one model call completes successfully.
+ * Stream event emitted when one model call completes, or is interrupted by a
+ * steering message (`finishReason: "steered"`).
  */
 export interface StepCompletedStreamEvent {
   data: {
-    finishReason: AssistantStepFinishReason;
+    finishReason: StepCompletedFinishReason;
     providerMetadata?: StepCompletedProviderMetadata;
     sequence: number;
     stepIndex: number;
-    /** The delivery id of the message that cut this step short; set only with `finishReason: "steered"`. */
+    /** The delivery id of the steering message; set only with `finishReason: "steered"`, and only when that delivery has an id. */
     steeredBy?: string;
     turnId: string;
     usage?: {
@@ -1608,7 +1614,7 @@ export function createStepStartedEvent(input: {
  * Creates the `step.completed` event for one completed model call.
  */
 export function createStepCompletedEvent(input: {
-  readonly finishReason: AssistantStepFinishReason;
+  readonly finishReason: StepCompletedFinishReason;
   readonly providerMetadata?: StepCompletedProviderMetadata;
   readonly sequence: number;
   readonly stepIndex: number;
