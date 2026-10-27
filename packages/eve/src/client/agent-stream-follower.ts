@@ -288,8 +288,7 @@ export class AgentStreamFollower {
         const status = error instanceof ClientError ? error.status : undefined;
         const retryable = isRetryableStreamError(error);
         node.status =
-          retryable &&
-          node.failures < DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy.maxAttempts
+          retryable && node.failures < DEFAULT_STREAM_RECONNECT_POLICY.maxAttempts
             ? "interrupted"
             : "unavailable";
         node.reason =
