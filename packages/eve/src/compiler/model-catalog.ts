@@ -17,6 +17,8 @@ import {
 const MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
 const MODEL_CATALOG_CACHE_VERSION = 2;
 const MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
+// A network that drops packets must not hang a build that may not need the catalog at all.
+const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000;
 
 const modelCatalogCacheSchema = z
   .object({
@@ -137,7 +139,9 @@ export function createCompiledRuntimeModelCatalogLoader(
 }
 
 async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalogCache> {
-  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL);
+  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, {
+    signal: AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS),
+  });
 
   if (!response.ok) {
     throw new Error(

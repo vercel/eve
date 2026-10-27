@@ -146,12 +146,14 @@ export function lookupCatalogModelByProviderModelId(
 
   for (const model of catalog.models) {
     for (const entry of model.providers) {
+      // Skip windowless entries, as the snapshot drops them, so both resolve alike.
+      const contextWindowTokens = contextWindowOf(entry);
       if (
+        contextWindowTokens !== null &&
         entry.provider === resolvedProvider &&
         normalizeCatalogModelId(entry.providerModelId) === normalizedModelId
       ) {
-        const contextWindowTokens = contextWindowOf(entry);
-        return contextWindowTokens === null ? null : { contextWindowTokens, slug: model.slug };
+        return { contextWindowTokens, slug: model.slug };
       }
     }
   }

@@ -298,7 +298,7 @@ async function normalizeAuthoredModelReference(input: {
         };
       }
     } catch {
-      // Slug lookup below still resolves built-in limits and otherwise resurfaces the catalog error.
+      // The slug lookup below resurfaces the catalog error.
     }
   }
 

@@ -233,8 +233,8 @@ export async function writeCompilerArtifacts(
     projectDiscoverDiagnostic(diagnostic, ROOT_COMPILED_AGENT_NODE_ID),
   );
   const modelCatalog = createCompiledRuntimeModelCatalogLoader(input.manifest.appRoot);
-  const modelMetadata = await modelCatalog.loadModelMetadata();
-  if (modelMetadata.fetchedAt === null) {
+  // Checked before compiling so the manifest's diagnostics summary counts the warning.
+  if ((await modelCatalog.loadModelMetadata()).fetchedAt === null) {
     diagnostics.push(createModelMetadataUnavailableDiagnostic(paths.modelMetadataPath));
   }
   const compiledManifest = await materializeWorkspaceResources({
@@ -245,6 +245,8 @@ export async function writeCompilerArtifacts(
       modelCatalog,
     }),
   });
+  // Read again after compiling: a static model the cached catalog missed refreshes it.
+  const modelMetadata = await modelCatalog.loadModelMetadata();
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
   const discoveryManifestJson = serializeArtifactJson(input.manifest);
