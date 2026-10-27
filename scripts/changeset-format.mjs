@@ -10,7 +10,7 @@ export function classifyTitle(title) {
   if (/^(?:internal|chore|refactor|test|ci|build)(?:\([^)]+\))?!?:\s+\S/iu.test(title))
     return "internal";
   throw new Error(
-    `Invalid release PR title ${JSON.stringify(title)}. Use feat:, perf:, fix:, docs(feature):, docs(bugfix):, or an internal type (chore:, refactor:, test:, ci:, build:, internal:).`,
+    `Invalid release subject ${JSON.stringify(title)}. Use feat:, perf:, fix:, docs(feature):, docs(bugfix):, or an internal type (chore:, refactor:, test:, ci:, build:, internal:).`,
   );
 }
 

@@ -11,7 +11,6 @@
     "build": "turbo run build --filter='./packages/*'",
     "changeset": "changeset",
     "check:deps": "syncpack lint",
-    "check:pr-title": "node ./scripts/check-release-pr-title.mjs",
     "check:sandbox-image-tag": "node ./scripts/sandbox-image-tag.mjs --check",
     "check:template-files": "node ./scripts/sync-template-files.mjs --check",
     "check:templates": "node ./scripts/check-template-compatibility.mjs",

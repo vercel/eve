@@ -34,18 +34,7 @@ test("changeset summaries preserve details and credit only thanked handles", () 
   ]) {
     assert.equal(classifyTitle(title), category);
   }
-  assert.throws(() => classifyTitle("docs: Update the guide"), /Invalid release PR title/u);
-});
-
-test("proposed PR titles can be validated locally without GitHub", () => {
-  execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs", "feat(eve): Add a tool"]);
-  assert.throws(
-    () =>
-      execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs", "Update the guide"], {
-        stdio: "pipe",
-      }),
-    /Command failed/u,
-  );
+  assert.throws(() => classifyTitle("docs: Update the guide"), /Invalid release subject/u);
 });
 
 test("PR title validation ignores changesets added to the base after the event", async (t) => {
