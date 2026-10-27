@@ -1,19 +1,20 @@
 import { defineAuthoringCase, simpleProject } from "../../lib/authoring-case.js";
 import { crmLocalEnvSetup } from "../../lib/setups/crm-local-env.js";
 
-// Writing an extension package and mounting it into the agent that ships beside it.
+// Writing an extension package and mounting it into the agent that ships beside it. The prompt
+// asks for a shared package without naming extensions, so the docs have to lead there.
 export default defineAuthoringCase({
   startingPoint: simpleProject,
   setup: crmLocalEnvSetup,
   async interact({ send }) {
     await send(
       [
-        "Several of our agents will need to work with Acme CRM, so build that integration once as an eve extension package and use it here first. Create the package as `@acme/crm` in `packages/crm/` inside this project, and mount it into this agent as `crm`.",
+        "We're going to have several agents that work with Acme CRM, and I don't want each one re-implementing the integration. Build it once as a shared package, `@acme/crm` in `packages/crm/` of this repo, that any of our agents can add to pick up the CRM capabilities, and add it to this agent first.",
         "",
-        "- Agents that mount it configure an `apiKey`, which is required, and can optionally set a `baseUrl`, which defaults to `https://api.acme-crm.dev`. This agent passes the key from `CRM_API_KEY`, which is already set in `.env.local`.",
-        "- A `lookup_customer` tool takes an `email` and returns the JSON from `GET <baseUrl>/v1/customers?email=<email>`, sent with `Authorization: Bearer <apiKey>`.",
-        '- An `add_note` tool takes a `customerId` and a `note` and POSTs `{ "note": <note> }` as JSON to `<baseUrl>/v1/customers/<customerId>/notes` with the same header. It writes to the CRM, so it must always ask for approval first, in every agent that mounts the package.',
-        "- Every agent that mounts it should be told to look a customer up before adding a note to their record.",
+        "- Each agent brings its own Acme API key, and some teams will point at our Acme sandbox instead of production (`https://api.acme-crm.dev`). Call those settings `apiKey` and `baseUrl`. This agent's key is in `CRM_API_KEY`, already set in `.env.local`.",
+        '- Agents need to look up a customer by email (`lookup_customer`) and add a note to a customer\'s record (`add_note`). From Acme\'s API docs: `GET /v1/customers?email=<email>` returns the customer, and `POST /v1/customers/<customerId>/notes` with the JSON body `{ "note": "..." }` adds a note. Both take `Authorization: Bearer <apiKey>`.',
+        "- Notes go straight onto the customer's record, so a person has to approve every note before it's written, in any agent that uses the package.",
+        "- Agents using it should always look the customer up before writing a note, so notes don't land on the wrong record.",
         "",
         "Make sure the project typechecks and builds.",
       ].join("\n"),

@@ -36,10 +36,8 @@ test("the project typechecks and builds", { timeout: 600_000 }, () => {
   }
 });
 
-test("mounts the package as helpdesk for the support queue", async () => {
-  const source = readFileSync(mountFile(), "utf8");
-  expect(source).toMatch(new RegExp(`from\\s+["']${packageName}["']`));
-  expect(source).toMatch(/HELPDESK_TOKEN/);
+test("adds the package to this agent for the support queue", async () => {
+  expect(readFileSync(mountFile(), "utf8")).toMatch(/HELPDESK_TOKEN/);
 
   await import(pathToFileURL(resolve(mountFile())).href);
   const fetch = stubFetch();
@@ -54,15 +52,15 @@ test("mounts the package as helpdesk for the support queue", async () => {
 test("keeps searching and creating tickets but cannot delete them", () => {
   const { tools } = eveInfo();
   expect(tools).toEqual(
-    expect.arrayContaining(["helpdesk__search_tickets", "helpdesk__create_ticket"]),
+    expect.arrayContaining([mounted("search_tickets"), mounted("create_ticket")]),
   );
-  expect(tools).not.toContain("helpdesk__delete_ticket");
+  expect(tools).not.toContain(mounted("delete_ticket"));
 });
 
 test("asks for approval before closing a ticket", async () => {
-  expect(compiledTools().get("helpdesk__close_ticket")?.requiresApproval).toBe(true);
+  expect(compiledTools().get(mounted("close_ticket"))?.requiresApproval).toBe(true);
 
-  const close = await load(toolSource("helpdesk__close_ticket"));
+  const close = await load(toolSource(mounted("close_ticket")));
   const policy = typeof close.approval === "function" ? close.approval : close.approval?.request;
   expect(typeof policy).toBe("function");
   const toolInput = { ticketId: "T-7", resolution: "Refund issued." };
@@ -83,10 +81,10 @@ test("asks for approval before closing a ticket", async () => {
 // and hooks the way eve would for a call.
 test("reports each new ticket to the dashboard", async () => {
   const fetch = stubFetch();
-  await runCall("helpdesk__search_tickets", { query: "refund" });
+  await runCall(mounted("search_tickets"), { query: "refund" });
   expect(await dashboardReports(fetch)).toEqual([]);
 
-  await runCall("helpdesk__create_ticket", newTicket);
+  await runCall(mounted("create_ticket"), newTicket);
   const reports = await dashboardReports(fetch);
   expect(reports).toHaveLength(1);
   expect(reports[0]!.method).toBe("POST");
@@ -102,7 +100,7 @@ test("a dashboard outage does not fail ticket creation", async () => {
   ];
   for (const outage of outages) {
     const fetch = stubFetch(outage);
-    const output = await runCall("helpdesk__create_ticket", newTicket);
+    const output = await runCall(mounted("create_ticket"), newTicket);
     expect(output).toMatchObject({ id: "T-42" });
     expect((await requests(fetch)).map((call) => call.url)).toContain(dashboardUrl);
   }
@@ -113,12 +111,34 @@ function readJson(path: string): any {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function mountFile(): string {
-  const file = ["agent/extensions/helpdesk.ts", "agent/extensions/helpdesk/extension.ts"].find(
-    existsSync,
+/** The agent's mount of the package, wherever the agent put it and whatever it named it. */
+function mount(): { file: string; namespace: string } {
+  const root = "agent/extensions";
+  const candidates = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? [{ file: join(root, entry.name, "extension.ts"), namespace: entry.name }]
+          : entry.name.endsWith(".ts")
+            ? [{ file: join(root, entry.name), namespace: entry.name.slice(0, -3) }]
+            : [],
+      )
+    : [];
+  const found = candidates.find(
+    ({ file }) =>
+      existsSync(file) &&
+      new RegExp(`from\\s+["']${packageName}["']`).test(readFileSync(file, "utf8")),
   );
-  if (file === undefined) throw new Error("The agent does not mount an extension as `helpdesk`.");
-  return file;
+  if (found === undefined) throw new Error(`The agent does not mount ${packageName}.`);
+  return found;
+}
+
+function mountFile(): string {
+  return mount().file;
+}
+
+/** A tool's name in this agent: the mount's namespace, then the package's own name. */
+function mounted(tool: string): string {
+  return `${mount().namespace}__${tool}`;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- eve's JSON output is untyped here.
@@ -190,7 +210,7 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
     Symbol.for("eve.resolved-definition-sources")
   ];
   for (const tool of eveInfo().tools as string[]) {
-    if (!tool.startsWith("helpdesk__")) continue;
+    if (!tool.startsWith(`${mount().namespace}__`)) continue;
     registry?.set(await load(toolSource(tool)), { kind: "tool", names: new Set([tool]) });
   }
 

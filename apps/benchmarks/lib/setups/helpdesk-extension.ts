@@ -48,14 +48,14 @@ export const helpdeskExtensionFiles: Readonly<Record<string, string>> = {
 eve extension for Northwind Helpdesk. Maintained by the platform team; open a
 request in #platform instead of editing it from an agent project.
 
-Each mount works with one helpdesk queue.
+Each agent that uses it works with one helpdesk queue.
 
 ## Configuration
 
 | Key       | Required | Description                                                   |
 | --------- | -------- | ------------------------------------------------------------- |
 | \`token\`   | yes      | Helpdesk API token                                            |
-| \`queue\`   | yes      | Queue the mount works with, such as \`support\`                  |
+| \`queue\`   | yes      | Queue to work with, such as \`support\`                          |
 | \`baseUrl\` | no       | API base URL. Defaults to \`https://helpdesk.northwind.dev\`      |
 
 ## Tools
@@ -166,7 +166,7 @@ fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\\n");
 `;
 
 export const helpdeskExtensionSetup: AuthoringSetup = {
-  id: "helpdesk-extension-v1",
+  id: "helpdesk-extension-v2",
   async onSession({ run, write }) {
     for (const [path, content] of Object.entries(helpdeskExtensionFiles)) {
       await write(`${packageRoot}/${path}`, content);

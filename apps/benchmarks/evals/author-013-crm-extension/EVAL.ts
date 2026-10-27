@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -33,7 +33,7 @@ test("creates the @acme/crm extension package", () => {
   expect(declaration).toMatch(/defineExtension\s*\(/);
 });
 
-// The mount adds `crm__`, so tools named `crm_lookup_customer` would surface as
+// The mount adds its own prefix, so a tool named `crm_lookup_customer` would surface as
 // `crm__crm_lookup_customer`.
 test("names the tools from their paths without the mount prefix", () => {
   for (const tool of ["lookup_customer", "add_note"]) {
@@ -41,11 +41,9 @@ test("names the tools from their paths without the mount prefix", () => {
   }
 });
 
-test("mounts the package as crm with the key from CRM_API_KEY", () => {
-  const source = readFileSync(mountFile(), "utf8");
-  // Through the package, not a relative path into its source.
-  expect(source).toMatch(new RegExp(`from\\s+["']${packageName}["']`));
-  expect(source).toMatch(/CRM_API_KEY/);
+test("adds the package to this agent with the key from CRM_API_KEY", () => {
+  // Found through its package import, not a relative path into its source.
+  expect(readFileSync(mountFile(), "utf8")).toMatch(/CRM_API_KEY/);
   const dependencies = { ...readJson("package.json").dependencies };
   expect(dependencies[packageName]).toBeTruthy();
 });
@@ -61,11 +59,13 @@ test("the project typechecks and builds", { timeout: 600_000 }, () => {
 test("gives the agent both tools and the extension's instructions", () => {
   const info = eveInfo();
   expect(info.status).toBe("ready");
-  expect(info.tools).toEqual(expect.arrayContaining(["crm__lookup_customer", "crm__add_note"]));
+  expect(info.tools).toEqual(
+    expect.arrayContaining([mounted("lookup_customer"), mounted("add_note")]),
+  );
   expect(info.tools).not.toContain("lookup_customer");
   expect(info.tools).not.toContain("add_note");
   // The extension contributes its own fragment beside the agent's instructions.
-  expect(info.instructions).toMatch(/instructions\/crm\b/);
+  expect(info.instructions).toContain(`instructions/${mount().namespace}`);
   expect(extensionInstructions()).toMatch(/look\w*\s+(?:\w+\s+){0,3}up|lookup|look-up/i);
   expect(extensionInstructions()).toMatch(/note/i);
 });
@@ -119,7 +119,7 @@ test("add_note always asks for approval", async () => {
   }
   const manifest = readJson(eveInfo().artifacts.compiledManifest);
   // oxlint-disable-next-line typescript/no-explicit-any -- the manifest is eve-internal.
-  const compiled = manifest.tools.find((candidate: any) => candidate.name === "crm__add_note");
+  const compiled = manifest.tools.find((candidate: any) => candidate.name === mounted("add_note"));
   expect(compiled?.requiresApproval).toBe(true);
 });
 
@@ -153,10 +153,34 @@ function extensionInstructions(): string {
   return "";
 }
 
+/** The agent's mount of the package, wherever the agent put it and whatever it named it. */
+function mount(): { file: string; namespace: string } {
+  const root = "agent/extensions";
+  const candidates = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? [{ file: join(root, entry.name, "extension.ts"), namespace: entry.name }]
+          : entry.name.endsWith(".ts")
+            ? [{ file: join(root, entry.name), namespace: entry.name.slice(0, -3) }]
+            : [],
+      )
+    : [];
+  const found = candidates.find(
+    ({ file }) =>
+      existsSync(file) &&
+      new RegExp(`from\\s+["']${packageName}["']`).test(readFileSync(file, "utf8")),
+  );
+  if (found === undefined) throw new Error(`The agent does not mount ${packageName}.`);
+  return found;
+}
+
 function mountFile(): string {
-  const file = ["agent/extensions/crm.ts", "agent/extensions/crm/extension.ts"].find(existsSync);
-  if (file === undefined) throw new Error("The agent does not mount an extension as `crm`.");
-  return file;
+  return mount().file;
+}
+
+/** A tool's name in this agent: the mount's namespace, then the package's own name. */
+function mounted(tool: string): string {
+  return `${mount().namespace}__${tool}`;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- eve's JSON output is untyped here.
