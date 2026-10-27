@@ -22,26 +22,61 @@ const WRITE: GitHubShellInput = {
 };
 
 test("parses simple argv quoting without enabling a shell language", () => {
+  assert.deepEqual(parseCommand(`gh pr comment 1 --body "it's ready"`), [
+    "gh",
+    "pr",
+    "comment",
+    "1",
+    "--body",
+    "it's ready",
+  ]);
+});
+
+test("parses text that cannot expand without a shell into the argv bash produces", () => {
   for (const [command, argv] of [
-    [`gh pr comment 1 --body "it's ready"`, ["gh", "pr", "comment", "1", "--body", "it's ready"]],
+    ["gh api repos/{owner}/{repo}/pulls", ["gh", "api", "repos/{owner}/{repo}/pulls"]],
+    ["gh api graphql -f query={}", ["gh", "api", "graphql", "-f", "query={}"]],
+    ['gh pr view "{a,b}" \\{c,d}', ["gh", "pr", "view", "{a,b}", "{c,d}"]],
+    ["gh pr comment 1 --body Fix(parse)", ["gh", "pr", "comment", "1", "--body", "Fix(parse)"]],
     [
-      "gh api 'repos/{owner}/{repo}/pulls' --jq '.[] | .title'",
-      ["gh", "api", "repos/{owner}/{repo}/pulls", "--jq", ".[] | .title"],
-    ],
-    ['gh api "repos/{owner}/{repo}"', ["gh", "api", "repos/{owner}/{repo}"]],
-    [
-      'gh pr comment 1 --body "Fix (all tiers)"',
-      ["gh", "pr", "comment", "1", "--body", "Fix (all tiers)"],
-    ],
-    [
-      "gh pr comment 1 --body 'Run `pnpm test` for 5$ in {a,b}'",
-      ["gh", "pr", "comment", "1", "--body", "Run `pnpm test` for 5$ in {a,b}"],
+      "gh pr comment 1 --body '$(date) `id` ${HOME} $USER'",
+      ["gh", "pr", "comment", "1", "--body", "$(date) `id` ${HOME} $USER"],
     ],
     ["gh pr comment 1 --body \\$HOME", ["gh", "pr", "comment", "1", "--body", "$HOME"]],
+    [
+      'gh pr comment 1 --body "for 5$ or US$"',
+      ["gh", "pr", "comment", "1", "--body", "for 5$ or US$"],
+    ],
+    ["gh pr create \\\n  --title Fix", ["gh", "pr", "create", "--title", "Fix"]],
+    ['gh pr comment 1 --body "one \\\ntwo"', ["gh", "pr", "comment", "1", "--body", "one two"]],
+    ["gh pr comment 1 --body 'one \\\ntwo'", ["gh", "pr", "comment", "1", "--body", "one \\\ntwo"]],
+    ["gh pr view {..} {a..} {foo..bar}", ["gh", "pr", "view", "{..}", "{a..}", "{foo..bar}"]],
+    ["gh pr comment 1 --body x\\ ", ["gh", "pr", "comment", "1", "--body", "x "]],
+    ["\n gh pr view 1 \n", ["gh", "pr", "view", "1"]],
+    ["gh pr comment 1 --body a\u00a0b\rc", ["gh", "pr", "comment", "1", "--body", "a\u00a0b\rc"]],
+    ['gh pr comment 1 --body "C:\\path"', ["gh", "pr", "comment", "1", "--body", "C:\\path"]],
+    [
+      'gh pr comment 1 --body "\\$ \\" \\\\ \\`"',
+      ["gh", "pr", "comment", "1", "--body", '$ " \\ `'],
+    ],
+    ['gh pr comment 1 --body "one\ntwo"', ["gh", "pr", "comment", "1", "--body", "one\ntwo"]],
   ] as const) {
     assert.deepEqual(parseCommand(command), argv, command);
     assert.equal(githubShellApproval({ ...READ, command }), "not-applicable", command);
   }
+});
+
+test("sends backticks inside double quotes as literal Markdown", () => {
+  const command = 'gh pr comment 1 --body "Run `pnpm test` (all tiers)"';
+  assert.deepEqual(parseCommand(command), [
+    "gh",
+    "pr",
+    "comment",
+    "1",
+    "--body",
+    "Run `pnpm test` (all tiers)",
+  ]);
+  assert.equal(githubShellApproval({ ...READ, command }), "not-applicable");
 });
 
 test("names the refused syntax, its fix, and a stable denial code", () => {
@@ -50,12 +85,7 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
     ["gh pr view 1 && gh pr view 2", "chain", /"&&" cannot chain commands\. Send each command/u],
     ["gh pr view 1; env", "chain", /";" cannot chain commands/u],
     ["gh pr view 1\ngh pr view 2", "chain", /"\\n" cannot chain commands/u],
-    ["gh pr create \\\n  --title Fix", "line_continuation", /end of a line cannot continue it/u],
-    [
-      'gh pr comment 1 --body "one \\\ntwo"',
-      "line_continuation",
-      /Put the whole command on one line/u,
-    ],
+    ["gh pr view 1\\\\\ngh pr view 2", "chain", /"\\n" cannot chain commands/u],
     ["gh pr view 1 > out", "redirect", /">" cannot redirect/u],
     ["gh pr create --body-file - <<EOF", "heredoc", /"<<" cannot start a heredoc.*--body-file/u],
     [
@@ -68,23 +98,30 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
       "substitution",
       /"\$\(" is not expanded.*--body-file/u,
     ],
+    ["gh pr view $(printenv)", "substitution", /"\$\(" is not expanded/u],
+    ["gh pr view $\\\n(printenv)", "substitution", /"\$\(" is not expanded/u],
     [
       "gh pr view $((1 + 1))",
       "substitution",
       /"\$\(\(" is not evaluated\. Write the computed value/u,
     ],
+    ["gh pr comment 1 --body $'a\\nb'", "substitution", /quoting is not interpreted\. Use plain/u],
     ["gh pr comment 1 --body $'it\\'s'", "substitution", /"\$'" quoting is not interpreted/u],
-    ['gh pr comment 1 --body "Run `id`"', "substitution", /"`" must be in single quotes/u],
+    ["gh pr comment 1 --body `id`", "substitution", /"`" is not expanded.*single quotes/u],
     ['gh pr comment 1 --body "${BODY}"', "variable", /"\$\{" is not expanded/u],
-    ["gh pr view $PR_NUMBER", "variable", /"\$PR_NUMBER" is not expanded\..*write \\\$PR_NUMBER/u],
-    ['gh pr comment 1 --body "costs 5$"', "variable", /"\$" must be in single quotes/u],
     [
-      "gh api repos/{owner}/{repo}",
-      "brace_expansion",
-      /"\{" must be quoted\. Quote literal braces/u,
+      "gh pr view $PR_NUMBER",
+      "variable",
+      /"\$PR_NUMBER" is not expanded\. Write the value itself/u,
     ],
-    ["gh pr view {1,2}", "brace_expansion", /"\{" must be quoted/u],
-    ["gh pr comment 1 --body Fix(parse)", "subshell", /"\(" must be quoted/u],
+    ["gh pr view {1,2}", "brace_expansion", /"\{1,2\}" is not expanded into separate arguments/u],
+    ["gh pr view pr-{1..3}", "brace_expansion", /"\{1\.\.3\}" is not expanded/u],
+    ["gh pr view pr-{1.\\\n.3}", "brace_expansion", /"\{1\.\.3\}" is not expanded/u],
+    ["gh pr view {+1..3}", "brace_expansion", /"\{\+1\.\.3\}" is not expanded/u],
+    ["gh pr view {1..+3}", "brace_expansion", /"\{1\.\.\+3\}" is not expanded/u],
+    ["gh pr view {1..3..+1}", "brace_expansion", /"\{1\.\.3\.\.\+1\}" is not expanded/u],
+    ["gh pr view {a..c..+2}", "brace_expansion", /"\{a\.\.c\.\.\+2\}" is not expanded/u],
+    ['gh pr comment 1 --body "costs $5"', "variable", /"\$5" is not expanded\..*write \\\$5/u],
     ["GH_TOKEN=stolen gh auth status", "env_assignment", /"GH_TOKEN=" cannot set the environment/u],
     ["env GH_TOKEN=stolen gh auth status", "env_assignment", /"env" cannot set the environment/u],
     [
@@ -99,13 +136,13 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
       "git_option",
       /"-C" is not a subcommand\. Set the workingDirectory parameter to "internal-agents"/u,
     ],
+    ["git commit -m fix", "git_subcommand", /"git commit" is not an authenticated git command/u],
     [
       "git -c core.pager=cat push origin main",
       "git_option",
       /"-c" is not a subcommand\. Set .*git config/u,
     ],
     ["git --no-pager push origin main", "git_option", /never pages output/u],
-    ["git commit -m fix", "git_subcommand", /"git commit" is not an authenticated git command/u],
     ["git push -u origin main", "git_remote", /Put "-u" after the remote and refs/u],
     ["git push upstream main", "git_remote", /runs only against origin/u],
     [
@@ -118,6 +155,7 @@ test("names the refused syntax, its fix, and a stable denial code", () => {
       "unterminated_quote",
       /unterminated ' quote near .*An apostrophe ends single-quoted text/u,
     ],
+    ["gh pr comment 1 --body 'It's $(done) | next'", "unterminated_quote", /unterminated ' quote/u],
     ["gh pr comment 1 --body a\0b", "invalid_input", /NUL character/u],
   ] as const) {
     const denial = githubCommandDenial({ ...WRITE, command });
