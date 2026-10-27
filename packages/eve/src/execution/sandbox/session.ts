@@ -70,7 +70,7 @@ export function createConnectionSession<Extensions extends object>(
       workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
     });
     if (options.stdin === true && process.stdin === undefined) {
-      await process.kill();
+      await Promise.resolve(process.kill()).catch(() => undefined);
       throw new Error("This sandbox provider does not support `stdin` on spawn.");
     }
     return process;
