@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
@@ -112,5 +112,109 @@ it("reads a fresh invocation with no lines yet as working", async () => {
   serveRecords([]);
   expect(await execution().read({ invocationId: "invocation-1", auth })).toMatchObject({
     status: "working",
+  });
+});
+
+describe("statusMessage", () => {
+  const turn = {
+    type: "turn.started",
+    data: { turnId: "turn-1", follows: null, cause: { deliveryId: "delivery-1" } },
+    scope: { turnId: "turn-1" },
+  };
+  const run = {
+    type: "model.requested",
+    data: { owner: { turnId: "turn-1" }, runId: "run-1" },
+    scope: { turnId: "turn-1" },
+  };
+  const runSettled = {
+    type: "model.settled",
+    data: { outcome: "completed", runId: "run-1" },
+    scope: { runId: "run-1", turnId: "turn-1" },
+  };
+  const call = (callId: string, capability: object) => ({
+    type: "call.requested",
+    data: { callId, capability, input: {}, owner: { runId: "run-1" } },
+    scope: { runId: "run-1" },
+  });
+  const started = (callId: string) => ({ type: "call.started", data: { callId } });
+  const settled = (callId: string) => ({
+    type: "call.settled",
+    data: { callId, outcome: "completed", output: "done" },
+  });
+
+  async function statusMessageOf(...facts: object[]) {
+    serveRun("running");
+    serveRecords(
+      [{ type: "session.started", data: {} }, turn, run, ...facts].map((fact) => ({
+        at: "2026-10-16T00:00:00.000Z",
+        facts: [fact],
+      })),
+    );
+    const invocation = await execution().read({ invocationId: "invocation-1", auth });
+    expect(invocation?.status).toBe("working");
+    return invocation?.status === "working" ? invocation.statusMessage : undefined;
+  }
+
+  it("names a running call by its label, else by its tool name", async () => {
+    await expect(
+      statusMessageOf(
+        call("c-1", { kind: "tool", label: "Reading notes.md", name: "read" }),
+        started("c-1"),
+      ),
+    ).resolves.toBe("Reading notes.md");
+    await expect(
+      statusMessageOf(call("c-1", { kind: "tool", name: "list_files" }), started("c-1")),
+    ).resolves.toBe("List files");
+  });
+
+  it("names the latest running call and counts the others", async () => {
+    await expect(
+      statusMessageOf(
+        call("c-1", { kind: "tool", name: "read" }),
+        call("c-2", { kind: "tool", name: "search" }),
+        call("c-3", { kind: "tool", name: "list_files" }),
+        started("c-1"),
+        started("c-2"),
+        started("c-3"),
+      ),
+    ).resolves.toBe("List files (+2 more)");
+  });
+
+  it("drops a call once it settles and hides control calls", async () => {
+    await expect(
+      statusMessageOf(
+        call("c-1", { kind: "tool", name: "read" }),
+        call("c-2", { kind: "control", name: "wait" }),
+        started("c-1"),
+        started("c-2"),
+        settled("c-1"),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("keeps naming an approved call while it runs after the turn parked", async () => {
+    await expect(
+      statusMessageOf(
+        call("c-1", { kind: "tool", label: "Deploying", name: "deploy" }),
+        runSettled,
+        {
+          type: "interaction.opened",
+          data: {
+            interactionId: "i-1",
+            request: { kind: "approval", prompt: "Approve deploy?" },
+            subject: { callId: "c-1" },
+          },
+        },
+        {
+          type: "interaction.settled",
+          data: {
+            interactionId: "i-1",
+            outcome: "accepted",
+            answer: { interactionId: "i-1", optionId: "approve" },
+          },
+        },
+        started("c-1"),
+      ),
+    ).resolves.toBe("Deploying");
   });
 });
