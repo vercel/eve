@@ -1,3 +1,4 @@
+import { ACTION_RESULT_FAILED } from "#harness/call-outcome.js";
 import { traceStepIndex } from "#instrumentation/scope.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import {
@@ -303,11 +304,14 @@ export function createAgentToolInstrumentation(input: {
   };
 }
 
-/** A thrown error's class names a failure that carries no code of its own. */
+/** A thrown error's `name` types a failure that has no code of its own. */
 function toolErrorType({ errorCode, errorName }: InstrumentationCallSettledEvent) {
-  return errorCode === "ACTION_RESULT_FAILED" && errorName && errorName !== "Error"
-    ? errorName
-    : errorCode;
+  return errorCode === ACTION_RESULT_FAILED ? (thrownErrorType(errorName) ?? errorCode) : errorCode;
+}
+
+/** A thrown error's `name`, unless it is empty or `Error`, which classify nothing. */
+export function thrownErrorType(errorName: string | undefined): string | undefined {
+  return errorName && errorName !== "Error" ? errorName : undefined;
 }
 
 function toolContext(state: AgentActionTraceState): AgentToolContext {

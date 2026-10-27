@@ -26,6 +26,7 @@ import {
   withErrorContent,
 } from "#compiled/@vercel/agent-runs/otel.js";
 import { DIRECT_TOOL_CALL_ATTRIBUTE, DIRECT_TOOL_CALL_VALUE } from "#tracing/local/inspection.js";
+import { thrownErrorType } from "#tracing/eve/agent-tool-instrumentation.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import {
@@ -235,12 +236,12 @@ async function traced(
       // The conversation's rule: the error itself when outputs are recorded, else a generic one.
       span.fail(
         recordOutputs ? failure?.error : undefined,
-        failure === undefined ? result.outcome : undefined,
+        thrownErrorType(errorNameOf(failure?.error)) ?? result.error.code,
       );
     }
     return result;
   } catch (error) {
-    span.fail(recordOutputs ? error : undefined);
+    span.fail(recordOutputs ? error : undefined, errorNameOf(error));
     throw error;
   } finally {
     span.end();
@@ -311,6 +312,7 @@ function toolCallEvents(
         await hooks.publish({
           durationMs,
           error: capturesOutputs ? error : undefined,
+          errorName: errorNameOf(error),
           idempotencyKey,
           outcome: "failed",
           scope,
@@ -328,11 +330,17 @@ function toolCallEvents(
         cause: result.outcome === "rejected" ? result.cause : undefined,
         error:
           capturesOutputs && result.outcome === "failed" ? (failure ?? result.error) : undefined,
+        errorCode: result.outcome === "failed" ? result.error.code : undefined,
+        errorName: result.outcome === "failed" ? errorNameOf(failure) : undefined,
         output: capturesOutputs && result.outcome === "completed" ? result.output : undefined,
       });
       return result;
     },
   };
+}
+
+function errorNameOf(error: unknown): string | undefined {
+  return error instanceof Error ? error.name : undefined;
 }
 
 function setDefined(span: SpanWriter, attributes: Attributes): void {

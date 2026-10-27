@@ -65,6 +65,10 @@ function tool(name: string, execute: (input: { text?: string }) => unknown): Har
   };
 }
 
+class QuotaError extends Error {
+  override name = "QuotaError";
+}
+
 const tools = [
   tool(
     "lookup",
@@ -79,6 +83,9 @@ const tools = [
     // Logged failures record on the active span; their text must not be captured.
     logError(log, "the tool failed", new Error(`logged ${text}`));
     throw new Error(`thrown ${text}`);
+  }),
+  tool("over_quota", async () => {
+    throw new QuotaError("Over quota.");
   }),
 ];
 
@@ -404,5 +411,19 @@ describe("invokeTool content capture", () => {
     expect(toolSpan("explode").status.message).toBe(`thrown ${SENTINEL}`);
     const parentSpan = finished().find((candidate) => candidate.name === "platform request")!;
     expect(exported(parentSpan)).not.toContain(SENTINEL);
+  });
+});
+
+describe("invokeTool failure type", () => {
+  it.each([
+    { name: "QuotaError", tool: "over_quota", type: "QuotaError" },
+    { name: "Error", tool: "explode", type: "TOOL_FAILED" },
+  ])("types a thrown $name as $type, whatever the trace records", async ({ tool, type }) => {
+    for (const records of [false, true]) {
+      exporter.reset();
+      useTracing(() => ({ emit: true, recordInputs: records, recordOutputs: records }), records);
+      await invokeTool(runtime, tool, { text: "plain" }, { auth: alice });
+      expect(toolSpan(tool).attributes["error.type"], `outputs recorded: ${records}`).toBe(type);
+    }
   });
 });

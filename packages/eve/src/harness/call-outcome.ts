@@ -4,13 +4,16 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 // How a call's result reads on `call.settled`: an explicitly failed runtime result failed.
 // Error-shaped JSON can also be an ordinary successful tool value; its fields aren't a status.
 
+/** The code of a failed call whose result carries no code of its own. */
+export const ACTION_RESULT_FAILED = "ACTION_RESULT_FAILED";
+
 export function callOutcomeOf(result: RuntimeActionResult): {
   readonly outcome: "completed" | "failed";
   readonly error?: ErrorInfo;
 } {
   if (result.isError === true) {
     const error = readOutputError(result.output) ?? {
-      code: "ACTION_RESULT_FAILED",
+      code: ACTION_RESULT_FAILED,
       message: formatOutput(result.output),
     };
     return {

@@ -275,6 +275,39 @@ describe("invokeTool", () => {
     },
   );
 
+  it("names a thrown error on call.settled for a provider that records no outputs", async () => {
+    class QuotaError extends Error {
+      override name = "QuotaError";
+    }
+    const settled: InstrumentationEvent[] = [];
+    const hooks = createInstrumentationHooks([
+      {
+        events: { "call.settled": (event) => void settled.push(event) },
+        name: "observer",
+        tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      },
+    ]);
+    vi.stubGlobal(Symbol.for("eve.instrumentation-runtime"), {
+      forceFlush: async () => {},
+      hooks,
+      otelSettings: undefined,
+    });
+    const runtime = runtimeWith([
+      tool("charge", () => {
+        throw new QuotaError("Over quota.");
+      }),
+    ]);
+    await invokeTool(runtime, "charge", {}, { auth: alice });
+    expect(settled).toEqual([
+      expect.objectContaining({
+        error: undefined,
+        errorCode: "TOOL_FAILED",
+        errorName: "QuotaError",
+        outcome: "failed",
+      }),
+    ]);
+  });
+
   it("runs as auth, with initiator defaulting to auth", async () => {
     const bob: SessionAuthContext = { ...alice, principalId: "bob" };
     const seen: unknown[] = [];

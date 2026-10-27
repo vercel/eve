@@ -142,6 +142,11 @@ const approval = (callId: string): SessionEvent =>
 const turnSettled = (data: Record<string, unknown>): SessionEvent =>
   ({ data: { turnId: "turn_0", ...data }, scope: turn, type: "turn.settled" }) as SessionEvent;
 
+class QuotaError extends Error {
+  override name = "QuotaError";
+}
+class Unnamed extends Error {}
+
 /** Each span as `name outcome`, indented under its parent; `!` marks an error status. */
 function tree(spans: readonly ReadableSpan[]): string[] {
   const ids = new Set(spans.map((span) => span.spanContext().spanId));
@@ -315,21 +320,32 @@ describe("a session's spans, from its committed lines", () => {
 
   it.each([
     {
-      thrown: Object.assign(new Error("Token refused."), { name: "GitBrokerRefusedError" }),
-      type: "GitBrokerRefusedError",
+      case: "an error class that sets its name",
+      thrown: new QuotaError("Over quota."),
+      type: "QuotaError",
     },
-    { thrown: new Error("Token refused."), type: "ACTION_RESULT_FAILED" },
     {
+      case: "a subclass that keeps Error's name",
+      thrown: new Unnamed("Over quota."),
+      type: "ACTION_RESULT_FAILED",
+    },
+    { case: "a plain Error", thrown: new Error("Over quota."), type: "ACTION_RESULT_FAILED" },
+    {
+      case: "an error with an empty name",
+      thrown: Object.assign(new Error("Over quota."), { name: "" }),
+      type: "ACTION_RESULT_FAILED",
+    },
+    {
+      case: "a Node system error, whose code is ignored",
       thrown: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
       type: "ACTION_RESULT_FAILED",
     },
     {
-      thrown: Object.assign(new Error(JSON.stringify({ code: "X", message: "Token refused." })), {
-        name: "GitBrokerRefusedError",
-      }),
+      case: "a named error whose message carries a code",
+      thrown: new QuotaError(JSON.stringify({ code: "X", message: "Over quota." })),
       type: "X",
     },
-  ])("types a call that threw $thrown.name as $type", async ({ thrown, type }) => {
+  ])("types a call that threw $case as $type", async ({ thrown, type }) => {
     for (const records of [false, true]) {
       const { commit, spans } = session(() => ({
         emit: true,
