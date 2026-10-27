@@ -12,7 +12,7 @@ import type {
   SessionInputQueue,
   TurnSelection,
 } from "#execution/session/input-queue.js";
-import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import type { SessionInboxHandle, SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
@@ -32,7 +32,8 @@ export type NextTurnInstruction =
  * descendant deliveries leave nothing for the parent, so the wait continues.
  */
 export async function nextTurnDelivery(input: {
-  readonly inbox: SessionInboxReader;
+  readonly inbox: SessionInboxReader &
+    Partial<Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">>;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -65,7 +66,15 @@ export async function nextTurnDelivery(input: {
         cursor.serializedContext,
         latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
       );
-      if (followUp !== undefined && queue.enqueueDelivery(followUp) !== undefined) continue;
+      if (followUp !== undefined) {
+        // Behind an awaited handover, older input is queued but unreadable: wait for it, so the
+        // follow-up yields to it as it would to anything readable.
+        if (inbox.awaitingHandover === true && inbox.whenHandoverSettled !== undefined) {
+          await inbox.whenHandoverSettled();
+          continue;
+        }
+        if (queue.enqueueDelivery(followUp) !== undefined) continue;
+      }
     }
 
     if (!inbox.hasPending()) {

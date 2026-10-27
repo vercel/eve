@@ -689,18 +689,14 @@ describe("runReactions", () => {
       enterSessionProjectionAt(ctx, projection);
       await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
       // The delivery carries what the hook passed, and no sender; the prompt adds the note.
-      expect(readReactionsState(ctx).intents).toMatchObject([
-        { delivery: { payloads: [{ message: "Keep going." }] }, turnId: "turn-1" },
-      ]);
-      const [intent] = readReactionsState(ctx).intents ?? [];
-      expect(intent?.type === "follow-up" && intent.delivery).toMatchObject({
+      const { followUp } = readReactionsState(ctx);
+      expect(followUp?.turnId).toBe("turn-1");
+      expect(followUp?.delivery).toMatchObject({
         deliveryMetadata: [{ channelKind: "http", hook: "until-done" }],
         turnPolicy: "queue",
       });
-      expect(intent?.type === "follow-up" && intent.delivery).not.toHaveProperty("auth");
-      expect(intent?.type === "follow-up" && intent.delivery.payloads[0]).toEqual({
-        message: "Keep going.",
-      });
+      expect(followUp?.delivery).not.toHaveProperty("auth");
+      expect(followUp?.delivery.payloads).toEqual([{ message: "Keep going." }]);
       return ctx;
     }
 
@@ -730,7 +726,7 @@ describe("runReactions", () => {
       enterSessionProjectionAt(ctx, projection);
       await commit(ctx, { written: written(1, "turn.settled", cancelled) });
       expect(results).toEqual([{ queued: false, reason: "not-completed" }]);
-      expect(readReactionsState(ctx).intents ?? []).toEqual([]);
+      expect(readReactionsState(ctx).followUp).toBeUndefined();
     });
 
     const control = (control: string) =>
@@ -739,7 +735,7 @@ describe("runReactions", () => {
     it.each(["cancel", "reset"])("drops a follow-up when a %s arrives", async (kind) => {
       const ctx = await followedUp();
       await commit(ctx, { written: control(kind) });
-      expect(readReactionsState(ctx).intents).toEqual([]);
+      expect(readReactionsState(ctx).followUp).toBeUndefined();
     });
 
     it("drops a follow-up when the history is cleared", async () => {
@@ -752,7 +748,7 @@ describe("runReactions", () => {
           selects: null,
         }),
       });
-      expect(readReactionsState(ctx).intents).toEqual([]);
+      expect(readReactionsState(ctx).followUp).toBeUndefined();
     });
 
     it("keeps a follow-up through a compaction", async () => {
@@ -766,7 +762,7 @@ describe("runReactions", () => {
           selects: null,
         }),
       });
-      expect(readReactionsState(ctx).intents).toMatchObject([{ type: "follow-up" }]);
+      expect(readReactionsState(ctx).followUp?.turnId).toBe("turn-1");
     });
   });
 });

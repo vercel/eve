@@ -21,7 +21,7 @@ import type { ResolvedHookDefinition } from "#runtime/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
-import { followUpKey, followUpOf } from "../follow-up.js";
+import { followUpKey } from "../follow-up.js";
 import { queueCommands, reportReactionFailure, type Command } from "../intents.js";
 import { sessionFrameOf } from "../frame.js";
 import type { CommitContext, CommitReaction } from "../reaction.js";
@@ -127,7 +127,7 @@ async function runHandler(call: {
       ...requested.flatMap((command) =>
         command.type === "follow-up" && command.turnId === turnId ? [command.delivery] : [],
       ),
-      ...[followUpOf(state.intents, turnId)?.delivery ?? []].flat(),
+      ...(state.followUp?.turnId === turnId ? [state.followUp.delivery] : []),
     ];
     if (
       queued.some(({ deliveryMetadata }) =>

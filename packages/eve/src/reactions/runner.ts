@@ -36,7 +36,6 @@ import {
   sessionIdOf,
   type ReactionsState,
   type Slot,
-  type TurnIntent,
   writeLive,
   writeReactionsState,
 } from "./state.js";
@@ -391,7 +390,7 @@ function actOnCancels(
     (intent) => (intent.type === "cancel" || intent.type === "fail") && intent.turnId !== turnId,
   );
   const [first] = (readReactionsState(ctx).intents ?? []).filter(
-    (intent): intent is TurnIntent => intent.type === "cancel",
+    (intent) => intent.type === "cancel",
   );
   if (first === undefined || cancelTurn === undefined) return;
   const hook = reactions.find(({ id }) => id === first.reactionId)?.label ?? first.reactionId;
@@ -410,15 +409,13 @@ function actOnCancels(
  * A compaction keeps it: the conversation it follows up is still there, summarized.
  */
 function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
-  if (!(readReactionsState(ctx).intents ?? []).some((intent) => intent.type === "follow-up")) {
+  const { followUp, ...state } = readReactionsState(ctx);
+  if (followUp === undefined) return;
+  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
+  if (followUp.turnId === latestTurnId && !written.some(({ event }) => stopsFollowUps(event))) {
     return;
   }
-  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
-  const stopped = written.some(({ event }) => stopsFollowUps(event));
-  takeIntents(
-    ctx,
-    (intent) => intent.type === "follow-up" && (stopped || intent.turnId !== latestTurnId),
-  );
+  writeReactionsState(ctx, state);
 }
 
 function stopsFollowUps(event: WrittenEvent["event"]): boolean {

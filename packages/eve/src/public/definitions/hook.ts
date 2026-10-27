@@ -145,8 +145,8 @@ export interface HookFollowUp {
    * same turn share one next turn, each message its own payload, in hook order. It yields: any
    * other turn that starts first, a `session.cancel()`, a clear, or a reset drops it, so a
    * person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
-   * receipt: the delivery doesn't exist until the session admits it. Throws after the handler has
-   * settled.
+   * receipt: the delivery doesn't exist until the session admits it. Like other hook effects, it's
+   * lost if the step is interrupted before it's saved. Throws after the handler has settled.
    */
   followUp(message: MessageContent, options?: HookFollowUpOptions): HookFollowUpResult;
 }

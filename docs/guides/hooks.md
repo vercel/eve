@@ -292,7 +292,7 @@ export default defineHook({
 
 Only `turn.settled` and `*` handlers receive `ctx.followUp`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the follow-up names no sender and the turn runs as the session's current identity.
 
-The follow-up waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or reset, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and the model is told that a hook sent it. Bound loops yourself, as the example does.
+The follow-up waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or reset, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and the model is told that a hook sent it. Like other hook effects, a follow-up is lost if the step that settled the turn is interrupted before it's saved. Bound loops yourself, as the example does.
 
 A turn can be followed up when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and follow up with a correction. When several hooks follow up the same turn, their messages share the next turn.
 

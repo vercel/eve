@@ -6,7 +6,7 @@ import type { AlsContext } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import { REACTIONS_STATE_KEY, type FollowUpIntent } from "./follow-up.js";
+import { REACTIONS_STATE_KEY, type FollowUp } from "./follow-up.js";
 
 // The session's reactions as they stand, in its checkpointed state, never on the stream: one slot
 // per dynamic value with what's installed, memo results, and the commands hooks queued. Installed values that carry code live in an in-process
@@ -42,19 +42,18 @@ export interface ReactionsState {
   readonly at?: string;
   /** The runtime revision the latest step ran; memos made under another are discarded. */
   readonly revision?: string;
-  /** Commands hooks queued that the session hasn't acted on yet. */
+  /** Commands hooks queued for the running turn that the session hasn't acted on yet. */
   readonly intents?: readonly PendingIntent[];
+  /** The follow-up hooks queued for the turn that settled, until the session admits or drops it. */
+  readonly followUp?: FollowUp;
   /** The turn a hook's cancel stopped: a cancel acts once on its turn. */
   readonly cancelledTurnId?: string;
   /** The hook whose cancel stopped `cancelledTurnId`, which may follow the turn up. */
   readonly cancelledBy?: string;
 }
 
-/** A command a hook queued, waiting for the session to act on it. */
-export type PendingIntent = TurnIntent | FollowUpIntent;
-
-/** Acts on the running turn. */
-export interface TurnIntent {
+/** A command a hook queued for the running turn, waiting for the session to act on it. */
+export interface PendingIntent {
   /** The hook that queued it. */
   readonly reactionId: string;
   /** The occurrence it acts for, for diagnostics. */

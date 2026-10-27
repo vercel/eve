@@ -5,7 +5,6 @@ import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { followUpOf, type FollowUpIntent } from "./follow-up.js";
 import type { Reaction } from "./reaction.js";
 import { readReactionsState, writeReactionsState, type PendingIntent } from "./state.js";
 
@@ -32,20 +31,20 @@ export function queueCommands(
   if (commands.length === 0) return;
   const state = readReactionsState(ctx);
   const intents = [...(state.intents ?? [])];
+  let { followUp } = state;
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
     if (command.type === "follow-up") {
       // A hook joins the turn's follow-up; `ctx.followUp()` already refused one it can't join.
-      const index = intents.findIndex((queued) => queued === followUpOf(intents, command.turnId));
-      if (index === -1) intents.push({ ...command, occurrence, reactionId: reaction.id });
-      else {
-        const queued = intents[index] as FollowUpIntent;
-        intents[index] = {
-          ...queued,
-          delivery: coalesceDeliveries([queued.delivery, command.delivery]),
-        };
-      }
+      const queued = followUp?.turnId === command.turnId ? followUp : undefined;
+      followUp = {
+        delivery:
+          queued === undefined
+            ? command.delivery
+            : coalesceDeliveries([queued.delivery, command.delivery]),
+        turnId: command.turnId,
+      };
       changed = true;
       continue;
     }
@@ -60,7 +59,9 @@ export function queueCommands(
     });
     changed = true;
   }
-  if (changed) writeReactionsState(ctx, { ...state, intents });
+  if (changed) {
+    writeReactionsState(ctx, { ...state, intents, ...(followUp !== undefined && { followUp }) });
+  }
 }
 
 /** Removes and returns the waiting intents that match, because the session acted on them. */
@@ -120,5 +121,5 @@ export function takeTurnFailure(ctx: ContextContainer | undefined): string | und
     ctx,
     (intent) => intent.type === "fail" && intent.turnId === turnId,
   );
-  return failure?.type === "fail" ? failure.reason : undefined;
+  return failure?.reason;
 }
