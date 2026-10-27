@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import type { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -267,12 +267,16 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
   return sessionStorage().run({ context: session }, () => tool.execute(parsed, call));
 }
 
-/** The process-wide storage eve keeps its session context in, shared by every eve copy. */
+/** The process-wide storage eve creates on load for its session context, shared by every eve copy. */
 function sessionStorage(): AsyncLocalStorage<{ context: SessionState }> {
   const key = Symbol.for("eve.context-storage");
-  const global = globalThis as Record<symbol, AsyncLocalStorage<{ context: SessionState }>>;
-  global[key] ??= new AsyncLocalStorage();
-  return global[key];
+  const global = globalThis as Record<
+    symbol,
+    AsyncLocalStorage<{ context: SessionState }> | undefined
+  >;
+  const storage = global[key];
+  if (!storage) throw new Error("eve context storage is missing; load a graded module first.");
+  return storage;
 }
 
 /** A session's context values, as `defineState` reads and writes them. */
