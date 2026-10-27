@@ -72,8 +72,7 @@ test("bootstraps the selected source before a native agent starts", async () => 
 
 test("registers the setup of every case the native runner can run", async () => {
   const evalsRoot = new URL("../evals", import.meta.url).pathname;
-  // The iMessage case grades a synthetic provider world only the old local harness wrote.
-  for (const name of fixtureNames(evalsRoot).filter((name) => name !== "author-000-imessage")) {
+  for (const name of fixtureNames(evalsRoot)) {
     const authoringCase = await loadAuthoringCase(`${evalsRoot}/${name}`);
     const ids = [authoringCase.startingPoint.setup, authoringCase.setup]
       .filter(Boolean)
@@ -82,7 +81,7 @@ test("registers the setup of every case the native runner can run", async () => 
   }
 });
 
-test("installs the turns shim for the harness of a multi-turn case", async () => {
+test("installs the harness shim with a case's turns and setup environment", async () => {
   const writes = {};
   const setup = createNativeAuthoringSetup({
     packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
@@ -95,7 +94,7 @@ test("installs the turns shim for the harness of a multi-turn case", async () =>
       return JSON.stringify({
         startingPoint: "scaffolded",
         revision: "commit",
-        setupIds: [],
+        setupIds: ["imessage-v2"],
         prompts: ["First.", "Second."],
       });
     },
@@ -112,10 +111,14 @@ test("installs the turns shim for the harness of a multi-turn case", async () =>
 
   assert.equal(
     writes["/vercel/runtimes/node24/bin/codex"],
-    '#!/bin/sh\nexec node /opt/eve-authoring/turns.mjs "$0" "$@"\n',
+    '#!/bin/sh\nexec node /opt/eve-authoring/harness.mjs "$0" "$@"\n',
   );
-  assert.deepEqual(JSON.parse(writes["/opt/eve-authoring/turns.json"]), {
+  assert.deepEqual(JSON.parse(writes["/opt/eve-authoring/harness.json"]), {
     prompts: ["First.", "Second."],
+    environment: {
+      EVE_DEV_OFFICIAL_REGISTRY_URL: "http://127.0.0.1:4173",
+      EVE_AUTHORING_EVAL_DIRECTORY: "/tmp/photon",
+    },
   });
 });
 

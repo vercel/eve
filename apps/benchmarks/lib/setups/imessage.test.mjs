@@ -23,7 +23,6 @@ test("serves the deterministic iMessage registry item", async () => {
     write: async (path, content) => writes.set(path, content),
   };
 
-  await imessageSetup.onBootstrap(context);
   await imessageSetup.onSession(context);
 
   const registry = JSON.parse(writes.get("/tmp/photon-test/registry/registry.json"));
@@ -32,17 +31,13 @@ test("serves the deterministic iMessage registry item", async () => {
     {
       name: "channel/photon-imessage",
       type: "registry:item",
-      description: "Connect an eve agent to iMessage through a deterministic provider setup flow.",
+      description: "Connect an eve agent to iMessage through Photon.",
       registry: "http://127.0.0.1:4173/registry.json",
       addCommandArgument: "http://127.0.0.1:4173/channel/photon-imessage.json",
     },
   ]);
-  assert.equal(item.meta.eve.setup.command, "mock-imessage-setup");
-  // The absolute path must reach pnpm unprefixed; `./` in front of it would
-  // normalize to a relative path and link a directory that does not exist.
-  assert.ok(
-    commands.some((command) => command === "pnpm add /tmp/photon-test/mock-imessage-setup"),
-  );
+  assert.equal(item.meta.eve.setup.command, "photon-imessage-setup");
+  assert.ok(commands.includes("npm install --save-dev ./.fixtures/photon-imessage-setup"));
   assert.ok(commands.some((command) => command.includes("python3 -m http.server 4173")));
 });
 

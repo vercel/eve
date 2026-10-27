@@ -1,8 +1,3 @@
-export const WORKSPACE = "workspace";
-export const AGENT_EVAL_DIRECTORY = ".eve-grader";
+/** Where setups keep fixture state and append the world events graders read. */
 export const AUTHORING_EVAL_DIRECTORY = "/tmp/photon";
-export const WORLD_EVENTS_PATH = `${AUTHORING_EVAL_DIRECTORY}/world-events.jsonl`;
-export const SOURCE_ROOT = "/tmp/eve-source";
-export const SOURCE_ARCHIVE_PATH = "/tmp/eve-source.tar.gz";
-export const EVE_PACKAGE_PATH = "/tmp/eve-package/eve.tgz";
 export const AUTHORING_EVAL_DIRECTORY_ENV = "EVE_AUTHORING_EVAL_DIRECTORY";

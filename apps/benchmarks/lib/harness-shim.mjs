@@ -1,8 +1,9 @@
-// Runs in the eval sandbox in place of the harness CLI. agent-eval's runners send one
-// prompt, so when an invocation carries a case's first prompt, this sends every later
-// prompt as a follow-up in the same CLI session before returning. Any other invocation
-// (login, version checks, judge calls) passes straight through. Zero-dependency: the
-// sandbox only has node.
+// Runs in the eval sandbox in place of the harness CLI, with the case's setup environment,
+// so the coding agent and every command it runs inherit it. agent-eval's runners send one
+// prompt, so when an invocation carries a multi-turn case's first prompt, this sends every
+// later prompt as a follow-up in the same CLI session before returning. Any other
+// invocation (login, version checks, judge calls) passes straight through.
+// Zero-dependency: the sandbox only has node.
 
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, readFileSync, realpathSync } from "node:fs";
@@ -60,9 +61,13 @@ function main() {
   const [wrapper, ...args] = process.argv.slice(2);
   const cli = basename(wrapper);
   const binary = realBinary(cli, wrapper);
-  const { prompts } = JSON.parse(readFileSync(new URL("./turns.json", import.meta.url), "utf8"));
+  const { prompts, environment } = JSON.parse(
+    readFileSync(new URL("./harness.json", import.meta.url), "utf8"),
+  );
+  Object.assign(process.env, environment);
   // agent-eval passes PROMPT.md untrimmed.
-  const promptIndex = args.findIndex((arg) => arg.trim() === prompts[0].trim());
+  const promptIndex =
+    prompts.length < 2 ? -1 : args.findIndex((arg) => arg.trim() === prompts[0].trim());
   if (promptIndex === -1) {
     const result = spawnSync(binary, args, { stdio: "inherit" });
     if (result.error) throw result.error;

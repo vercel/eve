@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
 import { authoringStatePath, recordAuthoringEvent } from "./authoring-world.mjs";
@@ -8,6 +8,7 @@ import { authoringStatePath, recordAuthoringEvent } from "./authoring-world.mjs"
 const PROTOCOL_VERSION = 2;
 const STATE_FILE = authoringStatePath("mock-imessage-state");
 const EXPECTED_PHONE = process.env.EVE_AUTHORING_PHONE_NUMBER ?? "+15551234567";
+const PROJECT_ID = "prj_7Hq2vK9mT4";
 
 const { values } = parseArgs({
   options: {
@@ -72,18 +73,23 @@ if (!values["non-interactive"]) {
 } else {
   if (!state.projectCreated) {
     state.projectCreated = true;
-    record("project.created", { id: "mock-imessage-project" });
+    record("project.created", { id: PROJECT_ID });
   }
   if (!state.phoneRegistered) {
     state.phoneRegistered = true;
     record("phone.registered", { phoneNumber: EXPECTED_PHONE });
   }
   persist();
+  // Matches eve's portable-credentials path, which writes the project credentials here.
+  appendFileSync(
+    ".env.local",
+    `IMESSAGE_PROJECT_ID=${PROJECT_ID}\nIMESSAGE_PROJECT_SECRET=psk_live_4c1f9e7a2b8d6035e1a7c94f\n`,
+  );
   record("setup.completed");
   finish({
     kind: "completed",
     facts: [
-      { label: "Provider project", value: "mock-imessage-project" },
+      { label: "Photon project", value: PROJECT_ID },
       { label: "Phone number", value: EXPECTED_PHONE, kind: "phone" },
     ],
     deploymentRequired: true,

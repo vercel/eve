@@ -4,11 +4,14 @@ import type { Sandbox } from "@vercel/agent-eval";
 
 import type { AuthoringBenchmarkModel } from "./benchmark-config.js";
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
+import { AUTHORING_EVAL_DIRECTORY } from "./paths.js";
+import { imessageSetup } from "./setups/imessage.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
 import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
 import { vercelSetup } from "./setups/vercel.js";
 
 const sessionSetups: readonly AuthoringSetup[] = [
+  imessageSetup,
   inventoryOpenApiSetup,
   northstarFulfillmentSetup,
   vercelSetup,
@@ -28,7 +31,7 @@ const harnessCli: Record<AuthoringBenchmarkModel["harness"], string> = {
   Codex: "codex",
   OpenCode: "opencode",
 };
-const TURNS_ROOT = "/opt/eve-authoring";
+const SHIM_ROOT = "/opt/eve-authoring";
 
 /** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
 export const JUST_BASH_VERSION = "3.6.0";
@@ -58,8 +61,12 @@ export function createNativeAuthoringSetup(options: {
       "/usr/local/bin/eve": `#!/bin/sh\nexec npx --yes --allow-remote=all --package=${shellQuote(options.packageSpec)} eve "$@"\n`,
     });
     await run(sandbox, "chmod +x /usr/local/bin/eve", "eve canary wrapper");
-    if (bootstrap.prompts !== undefined) {
-      await installTurnsShim(sandbox, harnessCli[options.harness], bootstrap.prompts);
+    const environment = Object.assign({}, ...setups.map((setup) => setup.environment));
+    if (bootstrap.prompts !== undefined || Object.keys(environment).length > 0) {
+      await installHarnessShim(sandbox, harnessCli[options.harness], {
+        prompts: bootstrap.prompts ?? [],
+        environment,
+      });
     }
 
     if (bootstrap.startingPoint === "scaffolded") {
@@ -109,23 +116,26 @@ export function createNativeAuthoringSetup(options: {
 // agent-eval installs the harness CLI after setup, into npm's global bin. The shim goes
 // in the first PATH entry so the runner reaches it first, and finds the real CLI further
 // down PATH.
-async function installTurnsShim(
+async function installHarnessShim(
   sandbox: Sandbox,
   cli: string,
-  prompts: readonly string[],
+  config: { prompts: readonly string[]; environment: Record<string, string> },
 ): Promise<void> {
   // Ask node directly: agent-eval launches its runner the same way, not via a login shell.
   const path = await sandbox.runCommand("node", ["-p", "process.env.PATH.split(':')[0]"]);
   const binDirectory = path.stdout.trim();
   if (path.exitCode !== 0 || !binDirectory.startsWith("/")) {
-    throw new Error(`Could not resolve the sandbox PATH for the ${cli} turns shim.`);
+    throw new Error(`Could not resolve the sandbox PATH for the ${cli} shim.`);
   }
   await sandbox.writeFiles({
-    [`${TURNS_ROOT}/turns.mjs`]: readFileSync(new URL("./turns-shim.mjs", import.meta.url), "utf8"),
-    [`${TURNS_ROOT}/turns.json`]: `${JSON.stringify({ prompts })}\n`,
-    [`${binDirectory}/${cli}`]: `#!/bin/sh\nexec node ${TURNS_ROOT}/turns.mjs "$0" "$@"\n`,
+    [`${SHIM_ROOT}/harness.mjs`]: readFileSync(
+      new URL("./harness-shim.mjs", import.meta.url),
+      "utf8",
+    ),
+    [`${SHIM_ROOT}/harness.json`]: `${JSON.stringify(config)}\n`,
+    [`${binDirectory}/${cli}`]: `#!/bin/sh\nexec node ${SHIM_ROOT}/harness.mjs "$0" "$@"\n`,
   });
-  await run(sandbox, `chmod +x ${shellQuote(`${binDirectory}/${cli}`)}`, "turns shim");
+  await run(sandbox, `chmod +x ${shellQuote(`${binDirectory}/${cli}`)}`, "harness shim");
 }
 
 // A case whose setup is skipped would hand the model a workspace without its fixture.
@@ -146,7 +156,7 @@ function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSet
       : `${sandbox.getWorkingDirectory()}/${projectDirectory}`;
   return {
     workspace,
-    artifactsRoot: "/tmp/photon",
+    artifactsRoot: AUTHORING_EVAL_DIRECTORY,
     run: async (command, workingDirectory = workspace) =>
       run(sandbox, command, command, undefined, workingDirectory),
     write: async (path, content) =>

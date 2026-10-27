@@ -15,9 +15,8 @@ export interface AuthoringStartingPoint {
 export interface AuthoringSetup {
   /** Change this when setup behavior or fixture dependencies change. */
   readonly id: string;
-  readonly ports?: ReadonlyArray<number>;
+  /** Set for the coding agent and every command it runs. */
   readonly environment?: Readonly<Record<string, string>>;
-  readonly onBootstrap?: (context: AuthoringSetupContext) => Promise<void>;
   readonly onSession?: (context: AuthoringSetupContext) => Promise<void>;
 }
 

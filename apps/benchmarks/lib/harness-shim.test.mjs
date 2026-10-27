@@ -37,7 +37,7 @@ const harnesses = [
 
 for (const harness of harnesses) {
   test(`${harness.cli} sends follow-up turns in the session the first prompt started`, () => {
-    const root = mkdtempSync(join(tmpdir(), "eve-turns-shim-"));
+    const root = mkdtempSync(join(tmpdir(), "eve-harness-shim-"));
     try {
       const { run, calls } = install(root, harness, ["First.", "Second.", "Third."]);
 
@@ -56,7 +56,7 @@ for (const harness of harnesses) {
 }
 
 test("passes other invocations through and stops at a failed turn", () => {
-  const root = mkdtempSync(join(tmpdir(), "eve-turns-shim-"));
+  const root = mkdtempSync(join(tmpdir(), "eve-harness-shim-"));
   try {
     const { run, calls } = install(root, harnesses[0], ["First.", "Second."]);
     assert.equal(run(["--version"]).status, 0);
@@ -70,22 +70,36 @@ test("passes other invocations through and stops at a failed turn", () => {
   }
 });
 
+test("runs a one-turn case once with the setup environment", () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-harness-shim-"));
+  try {
+    const { run, calls } = install(root, harnesses[1], []);
+    assert.equal(run(harnesses[1].args("Only.")).status, 0);
+    assert.deepEqual(calls(), [harnesses[1].args("Only.")]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function install(root, harness, prompts) {
   const shimRoot = join(root, "opt");
   const shimBin = join(root, "shim-bin");
   const realBin = join(root, "real-bin");
   const log = join(root, "calls.jsonl");
   for (const directory of [shimRoot, shimBin, realBin]) mkdirSync(directory);
-  copyFileSync(new URL("./turns-shim.mjs", import.meta.url), join(shimRoot, "turns.mjs"));
-  writeFileSync(join(shimRoot, "turns.json"), JSON.stringify({ prompts }));
+  copyFileSync(new URL("./harness-shim.mjs", import.meta.url), join(shimRoot, "harness.mjs"));
+  writeFileSync(
+    join(shimRoot, "harness.json"),
+    JSON.stringify({ prompts, environment: { EVE_SETUP_VALUE: "from-setup" } }),
+  );
   executable(
     join(shimBin, harness.cli),
-    `#!/bin/sh\nexec node ${join(shimRoot, "turns.mjs")} "$0" "$@"\n`,
+    `#!/bin/sh\nexec node ${join(shimRoot, "harness.mjs")} "$0" "$@"\n`,
   );
   executable(
     join(realBin, harness.cli),
     `#!/usr/bin/env node\n` +
-      `require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n` +
+      `require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify([process.env.EVE_SETUP_VALUE, ...process.argv.slice(2)]) + "\\n");\n` +
       `console.log(${JSON.stringify(JSON.stringify(harness.event))});\n` +
       `process.exit(Number(process.env.FAKE_EXIT ?? 0));\n`,
   );
@@ -99,7 +113,12 @@ function install(root, harness, prompts) {
       readFileSync(log, "utf8")
         .split("\n")
         .filter(Boolean)
-        .map((line) => JSON.parse(line)),
+        .map((line) => JSON.parse(line))
+        .map(([environment, ...args]) => {
+          // Every call, follow-up or not, carries the setup environment.
+          assert.equal(environment, "from-setup");
+          return args;
+        }),
   };
 }
 

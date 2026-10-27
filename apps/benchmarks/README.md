@@ -104,8 +104,8 @@ results cannot be reproduced from committed source and should not be committed a
 Without `--models`, publication covers the complete configured model matrix. Use `--models` to
 publish or refresh selected model rows. The published suite currently includes weather-tool,
 new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
-schedule cases. The iMessage case remains available for local runs but is excluded from the
-published matrix, and so are the company-brain and ops-agent cases. Each
+schedule cases. The iMessage, company-brain, and ops-agent cases can be run by name but are
+excluded from the published matrix. Each
 cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
 when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
@@ -142,8 +142,11 @@ A case can call `send` more than once. Each later prompt goes to the coding agen
 the same session after it finishes the previous turn (`--continue` for Claude Code, `exec resume`
 for Codex, `--session` for OpenCode). The turns are a fixed script: the runner collects them before
 the run starts, so every `send` resolves to an empty reply and a case cannot branch on what the
-agent said. The iMessage case remains local-only because its grader reads a synthetic provider world
-that the native runner does not provide.
+agent said. `author-000-imessage` is the example: the agent has to ask for a phone number, which
+only arrives in the second turn.
+
+A setup's `environment` reaches the coding agent and every command it runs. The runner wraps the
+harness CLI to set it, the same wrapper that sends follow-up turns.
 
 ## Partial credit
 
