@@ -100,7 +100,7 @@ export type {
   SessionEventMeta,
   SessionStreamEvent,
 } from "#protocol/session-event.js";
-export { endsTurn, failureOf } from "#client/session-utils.js";
+export { endsTurn } from "#client/session-utils.js";
 
 export type { AskedCall } from "#protocol/session-projection/reader.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
