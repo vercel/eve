@@ -253,7 +253,7 @@ describe("adaptMultiplexedCommandToSandboxProcess", () => {
       });
     const open = () => {
       const command = {
-        closeStdin: async () => undefined,
+        closeStdin: vi.fn(async () => undefined),
         kill: vi.fn(async () => undefined),
         logs: logs(),
         wait: async () => ({ exitCode: 0 }),
@@ -278,6 +278,7 @@ describe("adaptMultiplexedCommandToSandboxProcess", () => {
     await vi.waitFor(() => expect(aborted.command.writeStdin).toHaveBeenCalledOnce());
     await aborted.writer.abort(new Error("done"));
     await expect(abortedWrite).rejects.toThrow("done");
+    expect(aborted.command.closeStdin).toHaveBeenCalledOnce();
 
     const controller = new AbortController();
     const command = {

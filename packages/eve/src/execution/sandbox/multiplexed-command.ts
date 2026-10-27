@@ -55,6 +55,7 @@ interface StdinCommand {
 /**
  * Writes go to the command in order. Aborting the writer or any of `signals`
  * cancels the pending write, so a stalled request cannot outlive the process.
+ * Aborting the writer still closes stdin, so EOF-driven commands can finish.
  */
 function createStdinStream(
   command: StdinCommand,
@@ -70,6 +71,10 @@ function createStdinStream(
     },
     async close() {
       await command.closeStdin({ abortSignal });
+    },
+    async abort() {
+      const stopped = AbortSignal.any([...signals]);
+      if (!stopped.aborted) await command.closeStdin({ abortSignal: stopped });
     },
   });
 }
