@@ -1,6 +1,8 @@
 export interface AuthoringSetupContext {
   readonly workspace: string;
   readonly artifactsRoot: string;
+  /** The eve package under test, as an npm install specifier. */
+  readonly packageSpec: string;
   run(command: string, workingDirectory?: string): Promise<void>;
   write(path: string, content: string): Promise<void>;
 }
