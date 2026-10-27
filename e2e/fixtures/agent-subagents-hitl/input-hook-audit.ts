@@ -3,9 +3,10 @@ import type { HookContext, HookEvent } from "eve/hooks";
 
 export interface InputHookObservation {
   readonly subscriber: "typed" | "wildcard";
-  readonly eventId: string;
+  /** The opening fact's position, as `line:index`. */
+  readonly position: string;
   readonly sessionId: string;
-  readonly requestIds: readonly string[];
+  readonly interactionId: string;
 }
 
 export const inputHookAudit = defineState<InputHookObservation[]>(
@@ -18,14 +19,14 @@ export function recordInputHook(
   event: HookEvent,
   ctx: HookContext,
 ): void {
-  if (event.type !== "input.requested") return;
+  if (event.type !== "interaction.opened") return;
   inputHookAudit.update((observations) => [
     ...observations,
     {
       subscriber,
-      eventId: event.meta.id,
+      position: `${ctx.position.line}:${ctx.position.index}`,
       sessionId: ctx.session.id,
-      requestIds: event.data.requests.map((request) => request.requestId),
+      interactionId: event.data.interactionId,
     },
   ]);
 }

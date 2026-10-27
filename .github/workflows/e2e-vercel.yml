@@ -83,7 +83,6 @@ jobs:
     env:
       EVE_E2E_MODEL: mock
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
-      EVE_SANDBOX_IMAGE_TAG: latest
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -110,6 +109,10 @@ jobs:
       - name: Install Vercel CLI
         if: needs.changes.outputs.relevant == 'true'
         run: pnpm add --global vercel@latest && vercel --version
+
+      - name: Resolve eve sandbox image
+        if: needs.changes.outputs.relevant == 'true'
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
@@ -164,6 +167,11 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
             scope_args=(--scope "$VERCEL_ORG_ID")
           fi
+          # Set only when the pinned image is unpublished; see .github/actions/sandbox-image.
+          image_env_args=()
+          if [ -n "${EVE_SANDBOX_IMAGE_TAG:-}" ]; then
+            image_env_args=(--env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG")
+          fi
 
           vercel link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           vercel env pull --yes --environment=preview "${token_args[@]}"
@@ -178,7 +186,7 @@ jobs:
             pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
           DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
-            --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
+            "${image_env_args[@]}" \
             "${token_args[@]}" | tail -n 1)"
 
           wait_for_target() {

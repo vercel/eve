@@ -12,7 +12,8 @@ export default defineEval({
       message,
       topic: "callback-guarded",
     });
-    const guarded = await t.target.attachSession(guardedId);
+    const guarded = t.target.attach(guardedId);
+    await guarded.nextTurn();
     guarded.succeeded();
     guarded.calledTool("callback_identity", {
       output: { implementation: "guarded", topic: "callback-guarded" },
@@ -22,7 +23,8 @@ export default defineEval({
       message,
       topic: "callback-open",
     });
-    const open = await t.target.attachSession(openId);
+    const open = t.target.attach(openId);
+    await open.nextTurn();
     open.succeeded();
     open.calledTool("callback_identity", {
       output: { implementation: "open", topic: "callback-open" },

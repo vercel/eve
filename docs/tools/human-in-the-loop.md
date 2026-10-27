@@ -9,7 +9,7 @@ Human-in-the-loop (HITL) is any point where the agent durably pauses and waits f
 - **Approvals** — a tool policy allows, denies, or pauses a call for a person to review. The agent decides to call the tool; the policy decides whether it runs automatically or needs a human decision.
 - **Questions** — the agent itself asks the user a clarifying question or a choice mid-turn, and parks until they answer.
 
-Both keep the turn open, and the stream reports `turn.waiting`. The run waits durably, for as long as it takes — seconds or days — and picks back up exactly where it left off once the answer arrives. Channels render the request for you.
+Both keep the turn open, and the stream reports `turn.paused` awaiting the person. The run waits durably, for as long as it takes — seconds or days — and picks back up exactly where it left off once the answer arrives. Channels render the request for you.
 
 ## Approvals
 
@@ -32,12 +32,12 @@ export default defineTool({
 });
 ```
 
-| Helper     | Behavior                                                                           |
-| ---------- | ---------------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                                 |
-| `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
-| `always()` | Require approval before every call.                                                |
-| `auto()`   | Ask a decision model whether to run the exact call or require user approval.       |
+| Helper     | Behavior                                                                     |
+| ---------- | ---------------------------------------------------------------------------- |
+| `never()`  | Never require approval (the default when omitted).                           |
+| `once()`   | Remember approval for this tool for the rest of the session.                 |
+| `always()` | Require approval before every call.                                          |
+| `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
@@ -62,7 +62,9 @@ approval: auto({
 });
 ```
 
-A reusable approval grant applies only after every matching request that is already pending has been resolved. If several calls to a `once()`-gated tool have each produced an approval prompt, approving one does not authorize the others; each visible prompt remains an independent decision. After those pending requests are resolved, later calls in the session are allowed automatically.
+Dynamic tools rebuild their policies when evaluated. Use [`ctx.memo()`](/docs/guides/dynamic-capabilities) to keep external JSON observations used to configure a policy.
+
+Each pending approval needs its own answer. A `once()` approval applies to later calls, not other already-open prompts.
 
 Use the object form of `approval` to replace the default `Approve <tool label>?` text with a tool-specific summary. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
 
@@ -86,7 +88,7 @@ export default defineTool({
 
 Channels render this prompt in their approval UI. Slack also includes the complete tool input in a collapsed **Tool input** block so an approver can inspect the original structured value.
 
-When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools, callId, abortSignal }` (connection tools also get `toolAnnotations`), and returns an AI SDK 7 approval status synchronously or as a promise. Use `abortSignal` for asynchronous policy work so cancellation stops it with the turn. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
+When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, callId, abortSignal }` (connection tools also get `toolAnnotations`), and returns an AI SDK 7 approval status synchronously or as a promise. Use `abortSignal` for asynchronous policy work so cancellation stops it with the turn. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
 
 ```ts
 approval: ({ session, toolInput }) => {
@@ -100,9 +102,15 @@ approval: ({ session, toolInput }) => {
 
 For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
 
-Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. A denied call never starts: it settles `call.settled` with `outcome: "rejected"`, `cause: { policy: "approval" }`, and a `TOOL_EXECUTION_DENIED` output, whether the policy denies it as the model calls it or when an approved call is checked again. A tool that runs and throws settles `failed`. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by a remembered `once()` approval records the same `{ policy: "approval" }`; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
-Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
+Approval is not an exactly-once guarantee for a charge or email. Give non-idempotent side effects their own idempotency keys.
+
+### Remember approval for a tool
+
+`once()` remembers the latest decision people gave its prompts for the resolved tool name, across turns and context clears, until the session ends. A remembered approval covers later calls to that tool regardless of their input; it does not clear a different tool. A later denial of a `once()` prompt for the tool replaces it, so the next call asks again. When one delivery answers several of those prompts, a denial among its answers stands. Approving a prompt asked by `always()` or by a policy that does not return `once()`'s decision remembers nothing, and so does a wrapping policy that calls `once()` but returns a different status. Existing pending prompts still need their own answers.
+
+A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions. When wrapping `once()` in another policy, forward the policy context and return its status object unchanged.
 
 ### Authorizing approval responses
 
@@ -139,12 +147,12 @@ export default defineTool({
 
 The `response` policy receives:
 
-- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `principal`: the authenticated principal whose turn requested the call, or `null` when that caller was unauthenticated or anonymous. eve captures `request.principal` when the approval is requested, so it stays the same while other people continue the session.
-- `response`: the submitted `decision`, `"approve"` or `"cancel"`, plus `principal`: the authenticated principal that submitted it, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity. The policy runs for both decisions, so a responder it rejects can neither approve nor cancel the call.
+- `request`: the stable `interactionId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `principal`: the authenticated principal whose turn requested the call, or `null` when that caller was unauthenticated or anonymous. eve captures `request.principal` when the approval is requested, so it stays the same while other people continue the session.
+- `response`: the submitted `decision`, `"approve"` or `"deny"`, plus `principal`: the authenticated principal that submitted it, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity. The policy runs for both decisions, so a responder it rejects can neither approve nor deny the call.
 - `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
 - `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
 
-Return `{ status: "allowed" }` to accept the decision. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can settle it. When a policy only cares who approves, return `{ status: "allowed" }` for `cancel` so anyone can still dismiss the request.
+Return `{ status: "allowed" }` to accept the decision. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can settle it. When a policy only cares who approves, return `{ status: "allowed" }` for `deny` so anyone can still dismiss the request.
 
 `session.initiator` is the person who started the session, and `request.principal` is the person who asked for this call. In a shared thread they can differ. Compare the full identity of `response.principal` with `request.principal` to let only the requester settle the call:
 
@@ -180,9 +188,7 @@ export default defineTool({
 });
 ```
 
-When the policy refuses a response, the approval stays pending and the turn stays held. The stream emits `approval.candidate` with `outcome: "pending"`, then `approval.candidate` with `outcome: "rejected"` and the policy's `reason`, then `turn.waiting` with `on: "input"` for the same `turnId`. It does not emit `session.waiting`, so a client that stops reading at a session boundary keeps reading through a refusal. The client finishes the submission and the approval prompt stays answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision.
-
-Every response a policy evaluates starts the same way, not only refusals. eve first records the response as an `approval.candidate` with `outcome: "pending"`, then runs the policy so slow policy work cannot lose the response. An allowed response then emits `approval.settled` and `input.resolved`. An approval without a `response` policy settles directly and emits no `approval.candidate`. A candidate can also end with `failed`, `timed-out`, or `stale`; inspect `approval.candidate` events for the reason.
+When the policy refuses a response, its `response.settled` reports `outcome: "refused"` and the approval stays open for another answer. Submitting an answer does not approve the call on its own: wait for `interaction.settled` to confirm the decision.
 
 ### Skipping approval for schedule-dispatched turns
 
@@ -225,36 +231,38 @@ The user can always type their own answer instead of picking an option, so the m
 ```ts title="agent/tools/ask_question.ts"
 import { askQuestion } from "eve/tools/ask_question";
 
-export default askQuestion();
+export default askQuestion;
 ```
 
 `ask_question` is an ordinary [workflow tool](/docs/tools/workflows) built on `ctx.ask()`. Write your own workflow tool with `ctx.ask()` when you need a different schema or want to act on the answer in the same call. Without any asking tool, the model asks in its reply text and the user's next message carries the answer.
 
-In a custom workflow tool, an answered `ctx.ask()` returns the authenticated responder's `authenticator`, `principalId`, and `principalType` when that identity is available. It does not include channel attributes. `ctx.session.auth.current` remains the run's auth snapshot; use the response's `responder` to identify who answered.
+In a custom workflow tool, an answered `ctx.ask()` returns the authenticated responder's `id`, `type`, and optional `issuer` when that identity is available. It does not include channel attributes. `ctx.session.auth.current` remains the run's auth snapshot; use the response's `responder` to identify who answered.
 
 ## How pause and resume works
 
 Approvals and questions share one protocol:
 
 1. A tool call needs approval, or a workflow tool such as `ask_question` calls `ctx.ask()`.
-2. eve emits an `input.requested` stream event carrying the pending requests.
-3. The run parks durably, for as long as it takes. The turn stays open: the stream emits `turn.waiting`, and after the answer the turn resumes under the same `turnId`. That `turn.waiting` carries `on: "input"`, since a person must act.
-4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
+2. eve emits an `interaction.opened` fact for each pending request.
+3. The run parks durably, for as long as it takes. The turn stays open: the stream emits `turn.paused` awaiting those interactions, and after the answer the turn runs on under the same `turnId`.
+4. The client answers with `answers` (structured, each naming its `interactionId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `deny`.
 
-To tell the model why a call was denied, send `text` with the `cancel` response, for example `{ requestId, optionId: "cancel", text: "Only the three-pack." }`. The model receives the note quoted in the denial result, marked as written by the person who denied the call, who may not be the user. The note is also visible to anyone who can read the session stream, in `input.resolved`.
+To tell the model why a call was denied, send `text` with the `deny` response, for example `{ interactionId, optionId: "deny", text: "Only the three-pack." }`. The model receives the note quoted in the denial result, marked as written by the person who denied the call, who may not be the user. The note is also visible to anyone who can read the session stream, in the `response.submitted` and `interaction.settled` facts.
 
-For `ctx.ask()` questions from tools and prompts proxied from subagents, a follow-up message answers the first open request, as described in [Several requests at once](#several-requests-at-once). The message must match an option, or the question must allow free text. Otherwise the message follows the session's `turnPolicy`. A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call the turn waits on, so a question such a call asked, such as `ask_question`'s, is withdrawn and resolves as `cancelled`. The model reads the message once those calls settle.
+For `ctx.ask()` questions from tools and prompts proxied from subagents, a follow-up message answers the first open request, as described in [Several requests at once](#several-requests-at-once). The message must match an option, or the question must allow free text. Otherwise the message follows the session's `turnPolicy`. A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call the turn waits on, so a question such a call asked, such as `ask_question`'s, is withdrawn: its interaction settles `withdrawn`. The model reads the message once those calls settle.
 
-Each request includes a `kind` discriminator: `tool-approval`, `question`, or
-`session-limit`. Clients should use `kind` to choose behavior and presentation.
-`requestId` identifies the request to answer, and `action.callId` identifies the
-tool call that raised it; neither encodes the request's semantics.
+On the stream, each interaction's `request.kind` is `approval`, `question`, `budget`, or `sign-in`,
+and its `subject` names the call, task, or turn it is about. Clients read the same interaction as an
+`Interaction`, with the same nested `request.kind`; use it to choose behavior and presentation, and keep a
+default branch, since a later release can add a kind. `interactionId` identifies the interaction to
+answer, and `call.callId`, when present, identifies the call it is about; neither encodes the
+interaction's semantics.
 
 The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
 
-When a subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
+When a subagent requests input, its parent session relays it as its own `interaction.opened`, with `origin` naming the child session and request, and `origin.call` naming the child's call. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
-A message from the parent agent to a subagent never answers the subagent's tool approval or session-limit request, even when its text matches an option such as `approve` or `continue`. Only a person's structured answer, routed through the parent session, settles these requests. The subagent still receives the parent's message as an ordinary message. It steers the turn past a pending approval, which resolves as `ignored`, and waits behind a session-limit request until a person answers it.
+A message from the parent agent to a subagent never answers the subagent's tool approval or session-limit request, even when its text matches an option such as `approve` or `continue`. Only a person's structured answer, routed through the parent session, settles these requests. The subagent still receives the parent's message as an ordinary message. It steers the turn past a pending approval, whose interaction settles `withdrawn`, and waits behind a session-limit request until a person answers it.
 
 Approval is consent only. An approved tool call runs with the requesting user's identity, connections, and credentials, including its policy recheck. The approver's access is never lent to the call. Subsequent tool calls in the turn also stay with the original owner.
 
@@ -279,11 +287,11 @@ export default defineTool({
 });
 ```
 
-For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve cancels the turn's pending approval, so the call doesn't run and `input.resolved` reports `outcome: "ignored"`, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Calls the person already approved in the same batch still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn withdraws its approval: the call doesn't run, `input.resolved` reports `outcome: "cancelled"`, and a later answer to it approves nothing.
+For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve withdraws every approval nobody has answered: each interaction settles `withdrawn`, its call settles `rejected` without running, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Approvals that already have an answer settle on it, so calls the person already approved still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn interrupts its approval: the call doesn't run, the interaction settles `interrupted`, and a later answer to it approves nothing.
 
 ### Several requests at once
 
-A turn can wait on more than one request, such as two `ctx.ask()` questions a workflow tool asks with `Promise.all`, or approvals for two tool calls the model made in one step. A follow-up message answers only the first open request: a [runtime limit](/docs/agent-config#runtime-limits) continuation prompt if one is open, and otherwise the request eve asked for first, in the order of its `input.requested` events.
+A turn can wait on more than one request, such as two `ctx.ask()` questions a workflow tool asks with `Promise.all`, or approvals for two tool calls the model made in one step. A follow-up message answers only the first open request: a [runtime limit](/docs/agent-config#runtime-limits) continuation prompt if one is open, and otherwise the request eve asked for first, in the order of its `interaction.opened` facts.
 
 The message answers that request when it matches one of its options, or when the request accepts free text. Otherwise the message is not an answer and follows the rules above. To answer several requests by text, send one message per request.
 
@@ -297,9 +305,9 @@ See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for
 
 Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels/overview).
 
-From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
+In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. See [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts).
 
-You can answer while a turn is running, such as the second approval of a batch while the first answer is still settling. The default message reducer waits for server confirmation before marking any input request answered. A submitted answer marks its request `responded` in `data.inputs` until `approval.settled` or `input.resolved` arrives; submitting a response alone does not resolve an approval, question, or session-limit prompt. Answering a request that is no longer open rejects without a server request. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
+You can answer while other work runs. An interaction stays `open` until `interaction.settled`; the frontend example shows how to query pending prompts.
 
 ## What to read next
 

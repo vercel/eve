@@ -1,12 +1,13 @@
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import { createHash } from "node:crypto";
 
-import type { ModelMessage } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { SessionAuth } from "#context/keys.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { DynamicResolveContext } from "#dynamic/definition.js";
+import type { SessionFrame } from "#dynamic/definition.js";
 import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/build-output-environment.js";
 import { MEMORY_DEFINITION_BRAND } from "#shared/memory-definition.js";
 import {
@@ -35,11 +36,7 @@ export interface MemoryScopeContext {
     readonly id: string;
     readonly auth: SessionAuth;
   };
-  readonly channel: {
-    readonly kind?: string;
-    readonly continuationToken?: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: InstrumentationChannel;
 }
 
 export type MemoryScopeDefinition =
@@ -85,21 +82,18 @@ export interface MemoryTurnStartedContext extends MemoryOperationContext {
   readonly turn: MemoryTurnContext;
 }
 
-export interface MemoryCompactionCompletedContext extends MemoryOperationContext {
-  readonly turn: MemoryTurnContext | null;
-  readonly compaction: { readonly modelId: string };
+export interface MemoryTurnCompletedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext;
 }
 
 export interface MemoryCompactionRequestedContext extends MemoryOperationContext {
+  /** The turn the compaction runs in, or `null` for a compaction between turns. */
   readonly turn: MemoryTurnContext | null;
   readonly compaction: {
     readonly modelId: string;
+    /** The input tokens that crossed the threshold, or `null` for a requested compaction. */
     readonly usageInputTokens: number | null;
   };
-}
-
-export interface MemoryTurnCompletedContext extends MemoryOperationContext {
-  readonly turn: MemoryTurnContext;
 }
 
 export type MemoryRecallHandler<TContext extends MemoryOperationContext> = (
@@ -110,12 +104,15 @@ export type MemoryCaptureHandler<TContext extends MemoryOperationContext> = (
   context: TContext,
 ) => void | Promise<void>;
 
-export interface MemoryToolsContext extends DynamicResolveContext {
+export interface MemoryToolsContext extends Pick<
+  SessionFrame,
+  "channel" | "conversation" | "session"
+> {
+  readonly abortSignal: AbortSignal;
   readonly memory: {
     readonly scope: MemoryScope;
     readonly slot: string;
   };
-  readonly turn: MemoryTurnContext;
 }
 
 export interface MemoryToolDefinition {
@@ -132,23 +129,23 @@ export type MemoryToolSet = Readonly<Record<string, MemoryToolDefinition>>;
 export interface MemoryProvider {
   readonly recall: {
     readonly "turn.started": MemoryRecallHandler<MemoryTurnStartedContext>;
-    readonly "compaction.completed"?: MemoryRecallHandler<MemoryCompactionCompletedContext>;
   };
   readonly capture?: {
+    /**
+     * Runs before compaction rewrites history, with the history it rewrites. When it throws, the
+     * compaction fails and history stays as it was.
+     */
     readonly "compaction.requested"?: MemoryCaptureHandler<MemoryCompactionRequestedContext>;
     readonly "turn.completed"?: MemoryCaptureHandler<MemoryTurnCompletedContext>;
   };
   readonly tools?: (context: MemoryToolsContext) => Promise<MemoryToolSet | null>;
 }
 
-export type MemoryVisibility = "scope" | "session";
-
 export interface MemoryDefinition {
   readonly description?: string;
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
-  readonly visibility?: MemoryVisibility;
 }
 
 export type DefinedMemory<T extends MemoryDefinition = MemoryDefinition> = T & {

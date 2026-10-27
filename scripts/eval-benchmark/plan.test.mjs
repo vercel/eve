@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolveModelReleases } from "./catalog.mjs";
 import { planLegs, selectBenchmark } from "./plan.mjs";
+import { evalFlags, releasePublishedAt, releaseTag } from "./release.mjs";
 
 const registry = {
   models: [
@@ -142,6 +143,53 @@ test("mock-only fixtures and hosted worlds plan without live legs", () => {
     ).live,
     [],
   );
+});
+
+test("a backfill plans the fixtures its release has and no hosted worlds", () => {
+  const selection = selectBenchmark({
+    registry: {
+      ...registry,
+      fixtures: ["agent-one", "agent-new"],
+      mockFixtures: ["agent-one", "agent-stress"],
+      mockWorlds: ["local", "postgres", { name: "vercel", fixtures: ["agent-stress"] }],
+      mockAttempts: 1,
+    },
+    matrix,
+    // The release predates agent-new.
+    findFixture: (name) => fixtures[name],
+    backfill: true,
+  });
+  assert.deepEqual(selection.absentFixtures, ["agent-new"]);
+  const { live, mock } = planLegs(selection);
+  assert.deepEqual([...new Set(live.map((leg) => leg.fixture))], ["agent-one"]);
+  assert.deepEqual(
+    mock.map((leg) => leg.leg_id),
+    [
+      "mock__agent-one__mock__local__1",
+      "mock__agent-one__mock__postgres__1",
+      "mock__agent-stress__mock__local__1",
+      "mock__agent-stress__mock__postgres__1",
+    ],
+  );
+});
+
+test("dates a backfill at its npm publish time and passes only flags its runner has", async () => {
+  const npm = (time) => async () => ({ ok: true, status: 200, json: async () => ({ time }) });
+  assert.equal(
+    await releasePublishedAt("0.61.0", npm({ "0.61.0": "2026-09-18T17:49:48.172Z" })),
+    "2026-09-18T17:49:48.172Z",
+  );
+  await assert.rejects(
+    releasePublishedAt("0.61.9", npm({})),
+    /npm has no publish time for eve 0.61.9/,
+  );
+  // Numeric, not lexical: 0.9.0 is older than 0.83.1.
+  assert.deepEqual(
+    ["0.9.0", "0.83.0", "0.83.1", "0.100.0"].map((version) => evalFlags(version).keepState),
+    [false, false, true, true],
+  );
+  assert.equal(releaseTag("0.61.0"), "eve@0.61.0");
+  assert.throws(() => releaseTag("eve@0.61.0"), /must be a published eve version/);
 });
 
 test("registry errors name the offending entry", () => {

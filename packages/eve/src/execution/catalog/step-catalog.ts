@@ -9,8 +9,9 @@
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { connectionToolName } from "#connections/ownership.js";
-import { buildDynamicTools } from "#context/build-dynamic-tools.js";
-import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
+import { dynamicConnectionVersions } from "#reactions/kinds/connection.js";
+import { buildDynamicSubagentTools } from "#reactions/kinds/subagent.js";
+import { dynamicTools } from "#reactions/kinds/tool.js";
 import type { ContextAccessor, ContextReader } from "#context/key.js";
 import { OfferedCatalogToolsKey, type OfferedCatalogTools } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -158,6 +159,7 @@ export function buildStepCatalog(input: {
   // context store may not be active.
   const registry = input.ctx?.get(ConnectionRegistryKey);
   const connections = registry?.getConnections() ?? [];
+  const connectionVersions = dynamicConnectionVersions(input.ctx);
   const skills = sessionSkills(input.ctx);
   // Entries hold only what this session sees, so a delegated session of the
   // same agent doesn't search for root-only entries it can't reach.
@@ -175,7 +177,9 @@ export function buildStepCatalog(input: {
   const toolEntry = (name: string): HarnessToolDefinition | undefined =>
     entries.get(name) ??
     advertised.get(name) ??
-    (registry === undefined ? undefined : connectionEntryNamed(name, registry, connections));
+    (registry === undefined
+      ? undefined
+      : connectionEntryNamed(name, registry, connections, connectionVersions));
   const describe = (definition: HarnessToolDefinition) => describeEntry(definition, input.endsTurn);
   const catalog: StepCatalog = {
     advertised,
@@ -268,14 +272,8 @@ function stepEntries(
   for (const subagent of buildDynamicSubagentTools(input.ctx).filter(visible)) {
     entries.set(subagent.name, subagent);
   }
-  // Dynamic tools override a same-named authored tool. The first definition of
-  // a name wins: step, then turn, then session.
-  const dynamicNames = new Set<string>();
-  for (const tool of buildDynamicTools(input.ctx).filter(visible)) {
-    if (dynamicNames.has(tool.name)) continue;
-    dynamicNames.add(tool.name);
-    entries.set(tool.name, tool);
-  }
+  // Dynamic tools override a same-named authored tool.
+  for (const tool of dynamicTools(input.ctx).filter(visible)) entries.set(tool.name, tool);
   return entries;
 }
 
@@ -296,12 +294,18 @@ function connectionEntryNamed(
   name: string,
   registry: ConnectionRegistry,
   connections: readonly ResolvedConnectionDefinition[],
+  versions: ReadonlyMap<string, string>,
 ): HarnessToolDefinition | undefined {
   for (const connection of connections) {
-    if (name === connection.connectionName) return connectionSignInEntry(registry, connection);
+    const version = versions.get(connection.connectionName);
+    const versioned = (entry: HarnessToolDefinition) =>
+      version === undefined ? entry : { ...entry, version };
+    if (name === connection.connectionName) {
+      return versioned(connectionSignInEntry(registry, connection));
+    }
     const prefix = connectionToolName(connection.connectionName, "");
     if (name.length > prefix.length && name.startsWith(prefix)) {
-      return connectionEntry(registry, connection, name.slice(prefix.length));
+      return versioned(connectionEntry(registry, connection, name.slice(prefix.length)));
     }
   }
   return undefined;

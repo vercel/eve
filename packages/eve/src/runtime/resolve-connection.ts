@@ -138,7 +138,7 @@ export async function resolveConnectionDefinition(
       const callbacks = normalizeMcpClientConnectionDefinition(
         resolvedRecord,
         `Connection "${definition.connectionName}":`,
-      ).experimental_events;
+      ).experimental?.events;
       const authorization =
         typeof result.authorization === "object" ? result.authorization : undefined;
       if (
@@ -146,7 +146,7 @@ export async function resolveConnectionDefinition(
         authorization?.vercelConnect?.experimental_events === undefined
       )
         throw new ResolveAgentError(
-          `Connection "${definition.connectionName}": experimental_events requires a static Connect auth provider with the events bridge.`,
+          `Connection "${definition.connectionName}": experimental.events requires a static Connect auth provider with the events bridge.`,
           { logicalPath: definition.logicalPath, sourceId: definition.sourceId },
         );
       result.experimental_events = {
@@ -240,7 +240,7 @@ export function resolveDynamicConnectionValue(
   }
 
   const normalized = normalizeMcpClientConnectionDefinition(value, message);
-  if (normalized.experimental_events !== undefined) {
+  if (normalized.experimental?.events !== undefined) {
     throw new Error(
       `${message} experimental_events requires a statically authored connection so eve can mount its receiver at build time.`,
     );

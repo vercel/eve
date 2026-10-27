@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 
 /**
  * Buffered result of one `docker …` invocation.
@@ -29,6 +29,7 @@ export interface DockerRunOptions {
  * shape so the sandbox engine can adapt it directly.
  */
 export interface DockerProcess {
+  readonly stdin?: WritableStream<Uint8Array>;
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   wait(): Promise<{ exitCode: number }>;
@@ -44,7 +45,10 @@ export interface DockerCli {
   /** Runs `docker <args>` to completion, buffering stdout/stderr. */
   run(args: readonly string[], options?: DockerRunOptions): Promise<DockerCommandResult>;
   /** Spawns `docker <args>` with streaming stdout/stderr. */
-  stream(args: readonly string[], options?: { readonly signal?: AbortSignal }): DockerProcess;
+  stream(
+    args: readonly string[],
+    options?: { readonly signal?: AbortSignal; readonly stdin?: boolean },
+  ): DockerProcess;
 }
 
 /**
@@ -188,8 +192,9 @@ export function createDockerCli(): DockerCli {
       throwIfAborted(options.signal);
       const child = spawn(resolveDockerExecutable(), args, {
         signal: options.signal,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
+      if (options.stdin !== true) child.stdin.end();
 
       const exit = new Promise<number>((resolve, reject) => {
         child.on("error", (error) => reject(adaptSpawnError(error)));
@@ -200,6 +205,10 @@ export function createDockerCli(): DockerCli {
       exit.catch(() => {});
 
       return {
+        stdin:
+          options.stdin === true
+            ? (Writable.toWeb(child.stdin) as WritableStream<Uint8Array>)
+            : undefined,
         stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
         stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
         async wait() {

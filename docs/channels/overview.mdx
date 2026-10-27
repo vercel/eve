@@ -34,6 +34,16 @@ authorization. See the [default eve HTTP channel](./eve#audience) for its
 mapping, or [custom channels](./custom#conversation-audience) to classify your
 own.
 
+## Sign-ins
+
+When a tool needs a connection the person hasn't authorized, the built-in channels show a sign-in. Its link or code is a credential: whoever completes it connects their account. So it appears only where the person signing in alone reads it:
+
+- In a conversation that's theirs (a direct message, a private chat, an SMS thread), eve posts the sign-in there.
+- In a group, eve sends it privately where the platform can (Slack and Chat SDK adapters with ephemeral messages; Telegram once the requester presses **Authorize**) and posts a status without the link. Otherwise the status asks the person to continue in a direct message with the agent. Teams channels and Discord servers and group DMs work this way. On GitHub, where every comment is public, the status says the person who asked must sign in.
+- When the sign-in ends, eve edits the status where it can, or posts how it ended, and once the person connects, shows the turn resuming.
+
+Linear uses its native sign-in prompt. A sign-in an approval's responder needs appears with that approval's prompt instead.
+
 ## Overlapping messages
 
 Channels default to `turnPolicy: "steer"`. Before assistant answer output or local tool execution begins, a message can interrupt pending model generation and continue the same turn with the correction. Executing tools finish and checkpoint their results before steering reaches the next model call. After answer output starts, steering waits for the next committed workflow boundary. The turn ID stays the same.
@@ -53,7 +63,7 @@ export default defineChannel({
 
 Adjacent queued messages can combine into one turn only when their full auth contexts match, including identity, issuer, authenticator, and authorization attributes. Their attachments and context stay in payload order. A different auth context ends the batch; eve does not regroup messages across intervening senders. Anonymous deliveries stay separate. Turns still share the session's conversation history.
 
-`from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `inputResponses` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
+`from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `answers` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
 
 Events rejected before `send(...)`, such as invalid signatures or filtered mentions, never reach the active turn. A delivery already sent to the session can interrupt pending generation before the channel's `deliver` hook processes it. If that hook ignores the correction, eve resumes the original request with its original auth, delivery provenance, and channel state.
 

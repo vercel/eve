@@ -37,7 +37,7 @@ export default defineEval({
     const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
     t.calledTool("get_weather");
-    t.check(turn.message, includes("Sunny"));
+    t.check(turn.reply, includes("Sunny"));
   },
 });
 ```
@@ -50,15 +50,15 @@ Every `evals/` directory needs exactly one `evals.config.ts` at its root. It dec
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
   judge: { model: "typesafe-ai/jev" },
-  reporters: [Braintrust({ projectName: "my-agent" })],
+  reporters: [braintrustReporter({ projectName: "my-agent" })],
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, `timeoutMs`, and `repeat` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. `repeat` runs every eval several times to measure repeatability; see [Repeat evals](./running#repeat-evals). CLI flags (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take precedence over the config defaults.
+Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, `timeoutMs`, and `repeat` round out the defaults. Config `reporters` observe every eval in the run, so set one `braintrustReporter()` here instead of adding it to each eval. `repeat` runs every eval several times to measure repeatability; see [Repeat evals](./running#repeat-evals). CLI flags (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take precedence over the config defaults.
 
 ### Run setup and teardown
 
@@ -145,7 +145,7 @@ model: mockModel({
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
-- **Drive** the agent: `t.session()` creates an empty session; `t.send(...)` creates a session with its first message and returns a turn. Continue through `turn.session.send(...)`. Session handles also expose `start`, `cancel`, `respond`, `respondAll`, `sendFile`, and `requireInputRequest`. Read output from `turn.message`, and conversation state from `turn.session`. See [Cases](./cases).
+- **Drive** the agent: `t.session()` creates an empty session; `t.send(...)` creates a session with its first message and returns a turn. Continue through `turn.session.send(...)`. Session handles also expose `start`, `cancel`, `respond`, `respondAll`, `sendFile`, and `requireInteraction`. Read output from `turn.reply`, and conversation state from `turn.session`. See [Cases](./cases).
 - **Assert** with three surfaces, covered next.
 
 ## Three assertion surfaces
@@ -153,7 +153,7 @@ model: mockModel({
 Each surface matches a genuinely different kind of judgment:
 
 - **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
-- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
+- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.reply, includes("sunny"))`. Grade `turn.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
 - **`t.score(evaluation)`** records a score, such as a length ratio or an evaluator's result. Chain `.label(key)` to name it, and `.gate(threshold)` or `.atLeast(threshold)` to let it decide the eval. See [Assertions](./assertions#scores-with-tscore).
 - **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
 
@@ -171,7 +171,7 @@ t.succeeded(); // gate
 t.calledTool("get_weather").soft(); // record as a metric, don't gate
 t.judge("cites a source"); // soft, tracked (no threshold)
 t.judge("The response is consistent with output.reference.", {
-  on: { response: turn.message ?? "", reference },
+  on: { response: turn.reply ?? "", reference },
 }).atLeast(0.7); // soft, gated under --strict at 0.7
 ```
 

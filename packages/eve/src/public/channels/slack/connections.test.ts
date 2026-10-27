@@ -41,7 +41,7 @@ describe("buildAuthRequiredPublicText", () => {
 
 describe("buildAuthCompletedText", () => {
   it("renders the success outcome with a check glyph", () => {
-    expect(buildAuthCompletedText({ displayName: "Linear", outcome: "authorized" })).toBe(
+    expect(buildAuthCompletedText({ displayName: "Linear", outcome: "accepted" })).toBe(
       ":white_check_mark: Linear connected",
     );
   });
@@ -56,10 +56,10 @@ describe("buildAuthCompletedText", () => {
     expect(
       buildAuthCompletedText({
         displayName: "Linear",
-        outcome: "timed-out",
+        outcome: "expired",
         reason: "the code expired",
       }),
-    ).toBe(":x: Linear authorization timed-out (the code expired)");
+    ).toBe(":x: Linear authorization timed out (the code expired)");
   });
 
   it("reports a cancelled sign-in plainly", () => {

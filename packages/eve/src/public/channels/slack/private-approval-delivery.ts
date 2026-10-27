@@ -1,15 +1,15 @@
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
-import { renderInputRequestPostParts, type SlackHitlRoute } from "#public/channels/slack/hitl.js";
+import { renderInteractionPostParts, type SlackHitlRoute } from "#public/channels/slack/hitl.js";
 import type { SlackPendingApprovalCard } from "#public/channels/slack/slackChannel.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
 
 const log = createLogger("slack.private-approval-delivery");
 type PrivateApprovalSlack = Pick<SlackHandle, "channelId" | "request" | "threadTs">;
 
-export async function deliverPrivateInputRequest(input: {
+export async function deliverPrivateInteraction(input: {
   readonly previewMessageTs: string;
-  readonly request: InputRequest;
+  readonly request: Interaction;
   readonly reviewer: string;
   readonly slack: PrivateApprovalSlack;
 }): Promise<SlackPendingApprovalCard> {
@@ -24,7 +24,7 @@ export async function deliverPrivateInputRequest(input: {
     channelId: input.slack.channelId,
     threadTs: input.slack.threadTs,
   };
-  const parts = renderInputRequestPostParts(input.request, route);
+  const parts = renderInteractionPostParts(input.request, route);
   const postedMessageIds: string[] = [];
 
   try {

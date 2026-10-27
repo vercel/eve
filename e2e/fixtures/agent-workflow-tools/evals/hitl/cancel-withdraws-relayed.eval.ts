@@ -10,18 +10,18 @@ export default defineEval({
   tags: ["hitl", "relayed", "cancel"],
   async test(t) {
     const parked = await t.send("WORKFLOW-CONFIRM-START");
-    const request = parked.session.requireInputRequest({ toolName: "confirm_deploy" });
+    const request = parked.session.requireInteraction({ toolName: "confirm_deploy" });
     const startIndex = parked.session.state.streamIndex;
 
     await parked.session.cancel();
-    const cancelled = await t.target.watchTurn(parked.sessionId, { startIndex }).result();
-    cancelled.event("input.resolved", {
+    const cancelled = await t.target.attach(parked.sessionId, { startIndex }).watch().result();
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { resolutions: [{ outcome: "cancelled", requestId: request.requestId }] },
+      data: { interactionId: request.interactionId, outcome: "interrupted" },
     });
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "confirm_deploy" } },
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("call.settled", {
+      data: { callId: request.call?.callId, outcome: "completed" },
     });
   },
 });

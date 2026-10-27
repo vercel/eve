@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -15,7 +16,7 @@ import {
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import { listLocalTraces } from "#tracing/local/trace-reader.js";
-import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
+import type { InstrumentationScope } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
@@ -60,15 +61,17 @@ describe("local instrumentation runtime", () => {
       frameworkVersion: "test",
       serviceName: "test-agent",
     });
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      functionId: "weather",
-      rootSessionId: "session-1",
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
+    const scope: InstrumentationScope = instrumentationScope(
+      {
+        runId: "session-1:turn-1:0:0",
+        attempt: 0,
+        functionId: "weather",
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+      },
+      0,
+    );
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
     const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
@@ -132,10 +135,11 @@ describe("local instrumentation runtime", () => {
         callId: "tool-1",
         idempotencyKey: actionKey,
         input: {},
-        kind: "tool-call",
+        capability: { kind: "tool", name: "weather" },
+        frameworkTool: false,
         toolName: "weather",
         scope,
-        type: "tool.call.started",
+        type: "call.requested",
       });
       await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
         {
@@ -165,27 +169,29 @@ describe("local instrumentation runtime", () => {
       await hooks.publish({
         idempotencyKey: actionKey,
         outcome: "completed",
-        output: { output: { temperature: 72 }, type: "result" },
+        output: { temperature: 72 },
         scope,
-        type: "tool.call.completed",
+        type: "call.settled",
       });
       await hooks.publish({
+        outcome: "completed",
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
-        type: "step.attempt.completed",
+        type: "model.settled",
       });
       await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
-        type: "turn.completed",
+        // Settling the turn emits the turn span with the pre-allocated id.
+        outcome: "completed",
+        type: "turn.settled",
       });
-      // Settling the turn emits the turn span with the pre-allocated id.
       await hooks.publish({
         idempotencyKey: sessionIdempotencyKey("session-1"),
         sessionId: "session-1",
-        turnId: "turn-1",
-        type: "session.waiting",
+        outcome: "completed",
+        type: "session.ended",
       });
     };
     await runtimeContext.with(activeContext, () =>

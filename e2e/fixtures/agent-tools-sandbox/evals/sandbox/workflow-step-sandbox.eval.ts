@@ -15,7 +15,7 @@ export default defineEval({
     turn.expectOk();
 
     t.succeeded();
-    t.calledSubagent("step-sandbox", { count: 1, status: "completed" });
-    t.check(turn.message, includes(NOTE));
+    t.calledAgent("step-sandbox", { count: 1, status: "completed" });
+    t.check(turn.reply, includes(NOTE));
   },
 });

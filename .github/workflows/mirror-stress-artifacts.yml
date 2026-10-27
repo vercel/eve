@@ -1,0 +1,89 @@
+name: Mirror Stress Artifacts
+
+# Copies e2e-vercel's release-PR `workflow-stress-performance` artifacts to the
+# benchmark Blob store before GitHub's 30-day retention deletes them
+# (scripts/eval-benchmark/mirror-stress-artifacts.mjs), then derives a
+# benchmark run from each release build
+# (scripts/eval-benchmark/import-stress-artifacts.mjs). Both skip what they
+# already wrote. Each release imports its build once Release finishes; the
+# daily run catches anything that missed, such as a renamed release PR. A
+# metric definition change on main re-derives every release under the new
+# metrics version right away: eve-evals reads only the newest import root, so
+# waiting for the daily run would leave it without the hosted history.
+on:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # METRICS_VERSION lives in standard.mjs; any definition change bumps it.
+    paths:
+      - scripts/eval-metrics/**
+  # Runs after Release, never inside it, so it cannot block or slow a publish.
+  # By then the release PR is merged and its final head's e2e-vercel run, a
+  # required check, has uploaded the archive. workflow_run runs main's copy of
+  # this file, and only Release on main triggers it.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  mirror:
+    name: mirror
+    # Release runs on every push to main; only a release PR merge adds a build.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      startsWith(github.event.workflow_run.head_commit.message, 'Version Packages')
+    # On the job, not the workflow: a skipped run must not take the place of a
+    # pending release run.
+    concurrency:
+      group: mirror-stress-artifacts
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Stress imports publish only from refs/heads/main (got ${GITHUB_REF})."
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The import reads each release's merge commit on main.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Mirror release-PR stress artifacts
+        id: mirror
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+        run: node scripts/eval-benchmark/mirror-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY"
+
+      - name: Import release builds as benchmark runs
+        # One archive that failed to mirror should not hold back the rest, but
+        # the import must not run when an earlier step skipped the mirror.
+        if: ${{ !cancelled() && steps.mirror.outcome != 'skipped' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+        run: node scripts/eval-benchmark/import-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY"

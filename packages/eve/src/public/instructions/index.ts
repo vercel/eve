@@ -6,9 +6,17 @@
 export {
   defineDynamic,
   defineInstructions,
-  type DynamicInstructionsEvents,
   type DynamicInstructionsResult,
   type InstructionsDefinition,
 } from "#public/definitions/instructions.js";
 
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicContext,
+  DynamicKey,
+  DynamicModelContext,
+  DynamicSentinel,
+  DynamicTurn,
+  Memo,
+  Occurrence,
+  SessionFrame,
+} from "#dynamic/definition.js";

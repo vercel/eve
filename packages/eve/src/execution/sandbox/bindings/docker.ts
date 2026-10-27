@@ -186,10 +186,10 @@ export function createDockerSandboxProvider(
   }
 
   return {
-    async onSessionEnd(context, state, { abortSignal }) {
+    async onSessionEnd(context, state, { signal }) {
       await ensureDaemon();
       const containerName = state?.containerName ?? dockerSessionName(context);
-      const removed = await cli.run(["rm", "-f", containerName], { signal: abortSignal });
+      const removed = await cli.run(["rm", "-f", containerName], { signal });
       if (removed.exitCode !== 0 && !/no such container/iu.test(removed.stderr)) {
         expectDockerSuccess(removed, `delete sandbox session container "${containerName}"`);
       }

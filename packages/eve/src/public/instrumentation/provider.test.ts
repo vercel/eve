@@ -4,13 +4,6 @@ import {
   defineInstrumentation,
   disableInstrumentation,
   isInstrumentationDisabled,
-  isInstrumentationProvider,
-  type InstrumentationMemoryOperation,
-  type InstrumentationMemoryOperationCompletedEvent,
-  type InstrumentationMemoryOperationFailedEvent,
-  type InstrumentationMemoryOperationStartedEvent,
-  type InstrumentationMemoryOperationTerminalEvent,
-  type InstrumentationMemoryRecord,
 } from "#public/instrumentation/index.js";
 
 describe("defineInstrumentation", () => {
@@ -40,11 +33,13 @@ describe("defineInstrumentation", () => {
   it("infers terminal handler events from union-typed discriminants", () => {
     const provider = defineInstrumentation({
       events: {
-        "tool.call.completed": (event) => void [event.acceptedAtMs, event.outcome, event.usage],
-        "tool.call.failed": (event) => void [event.acceptedAtMs, event.errorCode, event.outcome],
-        "session.completed": (event) => void event.sessionId,
-        "step.attempt.completed": (event) => void event.scope,
-        "turn.failed": (event) => void event.error,
+        "call.settled": (event) => void [event.acceptedAtMs, event.errorCode, event.outcome],
+        "session.ended": (event) => void event.sessionId,
+        "model.settled": (event) => void event.scope,
+        "memory.operation.settled": (event) => {
+          if (event.outcome === "completed") void event.outputRecords;
+        },
+        "turn.settled": (event) => void event.error,
       },
     });
 
@@ -60,8 +55,8 @@ describe("defineInstrumentation", () => {
   it("exposes durable input request and resolution events", () => {
     const provider = defineInstrumentation({
       events: {
-        "input.requested": (event) => void event.action.callId,
-        "input.resolved": (event) => void event.outcome,
+        "interaction.opened": (event) => void event.call?.callId,
+        "interaction.settled": (event) => void event.outcome,
       },
     });
 
@@ -71,48 +66,12 @@ describe("defineInstrumentation", () => {
   it("exposes channel delivery lifecycle events", () => {
     const provider = defineInstrumentation({
       events: {
-        "channel.delivery.started": (event) => void event.delivery.deliveryId,
-        "channel.delivery.completed": (event) => void event.outcome,
-        "channel.delivery.failed": (event) => void event.errorCode,
+        "delivery.consumed": (event) => void event.deliveryId,
+        "delivery.settled": (event) => void event.outcome,
       },
     });
 
     expect(isInstrumentationProvider(provider)).toBe(true);
-  });
-
-  it("exports memory operation event contracts", () => {
-    const operation: InstrumentationMemoryOperation = {
-      idempotencyKey: "memory:search",
-      operationName: "search_memory",
-      phase: "turn.started",
-      slot: "profile",
-      storeId: "scope",
-      turnId: "turn-1",
-    };
-    const record: InstrumentationMemoryRecord = { content: "Prefers dark mode.", id: "theme" };
-    const started: InstrumentationMemoryOperationStartedEvent = {
-      ...operation,
-      rootSessionId: "root-session",
-      sessionId: "session-1",
-      type: "memory.operation.started",
-    };
-    const completed: InstrumentationMemoryOperationCompletedEvent = {
-      ...started,
-      outputRecords: [record],
-      recordCount: 1,
-      type: "memory.operation.completed",
-    };
-    const failed: InstrumentationMemoryOperationFailedEvent = {
-      ...started,
-      error: new Error("failed"),
-      type: "memory.operation.failed",
-    };
-    const terminals: InstrumentationMemoryOperationTerminalEvent[] = [completed, failed];
-
-    expect(terminals.map((event) => event.type)).toEqual([
-      "memory.operation.completed",
-      "memory.operation.failed",
-    ]);
   });
 
   it("preserves the authored fields", () => {
@@ -145,3 +104,5 @@ describe("disableInstrumentation", () => {
     expect(isInstrumentationDisabled(defineInstrumentation({}))).toBe(false);
   });
 });
+
+import { isInstrumentationProvider } from "#instrumentation/provider.js";

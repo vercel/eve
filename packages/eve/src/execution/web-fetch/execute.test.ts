@@ -104,6 +104,35 @@ describe("extractTextFromHtml", () => {
 
     expect(text).toContain("Line 1\nLine 2");
   });
+
+  it.each([
+    ["<p>Before</p><script>var x = 1;", "Before"],
+    ["<script foo>x</script bar><p>After</p>", "After"],
+    ["<p>A</p><style-guide>B</style-guide><p>C</p>", "A\nBC"],
+    ["<!-- a > <script> --><p>Visible</p>", "Visible"],
+    ["<p>Before</p><!-- unclosed <p>hidden</p>", "Before"],
+    ["<constructor>A</constructor><__proto__>B", "AB"],
+  ])("extracts the text browsers would show from %j", (html, expected) => {
+    expect(extractTextFromHtml(html)).toBe(expected);
+  });
+
+  const KIB_256 = 256 * 1024;
+  // Most of these took seconds before the linear scan (quadratic regex
+  // backtracking). The 1 s bound is deliberately loose to avoid CI flake.
+  it.each([
+    ["<script x", "<script x".repeat(KIB_256 / 9)],
+    ["<", "<".repeat(KIB_256)],
+    ["< x ", "< x ".repeat(KIB_256 / 4)],
+    ["<a>", "<a>".repeat(KIB_256 / 3)],
+    ["<br>", "<br>".repeat(KIB_256 / 4)],
+    ["<script></script>", "<script></script>".repeat(KIB_256 / 17)],
+    ["<script></script ", `<script>${"</script ".repeat(KIB_256 / 9)}`],
+    ["<!-- >", "<!-- >".repeat(KIB_256 / 6)],
+  ])("processes 256 KiB of repeated %j in linear time", (_label, html) => {
+    const start = performance.now();
+    extractTextFromHtml(html);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
 });
 
 describe("executeWebFetchTool", () => {

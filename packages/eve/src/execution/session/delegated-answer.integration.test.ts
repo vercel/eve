@@ -71,9 +71,16 @@ describe("delegated agent approval answers", () => {
 
       try {
         const held = await withTimeout(stream.nextTurn(), "child approval");
-        const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
-        expect(request?.kind).toBe("tool-approval");
-        expect(held.at(-1)).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
+        const approval = filterEventsByType(held, "interaction.opened").find(
+          ({ data }) => data.request.kind === "approval",
+        );
+        expect(approval).toBeDefined();
+        expect(filterEventsByType(held, "turn.paused")).toMatchObject([
+          {
+            data: { awaiting: [{ interactionId: approval!.data.interactionId }] },
+            type: "turn.paused",
+          },
+        ]);
 
         await expect(
           workflowRuntime.dispatchSession({
@@ -89,13 +96,14 @@ describe("delegated agent approval answers", () => {
             },
             sessionId: child.runId,
           }),
-        ).resolves.toEqual({ sessionId: child.runId, status: "accepted" });
+        ).resolves.toMatchObject({ sessionId: child.runId, status: "accepted" });
 
+        // The parent's message steers the held turn, so it withdraws the approval instead of answering it.
         const resumed = await withTimeout(stream.nextTurn(), "delegated approval answer");
-        const approvedRequests = filterEventsByType(resumed, "approval.settled")
-          .filter(({ data }) => data.outcome === "approved")
-          .map(({ data }) => data.requestId);
-        expect({ approvedRequests, executions }).toEqual({ approvedRequests: [], executions: [] });
+        const outcomes = filterEventsByType(resumed, "interaction.settled")
+          .filter(({ data }) => data.interactionId === approval!.data.interactionId)
+          .map(({ data }) => data.outcome);
+        expect({ executions, outcomes }).toEqual({ executions: [], outcomes: ["withdrawn"] });
       } finally {
         stream.dispose();
         await child.cancel();

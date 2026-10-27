@@ -86,7 +86,6 @@ jobs:
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVE_EVAL_IDS_JSON: ${{ toJSON(matrix.eval_ids) }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
-      EVE_SANDBOX_IMAGE_TAG: latest
 
     steps:
       - name: Checkout code
@@ -105,6 +104,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
+
+      - name: Resolve eve sandbox image
+        if: needs.changes.outputs.relevant == 'true'
+        uses: ./.github/actions/sandbox-image
 
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'

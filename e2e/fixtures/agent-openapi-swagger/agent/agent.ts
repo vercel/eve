@@ -1,6 +1,12 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { CALL_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
-import { callTool, outputOf, playScript, type ScriptedCall } from "@eve-e2e/config/mock-script";
+import {
+  callTool,
+  outputOf,
+  playScript,
+  resultOf,
+  type ScriptedCall,
+} from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
@@ -40,7 +46,7 @@ const KENNEL_CALLS: readonly ScriptedCall[] = [
 /** Calls each kennel tool, then reports the photo's image parts and the suggested name. */
 function kennelResponse(request: MockModelRequest): MockModelResponse | string {
   return playScript(request, KENNEL_CALLS, (finished) => {
-    const photo = finished.toolResults.find((result) => result.id === "kennel-photo")?.output;
+    const photo = resultOf(finished, "kennel-photo")?.output;
     const imageParts = Array.isArray(photo)
       ? photo.filter((part) => JSON.stringify(part).includes('"image/png"')).length
       : 0;

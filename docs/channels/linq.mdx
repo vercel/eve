@@ -82,7 +82,7 @@ export default linqChannel({
     if (!tapback.added) return null;
     const auth = defaultLinqAuth(tapback);
     if (tapback.tapback === "like") return { auth, answer: "approve" };
-    if (tapback.tapback === "dislike") return { auth, answer: "cancel" };
+    if (tapback.tapback === "dislike") return { auth, answer: "deny" };
     return { auth };
   },
 });

@@ -15,6 +15,10 @@ definitions of durable-harness's `/compare` page
 
 `standard.test.mjs` checks that our derivation gives the same marks and values,
 and that `METRIC_DEFINITIONS.commit` in `standard.mjs` matches `expected.json`.
+Both streams run one tool at a time. With concurrent tools, eve deliberately
+differs from `/compare`: it counts overlapping tool time once and measures tool
+hops per batch (see `framework.mjs`), so `standard.test.mjs` tests those cases
+separately.
 When either repository changes a definition, add or regenerate the fixtures in
 both, then bump `METRICS_VERSION` if a value's meaning changed:
 

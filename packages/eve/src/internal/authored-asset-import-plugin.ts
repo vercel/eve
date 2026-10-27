@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
-import { isNodeModulesPath } from "#internal/authored-package-boundary.js";
+import { findAuthoredPackageRoot, isNodeModulesPath } from "#internal/authored-package-boundary.js";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".ts",
@@ -18,26 +18,24 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
 
 /**
  * Creates the Rollup-compatible plugin that gives authored modules a small
- * asset-module surface for non-code relative imports inside the authored
- * package. Assets may sit outside the agent directory, but not outside the
- * package that owns it.
+ * asset-module surface for non-code relative imports. An asset may sit outside
+ * the agent directory, but not outside the authored package or the package
+ * that owns the importing module, such as a workspace package bundled from
+ * source.
  */
 export function createAuthoredAssetImportPlugin(input: {
   readonly packageRoot: string;
   /**
-   * Handles only importers and assets inside the package root and outside
-   * `node_modules`. Set it for bundles that also bundle dependencies, such as
-   * the Nitro server and the workflow driver, so dependency imports stay with
-   * the host bundler.
+   * Handles only importers and assets outside `node_modules`: authored source
+   * and workspace packages bundled from source. Set it for bundles that also
+   * bundle dependencies, such as the Nitro server and the workflow driver, so
+   * installed dependency imports stay with the host bundler.
    */
   readonly authoredSourceOnly?: boolean;
 }): Record<string, unknown> {
   const packageRoot = toCanonicalPath(input.packageRoot);
   const handles = (path: string): boolean =>
-    input.authoredSourceOnly !== true ||
-    (isAbsolute(path) &&
-      !isNodeModulesPath(path) &&
-      isPathInsideOrEqual(toCanonicalPath(path), packageRoot));
+    input.authoredSourceOnly !== true || (isAbsolute(path) && !isNodeModulesPath(path));
   return {
     name: "eve-authored-asset-import",
     resolveId(source: string, importer: string | undefined) {
@@ -48,9 +46,14 @@ export function createAuthoredAssetImportPlugin(input: {
       const { path, suffix } = splitImportSuffix(source);
       const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
       const canonicalPath = toCanonicalPath(resolvedPath);
-      if (!isPathInsideOrEqual(canonicalPath, packageRoot)) {
+      const importerPackageRoot =
+        findAuthoredPackageRoot(dirname(toCanonicalPath(importer))) ?? packageRoot;
+      if (
+        !isPathInsideOrEqual(canonicalPath, packageRoot) &&
+        !isPathInsideOrEqual(canonicalPath, importerPackageRoot)
+      ) {
         throw new Error(
-          `Authored asset import "${source}" from "${importer}" resolves outside package root "${packageRoot}".`,
+          `Authored asset import "${source}" from "${importer}" resolves outside package root "${importerPackageRoot}".`,
         );
       }
 
@@ -59,7 +62,7 @@ export function createAuthoredAssetImportPlugin(input: {
     async load(id: string) {
       const { path, suffix } = splitImportSuffix(id);
 
-      if (!isPotentialAuthoredAssetImport(path) || !handles(path)) {
+      if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
         return undefined;
       }
 
@@ -126,10 +129,15 @@ function isPotentialAuthoredAssetImport(source: string): boolean {
     return false;
   }
 
-  const { path } = splitImportSuffix(source);
+  const { path, suffix } = splitImportSuffix(source);
 
   if (!path.startsWith(".") && !path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path)) {
     return false;
+  }
+
+  // As in Vite, `?raw` imports any file as text, including code files and files without an extension.
+  if (suffix === "?raw") {
+    return true;
   }
 
   const extension = extname(path);

@@ -1,9 +1,9 @@
 ---
 title: "Output Schema"
-description: "Request structured results from eve client turns and read typed data from MessageResult."
+description: "Request structured results from eve client turns and read typed data from DeliveryResult."
 ---
 
-Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles, then emits the final payload as `result.completed`.
+Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles, then emits the final payload as a `content.completed` part with `kind: "result"`.
 
 ## JSON Schema
 
@@ -26,13 +26,13 @@ const outputSchema = {
   required: ["title", "count"],
 } as const;
 
-const client = new Client({ host: "http://127.0.0.1:2000" });
-const { session, response } = await client.sessions.create<Summary>({
+const client = new Client({ baseUrl: "http://127.0.0.1:2000" });
+const { session, delivery } = await client.sessions.create<Summary>({
   message: "Summarize this turn.",
   outputSchema,
 });
 
-const result = await response.result();
+const result = await delivery.result();
 
 console.log(result.data?.title);
 console.log(result.data?.count);
@@ -61,26 +61,26 @@ const response = await session.send<Summary>("Summarize this turn.", {
 const { data } = await response.result();
 ```
 
-The server is authoritative for validation. The client types `MessageResult.data` from your generic and schema, but it doesn't revalidate the streamed payload client-side.
+The server is authoritative for validation. The client types `DeliveryResult.data` from your generic and schema, but it doesn't revalidate the streamed payload client-side.
 
 ## Stream the result event
 
-If you consume events manually, read `result.completed`:
+If you consume events manually, read the `content.completed` part with `kind: "result"`:
 
 ```ts
 const response = await session.send<Summary>("Summarize this turn.", {
   outputSchema,
 });
 
-for await (const event of response) {
-  if (event.type === "result.completed") {
-    const summary = event.data.result as Summary;
+for await (const event of response.stream()) {
+  if (event.type === "content.completed" && event.data.kind === "result") {
+    const summary = event.data.value as Summary;
     console.log(summary.title);
   }
 }
 ```
 
-If more than one `result.completed` appears in the consumed event list, `result()` returns the most recent one as `data`.
+If more than one result part appears in the consumed event list, `result()` returns the most recent one as `data`.
 
 ## Send payloads with output schema
 
@@ -98,7 +98,7 @@ const result = await response.result();
 It also works on follow-up turns and HITL response turns:
 
 ```ts
-const response = await session.respond([{ requestId, optionId: "approve" }], {
+const response = await session.respond([{ interactionId, optionId: "approve" }], {
   outputSchema,
 });
 
@@ -124,5 +124,5 @@ For configured output that belongs to the agent or subagent definition itself, s
 ## What to read next
 
 - [Messages](./messages): send turns with `send()`
-- [Streaming](./streaming): handle `result.completed` live
+- [Streaming](./streaming): handle the result part live
 - [`agent.ts`](../../agent-config#other-defineagent-fields): configured output for function-like invocations

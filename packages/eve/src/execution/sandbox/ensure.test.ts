@@ -623,7 +623,7 @@ describe("ensureSandboxAccess", () => {
     expect(value.onSessionEnd).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
       { key: "session-1" },
-      { abortSignal: undefined, reason: "deleted" },
+      { signal: undefined, reason: "deleted" },
     );
     expect(value.create).toHaveBeenCalledTimes(2);
   });

@@ -4,21 +4,17 @@ import { defineDynamic, defineSkill } from "eve/skills";
 // under the mount namespace as `toolkit__incident` once mounted — not the bare
 // `incident` — so it can't collide with the consumer's or another extension's
 // skills. The dynamic-skill eval loads it by the namespaced name to prove that.
-export default defineDynamic({
-  events: {
-    "session.started": async () => ({
-      incident: defineSkill({
-        description:
-          "Use ONLY when the user asks for the toolkit incident playbook. " +
-          'Triggered by the literal phrase "toolkit incident playbook".',
-        markdown: [
-          "# Toolkit incident playbook",
-          "",
-          "Return this verification token to the user on a single line:",
-          "",
-          "toolkit-incident-dynamic-ok-7T2X",
-        ].join("\n"),
-      }),
-    }),
-  },
-});
+export default defineDynamic(() => ({
+  incident: defineSkill({
+    description:
+      "Use ONLY when the user asks for the toolkit incident playbook. " +
+      'Triggered by the literal phrase "toolkit incident playbook".',
+    content: [
+      "# Toolkit incident playbook",
+      "",
+      "Return this verification token to the user on a single line:",
+      "",
+      "toolkit-incident-dynamic-ok-7T2X",
+    ].join("\n"),
+  }),
+}));

@@ -1,151 +1,88 @@
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
-import type {
-  SubagentAuthorizationEvent,
-  SubagentAuthorizationEventHookPayload,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
-import { resolvedForParent } from "#harness/hitl/relays.js";
+import { relayedInteractionEvents } from "#harness/interaction-relay.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 
 const log = createLogger("execution.subagent-adapter");
 
 /**
- * Framework adapter that bridges a child subagent session to its
- * parent.
+ * Framework adapter that bridges a child subagent session to its parent.
  *
- * It proxies child `input.requested` events upward so the parent channel can
- * render HITL prompts and route responses back down to the child, and the
- * `input.resolved` of requests only the child can close.
+ * It relays every interaction fact the child publishes, so the parent channel can render each
+ * request, route answers back down, and close its copy when the child settles it.
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
-  async "approval.candidate"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "approval.candidate" }, ctx);
+  async "interaction.opened"(event, ctx) {
+    await relay(event, ctx);
   },
-  async "approval.settled"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "approval.settled" }, ctx);
+  async "interaction.settled"(event, ctx) {
+    await relay(event, ctx);
   },
-  async "authorization.required"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "authorization.required" }, ctx);
+  async "response.admitted"(event, ctx) {
+    await relay(event, ctx);
   },
-  async "authorization.completed"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "authorization.completed" }, ctx);
-  },
-  async "input.resolved"(data, ctx) {
-    const relayed = resolvedForParent(data);
-    if (relayed === undefined) return;
-    await forwardSubagentAuthorizationEvent({ data: relayed, type: "input.resolved" }, ctx);
-  },
-  async "input.requested"(data, ctx) {
-    const state = ctx.state;
-
-    if (!isSubagentAdapterState(state)) {
-      return;
-    }
-
-    const hookPayload: SubagentInputRequestHookPayload = {
-      callId: state.callId,
-      childContinuationToken: ctx.ctx.require(ContinuationTokenKey),
-      childSessionId: ctx.ctx.require(SessionIdKey),
-      childSessionInbox: ctx.ctx.get(SessionInboxKey),
-      inputSource: ctx.inputSource,
-      event: {
-        requests: data.requests,
-        sequence: data.sequence,
-        stepIndex: data.stepIndex,
-        turnId: data.turnId,
-      },
-      kind: "subagent-input-request",
-      subagentName: state.subagentName,
-    };
-
-    await forwardSubagentInputRequestStep({
-      hookPayload,
-      parentContinuationToken: state.parentContinuationToken,
-    });
+  async "response.settled"(event, ctx) {
+    await relay(event, ctx);
   },
 };
 
-async function forwardSubagentAuthorizationEvent(
-  event: SubagentAuthorizationEvent,
-  ctx: ChannelAdapterContext,
-): Promise<void> {
+async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<void> {
   const state = ctx.state;
-
-  if (!isSubagentAdapterState(state)) {
-    return;
-  }
-
-  await forwardSubagentAuthorizationEventStep({
-    hookPayload: {
-      callId: state.callId,
-      childSessionId: ctx.ctx.require(SessionIdKey),
-      event,
-      kind: "subagent-authorization-event",
-      subagentName: state.subagentName,
-    },
+  if (!isSubagentAdapterState(state) || ctx.view === undefined) return;
+  const childSessionId = ctx.ctx.require(SessionIdKey);
+  const relayed = relayedInteractionEvents(ctx.view, event, childSessionId);
+  if (relayed.length === 0) return;
+  const hookPayload: SubagentInteractionHookPayload = {
+    callId: state.callId,
+    childSessionId,
+    events: relayed,
+    kind: "subagent-interaction",
+    subagentName: state.subagentName,
+    // A person answers a request through this session: the parent routes it back here.
+    ...(relayed.some(
+      (fact) => fact.type === "interaction.opened" && fact.data.request.kind !== "sign-in",
+    ) && {
+      route: {
+        childContinuationToken: ctx.ctx.require(ContinuationTokenKey),
+        ...(ctx.ctx.get(SessionInboxKey) !== undefined && {
+          childSessionInbox: ctx.ctx.get(SessionInboxKey),
+        }),
+        ...(ctx.inputSource !== undefined && { inputSource: ctx.inputSource }),
+      },
+    }),
+  };
+  await forwardToParentStep({
+    hookPayload,
     parentContinuationToken: state.parentContinuationToken,
   });
 }
 
-/** Forwards one child authorization event to its active parent turn. */
-async function forwardSubagentAuthorizationEventStep(input: {
-  readonly hookPayload: SubagentAuthorizationEventHookPayload;
+/** Forwards one relayed interaction fact to the parent via the durable `resumeHook` path. */
+async function forwardToParentStep(input: {
+  readonly hookPayload: SubagentInteractionHookPayload;
   readonly parentContinuationToken: string;
 }): Promise<void> {
   "use step";
 
   try {
-    await resumeParentHook(input.parentContinuationToken, input.hookPayload);
+    // The workflow runtime loads only when a child forwards, so the channel adapters every
+    // session context restores stay free of it.
+    const { resumeHook } = await import("#internal/workflow/runtime.js");
+    await resumeHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
-    const errorId = createErrorId();
-    log.warn("failed to forward subagent authorization event to parent", {
+    log.warn("failed to forward a child's interaction to its parent", {
       callId: input.hookPayload.callId,
       childSessionId: input.hookPayload.childSessionId,
-      errorId,
-      eventType: input.hookPayload.event.type,
+      errorId: createErrorId(),
+      eventTypes: input.hookPayload.events.map((fact) => fact.type),
       parentContinuationToken: input.parentContinuationToken,
       subagentName: input.hookPayload.subagentName,
       error,
     });
     throw error;
   }
-}
-
-/**
- * Forwards one child HITL batch up to its parent via the durable
- * workflow `resumeHook` path.
- */
-async function forwardSubagentInputRequestStep(input: {
-  readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly parentContinuationToken: string;
-}): Promise<void> {
-  "use step";
-
-  try {
-    await resumeParentHook(input.parentContinuationToken, input.hookPayload);
-  } catch (error) {
-    const errorId = createErrorId();
-    log.warn("failed to forward proxied HITL batch to parent", {
-      callId: input.hookPayload.callId,
-      childContinuationToken: input.hookPayload.childContinuationToken,
-      childSessionId: input.hookPayload.childSessionId,
-      errorId,
-      parentContinuationToken: input.parentContinuationToken,
-      subagentName: input.hookPayload.subagentName,
-      error,
-    });
-    throw error;
-  }
-}
-
-/**
- * Resumes the parent's hook. The workflow runtime loads only when a child forwards, so the
- * channel adapters every session context restores stay free of it.
- */
-async function resumeParentHook(token: string, payload: unknown): Promise<void> {
-  const { resumeHook } = await import("#internal/workflow/runtime.js");
-  await resumeHook(token, payload);
 }

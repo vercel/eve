@@ -4,7 +4,7 @@ import { useEveAgent } from "eve/react";
 import { type FormEvent, type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { type Components, Streamdown } from "streamdown";
 
-import { traceReducer } from "./trace-reducer";
+import { traceTurns } from "./trace-turns";
 import {
   resolveTurnAssistantMessage,
   resolveTurnFailureMessage,
@@ -87,14 +87,15 @@ export function App() {
   const [composerInput, setComposerInput] = useState("");
   const [composerError, setComposerError] = useState<string | undefined>(undefined);
   const conversationStageRef = useRef<HTMLElement | null>(null);
-  const reducer = useMemo(() => traceReducer(), []);
   const agent = useEveAgent({
     prewarm: composerInput.trim().length > 0,
-    reducer,
   });
 
-  const turns = agent.data.turns;
-  const isComposeInProgress = agent.status === "submitted" || agent.status === "streaming";
+  const turns = useMemo(
+    () => traceTurns(agent.events, agent.messages),
+    [agent.events, agent.messages],
+  );
+  const isComposeInProgress = agent.status === "busy";
   const hasComposerText = composerInput.trim().length > 0;
   const hasConversation = turns.length > 0 || isComposeInProgress;
   const conversationActivityKey = [
@@ -138,7 +139,7 @@ export function App() {
 
     setComposerError(undefined);
     setComposerInput("");
-    if (agent.session?.sessionId === undefined && agent.data.turns.length > 0) {
+    if (agent.session?.sessionId === undefined && turns.length > 0) {
       agent.reset();
     }
     await agent.send(message);
@@ -188,10 +189,7 @@ export function App() {
         <section className="conversation-stage" ref={conversationStageRef}>
           {hasConversation ? (
             <div className="conversation-scroll">
-              <ConversationSection
-                isSending={agent.status === "submitted" || agent.status === "streaming"}
-                turns={turns}
-              />
+              <ConversationSection isSending={agent.status === "busy"} turns={turns} />
             </div>
           ) : (
             <div className="empty-state">

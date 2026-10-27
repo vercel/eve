@@ -6,13 +6,13 @@ const TOOL_NAME = "wait-for-cancellation";
 interface AcceptedResponse {
   readonly ok?: boolean;
   readonly sessionId?: string;
-  readonly status?: string;
+  readonly deliveryId?: string;
 }
 
 interface ResetResponse {
   readonly ok?: boolean;
-  readonly previousSessionId?: string;
-  readonly status?: string;
+  readonly sessionId?: string;
+  readonly deliveryId?: string;
 }
 
 async function postJson<T>(
@@ -52,20 +52,22 @@ export default defineEval({
       created,
       satisfies(
         (value: AcceptedResponse) =>
-          value.ok === true && value.status === "accepted" && typeof value.sessionId === "string",
+          value.ok === true &&
+          typeof value.deliveryId === "string" &&
+          typeof value.sessionId === "string",
         "the HTTP session route creates a session without a continuation token",
       ),
     );
     const sessionId = created.sessionId!;
 
-    const initial = await t.target.watchTurn(sessionId).result();
-    initial.notEvent("turn.failed");
-    initial.notEvent("session.failed");
+    const initial = await t.target.attach(sessionId).watch().result();
+    initial.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initial.notEvent("session.ended", { data: { outcome: "failed" } });
     initial.messageIncludes(/HTTP-SESSION-INITIAL-OK/i);
 
-    const liveCancellation = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length,
-    });
+    const liveCancellation = t.target
+      .attach(sessionId, { startIndex: initial.session.state!.streamIndex })
+      .watch();
     const sent = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,
@@ -75,16 +77,14 @@ export default defineEval({
     await t.require(
       sent,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "the message route sends to the exact session ID",
       ),
     );
 
-    await liveCancellation.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
+    await liveCancellation.waitForEvent("call.requested", {
+      data: { capability: { name: TOOL_NAME } },
     });
     const cancelled = await postJson<AcceptedResponse>(
       t.target,
@@ -95,19 +95,24 @@ export default defineEval({
     await t.require(
       cancelled,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "cancel targets the exact session ID",
       ),
     );
 
     const cancelledTurn = await liveCancellation.result();
-    cancelledTurn.event("turn.cancelled", { count: 1 });
-    cancelledTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelledTurn.notEvent("turn.failed");
-    cancelledTurn.notEvent("session.failed");
+    cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelledTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    let eventIndex = initial.events.length + cancelledTurn.events.length;
-    const liveCompaction = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    // Each read starts at the line after the last one read. A context change between turns
+    // ends no turn, so its read ends with its settlement.
+    const settlesContext = (event: { readonly type: string }) => event.type === "context.settled";
+    const liveCompaction = t.target
+      .attach(sessionId, { startIndex: cancelledTurn.session.state!.streamIndex })
+      .watch({ until: settlesContext });
     const compacted = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/compact`,
@@ -117,20 +122,21 @@ export default defineEval({
     await t.require(
       compacted,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "compact targets the exact session ID",
       ),
     );
     const compactedEvents = await liveCompaction.result();
     compactedEvents.eventOrder([
-      { type: "compaction.requested" },
-      { type: "compaction.completed" },
-      { type: "session.waiting" },
+      { data: { kind: "compaction" }, type: "context.started" },
+      { data: { kind: "compaction", outcome: "completed" }, type: "context.settled" },
     ]);
     compactedEvents.notEvent("turn.started");
-    eventIndex += compactedEvents.events.length;
 
-    const liveClear = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    const liveClear = t.target
+      .attach(sessionId, { startIndex: compactedEvents.session.state!.streamIndex })
+      .watch({ until: settlesContext });
     const cleared = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/clear`,
@@ -140,17 +146,24 @@ export default defineEval({
     await t.require(
       cleared,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "clear targets the exact session ID",
       ),
     );
     const clearedEvents = await liveClear.result();
-    clearedEvents.event("context.cleared", { count: 1 });
-    clearedEvents.eventOrder([{ type: "context.cleared" }, { type: "session.waiting" }]);
+    clearedEvents.event("context.settled", {
+      count: 1,
+      data: { kind: "clear", outcome: "completed" },
+    });
+    clearedEvents.eventOrder([
+      { data: { kind: "clear", outcome: "completed" }, type: "context.settled" },
+    ]);
     clearedEvents.notEvent("turn.started");
-    eventIndex += clearedEvents.events.length;
 
-    const liveFollowUp = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    const liveFollowUp = t.target
+      .attach(sessionId, { startIndex: clearedEvents.session.state!.streamIndex })
+      .watch();
     const followUpResponse = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,
@@ -160,35 +173,52 @@ export default defineEval({
     await t.require(
       followUpResponse,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "the same session accepts a message after compact and clear",
       ),
     );
     const followUp = await liveFollowUp.result();
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/HTTP-SESSION-FOLLOW-UP-OK/i);
 
+    const liveReset = t.target
+      .attach(sessionId, { startIndex: followUp.session.state!.streamIndex })
+      .watch({ until: (event) => event.type === "session.ended" });
     const reset = await postJson<ResetResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/reset`,
       { reason: "Verify immutable HTTP session identity" },
-      200,
+      202,
     );
     await t.require(
       reset,
       satisfies(
-        (value: ResetResponse) => value.status === "reset" && value.previousSessionId === sessionId,
+        (value: ResetResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "reset terminally retires the exact session ID",
       ),
     );
 
-    const rejected = await postJson<{ readonly code?: string; readonly ok?: boolean }>(
-      t.target,
-      `/eve/v1/session/${sessionId}`,
-      { message: "This must not create or follow a replacement." },
-      409,
-    );
+    const retired = await liveReset.result();
+    retired.event("session.ended", { count: 1, data: { outcome: "completed" } });
+
+    const probe = () =>
+      postJson<{ readonly code?: string; readonly ok?: boolean }>(
+        t.target,
+        `/eve/v1/session/${sessionId}`,
+        { message: "This must not create or follow a replacement." },
+        409,
+      );
+    let rejected = await probe();
+    // A compacted session's anchor finishes after the successor's terminal fact.
+    const retirementDeadline = Date.now() + 10_000;
+    while (rejected.code === "session_not_ready" && Date.now() < retirementDeadline) {
+      t.abortSignal.throwIfAborted();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      rejected = await probe();
+    }
     await t.require(
       rejected,
       satisfies(
@@ -208,16 +238,16 @@ export default defineEval({
       replacement,
       satisfies(
         (value: AcceptedResponse) =>
-          value.status === "accepted" &&
+          typeof value.deliveryId === "string" &&
           typeof value.sessionId === "string" &&
           value.sessionId !== sessionId,
         "a replacement session requires explicit creation",
       ),
     );
 
-    const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    const replacementTurn = await t.target.attach(replacement.sessionId!).watch().result();
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/HTTP-SESSION-REPLACEMENT-OK/i);
 
     t.succeeded();

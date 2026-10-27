@@ -1,0 +1,10 @@
+[
+  "DeployedSelfModificationConfig",
+  "GitHubCredentialCapability",
+  "GitHubCredentialProvider",
+  "GitHubCredentialRequest",
+  "GitHubRepository",
+  "SelfModificationAuthorization",
+  "SelfModificationAuthorizationContext",
+  "default"
+]

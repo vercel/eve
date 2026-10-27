@@ -1,4 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 import { FANOUT_LABELS, FANOUT_REPLY, FANOUT_TOOL_NAME } from "../agent/lib/fanout";
@@ -22,12 +23,13 @@ export default defineEval({
   },
 });
 
-function everyCallReachedBarrier(events: readonly MessageStreamEvent[]): boolean {
-  const executions = events.flatMap((event) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== FANOUT_TOOL_NAME) return [];
+function everyCallReachedBarrier(events: readonly SessionStreamEvent[]): boolean {
+  const view = foldEvents(emptySessionView(), events);
 
-    const output = event.data.result.output;
+  const executions = calls(view).flatMap((call) => {
+    if (call.name !== FANOUT_TOOL_NAME || call.outcome !== "completed") return [];
+
+    const output = call.output;
     if (typeof output !== "object" || output === null) return [];
     const { concurrentCallsAtRelease, label } = output as Record<string, unknown>;
     return typeof concurrentCallsAtRelease === "number" && typeof label === "string"

@@ -197,7 +197,7 @@ describe("runInitCommand", () => {
         captureForeignOutput: false,
         unicode: true,
       });
-      const client = new Client({ host: "http://eve-test.invalid" });
+      const client = new Client({ baseUrl: "http://eve-test.invalid" });
       const baseInfo = createTestAgentInfoResult();
       const info = {
         ...baseInfo,

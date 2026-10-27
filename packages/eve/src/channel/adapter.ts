@@ -1,11 +1,14 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
+import type { ChannelContext } from "#shared/channel-context.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { DeliverPayload } from "#channel/types.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import type { UploadPolicy } from "#public/channels/upload-policy.js";
 import type {
   FetchFileContext,
@@ -29,12 +32,10 @@ const log = createLogger("channel.adapter");
  * `ctx` provides read/write access to durable context keys (the same
  * {@link ContextAccessor} that tools and providers use).
  *
- * `session` is a live handle to the current session — id, auth,
- * optional channel continuation address, including an imperative `alias()`
- * for channels that need to add an alias for the session mid-turn (e.g. Slack's
- * auto-anchor on first post).
+ * `session` supplies live identity/auth; `continuation` owns channel routing (such as
+ * Slack's auto-anchor on first post). Neither grants session command authority.
  */
-export interface ChannelAdapterContext<TState = Record<string, unknown>> {
+export interface ChannelAdapterContext<TState = Record<string, unknown>> extends ChannelContext {
   /**
    * Mutable adapter state. Auto-serialized at step boundaries via
    * JSON snapshot. The adapter reads and writes this directly.
@@ -47,13 +48,15 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
    */
   readonly ctx: ContextAccessor;
 
-  /**
-   * Live handle to the current session.
-   */
-  readonly session: SessionHandle;
-
   /** @internal Independent source of a relayed child input batch. */
   readonly inputSource?: string;
+
+  /** Where the event a handler observes sits on the stream: its line, and its index there. */
+  readonly position?: FactPosition;
+  /** The event's owners: its turn, task, model run, or context change. */
+  readonly scope?: Scope;
+  /** The immutable snapshot of the event's line, supplied by its publisher. */
+  readonly view?: SessionView;
 }
 
 /**
@@ -68,20 +71,13 @@ type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<st
 // ---------------------------------------------------------------------------
 
 /**
- * Extracts the `data` field type from a stream event by its `type` discriminant.
- * Events that carry no `data` field (e.g. `session.completed`) resolve to `undefined`.
- */
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
-/**
- * A single outbound event handler. Receives the event's `data` (not the full
- * envelope) and the adapter context. Void return — side effects only.
+ * A single outbound event handler. Receives the written event and the adapter context. Void
+ * return: side effects only.
  */
 type EventHandler<
-  T extends UnstampedMessageStreamEvent["type"],
+  T extends SessionEvent["type"],
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,
-> = (data: EventData<T>, ctx: TCtx) => void | Promise<void>;
+> = (event: Extract<SessionEvent, { type: T }>, ctx: TCtx) => void | Promise<void>;
 
 /**
  * Map of outbound event handlers keyed by event type. The adapter declares
@@ -90,8 +86,17 @@ type EventHandler<
  */
 export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> =
   {
-    [K in UnstampedMessageStreamEvent["type"]]?: EventHandler<K, TCtx>;
+    [K in SessionEvent["type"]]?: EventHandler<K, TCtx>;
+  } & {
+    /** Runs once per committed line, after the line's event handlers. */
+    committed?: (line: CommittedLine, ctx: TCtx) => void | Promise<void>;
   };
+
+/** A line the session committed: the facts its channel heard, in order, and its position. */
+export interface CommittedLine {
+  readonly facts: readonly SessionEvent[];
+  readonly position: number;
+}
 
 // ---------------------------------------------------------------------------
 // File fetch
@@ -201,16 +206,18 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
  * Produces the default {@link StepInput} when no custom adapter `deliver`
  * hook is defined.
  *
- * Passes through both `message` and `inputResponses` from the delivery
+ * Passes through both `message` and `answers` from the delivery
  * payload so tool-approval responses (and other HITL replies) reach the
  * harness even when the channel has no bespoke deliver logic.
  */
-export function defaultDeliverResult(payload: DeliverPayload): StepInput | undefined {
+export function defaultDeliverResult(
+  payload: Pick<ChannelDelivery, "message" | "answers" | "context" | "outputSchema">,
+): StepInput | undefined {
   if (payload.message !== undefined) {
     return attachClientContext(
       attachInputText(
         {
-          inputResponses: payload.inputResponses,
+          answers: payload.answers,
           message: payload.message,
           context: payload.context,
           outputSchema: payload.outputSchema,
@@ -221,10 +228,10 @@ export function defaultDeliverResult(payload: DeliverPayload): StepInput | undef
     );
   }
 
-  if (payload.inputResponses !== undefined && payload.inputResponses.length > 0) {
+  if (payload.answers !== undefined && payload.answers.length > 0) {
     return attachClientContext(
       {
-        inputResponses: payload.inputResponses,
+        answers: payload.answers,
         context: payload.context,
         outputSchema: payload.outputSchema,
       },
@@ -263,41 +270,27 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
  * Throwing handlers are logged and swallowed so a downstream delivery
  * failure does not corrupt the event stream write path.
  */
+/**
+ * Runs the channel adapter's handler for one written event. Handlers observe; they never shape
+ * what is written, because the write already happened.
+ */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent | CommittedLine,
   ctx: ChannelAdapterContext,
-): Promise<UnstampedMessageStreamEvent> {
-  const eventForHandler = withWaitingContinuationToken(event, ctx);
-  const handler = adapter[event.type] as
-    | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
+): Promise<void> {
+  const type = "facts" in event ? "committed" : event.type;
+  const handler = adapter[type] as
+    | ((event: SessionEvent | CommittedLine, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
-
-  if (handler !== undefined) {
-    try {
-      await handler("data" in eventForHandler ? eventForHandler.data : undefined, ctx);
-    } catch (error) {
-      log.error("adapter event handler threw — event swallowed", {
-        adapterKind: getAdapterKind(adapter),
-        eventType: event.type,
-        error,
-      });
-    }
+  if (handler === undefined) return;
+  try {
+    await handler(event, ctx);
+  } catch (error) {
+    log.error("adapter event handler threw — event swallowed", {
+      adapterKind: getAdapterKind(adapter),
+      eventType: type,
+      error,
+    });
   }
-
-  return withWaitingContinuationToken(eventForHandler, ctx);
-}
-
-function withWaitingContinuationToken(
-  event: UnstampedMessageStreamEvent,
-  ctx: ChannelAdapterContext,
-): UnstampedMessageStreamEvent {
-  if (event.type !== "session.waiting") return event;
-  return {
-    ...event,
-    data: {
-      ...event.data,
-      continuationToken: ctx.session.continuation?.token ?? ctx.session.id,
-    },
-  };
 }

@@ -19,7 +19,8 @@ display them.
 
 This proposal adds a `history` option of user and assistant text. `send()` adds it as real turns
 right before that message, and a new `create()` on channel addresses starts a session from it
-without running a turn. The stream publishes added entries in `history.imported`. History always
+without running a turn. The stream records added entries on the `delivery.consumed` of the message
+that brought them. History always
 applies where it is passed: nothing is conditional on whether a session already exists.
 
 Requests that converge here: #91 (external transcripts), #3524 (branching from settled history,
@@ -30,7 +31,7 @@ closed as a duplicate), and Slack `threadContext`.
 ```ts
 /** One prior message passed as `history`. */
 export interface SessionHistoryMessage {
-  /** Optional app-owned id, echoed in `history.imported`. Unique within one call. */
+  /** Optional app-owned id, echoed in `delivery.consumed` history. Unique within one call. */
   readonly id?: string;
   readonly role: "user" | "assistant";
   /** Plain text. Channels render speaker attribution into this text when needed. */
@@ -97,14 +98,17 @@ authored code, so the app decides how much prior conversation to load and trims 
 `metadata: { "eve.imported": true }`. Assistant entries become plain assistant text. No tool
 calls, results, files, reasoning, or provider options are created.
 
-**Display history.** `history.imported` carries `messages` in the input shape (`id?`, `role`,
-`text`), `sequence`, and `turnId`, and precedes the `message.received` of the turn the entries joined. The default
-reducer places them before that turn's message, ahead of any unconfirmed optimistic message.
-`transcriptReducer()` includes the entries, and its `{ role, text }` messages are valid `history`, so
-a transcript of a seeded session can seed a branch. Imported messages carry `metadata.imported`
-and no `turnId`, so a turn's response never streams
-into one. Message ids derive from the event, since app ids are unique only within one call; the app
-id rides in `metadata.historyId`.
+**Display history.** History is input a delivery brings, so its consumption records it:
+`delivery.consumed` carries optional `history` in the input shape (`id?`, `role`, `text`), in the
+same commit as the delivery's `parts`. History from `create()` is recorded with the first message
+the channel accepts. When one commit consumes several deliveries, the model reads all of their
+history before their merged message, and readers place the history of one line's deliveries before
+what they sent the same way. The fold leaves `history` off the delivery row, so retained session
+state and selectors never hold it. `transcriptOf()` includes the entries, and its `{ role, text }`
+messages are valid `history`, so a transcript of a seeded session can seed a branch. Frontend
+messages for imported entries carry `metadata.imported` and no `turnId`, so a turn's response never
+streams into one. Message ids derive from the delivery, since app ids are unique only within one
+call; the app id rides in `metadata.historyId`. Entries are text only, so they name no turn or call.
 
 **Everything else is unchanged.** Session state, sandbox, memory, and pending input are untouched.
 After joining history, entries are ordinary messages: pre-model compaction counts them, compaction
@@ -116,7 +120,7 @@ flowchart LR
   Pending --> First["first message"]
   Send["send(msg, { history })"] --> Turn["turn input: history, context, message"]
   First --> Turn
-  Turn --> Event["history.imported, then message.received"]
+  Turn --> Event["delivery.consumed with history and parts"]
 ```
 
 ## Runtime boundary
@@ -158,7 +162,7 @@ approximate it.
 | --------------------------------------------- | ----------------- | ---------------- | ------------------------------------------------------------------- |
 | Continue a migrated transcript                | #91               | Covered for text | `create()` per conversation. Tool calls, reasoning, and files drop. |
 | App-owned persistence                         | #91               | Covered          | Server route calls `create()`; the client resumes by session id.    |
-| Clients display imported history              | #91, #3524        | Covered          | `history.imported` renders on live and replayed streams.            |
+| Clients display imported history              | #91, #3524        | Covered          | `delivery.consumed` history renders on live and replayed streams.   |
 | Client-supplied history                       | #91               | Non-goal         | Server-only.                                                        |
 | Real roles instead of a transcript blob       | #91, #75          | Covered          |                                                                     |
 | Initialize without execution                  | #3524             | Covered          | `create()` runs no model or tool.                                   |
@@ -176,13 +180,14 @@ approximate it.
   reducer placement before pending optimistic messages and before an active turn's response;
   Slack seeding on a message that starts the session, with unchanged catch-up.
 - E2E: a fixture channel creates a session from Alice's history, a first message answers from
-  it, and a later `send()` adds Bob's exchange; each turn publishes `history.imported` before its
-  `message.received`.
+  it, and a later `send()` adds Bob's exchange; each turn's `delivery.consumed` carries the history
+  its message brought.
 
 ## Open questions
 
 1. **Imported user message kind.** `"user"` plus metadata treats imported text like typed input. A
    dedicated kind would let compaction, memory, and filters tell them apart.
-2. **`history.imported` content.** Full text duplicates the inbox payload in the stream.
+2. **Recorded history content.** Full text on `delivery.consumed` duplicates the inbox payload in
+   the stream.
 3. **Tool calls and results.** A validated tool tier would reuse the legacy import's
    `normalizeHistory` and state its trust and approval semantics.

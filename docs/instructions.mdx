@@ -40,7 +40,7 @@ export default defineInstructions({
 });
 ```
 
-`role` is either `"system"` or `"user"` and defaults to `"system"`. The legacy `{ markdown: string }` form still creates system-role instructions, but is deprecated; do not combine `markdown` with `content` or `role`. Blank content contributes no context.
+`role` is either `"system"` or `"user"` and defaults to `"system"`. The retired `{ markdown: string }` form is rejected; use `content`. Blank content contributes no context.
 
 A module-backed definition runs once at build time. eve stores its resolved content and role in the compiled manifest, so the definition is not a runtime entry.
 
@@ -74,13 +74,11 @@ Static instructions never run code at runtime. When you need typed executable be
 
 ## Dynamic instructions
 
-To resolve instructions from session context (auth, tenant, channel, or external data), wrap `defineInstructions` in `defineDynamic`. Instruction resolvers support `session.started` and `turn.started`, not `step.started`, and may return `null` to contribute nothing.
+To compute instructions from auth, tenant, channel, or external data, use `defineDynamic((ctx) => ...)` and return `defineInstructions(...)` or `null`. The function runs before each ordinary model call. Use `ctx.memo(key, fn)` for JSON observations that should stay fixed for a key.
 
-A dynamic system result applies at its lifecycle scope. A dynamic user result is appended to durable history at that boundary: session results before turn results, and both before the current delivery. Completed workflow steps are replay-safe, so parking, resuming, or replaying one does not append the message again.
+A dynamic system instruction applies while its function returns it, outside history. A dynamic user instruction joins durable history only when its content changes. Before a turn's first model call it joins ahead of the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier text later adds it again. Existing history is not removed. Content digests survive deployment changes, clear, and compaction.
 
-The `messages` snapshot passed to a `session.started` resolver includes static user instructions. A `turn.started` resolver additionally sees user instructions produced at `session.started`. Other dynamic capability resolvers keep their existing snapshots.
-
-See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior. For a `session.started` instruction that reads the earlier conversation into a replacement session, see [Recover a stranded session](./guides/deployment/self-hosting#recover-a-stranded-session).
+See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior. To give a session that replaced a [stranded session](./concepts/execution-model-and-durability#what-a-replacement-session-receives) the earlier conversation, read its stream with `sessions.attach()` and `transcriptOf()` in a user-role instruction that memoizes it by the predecessor's ID.
 
 ## History controls and prompt caching
 

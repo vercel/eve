@@ -1,27 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  deriveTeamsInputResponses,
+  deriveTeamsAnswers,
   isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
-  renderInputRequestMessage,
+  renderInteractionMessage,
   TEAMS_HITL_DATA_KEY,
   TEAMS_HITL_FREEFORM_INPUT_ID,
   TEAMS_HITL_PROMPT_KEY,
   TEAMS_HITL_REQUEST_KIND_KEY,
 } from "#public/channels/teams/hitl.js";
 import { parseTeamsActivity } from "#public/channels/teams/inbound.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 
 describe("Teams HITL helpers", () => {
   it("renders approval tool input in the card and fallback text", () => {
-    const body = renderInputRequestMessage({
+    const body = renderInteractionMessage({
       ...request(),
-      action: {
+      call: {
         callId: "TC",
         input: { campaign: "summer", dailyBudget: 500 },
-        kind: "tool-call",
-        toolName: "set_campaign_budget",
+        name: "set_campaign_budget",
       },
     });
     const card = body.attachments?.[0]?.content as {
@@ -33,7 +32,7 @@ describe("Teams HITL helpers", () => {
   });
 
   it("carries the continuation token in submit actions", () => {
-    const body = renderInputRequestMessage(request(), { replyToActivityId: "ROOT" });
+    const body = renderInteractionMessage(request(), { replyToActivityId: "ROOT" });
     const card = body.attachments?.[0]?.content as {
       actions?: Array<{ data?: Record<string, unknown> }>;
     };
@@ -49,12 +48,13 @@ describe("Teams HITL helpers", () => {
 
   it("carries the prompt each button submits as the card shows it", () => {
     const prompt = "x".repeat(20_000);
-    const body = renderInputRequestMessage({
+    const body = renderInteractionMessage({
       ...request(),
-      kind: "question",
-      options: ["a", "b", "c", "d", "e", "f"].map((id) => ({ id, label: id })),
-      prompt,
-      requestId: "REQ",
+      request: {
+        kind: "question",
+        options: ["a", "b", "c", "d", "e", "f"].map((id) => ({ id, label: id })),
+        prompt,
+      },
     });
     const card = body.attachments?.[0]?.content as {
       actions?: Array<{ data?: Record<string, Record<string, unknown>> }>;
@@ -79,8 +79,8 @@ describe("Teams HITL helpers", () => {
         },
       }),
     );
-    expect(message ? deriveTeamsInputResponses(message) : []).toEqual([
-      { optionId: "cancel", requestId: "REQ" },
+    expect(message ? deriveTeamsAnswers(message) : []).toEqual([
+      { optionId: "cancel", interactionId: "REQ" },
     ]);
     expect(message ? readTeamsInputReplyToActivityId(message) : null).toBe("ROOT");
 
@@ -97,8 +97,8 @@ describe("Teams HITL helpers", () => {
         },
       },
     });
-    expect(invoke ? deriveTeamsInputResponses(invoke) : []).toEqual([
-      { requestId: "REQ", text: "freeform" },
+    expect(invoke ? deriveTeamsAnswers(invoke) : []).toEqual([
+      { interactionId: "REQ", text: "freeform" },
     ]);
     expect(invoke ? isTeamsToolApprovalResponseActivity(invoke) : false).toBe(false);
   });
@@ -109,7 +109,7 @@ describe("Teams HITL helpers", () => {
         [TEAMS_HITL_DATA_KEY]: {
           [TEAMS_HITL_REQUEST_KIND_KEY]: "tool-approval",
           optionId: "approve",
-          requestId: "REQ",
+          interactionId: "REQ",
         },
       }),
     );
@@ -118,17 +118,22 @@ describe("Teams HITL helpers", () => {
   });
 });
 
-function request(): InputRequest {
+function request(): Interaction {
   return {
-    action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
-    display: "confirmation",
-    kind: "tool-approval",
-    options: [
-      { id: "approve", label: "Approve", style: "primary" },
-      { id: "cancel", label: "Cancel", style: "danger" },
-    ],
-    prompt: "Approve deploy?",
-    requestId: "REQ",
+    call: { callId: "TC", input: {}, name: "deploy" },
+    interactionId: "REQ",
+    status: "open",
+    turnId: "turn_0",
+    stepIndex: 0,
+    request: {
+      display: "confirmation",
+      kind: "approval",
+      prompt: "Approve deploy?",
+      options: [
+        { id: "approve", label: "Approve", style: "primary" },
+        { id: "cancel", label: "Cancel", style: "danger" },
+      ],
+    },
   };
 }
 

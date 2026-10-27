@@ -8,7 +8,8 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
 vi.mock("../route-child-delivery.js", () => ({
@@ -90,6 +91,7 @@ function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     hasWorkingTasks: () => false,
+    ignore: async () => {},
     inbox: inbox,
     cursor,
     queue: new SessionInputQueue([]),
@@ -116,6 +118,18 @@ function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
 }
 
 describe("nextTurnDelivery", () => {
+  it("retains an accepted cancel's identity when background tasks must stop", async () => {
+    const inbox = createMockInbox([
+      { result: { done: false, value: { kind: "cancel", deliveryId: "cancel-tasks" } } },
+    ]);
+    const input = waitInput(inbox);
+    input.hasWorkingTasks = () => true;
+    expect(await nextTurnDelivery(input)).toEqual({
+      kind: "cancel-working-tasks",
+      origin: { deliveryId: "cancel-tasks" },
+    });
+  });
+
   it("batches one principal's adjacent queued deliveries with their latest claims", async () => {
     const auth: SessionAuthContext = {
       attributes: { scopes: ["read"], team: "support" },

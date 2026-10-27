@@ -21,14 +21,16 @@ export default defineEval({
     const newer = requestFrom(second, "authorized-change");
     expectApprovalCancelled(session, approvalA);
     // When the user still answers A, from an old prompt.
-    const stale = await session.respond([{ requestId: approvalA.requestId, optionId: "approve" }]);
+    const stale = await session.respond([
+      { interactionId: approvalA.interactionId, optionId: "approve" },
+    ]);
     // Then the stale answer becomes new input, which steers the held turn like any message:
     // the newer change is cancelled too, and nothing runs.
     stale.expectOk();
     stale.notEvent("turn.started");
-    stale.event("message.completed", { count: 1 });
+    stale.event("content.completed", { count: 1, data: { kind: "text", phase: "reply" } });
     expectApprovalCancelled(session, newer);
     expectChangeStillUnexecuted(session);
-    t.check(session.pendingInputRequests.length, equals(0));
+    t.check(session.pendingInteractions.length, equals(0));
   },
 });

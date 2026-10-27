@@ -1,101 +1,48 @@
-/**
- * Deterministic HITL continuation prompt for session usage limits.
- *
- * When a durable session reaches its usage limit, the harness
- * parks on a harness-authored input request instead of failing the session.
- * The request is derived only from the session, turn, and usage, so
- * identical session state always produces an identical prompt — no model call
- * is involved.
- */
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#shared/input.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
+import type { ResponseValue } from "#protocol/session-events/families/response.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** Synthetic action tool name carried by session-limit continuation requests. */
-const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
+export interface LimitAsk {
+  readonly interactionId: string;
+  readonly request: InteractionRequest;
+}
 
-/** Option id that starts a new usage window. */
-const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
-
-/** Option id that declines continuation and ends the session. */
-export const SESSION_LIMIT_STOP_OPTION_ID = "stop";
-
-/**
- * Builds the deterministic continuation prompt for a session that reached its
- * usage limit.
- */
 export function createSessionLimitContinuationRequest(input: {
   readonly sessionId: string;
-  readonly total: TokenUsage;
-  /** The turn's `sequence`, which tells its prompt apart from another turn's at the same usage. */
   readonly turnSequence: number;
-  readonly window: TokenUsage;
-  /** Which usage window the prompt is for; approving starts the next one. */
   readonly windowIndex: number;
-}): InputRequest {
-  const { sessionId, total, turnSequence, window, windowIndex } = input;
-  // Re-raising an unanswered prompt keeps its id; clients drop ids they've
-  // seen, so each window and each turn gets its own. Usage can't tell windows
-  // apart: a cost-only window leaves token counts unchanged. The sequence
-  // rather than the turn id keeps the id short enough for Discord's
-  // 100-character `custom_id`.
-  const requestId = `${sessionId}:${String(turnSequence)}:limit:usage:${String(windowIndex)}`;
-  const actionInput: JsonObject = { total: toJsonUsage(total), window: toJsonUsage(window) };
-
+}): LimitAsk {
+  const { sessionId, turnSequence, windowIndex } = input;
   return {
-    action: {
-      callId: requestId,
-      input: actionInput,
-      kind: "tool-call",
-      toolName: SESSION_LIMIT_CONTINUATION_TOOL_NAME,
+    // Cost-only windows can advance without any token count changing.
+    interactionId: `${sessionId}:${turnSequence}:limit:usage:${windowIndex}`,
+    request: {
+      allowFreeform: false,
+      display: "confirmation",
+      kind: "budget",
+      options: [
+        {
+          description: "Start a new usage window",
+          id: APPROVE_OPTION_ID,
+          label: "Approve",
+          style: "primary",
+        },
+        { description: "Stop now", id: DENY_OPTION_ID, label: "Stop", style: "danger" },
+      ],
+      prompt:
+        "This session has hit its usage limit. This is a guardrail against defective " +
+        "long-running sessions. If session activity looks fine, just approve to keep going.",
     },
-    allowFreeform: false,
-    display: "confirmation",
-    kind: "session-limit",
-    options: [
-      {
-        description: "Start a new usage window",
-        id: SESSION_LIMIT_CONTINUE_OPTION_ID,
-        label: "Approve",
-        style: "primary",
-      },
-      {
-        description: "Stop now",
-        id: SESSION_LIMIT_STOP_OPTION_ID,
-        label: "Stop",
-        style: "danger",
-      },
-    ],
-    prompt: SESSION_LIMIT_PROMPT,
-    requestId,
   };
 }
 
-/** `usage` as JSON: an unreported cost is left out. */
 export function toJsonUsage(usage: TokenUsage): JsonObject {
   const { costUsd, ...tokens } = usage;
   return costUsd === undefined ? tokens : { ...tokens, costUsd };
 }
 
-const SESSION_LIMIT_PROMPT =
-  "This session has hit its usage limit. This is a guardrail against defective " +
-  "long-running sessions. If session activity looks fine, just approve to keep going.";
-
-/**
- * Returns true when a request is a harness-authored session-limit
- * continuation prompt.
- */
-export function isSessionLimitContinuationRequest(request: InputRequest): boolean {
-  return request.kind === "session-limit";
-}
-
-/**
- * Matches request ids minted by {@link createSessionLimitContinuationRequest}.
- *
- * Continuation requests never enter model history (no matching tool call
- * exists), so the id shape is the only durable marker for recognizing a
- * stale continuation answer after its request left the pending batch.
- */
 export function isSessionLimitContinuationRequestId(requestId: string): boolean {
   return (
     /:limit:(?:usage|input|output):\d+$/u.test(requestId) ||
@@ -103,34 +50,8 @@ export function isSessionLimitContinuationRequestId(requestId: string): boolean 
   );
 }
 
-/**
- * Resolves the user's answer to a session-limit continuation prompt.
- *
- * Returns `{ granted: true }` for "continue", `{ granted: false }` for
- * "stop", and `undefined` when the batch carries no continuation request or
- * the user has not answered it — an unanswered prompt is re-raised on the
- * next step because the violation still holds.
- */
-export function resolveSessionLimitContinuation(input: {
-  readonly requests: readonly InputRequest[];
-  readonly responses: readonly InputResponse[];
-}): { readonly granted: boolean } | undefined {
-  const request = input.requests.find(isSessionLimitContinuationRequest);
-  if (request === undefined) {
-    return undefined;
-  }
-
-  const response = input.responses.find((entry) => entry.requestId === request.requestId);
-  if (response === undefined) {
-    return undefined;
-  }
-
-  if (response.optionId === SESSION_LIMIT_CONTINUE_OPTION_ID) {
-    return { granted: true };
-  }
-  if (response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
-    return { granted: false };
-  }
-
+export function limitDecision(answer: ResponseValue): { readonly granted: boolean } | undefined {
+  if (answer.optionId === APPROVE_OPTION_ID) return { granted: true };
+  if (answer.optionId === DENY_OPTION_ID) return { granted: false };
   return undefined;
 }

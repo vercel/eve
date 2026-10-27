@@ -27,15 +27,27 @@ export function resolveDevelopmentStateDirectory(appRoot: string): string {
   return resolve(appRoot, override);
 }
 
-type InstrumentationEnvironment = "development" | "preview" | "production";
+type ConversationEnvironment = "development" | "preview" | "production";
 
 /** Reports whether this process belongs to an `eve dev` session. */
 export function isEveDevEnvironment(): boolean {
   return process.env[EVE_DEV_ENV_FLAG] === "1";
 }
 
+/**
+ * Reports whether this process is a local development server: `eve dev`
+ * (`EVE_DEV=1`) or `vercel dev` (`VERCEL=1` with `VERCEL_ENV=development`).
+ * This is a property of the deployment, never of an inbound request.
+ */
+export function isLocalDevelopmentServer(): boolean {
+  if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
+    return true;
+  }
+  return isEveDevEnvironment();
+}
+
 /** Resolves the deployment environment used by setup hooks and trace policies. */
-export function resolveInstrumentationEnvironment(): InstrumentationEnvironment {
+export function resolveInstrumentationEnvironment(): ConversationEnvironment {
   if (isEveDevEnvironment() || process.env.VERCEL_ENV === "development") return "development";
   return process.env.VERCEL_ENV === "preview" ? "preview" : "production";
 }

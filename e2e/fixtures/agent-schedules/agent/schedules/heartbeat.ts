@@ -11,7 +11,7 @@ import { defineSchedule } from "eve/schedules";
  */
 export default defineSchedule({
   cron: "0 0 * * *",
-  markdown: [
+  content: [
     "Call the `record-heartbeat` tool exactly once with note 'cron-tick'.",
     "Do not call any other tool. You have no other task.",
   ].join("\n"),

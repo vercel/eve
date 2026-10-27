@@ -21,25 +21,25 @@ import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 /**
  * HTTP client for talking to a deployed eve agent.
  *
- * A single client is bound to one host and auth configuration. Its
+ * A single client is bound to one base URL and auth configuration. Its
  * `sessions` collection can create or attach many independent fixed session
  * handles.
  */
 export class Client {
   readonly #auth: ClientAuth | undefined;
   readonly #headers: HeadersValue | undefined;
-  readonly #host: string;
+  readonly #baseUrl: string;
   readonly #redirect: ClientRedirectPolicy | undefined;
   /** Explicit create/attach surface for ID-addressed sessions. */
   readonly sessions: ClientSessions;
 
   constructor(options: ClientOptions) {
-    this.#host = options.host;
+    this.#baseUrl = options.baseUrl;
     this.#auth = options.auth;
     this.#headers = options.headers;
     this.#redirect = options.redirect;
     this.sessions = new ClientSessions({
-      host: this.#host,
+      baseUrl: this.#baseUrl,
       redirect: this.#redirect,
       resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
     });
@@ -51,7 +51,7 @@ export class Client {
    * @throws {ClientError} If the server returns a non-successful status.
    */
   async health(): Promise<HealthResult> {
-    const url = createClientUrl(this.#host, EVE_HEALTH_ROUTE_PATH);
+    const url = createClientUrl(this.#baseUrl, EVE_HEALTH_ROUTE_PATH);
     const headers = await this.#resolveHeaders();
     const response = await fetch(url, withRedirectPolicy({ headers }, this.#redirect));
 
@@ -128,7 +128,7 @@ export class Client {
    * auth/header cascade used by {@link health}, {@link info}, and sessions.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const url = createClientUrl(this.#host, path);
+    const url = createClientUrl(this.#baseUrl, path);
     const headers = await this.#resolveHeaders(headersInitToRecord(init.headers));
     return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }

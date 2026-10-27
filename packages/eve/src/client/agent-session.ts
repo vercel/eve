@@ -1,56 +1,80 @@
-import { followStreamIterable } from "#client/open-stream.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { SessionReader } from "#shared/session.js";
+import { followStreamIterable, type FollowedEvent } from "#client/open-stream.js";
+import { ClientError } from "#client/client-error.js";
 import type { ClientSessionContext } from "#client/session.js";
-import type { StreamOptions } from "#client/types.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamOptions } from "#client/types.js";
+import { createEveDescendantStreamRoutePath } from "#protocol/routes.js";
+import {
+  EVE_OBSERVATION_KEY_HEADER,
+  type DescendantHop,
+} from "#protocol/descendant-observation.js";
 
-/**
- * A session an agent run opened, reached through the parent session whose
- * stream announced it with `agent.started`. Get one with
- * `session.agent(started)`. Every read uses the parent's host and
- * credentials: a local child's own route, or the parent-origin proxy for a
- * remote child, which the parent deployment authenticates to the remote agent
- * after checking that it recorded the child.
- */
-export class ClientAgentSession {
-  /** The agent's name, as `agent.started` reports it. */
+/** A read-only child reached through recorded relationships on its parent's authorized reader. */
+export class ClientAgentSession implements SessionReader {
   readonly name: string;
-  /** The child session's id. */
-  readonly sessionId: string;
-  /** The task whose run opened the session; absent when an `execute` call opened it. */
+  readonly id: string;
   readonly taskId: string | undefined;
   readonly #context: ClientSessionContext;
-  readonly #streamPath: string;
+  readonly #rootId: string;
+  readonly #children: readonly DescendantHop[];
 
   /** @internal */
-  constructor(context: ClientSessionContext, started: AgentStartedStreamEvent) {
+  constructor(
+    context: ClientSessionContext,
+    rootId: string,
+    opened: Extract<SessionStreamEvent, { type: "child.opened" }>,
+    children: readonly DescendantHop[] = [],
+  ) {
+    const position = opened.meta?.position?.line;
+    if (!Number.isSafeInteger(position) || position < 0)
+      throw new TypeError("Pass a received child.opened event with its committed source position.");
     this.#context = context;
-    this.#streamPath = started.data.streamPath;
-    this.name = started.data.name;
-    this.sessionId = started.data.sessionId;
-    this.taskId = started.data.taskId;
+    this.#rootId = rootId;
+    this.#children = [...children, { sessionId: opened.data.sessionId, position }];
+    this.name = opened.data.name;
+    this.id = opened.data.sessionId;
+    this.taskId =
+      opened.scope?.taskId ??
+      ("taskId" in opened.data.owner ? opened.data.owner.taskId : undefined);
   }
 
-  /**
-   * Follows the child's durable event stream. Reading it never advances the
-   * parent session's cursor. The child cursor starts at `0`; pass `startIndex`
-   * to resume. Stop at a child turn boundary with `isCurrentTurnBoundaryEvent`.
-   */
-  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
-    const startIndex = options?.startIndex ?? 0;
-    if (options?.follow === false && startIndex < 0) {
-      throw new Error(
-        "agent(started).stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
-    }
+  /** Resolves a further recorded child through this reader, including remote proxy hops. */
+  agent(opened: Extract<SessionStreamEvent, { type: "child.opened" }>): ClientAgentSession {
+    return new ClientAgentSession(this.#context, this.#rootId, opened, this.#children);
+  }
+
+  /** Reads independently of its parent; `follow: false` stops at the captured durable tail. */
+  async *stream(options?: SessionStreamOptions): AsyncGenerator<SessionStreamEvent> {
+    for await (const { event } of this.follow(options)) yield event;
+  }
+
+  /** @internal The child's events and durable line cursor, with server-established provenance. */
+  follow(
+    options?: SessionStreamOptions,
+    onIdentity?: (key: string) => void,
+    onCaughtUp?: () => void,
+    onPosition?: (position: number) => void,
+  ): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
       follow: options?.follow,
-      host: this.#context.host,
-      path: this.#streamPath,
-      redirect: this.#context.redirect,
+      onCaughtUp,
+      onPosition,
+      baseUrl: this.#context.baseUrl,
+      path: createEveDescendantStreamRoutePath(this.#rootId),
+      searchParams: { children: JSON.stringify(this.#children) },
+      redirect: "error",
       resolveHeaders: () => this.#context.resolveHeaders(),
       signal: options?.signal,
-      startIndex,
+      startIndex: options?.startIndex ?? 0,
       streamReconnectPolicy: options?.streamReconnectPolicy,
+      onOpen: (headers) => {
+        if (onIdentity === undefined) return;
+        const key = headers.get(EVE_OBSERVATION_KEY_HEADER);
+        if (key === null || key.length > 8192)
+          throw new ClientError(422, "Descendant reader provenance is unavailable.");
+        onIdentity(key);
+      },
     });
   }
 }

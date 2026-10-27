@@ -3,6 +3,11 @@
  * and question controls, and retiring an approval's messages once it resolves.
  */
 
+import type {
+  RefusedAnswer,
+  RequestBatch,
+  RequestSettlement,
+} from "#channel/interaction-prompts.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   slackUserIdForPrincipal,
@@ -11,8 +16,8 @@ import {
 import {
   buildAnsweredBlocks,
   decodeHitlActionId,
-  renderInputRequestPostParts,
-  type SlackInputRequestPostPart,
+  renderInteractionPostParts,
+  type SlackInteractionPostPart,
 } from "#public/channels/slack/hitl.js";
 import {
   answeredBlocksFromActionBlock,
@@ -22,7 +27,7 @@ import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
-import { deliverPrivateInputRequest } from "#public/channels/slack/private-approval-delivery.js";
+import { deliverPrivateInteraction } from "#public/channels/slack/private-approval-delivery.js";
 import type {
   SlackApprovalChannelResolver,
   SlackChannelInternalEvents,
@@ -30,41 +35,45 @@ import type {
   SlackEventContext,
   SlackPendingApprovalCard,
 } from "#public/channels/slack/slackChannel.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
 
 const log = createLogger("slack.defaults");
 
 /**
- * Default `input.requested` handler — renders each pending HITL
+ * Default `interaction.opened` handler — renders each pending HITL
  * request as Slack `block_actions`. Buttons by default; radio for
  * ≤6-option select requests; static_select for >6-option select
  * requests. Batches split into multiple posts when they would exceed
  * Slack's 50-block message cap.
  */
-export function defaultInputRequestedHandler(
+export function defaultInteractionsHandler(
   approvalChannel?: SlackApprovalChannelResolver,
-): NonNullable<SlackChannelInternalEvents["input.requested"]> {
-  return async (data, channel, ctx) => {
-    const directMessageRequests: InputRequest[] = [];
-    const threadRequests: InputRequest[] = [];
+): (
+  data: RequestBatch,
+  ctx: Parameters<NonNullable<SlackChannelInternalEvents["interaction.opened"]>>[1],
+) => Promise<void> {
+  return async (data, ctx) => {
+    const { channel } = ctx;
+    const directMessageRequests: Interaction[] = [];
+    const threadRequests: Interaction[] = [];
     for (const request of data.requests) {
       const destination =
         approvalChannel === undefined ? "thread" : await approvalChannel(request, ctx);
       (destination === "direct-message" ? directMessageRequests : threadRequests).push(request);
     }
 
-    await postPublicInputRequests(threadRequests, channel);
+    await postPublicInteractions(threadRequests, channel);
     for (const request of directMessageRequests) {
       const reviewer =
         slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId;
       if (!reviewer) {
         log.warn("direct-message input request not delivered because no reviewer was resolved", {
-          requestId: request.requestId,
+          requestId: request.interactionId,
           sessionId: ctx.session.id,
         });
         continue;
       }
-      const card = await deliverPrivateInputRequest({
+      const card = await deliverPrivateInteraction({
         previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
         request,
         reviewer,
@@ -73,7 +82,7 @@ export function defaultInputRequestedHandler(
       recordApprovalCards(channel.state, [request], card);
       try {
         const announcement = await channel.thread.post(
-          `Waiting on ${request.kind === "tool-approval" ? "approval" : "a response"} from <@${reviewer}>…`,
+          `Waiting on ${request.request.kind === "approval" ? "approval" : "a response"} from <@${reviewer}>…`,
         );
         if (announcement.id) {
           recordApprovalCards(channel.state, [request], {
@@ -83,7 +92,7 @@ export function defaultInputRequestedHandler(
         }
       } catch (error) {
         logError(log, "failed to announce private input request", error, {
-          requestId: request.requestId,
+          requestId: request.interactionId,
           sessionId: ctx.session.id,
         });
       }
@@ -91,21 +100,22 @@ export function defaultInputRequestedHandler(
   };
 }
 
-async function postPublicInputRequests(
-  requests: readonly InputRequest[],
+async function postPublicInteractions(
+  requests: readonly Interaction[],
   channel: SlackEventContext,
 ): Promise<void> {
   const detailsByRequest = new Map<string, string>();
-  for (const post of buildInputRequestPosts(requests)) {
+  for (const post of buildInteractionPosts(requests)) {
     const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
     if (post.kind === "details") {
       if (message.id) {
-        for (const request of post.requests) detailsByRequest.set(request.requestId, message.id);
+        for (const request of post.requests)
+          detailsByRequest.set(request.interactionId, message.id);
       }
       continue;
     }
     for (const request of post.requests) {
-      const detailsMessageTs = detailsByRequest.get(request.requestId);
+      const detailsMessageTs = detailsByRequest.get(request.interactionId);
       recordApprovalCards(channel.state, [request], {
         detailsMessageTs,
         messageBlocks: post.blocks,
@@ -117,13 +127,13 @@ async function postPublicInputRequests(
 
 function recordApprovalCards(
   state: SlackChannelState,
-  requests: readonly InputRequest[],
+  requests: readonly Interaction[],
   card: SlackPendingApprovalCard,
 ): void {
   if (!card.messageTs) return;
   const cards = { ...state.pendingApprovalCards };
   for (const request of requests) {
-    if (request.kind === "tool-approval") cards[request.requestId] = card;
+    if (request.request.kind === "approval") cards[request.interactionId] = card;
   }
   state.pendingApprovalCards = cards;
 }
@@ -214,30 +224,30 @@ async function settleRequest(
  * Slack's block-count cap. Tool input details are posted before interactive
  * approval controls so Slack's callback body cannot grow with the input.
  */
-function buildInputRequestPosts(requests: readonly InputRequest[]): Array<{
+function buildInteractionPosts(requests: readonly Interaction[]): Array<{
   blocks: unknown[];
   kind: "controls" | "details";
-  requests: InputRequest[];
+  requests: Interaction[];
   text: string;
 }> {
-  const details: Array<SlackInputRequestPostPart & { readonly request: InputRequest }> = [];
-  const controls: Array<SlackInputRequestPostPart & { readonly request: InputRequest }> = [];
+  const details: Array<SlackInteractionPostPart & { readonly request: Interaction }> = [];
+  const controls: Array<SlackInteractionPostPart & { readonly request: Interaction }> = [];
   for (const request of requests) {
-    const parts = renderInputRequestPostParts(request);
+    const parts = renderInteractionPostParts(request);
     if (parts.details) details.push({ ...parts.details, request });
     controls.push({ ...parts.controls, request });
   }
 
   return [
-    ...groupInputRequestPostParts(details).map((post) => ({ ...post, kind: "details" as const })),
-    ...groupInputRequestPostParts(controls).map((post) => ({ ...post, kind: "controls" as const })),
+    ...groupInteractionPostParts(details).map((post) => ({ ...post, kind: "details" as const })),
+    ...groupInteractionPostParts(controls).map((post) => ({ ...post, kind: "controls" as const })),
   ];
 }
 
-function groupInputRequestPostParts(
-  parts: readonly (SlackInputRequestPostPart & { readonly request: InputRequest })[],
-): Array<{ blocks: unknown[]; requests: InputRequest[]; text: string }> {
-  const groups: Array<{ blocks: unknown[]; fallbacks: string[]; requests: InputRequest[] }> = [];
+function groupInteractionPostParts(
+  parts: readonly (SlackInteractionPostPart & { readonly request: Interaction })[],
+): Array<{ blocks: unknown[]; requests: Interaction[]; text: string }> {
+  const groups: Array<{ blocks: unknown[]; fallbacks: string[]; requests: Interaction[] }> = [];
   for (const part of parts) {
     const current = groups.at(-1);
     if (current && current.blocks.length + part.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
@@ -271,56 +281,49 @@ function blockContainsRequestAction(block: unknown, requestId: string): boolean 
   );
 }
 
-/** Default handlers for the approval lifecycle events. */
-export const approvalEvents: Pick<
-  SlackChannelInternalEvents,
-  "approval.candidate" | "approval.settled" | "input.resolved"
-> = {
-  // A pending candidate gets no notice: an ephemeral cannot be removed once the
-  // approval settles, and the card itself reports the outcome moments later.
-  async "approval.candidate"(event, channel, _ctx) {
-    if (event.outcome !== "rejected" && event.outcome !== "failed") return;
-    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
-    if (userId === undefined) return;
-    await channel.thread.postEphemeral(
-      userId,
-      event.reason ?? "We couldn’t verify your response. Please try again.",
-    );
-  },
+/**
+ * A responder an approval's policy or check refused hears why privately. A pending answer gets
+ * no notice: an ephemeral cannot be removed once the approval settles, and the card itself
+ * reports the outcome moments later.
+ */
+export async function notifyRefusedResponder(
+  refused: RefusedAnswer,
+  channel: SlackEventContext,
+): Promise<void> {
+  const userId = slackUserIdForPrincipal(channel.state, refused.responder?.id);
+  if (userId === undefined) return;
+  await channel.thread.postEphemeral(
+    userId,
+    refused.reason ?? "We couldn’t verify your response. Please try again.",
+  );
+}
 
-  async "approval.settled"(event, channel, _ctx) {
-    const approved = event.outcome === "approved";
-    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
-    const by = userId === undefined ? "" : ` by <@${userId}>`;
-    const label = approved ? "Approve" : "Cancel";
-    await settleApprovalCard(channel, event.requestId, {
-      announcement: `${approved ? "Approved" : "Cancelled"}${by}.`,
-      label,
-      text: `Answered: ${label}`,
-      userId,
+/**
+ * Retires an approval's card: with the person whose press decided it, or as no longer needed
+ * when it ended any other way (the user replied instead, or it was withdrawn).
+ */
+export async function settleApproval(
+  resolution: RequestSettlement,
+  channel: SlackEventContext,
+): Promise<void> {
+  if (resolution.kind !== "approval") return;
+  const decided = resolution.outcome === "accepted" || resolution.outcome === "declined";
+  if (!decided) {
+    await settleApprovalCard(channel, resolution.interactionId, {
+      announcement: "This approval is no longer needed.",
+      label: "No longer needed",
+      text: "No longer needed",
     });
-  },
-
-  // `approval.settled` runs first in the same step and retires clicked cards
-  // with the responder. Approvals that end any other way (the user replied
-  // instead, or the request was withdrawn) are retired here.
-  async "input.resolved"(event, channel, _ctx) {
-    for (const resolution of event.resolutions) {
-      if (resolution.kind !== "tool-approval") continue;
-      const label =
-        resolution.outcome === "approved"
-          ? "Approve"
-          : resolution.outcome === "denied"
-            ? "Cancel"
-            : "No longer needed";
-      const withdrawn = label === "No longer needed";
-      await settleApprovalCard(channel, resolution.requestId, {
-        announcement: withdrawn
-          ? "This approval is no longer needed."
-          : `${label === "Approve" ? "Approved" : "Cancelled"}.`,
-        label,
-        text: withdrawn ? label : `Answered: ${label}`,
-      });
-    }
-  },
-};
+    return;
+  }
+  const approved = resolution.outcome === "accepted";
+  const userId = slackUserIdForPrincipal(channel.state, resolution.responder?.id);
+  const by = userId === undefined ? "" : ` by <@${userId}>`;
+  const label = approved ? "Approve" : "Cancel";
+  await settleApprovalCard(channel, resolution.interactionId, {
+    announcement: `${approved ? "Approved" : "Cancelled"}${by}.`,
+    label,
+    text: `Answered: ${label}`,
+    userId,
+  });
+}

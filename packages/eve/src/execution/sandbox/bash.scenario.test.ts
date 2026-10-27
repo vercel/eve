@@ -112,14 +112,14 @@ async function createHostSandbox(): Promise<{
       });
       launches.push(exited);
       // Like many providers, aborting kills only the launched process.
-      options.abortSignal?.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
+      options.signal?.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
       return {
         pid: child.pid,
         stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
         stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
         async wait() {
           const result = await exited;
-          options.abortSignal?.throwIfAborted();
+          options.signal?.throwIfAborted();
           return result;
         },
         async kill() {

@@ -1,8 +1,20 @@
+import { FatalError } from "#compiled/@workflow/core/index.js";
+import {
+  assertPublicHostname,
+  createPublicDispatcher,
+  fetchWithDispatcher,
+  findUnsafeDestinationError,
+  readBoundedResponse,
+  UnsafeDestinationError,
+} from "#execution/public-destination.js";
+import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
+/** Callback replies are small JSON acknowledgements. */
+const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1024;
 const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
 const VERCEL_CALLBACK_HOST_ENVS = [
   "VERCEL_URL",
@@ -11,7 +23,13 @@ const VERCEL_CALLBACK_HOST_ENVS = [
 ] as const;
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 
-/** Posts one framework callback payload with the shared callback transport policy. */
+/**
+ * Posts one framework callback payload with the shared callback transport policy.
+ *
+ * Callback URLs are caller-supplied, so delivery only connects to public
+ * addresses (loopback is also allowed on local development servers), checked
+ * against every resolved address at connect time.
+ */
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
   /** Set false when the caller owns failure logging, such as best-effort activity. */
@@ -23,17 +41,25 @@ export async function postSessionCallbackRequest(input: {
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
-    response = await fetch(input.url, {
+    response = await requestCallback(input.url, {
       body: JSON.stringify(input.body),
       headers: await resolveSessionCallbackHeaders(input.url),
-      method: "POST",
-      // Do not follow redirects: a validated callback host could otherwise
-      // 3xx-bounce the framework to an internal/metadata address after the
-      // path/token check has already passed.
-      redirect: "error",
       signal,
     });
   } catch (error) {
+    const blocked = findUnsafeDestinationError(error);
+    if (blocked !== undefined) {
+      // The policy decides the same way on every attempt, so do not retry.
+      // The policy message carries no part of the URL.
+      if (input.logFailures !== false) {
+        log.error("callback delivery failed", {
+          ...callbackLogFields(input),
+          failure: "blocked-destination",
+          error: new Error(blocked.message),
+        });
+      }
+      throw new FatalError(`Callback delivery refused: ${blocked.message}`);
+    }
     // Fetch errors can contain the capability URL or credentials in their
     // cause chain. Log a safe summary, but preserve the original rejection.
     if (input.logFailures !== false) {
@@ -55,6 +81,37 @@ export async function postSessionCallbackRequest(input: {
     });
   }
   return response;
+}
+
+async function requestCallback(
+  urlText: string,
+  init: {
+    readonly body: string;
+    readonly headers: Record<string, string>;
+    readonly signal: AbortSignal;
+  },
+): Promise<Response> {
+  const url = new URL(urlText);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new UnsafeDestinationError("Callback URL must use http or https.");
+  }
+  const policy = { allowLoopback: isLocalDevelopmentServer() };
+  assertPublicHostname(url.hostname, policy);
+  const dispatcher = await createPublicDispatcher(policy);
+  try {
+    const response = await fetchWithDispatcher(urlText, {
+      ...init,
+      dispatcher,
+      method: "POST",
+      // Do not follow redirects: a validated callback host could otherwise
+      // 3xx-bounce the framework to an internal/metadata address after the
+      // path/token check has already passed.
+      redirect: "error",
+    });
+    return await readBoundedResponse(response, MAX_CALLBACK_RESPONSE_BYTES);
+  } finally {
+    await dispatcher.close();
+  }
 }
 
 function callbackLogFields(input: { readonly body: unknown; readonly url: string }) {

@@ -20,9 +20,18 @@
 //
 // Dispatch inputs narrow the run through BENCHMARK_MODELS and
 // BENCHMARK_FIXTURES (comma-separated registry names) and BENCHMARK_ATTEMPTS.
+// BENCHMARK_RELEASE (e.g. 0.61.0) plans a release backfill (release.mjs):
+// the run is dated at the release's npm publish time, its manifest names the
+// release as its `source`, and it skips hosted worlds, whose platform the
+// release does not pin.
+//
+// The working directory is the code under test (main, or the release's tag),
+// which supplies the fixtures and e2e/matrix.json. The registry and the
+// startup probe are always this script's own checkout (the harness).
 //
 // Usage: node scripts/eval-benchmark/plan.mjs <plan.json> [sha]
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,8 +39,10 @@ import { fileURLToPath } from "node:url";
 import { discoverEvalIds } from "../../.github/scripts/discover-e2e-fixtures.mjs";
 import { resolveModelReleases } from "./catalog.mjs";
 import { fixtureDigest } from "./digest.mjs";
+import { evalFlags, releasePublishedAt, releaseTag } from "./release.mjs";
 
 export const PLAN_SCHEMA_VERSION = 1;
+const HARNESS_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const FIXTURE_ROOTS = ["e2e/fixtures", "apps/fixtures"];
 const NAME = /^[a-z0-9-]+$/;
 const MAX_ATTEMPTS = 10;
@@ -51,9 +62,12 @@ const STARTUP_SUBJECTS = { minimal: { tools: 0 } };
  *   matrix: any,
  *   findFixture: (name: string) => { dir: string, evalIds: string[], packageJson?: any } | undefined,
  *   narrow?: { models?: string, fixtures?: string, attempts?: string },
- * }} input
+ *   backfill?: boolean,
+ * }} input `backfill` plans a release backfill: registry fixtures the
+ *   release predates are left out (listed as `absentFixtures`), and so are
+ *   hosted worlds, whose platform the release does not pin.
  */
-export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) {
+export function selectBenchmark({ registry, matrix, findFixture, narrow = {}, backfill = false }) {
   const models = namedEntries(registry?.models, "models");
   const attempts = positiveInteger(registry?.attempts, 'e2e/benchmark.json: "attempts"');
   const mockAttempts = positiveInteger(
@@ -81,11 +95,18 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
     registry?.mockFixtures === undefined
       ? fixtureNames
       : names(registry.mockFixtures, "mockFixtures", { allowEmpty: true });
-  const mockWorlds = readMockWorlds(registry?.mockWorlds ?? [], matrix, mockFixtureNames);
+  const mockWorlds = readMockWorlds(registry?.mockWorlds ?? [], matrix, mockFixtureNames).filter(
+    (world) => !(backfill && world.hosted),
+  );
 
   const plannedNames = [...new Set([...fixtureNames, ...mockFixtureNames])];
-  const fixtures = plannedNames.map((name) => {
+  const absentFixtures = [];
+  const fixtures = plannedNames.flatMap((name) => {
     const found = findFixture(name);
+    if (found === undefined && backfill) {
+      absentFixtures.push(name);
+      return [];
+    }
     if (found === undefined) {
       throw new Error(
         `e2e/benchmark.json: fixture "${name}" was not found with an evals/ directory under ${FIXTURE_ROOTS.join(" or ")}.`,
@@ -93,7 +114,7 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
     }
     if (found.evalIds.length === 0)
       throw new Error(`e2e/benchmark.json: fixture "${name}" has no *.eval.ts files.`);
-    return { name, ...found };
+    return [{ name, ...found }];
   });
 
   const selectedModels = narrowNames(models, narrow.models, "model");
@@ -115,6 +136,7 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
       ({ name }) => selectedNames.has(name) && mockFixtureNames.includes(name),
     ),
     mockWorlds,
+    absentFixtures,
   };
 }
 
@@ -299,6 +321,12 @@ function narrowNames(entries, input, label) {
   return requested.map((name) => known.get(name));
 }
 
+/** git's blob id for a file: `git rev-parse <commit>:<path>` for the committed file. */
+function gitBlobId(path) {
+  const body = readFileSync(path);
+  return createHash("sha1").update(`blob ${body.length}\0`).update(body).digest("hex");
+}
+
 function findFixtureOnDisk(name) {
   for (const root of FIXTURE_ROOTS) {
     const dir = join(root, name);
@@ -321,10 +349,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error("Usage: node scripts/eval-benchmark/plan.mjs <plan.json> [sha]");
     process.exit(1);
   }
-  const sha =
-    shaArgument ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const gitHead = (cwd) =>
+    execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  const sha = shaArgument ?? gitHead(".");
+  const release = process.env.BENCHMARK_RELEASE || undefined;
+  const eveVersion = JSON.parse(readFileSync("packages/eve/package.json", "utf8")).version;
+  if (release !== undefined && eveVersion !== release)
+    throw new Error(
+      `The checkout at ${sha} is eve ${eveVersion}, not ${releaseTag(release)}; check out the release's tag to backfill it.`,
+    );
   const selection = selectBenchmark({
-    registry: JSON.parse(readFileSync("e2e/benchmark.json", "utf8")),
+    registry: JSON.parse(readFileSync(join(HARNESS_ROOT, "e2e/benchmark.json"), "utf8")),
     matrix: JSON.parse(readFileSync("e2e/matrix.json", "utf8")),
     findFixture: findFixtureOnDisk,
     narrow: {
@@ -332,17 +367,41 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       fixtures: process.env.BENCHMARK_FIXTURES,
       attempts: process.env.BENCHMARK_ATTEMPTS,
     },
+    backfill: release !== undefined,
   });
+  if (selection.absentFixtures.length > 0)
+    console.error(
+      `eve ${eveVersion} predates registry fixtures ${selection.absentFixtures.join(", ")}; they are not planned.`,
+    );
   const models = await resolveModelReleases(selection.models);
   const { live, mock } = planLegs({ ...selection, models });
+  const plannedAt =
+    release === undefined ? new Date().toISOString() : await releasePublishedAt(release);
+  // main's eval runner has every flag the benchmark passes.
+  const flags = release === undefined ? { keepState: true } : evalFlags(release);
   const plan = {
     schema_version: PLAN_SCHEMA_VERSION,
     sha,
-    planned_at: new Date().toISOString(),
+    eve_version: eveVersion,
+    planned_at: plannedAt,
+    ...(release === undefined
+      ? {}
+      : {
+          source: {
+            kind: "release-backfill",
+            repository: process.env.GITHUB_REPOSITORY ?? null,
+            release,
+            tag: releaseTag(release),
+            published_at: plannedAt,
+            executed_at: new Date().toISOString(),
+            harness_sha: gitHead(HARNESS_ROOT),
+          },
+        }),
     registry: {
       attempts: selection.attempts,
       mock_attempts: selection.mockAttempts,
       // The startup script defines its agents, so its blob id is their digest.
+      // The harness runs it, so a backfill shares main's digest.
       dev_startup:
         selection.devStartup === null
           ? null
@@ -350,9 +409,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
               ...selection.devStartup,
               subjects: selection.devStartup.subjects.map((subject) => ({
                 ...subject,
-                digest: execFileSync("git", ["rev-parse", `${sha}:${STARTUP_SCRIPT}`], {
-                  encoding: "utf8",
-                }).trim(),
+                digest: gitBlobId(join(HARNESS_ROOT, STARTUP_SCRIPT)),
               })),
             },
       // Concurrency changes measured latency, so every manifest records it.
@@ -388,8 +445,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     `dev_startup=${JSON.stringify(selection.devStartup)}`,
     `max_parallel=${selection.concurrency.legs}`,
     `evals_per_leg=${selection.concurrency.evalsPerLeg}`,
+    `keep_state=${flags.keepState}`,
   ];
-  console.error(`Planned ${live.length} live and ${mock.length} mock legs at ${sha}.`);
+  console.error(
+    `Planned ${live.length} live and ${mock.length} mock legs at ${sha} (eve ${eveVersion}${release === undefined ? "" : `, dated ${plannedAt}`}).`,
+  );
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
   else process.stdout.write(`${lines.join("\n")}\n`);
 }

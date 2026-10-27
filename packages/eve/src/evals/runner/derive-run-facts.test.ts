@@ -1,688 +1,346 @@
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { JsonObject } from "#shared/json.js";
-import type { TokenUsage } from "#shared/token-usage.js";
-import { stampTestEvents } from "#internal/testing/events.js";
-import { deriveRunFacts, type DeriveRunFactsOptions } from "#evals/runner/derive-run-facts.js";
-import type { EveEvalDerivedFacts } from "#evals/types.js";
+import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 
-/** Fixtures are authored without envelopes; stamp them the way the wire would. */
-function derive(
-  events: readonly UnstampedMessageStreamEvent[],
-  options?: DeriveRunFactsOptions,
-): EveEvalDerivedFacts {
-  return deriveRunFacts(stampTestEvents(events), options);
+function stream(events: readonly SessionEvent[]): SessionStreamEvent[] {
+  return events.map((event, line) => ({
+    ...event,
+    meta: { at: "2026-10-09T00:00:00.000Z", position: { index: 0, line } },
+  }));
 }
 
-function turnStarted(turnId: string, sequence: number): UnstampedMessageStreamEvent {
-  return { type: "turn.started", data: { turnId, sequence } };
-}
-
-function actionsRequested(
-  actions: readonly { callId: string; toolName: string; input?: JsonObject }[],
-): UnstampedMessageStreamEvent {
-  return {
-    type: "actions.requested",
-    data: {
-      actions: actions.map((action) => ({
-        callId: action.callId,
-        input: action.input ?? {},
-        kind: "tool-call" as const,
-        toolName: action.toolName,
-      })),
-      sequence: 1,
-      stepIndex: 0,
-      turnId: "t1",
+it("reads a call when two readers of one turn recorded its events out of order", () => {
+  const scope = { runId: "run_0", turnId: "turn_0" };
+  const events = stream([
+    {
+      data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
+      type: "turn.started",
     },
-  };
-}
-
-function actionResult(input: {
-  callId: string;
-  toolName: string;
-  output?: unknown;
-  status?: "completed" | "failed" | "rejected";
-  isError?: boolean;
-}): UnstampedMessageStreamEvent {
-  return {
-    type: "action.result",
-    data: {
-      result: {
-        callId: input.callId,
-        isError: input.isError,
-        kind: "tool-result" as const,
-        output: (input.output ?? null) as never,
-        toolName: input.toolName,
-      },
-      sequence: 1,
-      stepIndex: 0,
-      status: input.status ?? (input.isError === true ? "failed" : "completed"),
-      turnId: "t1",
-    },
-  };
-}
-
-function stepStarted(modelId: string, stepIndex: number): UnstampedMessageStreamEvent {
-  return { type: "step.started", data: { modelId, sequence: 1, stepIndex, turnId: "t1" } };
-}
-
-const USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 40, outputTokens: 8 };
-
-function sessionFailed(usage: TokenUsage): UnstampedMessageStreamEvent {
-  return {
-    type: "session.failed",
-    data: { code: "MODEL_CALL_FAILED", message: "failed", sessionId: "s1", usage },
-  };
-}
-
-function sessionWaiting(usage: TokenUsage | undefined): UnstampedMessageStreamEvent {
-  return {
-    type: "session.waiting",
-    data: { continuationToken: "", wait: "next-user-message", ...(usage && { usage }) },
-  };
-}
-
-function taskStarted(
-  callId: string,
-  name: string,
-  taskId: string,
-  kind: "agent" | "tool",
-): UnstampedMessageStreamEvent {
-  return { type: "task.started", data: { callId, kind, name, taskId, turnId: "t1" } };
-}
-
-function agentStarted(
-  callId: string,
-  name: string,
-  taskId: string,
-  remote?: { readonly url: string },
-): UnstampedMessageStreamEvent {
-  const data = {
-    callId,
-    name,
-    sessionId: `child-${callId}`,
-    streamPath: `/stream/${callId}`,
-    taskId,
-    turnId: "t1",
-  };
-  return { type: "agent.started", data: remote === undefined ? data : { ...data, remote } };
-}
-
-function inputRequested(requestIds: readonly string[]): UnstampedMessageStreamEvent {
-  return {
-    type: "input.requested",
-    data: {
-      requests: requestIds.map((requestId) => ({
-        action: {
-          callId: `${requestId}-call`,
-          input: {},
-          kind: "tool-call" as const,
-          toolName: "bash",
-        },
-        kind: "tool-approval" as const,
-        prompt: "Approve?",
-        requestId,
-      })),
-      sequence: 1,
-      stepIndex: 0,
-      turnId: "t1",
-    },
-  };
-}
-
-describe("deriveRunFacts", () => {
-  it("returns empty facts for no events", () => {
-    const facts = derive([]);
-    expect(facts).toEqual({
-      toolCalls: [],
-      toolCallCount: 0,
-      skillLoads: [],
-      subagentCalls: [],
-      subagentCallCount: 0,
-      inputRequests: [],
-      parked: false,
-      messageCount: 0,
-      reasoningBlockCount: 0,
-      models: [],
-      failureCode: undefined,
-    });
-  });
-
-  it("pairs tool calls with their results by call id", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      actionsRequested([
-        { callId: "c1", toolName: "get_weather", input: { city: "Brooklyn" } },
-        { callId: "c2", toolName: "bash", input: { command: "pwd" } },
-      ]),
-      actionResult({ callId: "c1", toolName: "get_weather", output: { tempF: 72 } }),
-      actionResult({
-        callId: "c2",
-        toolName: "bash",
-        output: "command denied",
-        status: "failed",
-      }),
-    ];
-
-    const facts = derive(events, { sessionId: "s1" });
-
-    expect(facts.toolCalls).toEqual([
-      {
-        name: "get_weather",
-        input: { city: "Brooklyn" },
-        output: { tempF: 72 },
-        status: "completed",
-        turnIndex: 0,
-        sessionId: "s1",
-      },
-      {
-        name: "bash",
-        input: { command: "pwd" },
-        output: "command denied",
-        status: "failed",
-        turnIndex: 0,
-        sessionId: "s1",
-      },
-    ]);
-    expect(facts.toolCallCount).toBe(2);
-  });
-
-  it("records the input the model sent an agent tool", () => {
-    const facts = derive([
-      turnStarted("t1", 0),
-      {
-        type: "actions.requested",
-        data: {
-          actions: [
-            {
-              callId: "c1",
-              description: "Research agent",
-              input: { message: "Find three sources" },
-              kind: "subagent-call",
-              name: "research",
-              nodeId: "subagents/research",
-              subagentName: "research",
-            },
-            {
-              callId: "c2",
-              description: "Weather agent",
-              input: { message: "Forecast for Brooklyn" },
-              kind: "remote-agent-call",
-              name: "weather",
-              nodeId: "remote-agents/weather",
-              remoteAgentName: "weather",
-            },
-          ],
-          sequence: 1,
-          stepIndex: 0,
-          turnId: "t1",
-        },
-      },
-      actionResult({ callId: "c1", toolName: "research", output: "Three sources" }),
-      actionResult({ callId: "c2", toolName: "weather", output: "Sunny" }),
-    ]);
-
-    expect(facts.toolCalls.map(({ input, name }) => ({ input, name }))).toEqual([
-      { input: { message: "Find three sources" }, name: "research" },
-      { input: { message: "Forecast for Brooklyn" }, name: "weather" },
-    ]);
-  });
-
-  it("settles an agent tool call from its subagent result", () => {
-    const facts = derive([
-      turnStarted("t1", 0),
-      {
-        type: "actions.requested",
-        data: {
-          actions: [
-            {
-              callId: "c1",
-              description: "Research agent",
-              input: { message: "Find three sources" },
-              kind: "subagent-call",
-              name: "research",
-              nodeId: "subagents/research",
-              subagentName: "research",
-            },
-          ],
-          sequence: 1,
-          stepIndex: 0,
-          turnId: "t1",
-        },
-      },
-      {
-        type: "action.result",
-        data: {
-          result: {
-            callId: "c1",
-            isError: true,
-            kind: "subagent-result",
-            origin: "dispatch",
-            output: "Subagent depth limit reached",
-            subagentName: "research",
-          },
-          sequence: 1,
-          stepIndex: 0,
-          status: "failed",
-          turnId: "t1",
-        },
-      },
-    ]);
-
-    expect(facts.toolCalls.map(({ name, output, status }) => ({ name, output, status }))).toEqual([
-      { name: "research", output: "Subagent depth limit reached", status: "failed" },
-    ]);
-  });
-
-  it("uses the normalized failed lifecycle status for error results", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      actionsRequested([{ callId: "c1", toolName: "bash" }]),
-      actionResult({ callId: "c1", toolName: "bash", isError: true }),
-    ];
-
-    const facts = derive(events);
-    expect(facts.toolCalls[0]?.status).toBe("failed");
-  });
-
-  it("distinguishes pending, completed, failed, and rejected tool calls", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      actionsRequested([
-        { callId: "pending", toolName: "pending" },
-        { callId: "completed", toolName: "completed" },
-        { callId: "failed", toolName: "failed" },
-        { callId: "rejected", toolName: "rejected" },
-      ]),
-      actionResult({ callId: "completed", toolName: "completed" }),
-      actionResult({ callId: "failed", toolName: "failed", status: "failed" }),
-      actionResult({ callId: "rejected", toolName: "rejected", status: "rejected" }),
-    ];
-
-    expect(derive(events).toolCalls.map((call) => call.status)).toEqual([
-      "pending",
-      "completed",
-      "failed",
-      "rejected",
-    ]);
-  });
-
-  it("derives pending tool calls from HITL input requests", () => {
-    const facts = derive([turnStarted("t1", 0), inputRequested(["approval"])]);
-
-    expect(facts.toolCalls).toEqual([
-      {
-        name: "bash",
+    {
+      data: {
+        callId: "call_sleep",
+        capability: { kind: "tool", name: "sleep" },
         input: {},
-        output: undefined,
+        owner: { runId: "run_0" },
+      },
+      scope,
+      type: "call.requested",
+    },
+    {
+      data: { callId: "call_sleep", outcome: "completed", output: { interrupted: true } },
+      scope,
+      type: "call.settled",
+    },
+  ]);
+  // The steering message's reader recorded the turn's later lines before the first reader's.
+  const usageEvents = [...events.slice(2), ...events];
+
+  expect(deriveRunFacts(events, { usageEvents }).toolCalls).toMatchObject([
+    { name: "sleep", output: { interrupted: true }, status: "completed" },
+  ]);
+});
+
+const turn0 = { turnId: "turn_0" };
+const run0 = { runId: "run_0", turnId: "turn_0" };
+const turn1 = { turnId: "turn_1" };
+const run1 = { runId: "run_1", turnId: "turn_1" };
+const spent = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 10 };
+
+function call(callId: string, kind: string, name: string, owner = run0): SessionEvent {
+  return {
+    data: {
+      callId,
+      capability: { kind, name },
+      input: { id: callId },
+      owner: { runId: owner.runId },
+    },
+    scope: owner,
+    type: "call.requested",
+  } as SessionEvent;
+}
+
+function done(callId: string, output: unknown, owner = run0): SessionEvent {
+  return {
+    data: { callId, outcome: "completed", output },
+    scope: owner,
+    type: "call.settled",
+  } as SessionEvent;
+}
+
+/** A turn that calls a tool, loads a skill, starts a subagent, and pauses on an approval. */
+const firstTurn: SessionEvent[] = [
+  { data: {}, type: "session.started" },
+  {
+    data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
+    scope: turn0,
+    type: "turn.started",
+  },
+  { data: { owner: turn0, runId: "run_0" }, scope: run0, type: "model.requested" },
+  {
+    data: { attempt: 0, modelId: "big-model", runId: "run_0" },
+    scope: run0,
+    type: "model.started",
+  },
+  {
+    data: { kind: "reasoning", partId: "p_0", phase: "narration", runId: "run_0", value: "Plan." },
+    scope: run0,
+    type: "content.completed",
+  },
+  call("call_weather", "tool", "weather"),
+  call("call_skill", "skill", "deploy-guide"),
+  call("call_research", "agent", "research"),
+  call("call_deploy", "tool", "deploy"),
+  done("call_weather", { temperature: 4 }),
+  done("call_skill", "Loaded."),
+  {
+    data: {
+      kind: "agent",
+      name: "research",
+      startedBy: { callId: "call_research" },
+      taskId: "task_0",
+    },
+    scope: turn0,
+    type: "task.started",
+  },
+  { data: { callId: "call_research", taskId: "task_0" }, scope: run0, type: "call.started" },
+  {
+    data: {
+      name: "research",
+      owner: { taskId: "task_0" },
+      sessionId: "child_0",
+      stream: "/child_0",
+    },
+    scope: turn0,
+    type: "child.opened",
+  },
+  {
+    data: {
+      interactionId: "i_0",
+      request: {
+        kind: "approval",
+        options: [{ id: "approve", label: "Approve" }],
+        prompt: "Deploy?",
+      },
+      subject: { callId: "call_deploy" },
+    },
+    scope: turn0,
+    type: "interaction.opened",
+  },
+  { data: { outcome: "completed", runId: "run_0" }, scope: run0, type: "model.settled" },
+  { data: { kind: "model", owner: { runId: "run_0" }, usage: spent }, type: "usage.recorded" },
+  {
+    data: { awaiting: [{ interactionId: "i_0" }], turnId: "turn_0" },
+    scope: turn0,
+    type: "turn.paused",
+  },
+] as SessionEvent[];
+
+/** The approval's answer runs the call; the next turn replies and fails. */
+const secondTurn: SessionEvent[] = [
+  {
+    data: { cause: { responseId: "r_0" }, interactionId: "i_0", outcome: "accepted" },
+    scope: turn0,
+    type: "interaction.settled",
+  },
+  done("call_deploy", "deployed"),
+  { data: { outcome: "completed", turnId: "turn_0" }, scope: turn0, type: "turn.settled" },
+  {
+    data: { cause: { deliveryId: "d_1" }, follows: "turn_0", turnId: "turn_1" },
+    scope: turn1,
+    type: "turn.started",
+  },
+  { data: { owner: turn1, runId: "run_1" }, scope: run1, type: "model.requested" },
+  {
+    data: { attempt: 0, modelId: "small-model", runId: "run_1" },
+    scope: run1,
+    type: "model.started",
+  },
+  {
+    data: { kind: "text", partId: "p_1", phase: "reply", runId: "run_1", value: "Deployed." },
+    scope: run1,
+    type: "content.completed",
+  },
+  { data: { outcome: "completed", runId: "run_1" }, scope: run1, type: "model.settled" },
+  { data: { kind: "model", owner: { runId: "run_1" }, usage: spent }, type: "usage.recorded" },
+  {
+    data: {
+      error: { code: "BUDGET_EXCEEDED", message: "Out of budget" },
+      outcome: "failed",
+      turnId: "turn_1",
+    },
+    scope: turn1,
+    type: "turn.settled",
+  },
+] as SessionEvent[];
+
+it("reads what a turn did: its calls by kind, the request it waits on, and its models", () => {
+  const events = stream(firstTurn);
+
+  expect(deriveRunFacts(events, { sessionId: "s" })).toMatchObject({
+    failureCode: undefined,
+    interactions: [{ interactionId: "i_0" }],
+    messageCount: 0,
+    models: ["big-model"],
+    parked: true,
+    reasoningBlockCount: 1,
+    skillLoads: [{ sessionId: "s", skill: "deploy-guide", status: "completed", turnIndex: 0 }],
+    subagentCalls: [
+      { callId: "call_research", childSessionId: "child_0", name: "research", status: "pending" },
+    ],
+    toolCallCount: 3,
+    toolCalls: [
+      {
+        callId: "call_weather",
+        input: { id: "call_weather" },
+        output: { temperature: 4 },
+        status: "completed",
+      },
+      // An agent call reports the input the model sent its tool.
+      {
+        callId: "call_research",
+        input: { id: "call_research" },
+        name: "research",
         status: "pending",
-        turnIndex: 0,
-        sessionId: undefined,
       },
-    ]);
+      { callId: "call_deploy", name: "deploy", status: "pending" },
+    ],
+    usage: { inputTokens: 100, outputTokens: 10 },
   });
+});
 
-  it("pairs HITL tool calls with resumed results by call id", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["approval"]),
-      turnStarted("t2", 1),
-      actionResult({
-        callId: "approval-call",
-        toolName: "bash",
-        output: "approved",
-      }),
-    ];
+it("counts a call an earlier turn asked for when this segment settles it, and the session's usage so far", () => {
+  const all = stream([...firstTurn, ...secondTurn]);
+  const segment = all.slice(firstTurn.length);
 
-    expect(derive(events).toolCalls).toEqual([
-      {
-        name: "bash",
-        input: {},
-        output: "approved",
-        status: "completed",
-        turnIndex: 0,
-        sessionId: undefined,
+  expect(deriveRunFacts(segment, { usageEvents: all })).toMatchObject({
+    failureCode: "BUDGET_EXCEEDED",
+    interactions: [],
+    messageCount: 1,
+    models: ["small-model"],
+    parked: false,
+    toolCalls: [{ callId: "call_deploy", output: "deployed", status: "completed" }],
+    usage: { inputTokens: 200, outputTokens: 20 },
+  });
+});
+
+it("does not mark a later completed turn parked on an earlier interaction in a sparse history", () => {
+  const events = stream([
+    ...firstTurn,
+    { type: "turn.settled", scope: turn0, data: { turnId: "turn_0", outcome: "cancelled" } },
+    {
+      type: "turn.started",
+      scope: turn1,
+      data: { turnId: "turn_1", follows: "turn_0", cause: { deliveryId: "d_1" } },
+    },
+    { type: "turn.settled", scope: turn1, data: { turnId: "turn_1", outcome: "completed" } },
+  ]);
+  expect(deriveRunFacts(events).parked).toBe(false);
+});
+
+it("marks a later parent turn parked on a relayed child interaction", () => {
+  const events = stream([
+    ...firstTurn,
+    { type: "turn.settled", scope: turn0, data: { turnId: "turn_0", outcome: "cancelled" } },
+    {
+      type: "turn.started",
+      scope: turn1,
+      data: { turnId: "turn_1", follows: "turn_0", cause: { deliveryId: "d_1" } },
+    },
+    {
+      type: "interaction.opened",
+      scope: turn1,
+      data: {
+        interactionId: "relayed",
+        subject: { callId: "call_research" },
+        origin: { sessionId: "child_0", interactionId: "child_approval" },
+        request: { kind: "approval", prompt: "Deploy the child's change?" },
       },
-    ]);
-  });
+    },
+    {
+      type: "turn.paused",
+      scope: turn1,
+      data: { turnId: "turn_1", awaiting: [{ interactionId: "relayed" }] },
+    },
+  ]);
+  expect(deriveRunFacts(events).parked).toBe(true);
+});
 
-  it("derives resolved tool calls from result-only turn events", () => {
-    const facts = derive([
-      turnStarted("t2", 1),
-      actionResult({ callId: "approval-call", toolName: "bash", status: "rejected" }),
-    ]);
-
-    expect(facts.toolCalls).toEqual([
-      {
-        name: "bash",
-        input: {},
-        output: null,
-        status: "rejected",
-        turnIndex: 0,
-        sessionId: undefined,
+it("counts a responder's sign-in as an interaction requiring input", () => {
+  const events = stream([
+    ...firstTurn,
+    {
+      type: "interaction.opened",
+      scope: turn0,
+      data: {
+        interactionId: "sign_in",
+        subject: { responseId: "r_0" },
+        request: { kind: "sign-in", prompt: "Sign in to approve.", signIn: { name: "deploy" } },
       },
-    ]);
-  });
+    },
+    {
+      type: "turn.paused",
+      scope: turn0,
+      data: { turnId: "turn_0", awaiting: [{ interactionId: "sign_in" }] },
+    },
+  ]);
+  expect(deriveRunFacts(events).parked).toBe(true);
+});
 
-  it("deduplicates tool calls surfaced by request and HITL events", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      actionsRequested([{ callId: "approval-call", toolName: "bash" }]),
-      inputRequested(["approval"]),
-    ];
-
-    expect(derive(events).toolCalls).toHaveLength(1);
-  });
-
-  it("stamps the turn index from turn.started boundaries", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      actionsRequested([{ callId: "c1", toolName: "first_tool" }]),
-      actionResult({ callId: "c1", toolName: "first_tool" }),
-      turnStarted("t2", 1),
-      actionsRequested([{ callId: "c2", toolName: "second_tool" }]),
-      actionResult({ callId: "c2", toolName: "second_tool" }),
-    ];
-
-    const facts = derive(events);
-    expect(facts.toolCalls.map((call) => call.turnIndex)).toEqual([0, 1]);
-  });
-
-  it("counts message.completed events whose step completed without tool calls", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      {
-        type: "message.completed",
-        data: { finishReason: "stop", message: "hello", stepIndex: 0, turnId: "t1", sequence: 1 },
-      },
-      {
-        type: "message.completed",
-        data: {
-          finishReason: "tool-calls",
-          message: "Checking.",
-          stepIndex: 1,
-          turnId: "t1",
-          sequence: 2,
+// https://github.com/vercel/eve/issues/5157
+it("reads a partial answer's segment as parked on the request it left open", () => {
+  const approval = (interactionId: string, callId: string): SessionEvent =>
+    ({
+      data: {
+        interactionId,
+        request: {
+          kind: "approval",
+          options: [{ id: "approve", label: "Approve" }],
+          prompt: `Deploy ${callId}?`,
         },
+        subject: { callId },
       },
-      {
-        type: "message.completed",
-        data: { finishReason: "stop", message: "world", stepIndex: 2, turnId: "t1", sequence: 3 },
+      scope: turn0,
+      type: "interaction.opened",
+    }) as SessionEvent;
+  const asked: SessionEvent[] = [
+    {
+      data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
+      scope: turn0,
+      type: "turn.started",
+    },
+    call("call_api", "tool", "deploy_service"),
+    call("call_web", "tool", "deploy_service"),
+    approval("i_api", "call_api"),
+    approval("i_web", "call_web"),
+    {
+      data: {
+        awaiting: [{ interactionId: "i_api" }, { interactionId: "i_web" }],
+        turnId: "turn_0",
       },
-    ];
-    const facts = derive(events);
-    expect(facts.messageCount).toBe(2);
-  });
+      scope: turn0,
+      type: "turn.paused",
+    },
+  ] as SessionEvent[];
+  const answered: SessionEvent[] = [
+    {
+      data: { cause: { responseId: "r_api" }, interactionId: "i_api", outcome: "accepted" },
+      scope: turn0,
+      type: "interaction.settled",
+    },
+    done("call_api", "deployed"),
+    {
+      data: { awaiting: [{ interactionId: "i_web" }], turnId: "turn_0" },
+      scope: turn0,
+      type: "turn.paused",
+    },
+  ] as SessionEvent[];
+  const all = stream([...asked, ...answered]);
+  const segment = all.slice(asked.length);
 
-  it("counts reasoning.completed events", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      {
-        type: "reasoning.completed",
-        data: { reasoning: "thinking...", stepIndex: 0, turnId: "t1", sequence: 1 },
-      },
-      {
-        type: "reasoning.completed",
-        data: { reasoning: "more thinking...", stepIndex: 1, turnId: "t1", sequence: 2 },
-      },
-    ];
-    const facts = derive(events);
-    expect(facts.reasoningBlockCount).toBe(2);
-  });
-
-  it("derives one subagent call per call to an agent task", () => {
-    const facts = derive(
-      [
-        turnStarted("t1", 0),
-        taskStarted("c1", "weather", "weather-1", "agent"),
-        agentStarted("c1", "weather", "weather-1", { url: "http://127.0.0.1:4001" }),
-        {
-          type: "task.settled",
-          data: {
-            callId: "c1",
-            output: "Sunny, 72F",
-            status: "completed",
-            taskId: "weather-1",
-            turnId: "t1",
-          },
-        },
-        turnStarted("t2", 1),
-        taskStarted("c2", "weather", "weather-1", "agent"),
-      ],
-      { sessionId: "s0" },
-    );
-
-    expect(facts.subagentCalls).toEqual([
-      {
-        callId: "c1",
-        childSessionId: "child-c1",
-        name: "weather",
-        output: "Sunny, 72F",
-        remoteUrl: "http://127.0.0.1:4001",
-        sessionId: "s0",
-        status: "completed",
-        turnIndex: 0,
-      },
-      {
-        callId: "c2",
-        childSessionId: "child-c1",
-        name: "weather",
-        output: undefined,
-        remoteUrl: "http://127.0.0.1:4001",
-        sessionId: "s0",
-        status: "working",
-        turnIndex: 1,
-      },
-    ]);
-  });
-
-  it("counts agent tasks by kind, not by the sessions tasks open", () => {
-    const facts = derive([
-      taskStarted("c1", "agent_router", "agent_router-1", "tool"),
-      agentStarted("c1", "weather", "agent_router-1"),
-      taskStarted("c2", "research", "research-1", "tool"),
-      agentStarted("c2", "research", "research-1"),
-      taskStarted("c3", "weather", "weather-1", "agent"),
-      {
-        type: "task.settled",
-        data: {
-          callId: "c3",
-          error: { message: "Remote agent is unreachable." },
-          status: "failed",
-          taskId: "weather-1",
-          turnId: "t1",
-        },
-      },
-    ]);
-
-    expect(facts.subagentCalls).toEqual([
-      {
-        callId: "c3",
-        childSessionId: undefined,
-        name: "weather",
-        output: undefined,
-        remoteUrl: undefined,
-        sessionId: undefined,
-        status: "failed",
-        turnIndex: 0,
-      },
-    ]);
-  });
-
-  it("lists the models the session's steps started with, once each, in first-use order", () => {
-    const facts = derive([
-      stepStarted("anthropic/claude-sonnet-4.6", 0),
-      stepStarted("openai/gpt-5.1", 1),
-      stepStarted("anthropic/claude-sonnet-4.6", 2),
-    ]);
-    expect(facts.models).toEqual(["anthropic/claude-sonnet-4.6", "openai/gpt-5.1"]);
-  });
-
-  it("reports the usage of the session's latest session.waiting", () => {
-    const facts = derive([
-      sessionWaiting({ cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 }),
-      sessionWaiting({
-        cacheReadTokens: 1,
-        cacheWriteTokens: 0,
-        costUsd: 0.5,
-        inputTokens: 40,
-        outputTokens: 8,
-      }),
-    ]);
-    expect(facts.usage).toEqual({
-      cacheReadTokens: 1,
-      cacheWriteTokens: 0,
-      costUsd: 0.5,
-      inputTokens: 40,
-      outputTokens: 8,
-    });
-  });
-
-  it("reports the usage of a session.failed or session.completed that came after it", () => {
-    const failed = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 90, outputTokens: 9 };
-    const completed = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 70, outputTokens: 7 };
-    expect([
-      derive([sessionWaiting(USAGE), sessionFailed(failed)]).usage,
-      derive([sessionWaiting(USAGE), { type: "session.completed", data: { usage: completed } }])
-        .usage,
-    ]).toEqual([failed, completed]);
-  });
-
-  it("reports the usage of a turn.waiting that parked the turn after it", () => {
-    const parked = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 55, outputTokens: 5 };
-    expect(
-      derive([
-        sessionWaiting(USAGE),
-        { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t2", usage: parked } },
-      ]).usage,
-    ).toEqual(parked);
-  });
-
-  it("reports no usage when the latest session event carried none", () => {
-    expect(derive([sessionWaiting(USAGE), sessionWaiting(undefined)]).usage).toBeUndefined();
-  });
-
-  it("captures failure code from session.failed event", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      {
-        type: "session.failed",
-        data: {
-          code: "TIMEOUT",
-          message: "Run timed out",
-          sessionId: "s1",
-        },
-      },
-    ];
-    const facts = derive(events);
-    expect(facts.failureCode).toBe("TIMEOUT");
-  });
-
-  it("collects HITL input requests", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["r1", "r2"]),
-    ];
-    const facts = derive(events);
-    expect(facts.inputRequests.map((request) => request.requestId)).toEqual(["r1", "r2"]);
-  });
-
-  it("marks the run parked when it ends on unanswered input requests", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["r1"]),
-      { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
-      {
-        type: "session.waiting",
-        data: { continuationToken: "session-id", wait: "next-user-message" },
-      },
-    ] as UnstampedMessageStreamEvent[];
-
-    const facts = derive(events);
-    expect(facts.parked).toBe(true);
-  });
-
-  it("does not mark the run parked when the turn continued past an answered input request", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["r1"]),
-      {
-        type: "input.resolved",
-        data: {
-          resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "r1" }],
-          sequence: 2,
-          stepIndex: 0,
-          turnId: "t1",
-        },
-      },
-      {
-        type: "message.completed",
-        data: { finishReason: "stop", message: "done", stepIndex: 1, turnId: "t1", sequence: 3 },
-      },
-      { type: "turn.completed", data: { sequence: 4, turnId: "t1" } },
-      {
-        type: "session.waiting",
-        data: { continuationToken: "session-id", wait: "next-user-message" },
-      },
-    ] as UnstampedMessageStreamEvent[];
-
-    const facts = derive(events);
-    expect(facts.parked).toBe(false);
-  });
-
-  it("does not mark the run parked on a request an earlier turn left open", () => {
-    // A cancel observed outside the session (e.g. through `t.target`) withdraws the
-    // request without its `input.resolved` reaching these events.
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["r1"]),
-      turnStarted("t2", 1),
-      {
-        type: "message.completed",
-        data: { finishReason: "stop", message: "done", stepIndex: 0, turnId: "t2", sequence: 1 },
-      },
-      { type: "turn.completed", data: { sequence: 1, turnId: "t2" } },
-      {
-        type: "session.waiting",
-        data: { continuationToken: "session-id", wait: "next-user-message" },
-      },
-    ] as UnstampedMessageStreamEvent[];
-
-    const facts = derive(events);
-    expect(facts.parked).toBe(false);
-  });
-
-  it("marks the run parked on a request a child relays during a later parent turn", () => {
-    // The relay keeps the child's own `turnId`, which does not match the parent's turn.
-    const relayed = inputRequested(["child_approval"]);
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t0", 0),
-      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
-      turnStarted("t1", 1),
-      { ...relayed, data: { ...relayed.data, callId: "call_child", turnId: "turn_0" } },
-      { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t1" } },
-    ] as UnstampedMessageStreamEvent[];
-
-    const facts = derive(events);
-    expect(facts.parked).toBe(true);
-  });
-
-  it("does not mark the run parked on an answered request whose responder must sign in", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["r1"]),
-      {
-        type: "approval.candidate",
-        data: {
-          candidateId: "c1",
-          outcome: "pending",
-          requestId: "r1",
-          responderPrincipalId: "responder",
-          sequence: 1,
-          stepIndex: 0,
-          turnId: "t1",
-        },
-      },
-      { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t1" } },
-    ] as UnstampedMessageStreamEvent[];
-
-    const facts = derive(events);
-    expect(facts.parked).toBe(false);
+  expect(deriveRunFacts(segment, { usageEvents: all })).toMatchObject({
+    interactions: [],
+    parked: true,
+    toolCalls: [{ callId: "call_api", output: "deployed", status: "completed" }],
   });
 });

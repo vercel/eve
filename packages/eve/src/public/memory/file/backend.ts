@@ -10,7 +10,7 @@ export interface MemoryDocument {
 export interface MemoryDocumentReadInput {
   /** Stable eve scope key for the authored memory slot. */
   readonly key: string;
-  readonly signal: AbortSignal;
+  readonly abortSignal: AbortSignal;
 }
 
 /** Input for a conditional document replacement. */

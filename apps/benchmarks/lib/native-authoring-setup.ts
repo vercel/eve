@@ -2,6 +2,14 @@ import type { Sandbox } from "@vercel/agent-eval";
 
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
+import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
+import { vercelSetup } from "./setups/vercel.js";
+
+const sessionSetups: readonly AuthoringSetup[] = [
+  inventoryOpenApiSetup,
+  northstarFulfillmentSetup,
+  vercelSetup,
+];
 
 interface FixtureBootstrap {
   readonly startingPoint: "scaffolded" | "empty";
@@ -9,6 +17,11 @@ interface FixtureBootstrap {
   readonly revision: string;
   readonly setupIds: readonly string[];
 }
+
+/** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
+export const JUST_BASH_VERSION = "3.6.0";
+/** Matches the workspace catalog, so it accepts the `vite` version eve's peer range requires. */
+export const VITEST_VERSION = "5.0.2";
 
 export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
@@ -22,6 +35,7 @@ export function createNativeAuthoringSetup(options: {
     if (bootstrap.revision !== options.revision) {
       throw new Error("Native fixture revision does not match the selected subject.");
     }
+    const setups = setupsFor(bootstrap.setupIds);
     await run(
       sandbox,
       "rm -f .eve-authoring-bootstrap.json CASE.ts package.json package-lock.json PROMPT.md",
@@ -56,15 +70,18 @@ export function createNativeAuthoringSetup(options: {
     }
 
     // DefaultSandbox selects just-bash inside the Linux eval container, where Docker
-    // is unavailable. Supply its optional peer before the model runs.
+    // is unavailable. Supply its optional peer before the model runs. The grader
+    // needs vitest too: agent-eval only installs its fallback `vitest@^3` when the
+    // workspace has none, and that fallback fails silently against eve's vite peer.
+    // Saving it keeps it through the agent's own `npm install`s.
     await run(
       sandbox,
-      "npm install --save-dev --save-exact just-bash@3.1.0",
-      "local sandbox dependency",
+      `npm install --save-dev --save-exact just-bash@${JUST_BASH_VERSION} vitest@${VITEST_VERSION}`,
+      "local sandbox and grader dependencies",
     );
 
     const context = setupContext(sandbox, bootstrap.projectDirectory);
-    for (const setup of setupsFor(bootstrap.setupIds)) await setup.onSession?.(context);
+    for (const setup of setups) await setup.onSession?.(context);
     if (options.treatment === "baseline") await run(sandbox, "rm -f AGENTS.md CLAUDE.md GEMINI.md");
     if (bootstrap.startingPoint === "scaffolded") {
       await run(sandbox, "npm run typecheck && npm run build", "starting workspace validation");
@@ -73,8 +90,15 @@ export function createNativeAuthoringSetup(options: {
   };
 }
 
-function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
-  return ids.flatMap((id) => (id === inventoryOpenApiSetup.id ? [inventoryOpenApiSetup] : []));
+// A case whose setup is skipped would hand the model a workspace without its fixture.
+export function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
+  return ids.map((id) => {
+    const setup = sessionSetups.find((candidate) => candidate.id === id);
+    if (setup === undefined) {
+      throw new Error(`Setup ${JSON.stringify(id)} is not registered with the native runner.`);
+    }
+    return setup;
+  });
 }
 
 function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSetupContext {

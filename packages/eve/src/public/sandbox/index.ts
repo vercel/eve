@@ -13,7 +13,6 @@ export {
   type SandboxRunOptions,
   type SandboxSession,
   type RuntimeSandboxSession,
-  type RuntimeSandboxSessionFor,
   type SandboxSpawnOptions,
   type SandboxRemovePathOptions,
   type SandboxWriteBinaryFileOptions,
