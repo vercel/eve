@@ -9,7 +9,7 @@ import {
 } from "#channel/compiled-channel.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
-import { toMessageSendOptions, type MessageSendOptions } from "#channel/session.js";
+import { toSessionSendOptions, type SessionSendOptions } from "#channel/session.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { Delivery } from "#shared/delivery.js";
 import type { Runtime, TurnPolicy } from "#channel/types.js";
@@ -21,7 +21,7 @@ export interface CrossChannelTargetHandle {
    * Starts a session at the target, or continues the one that owns it. The
    * channel's `receive()` hook gets `options` with the message and target.
    */
-  send(message: MessageContent, options: MessageSendOptions): Promise<Delivery>;
+  send(message: MessageContent, options: SessionSendOptions): Promise<Delivery>;
 }
 
 /** Selects another authored channel and one of its proactive targets. */
@@ -88,7 +88,7 @@ export function createCrossChannelToFn(
           source,
           target: targetChannel,
           input: {
-            ...toMessageSendOptions(options),
+            ...toSessionSendOptions(options),
             message,
             target: target as Readonly<Record<string, unknown>>,
           },

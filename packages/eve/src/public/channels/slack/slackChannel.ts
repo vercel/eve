@@ -9,7 +9,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { MessageContent } from "#shared/message-content.js";
-import { toMessageSendOptions, type MessageSendOptions } from "#channel/session.js";
+import { toSessionSendOptions, type SessionSendOptions } from "#channel/session.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type {
   ChannelFrom,
@@ -357,7 +357,7 @@ export interface SlackInitialMessage {
 /**
  * Options for one turn requested by a generic Slack event handler.
  */
-export type SlackEventSendOptions = MessageSendOptions & {
+export type SlackEventSendOptions = SessionSendOptions & {
   readonly target: SlackReceiveTarget;
 };
 
@@ -1398,7 +1398,7 @@ async function dispatchSlackEvent(input: {
       }),
     send: async (message, options) =>
       await receiveOnSlack(
-        { ...toMessageSendOptions(options), target: options.target, message },
+        { ...toSessionSendOptions(options), target: options.target, message },
         {
           from: input.from,
           api: input.api,

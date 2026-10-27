@@ -9,8 +9,14 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import { ScheduleDispatcher } from "#channel/schedule.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
+import { z } from "#compiled/zod/index.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
 afterEach(() => {
@@ -254,4 +260,103 @@ describe("delivery idempotency", () => {
     },
     60_000,
   );
+
+  it("reaches one session when a dynamic schedule's callback retries a keyed send", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    const turns: string[] = [];
+    const outbox = defineChannel<undefined, void, { inbox: string }>({
+      routes: [POST("/outbox", async () => new Response("ok"))],
+      async receive({ message, target, ...send }, { from }) {
+        return await from(target.inbox).send(message, send);
+      },
+    });
+    const app = await createTestRuntime({
+      agent: { name: "keyed-schedule", limits: { sessionTimeoutMs: false } },
+      modules: [
+        { logicalPath: "channels/outbox.ts", loadNamespace: async () => ({ default: outbox }) },
+        {
+          logicalPath: "hooks/record.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.started"() {
+                  turns.push("turn");
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await app.run(async () => {
+      const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
+      const { graph } = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
+      const dispatcher = new ScheduleDispatcher({
+        runtime: createWorkflowRuntime({ compiledArtifactsSource }),
+        channels: graph.root.channels,
+      });
+      const definition = defineDynamicSchedules({
+        provider: inMemoryScheduleProvider(),
+        inputSchema: z.object({ task: z.string() }),
+        auth: () => ({
+          attributes: {},
+          authenticator: "test",
+          principalId: "alice",
+          principalType: "user",
+        }),
+        async run({ payload, occurrence, to }) {
+          await to(outbox, { inbox: "team" }).send(payload.task, {
+            idempotencyKey: `${occurrence.executionId}:digest`,
+          });
+        },
+      });
+      const occurrence = (scheduleId: string) => ({
+        collection: "digests",
+        executionId: "exec-1",
+        name: scheduleId,
+        scheduleId,
+        scheduledAt: "2026-10-27T09:00:00Z",
+      });
+      const trigger = async (scheduleId: string) =>
+        (
+          await dispatcher.triggerCollection({
+            collectionId: "digests",
+            definition,
+            occurrence: occurrence(scheduleId),
+            payload: createScheduleCollectionPayload({
+              application: "fixture",
+              collection: "digests",
+              envelope: {
+                version: 3,
+                payload: { task: "Alice asks for the weekly digest." },
+                scope: "alice",
+                principal: { type: "user", authenticator: "test", principalId: "alice" },
+              },
+            }),
+          })
+        ).sessions[0]!;
+
+      const first = await trigger("weekly");
+      const other = await trigger("daily");
+      const stream = captureTurnEvents(getRun(first.sessionId));
+      try {
+        await stream.nextTurn();
+        await waitForParkedTurnStep(first.sessionId);
+        // The provider redelivers the occurrence after the first attempt timed out.
+        const retry = await trigger("weekly");
+        expect(retry.sessionId).toBe(first.sessionId);
+        expect(other.sessionId).not.toBe(first.sessionId);
+        const outcomes = await Promise.all(
+          [first, retry].map(
+            async (delivery) =>
+              (await delivery.result({ signal: AbortSignal.timeout(5_000) })).outcome,
+          ),
+        );
+        expect(outcomes).toEqual(["handled", "ignored"]);
+      } finally {
+        stream.dispose();
+        await Promise.all([getRun(first.sessionId).cancel(), getRun(other.sessionId).cancel()]);
+      }
+    });
+  }, 60_000);
 });

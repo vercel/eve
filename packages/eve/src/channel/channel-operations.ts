@@ -6,7 +6,7 @@ import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import { type ChannelCreateResult, createChannelAddressFn } from "#channel/channel-address.js";
 
 export type { ChannelCreateResult } from "#channel/channel-address.js";
-import type { MessageSendOptions, Session } from "#channel/session.js";
+import type { SessionSendOptions, Session } from "#channel/session.js";
 import type {
   Runtime,
   SessionAuthContext,
@@ -18,10 +18,8 @@ import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 
-type BaseChannelSendOptions = MessageSendOptions;
-
 /** Options for sending a message from a channel-local continuation address. */
-export type ChannelSendOptions<TState = undefined> = BaseChannelSendOptions & {
+export type ChannelSendOptions<TState = undefined> = SessionSendOptions & {
   readonly state?: Partial<TState>;
 };
 

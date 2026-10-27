@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import type { StateAdapter } from "#compiled/chat/index.js";
-import type { MessageSendOptions } from "#channel/session.js";
+import type { SessionSendOptions } from "#channel/session.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { chatSdkChannel } from "#public/channels/chat-sdk/index.js";
 import { discordChannel } from "#public/channels/discord/discordChannel.js";
@@ -27,7 +27,7 @@ const options = {
   outputSchema: { type: "object" },
   title: "Rollout plan",
   turnPolicy: "queue",
-} satisfies Required<MessageSendOptions>;
+} satisfies Required<SessionSendOptions>;
 
 const chatSdk = chatSdkChannel({
   adapters: {},

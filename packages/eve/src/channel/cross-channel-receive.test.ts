@@ -6,7 +6,7 @@ import {
   type CrossChannelTarget,
   type CrossChannelToFn,
 } from "#channel/cross-channel-receive.js";
-import type { MessageSendOptions } from "#channel/session.js";
+import type { SessionSendOptions } from "#channel/session.js";
 import { StreamDelivery } from "#client/delivery.js";
 import type { Runtime } from "#channel/types.js";
 import type { SlackChannel, SlackReceiveTarget } from "#public/channels/slack/slackChannel.js";
@@ -178,7 +178,7 @@ describe("createCrossChannelToFn", () => {
       outputSchema: { type: "object" },
       title: "Rollout plan",
       turnPolicy: "queue" as const,
-    } satisfies Required<MessageSendOptions>;
+    } satisfies Required<SessionSendOptions>;
 
     const internal = { callback: { url: "https://example.com/hook" }, initiatorAuth: null };
 

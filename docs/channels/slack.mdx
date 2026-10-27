@@ -749,7 +749,7 @@ Pass `{ channelId }` as the target to start a new thread. The agent's first post
 | `installationTeamId` | Select the app installation workspace when using a function-form bot token.               |
 | `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                 |
 
-A send with an `idempotencyKey` and no `threadTs` or `initialMessage` derives the new thread's session from the key, so a retry with the same key reaches the same session instead of starting a second thread.
+A send with an `idempotencyKey` and no `threadTs` or `initialMessage` derives the new thread's session from the key, so a retry with the same key reaches the same session instead of starting a second thread. Because the key chooses the session, two different sends that reuse a key land in the same thread and the second is ignored. Use a key that identifies the delivery across every sender to this channel, not only across retries of one sender.
 
 The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
 
