@@ -36,7 +36,6 @@ async function createPostBuildFixture(
   await mkdir(join(repoRoot, "docs"), { recursive: true });
 
   await copyScript(packageRoot, "copy-docs.mjs");
-  await copyScript(packageRoot, "agent-docs.mjs");
   await copyScript(packageRoot, "stamp-version-tokens.mjs");
   await writeFile(join(repoRoot, "README.md"), "# Monorepo README\n", "utf8");
   await writeFile(join(repoRoot, "docs", "guide.md"), "doc\n", "utf8");
@@ -140,43 +139,6 @@ describe("post-build scripts", () => {
     await expect(readFile(join(packageRoot, "docs", "guide.md"), "utf8")).resolves.toBe("doc\n");
     await expect(access(join(packageRoot, "dist", "docs"), constants.F_OK)).rejects.toThrow();
     await expect(readFile(join(packageRoot, "README.md"), "utf8")).resolves.toBe(packageReadme);
-  });
-
-  it("splits long docs pages into an outline and section files for agents", async () => {
-    const packageRoot = await createPostBuildFixture();
-    const repoDocs = join(packageRoot, "..", "..", "docs");
-    const section = (name: string) =>
-      [`## ${name}`, "", `${name} explains one thing.`, "", "x".repeat(5_000), ""].join("\n");
-    await writeFile(
-      join(repoDocs, "long.md"),
-      [
-        "---",
-        'title: "Long"',
-        "---",
-        "",
-        "Intro with a link to [Alpha](#alpha) and [Gamma](#gamma).",
-        "",
-        section("Alpha"),
-        section("Beta"),
-        section("Gamma"),
-        "See [Beta](#beta) and [Guide](./guide.md).",
-      ].join("\n"),
-      "utf8",
-    );
-
-    await runFile(process.execPath, [join(packageRoot, "scripts", "copy-docs.mjs")], {
-      cwd: packageRoot,
-    });
-
-    const outline = await readFile(join(packageRoot, "docs", "long.md"), "utf8");
-    expect(outline).toContain("Alpha explains one thing.");
-    expect(outline).toContain("[Gamma](./long/gamma.md#gamma)");
-    expect(outline).toContain("`long/beta.md`");
-    expect(outline).not.toContain("x".repeat(5_000) + "\n\n## Beta");
-    const gamma = await readFile(join(packageRoot, "docs", "long", "gamma.md"), "utf8");
-    expect(gamma).toContain("[Beta](./beta.md#beta)");
-    expect(gamma).toContain("[Guide](../guide.md)");
-    await expect(readFile(join(packageRoot, "docs", "guide.md"), "utf8")).resolves.toBe("doc\n");
   });
 
   it("does not synthesize a package README when copying docs", async () => {

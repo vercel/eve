@@ -6,7 +6,7 @@ You author an agent as a directory on disk. The directory is the contract — ma
 
 The framework is called eve. The published npm package is `eve`. The CLI binary is `eve`.
 
-**Building an agent with a coding agent?** Create the project with `npx eve@latest init <name>`, then read `docs/quick-reference.md` in this package: it has a checked snippet for each common requirement (tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, evals). `docs/README.md` routes everything else. A long page is an outline whose sections live in files next to it; read only the section files you need.
+**Building an agent with a coding agent?** Create the project with `npx eve@latest init <name>`, then read `docs/quick-reference.md` in this package: it has a checked snippet for each common requirement (tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, evals). `docs/README.md` routes everything else. Docs pages are long, so list a page's sections with `grep -n '^#' <page>` and read only what you need.
 
 ## Release notes
 

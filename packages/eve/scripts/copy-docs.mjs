@@ -1,9 +1,6 @@
-import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { splitPage } from "./agent-docs.mjs";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const monorepoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -37,25 +34,4 @@ if (page !== null) {
       renderBenchmarkMarkdown(snapshot.datasets[dataset], dataset),
     ),
   );
-}
-
-// Long pages become an outline plus section files; see agent-docs.mjs. The
-// entry points agents read in full stay whole.
-const WHOLE_PAGES = new Set(["README.md", "quick-reference.md"]);
-const pages = (await readdir(packageDocsDir, { recursive: true })).filter(
-  (path) => /\.mdx?$/u.test(path) && !WHOLE_PAGES.has(path),
-);
-for (const path of pages) {
-  const file = join(packageDocsDir, path);
-  const split = splitPage(await readFile(file, "utf8"), path.split("/").at(-1));
-  if (split === null) continue;
-  const sectionsDir = file.replace(/\.mdx?$/u, "");
-  if (existsSync(sectionsDir)) {
-    throw new Error(`Cannot split ${path}: ${sectionsDir} already exists.`);
-  }
-  await mkdir(sectionsDir, { recursive: true });
-  await writeFile(file, split.outline);
-  for (const chunk of split.chunks) {
-    await writeFile(join(sectionsDir, chunk.name), chunk.content);
-  }
 }
