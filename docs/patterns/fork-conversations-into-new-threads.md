@@ -124,8 +124,10 @@ a mention, and needs the `message.im` event and the `im:history` scope; see
 The fork's first model call sees the copied messages as earlier user and assistant turns, followed
 by the message. `toHistory` keeps the text of user messages and assistant replies, including the
 message that asked for the fork. It leaves out tool calls, files, and reasoning. `ctx.messages`
-also carries eve's context messages, such as request context and recalled memory; filter them out
-if the fork shouldn't see them. See [Start from prior history](../channels/eve#start-from-prior-history) for how history
+also carries eve's context messages, such as request context and recalled memory, and a tool can't
+tell them apart from the conversation yet, so the fork sees them too. The fork's agent can repeat
+anything in the copied history, so only fork into a channel whose members may see that
+conversation, including a DM's. See [Start from prior history](../channels/eve#start-from-prior-history) for how history
 joins a session.
 
 After the fork, the original conversation and the fork are separate sessions:

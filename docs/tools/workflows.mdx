@@ -820,7 +820,7 @@ async function openIncident(ctx: WorkflowStepToolContext, channelId: string, sum
 }
 ```
 
-A step that fails retries, so pass an `idempotencyKey` the retry repeats. The destination session dedupes keys from every sender, and `ctx.callId` is unique only within the calling session and is the same for every step of the call, so include `ctx.session.id` and add a label for each send. Create the channel in its own step: a retried send step then reuses the recorded `channelId` instead of creating another channel. A channel module imported only for a step doesn't load in the workflow body.
+A step that fails retries, so pass an `idempotencyKey` the retry repeats. The destination session dedupes keys from every sender, and `ctx.callId` is unique only within the calling session and is the same for every step of the call, so include `ctx.session.id` and add a label for each send. Create the channel in its own step: a retried send step then reuses the recorded `channelId` instead of creating another channel.
 
 `ctx.channel` holds the `kind`, `continuationToken`, and `metadata` of the channel serving the calling session, in the workflow body and in steps, as in [ordinary tools](/docs/tools#the-ctx-parameter).
 
