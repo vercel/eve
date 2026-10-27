@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildFrameworkRecords } from "./framework-records.mjs";
 import { publishRun } from "./publish.mjs";
+import { listRuns, rederiveRun } from "./rederive-runs.mjs";
 import { METRICS_VERSION, STANDARD_METRICS } from "../eval-metrics/standard.mjs";
 import { buildRecords, readLegs } from "./records.mjs";
 
@@ -385,6 +386,27 @@ function memoryStore() {
     async read(pathname) {
       return objects.get(pathname) ?? null;
     },
+    async list(prefix) {
+      return [...objects.keys()].filter((pathname) => pathname.startsWith(prefix));
+    },
+    async folders(prefix) {
+      const below = (pathname) => pathname.slice(prefix.length).split("/");
+      return [
+        ...new Set(
+          [...objects.keys()]
+            .filter((pathname) => pathname.startsWith(prefix) && below(pathname).length > 1)
+            .map((pathname) => `${prefix}${below(pathname)[0]}/`),
+        ),
+      ];
+    },
+    async replace(pathname, body) {
+      objects.set(pathname, Buffer.from(body));
+      writes.push(`replace ${pathname}`);
+    },
+    async remove(pathname) {
+      objects.delete(pathname);
+      writes.push(`remove ${pathname}`);
+    },
   };
 }
 
@@ -451,4 +473,89 @@ test("publishes raw trees and records before the manifest, idempotently and immu
     JSON.parse(backfillStore.objects.get(`${backfill.prefix}/manifest.json`)).source,
     source,
   );
+});
+
+test("re-derives a published run in place, keeping what it replaces", async (t) => {
+  const legsDir = legsDirectory(t);
+  const current = build(legsDir);
+  const store = memoryStore();
+  // A run published under the previous metrics version.
+  const from = METRICS_VERSION - 1;
+  const stale = current.map((record) => ({ ...record, metrics_version: from, metrics: {} }));
+  await publishRun({
+    plan,
+    legs: readLegs(plan, legsDir),
+    recordsJsonl: stale.map((record) => `${JSON.stringify(record)}\n`).join(""),
+    frameworkRecordsJsonl: "",
+    githubRunId: "123",
+    runAttempt: 1,
+    eveVersion: "0.71.2",
+    store,
+  });
+  const prefix = "runs/123/1";
+  const manifest = JSON.parse(store.objects.get(`${prefix}/manifest.json`));
+  manifest.metrics.metrics_version = from;
+  store.objects.set(`${prefix}/manifest.json`, Buffer.from(JSON.stringify(manifest)));
+  const published = {
+    records: store.objects.get(`${prefix}/records.jsonl`),
+    manifest: store.objects.get(`${prefix}/manifest.json`),
+  };
+  assert.deepEqual(await listRuns(store, "runs"), [prefix]);
+
+  const writes = store.writes.length;
+  assert.deepEqual(await rederiveRun({ store, prefix, dryRun: true }), {
+    status: "rederived",
+    from,
+    records: current.length,
+  });
+  assert.equal(store.writes.length, writes, "a dry run writes nothing");
+
+  await rederiveRun({ store, prefix });
+  const superseded = `superseded/metrics-v${from}/${prefix}`;
+  assert.deepEqual(store.writes.slice(writes), [
+    `${superseded}/records.jsonl`,
+    `${superseded}/manifest.json`,
+    // Readers never see a manifest that disagrees with its records.
+    `remove ${prefix}/manifest.json`,
+    `replace ${prefix}/records.jsonl`,
+    `replace ${prefix}/manifest.json`,
+  ]);
+  assert(store.objects.get(`${superseded}/records.jsonl`).equals(published.records));
+  assert(store.objects.get(`${superseded}/manifest.json`).equals(published.manifest));
+  assert.deepEqual(
+    store.objects.get(`${prefix}/records.jsonl`).toString().trim().split("\n").map(JSON.parse),
+    current,
+  );
+  const rewritten = JSON.parse(store.objects.get(`${prefix}/manifest.json`));
+  assert.equal(rewritten.metrics.metrics_version, METRICS_VERSION);
+  assert.deepEqual(rewritten.metrics.records, STANDARD_METRICS);
+  assert.deepEqual(await rederiveRun({ store, prefix }), {
+    status: "current",
+    from: METRICS_VERSION,
+  });
+});
+
+test("a re-derivation that changes which attempts a run holds writes nothing", async (t) => {
+  const legsDir = legsDirectory(t);
+  const store = memoryStore();
+  const [, ...fewer] = build(legsDir);
+  await publishRun({
+    plan,
+    legs: readLegs(plan, legsDir),
+    recordsJsonl: fewer.map((record) => `${JSON.stringify(record)}\n`).join(""),
+    frameworkRecordsJsonl: "",
+    githubRunId: "123",
+    runAttempt: 1,
+    eveVersion: "0.71.2",
+    store,
+  });
+  const manifest = JSON.parse(store.objects.get("runs/123/1/manifest.json"));
+  manifest.metrics.metrics_version = METRICS_VERSION - 1;
+  store.objects.set("runs/123/1/manifest.json", Buffer.from(JSON.stringify(manifest)));
+  const writes = store.writes.length;
+  await assert.rejects(
+    rederiveRun({ store, prefix: "runs/123/1" }),
+    /name different attempts than the published run/,
+  );
+  assert.equal(store.writes.length, writes);
 });

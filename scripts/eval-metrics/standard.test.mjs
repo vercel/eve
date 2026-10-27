@@ -147,12 +147,10 @@ test("derives representative metrics from a captured tool eval", () => {
   assert.equal(metrics["durability.workflow_steps_per_turn"].reason, "missing-world-probe");
   assert.equal(v["tokens.input"], 1126);
   assert.equal(v["tokens.peak_context"], 394);
-  assert.equal(v["counts.turns"], 2);
   assert.equal(v["counts.steps"], 3);
   assert.equal(v["counts.tool_calls"], 2);
   // Mock models report no cost: missing cost is unavailable, never zero.
-  assert.equal(metrics["cost.primary_usd"].reason, "missing-step-cost");
-  assert.equal(metrics["latency.output_tokens_per_s"].reason, "zero-stream-duration");
+  assert.equal(metrics["cost.total_usd"].reason, "missing-rolled-up-cost");
   assertPartition(metrics);
 });
 
@@ -163,10 +161,8 @@ test("attributes delegated work to tasks across repeated captures of one session
   assert.equal(v["attribution.task_ms"], 285 + 197 + 2120 + 185 + 144);
   // The agent calls until their handoff, and task waits outside task time.
   assert.equal(v["attribution.tool_ms"], 340);
-  assert.equal(v["counts.turns"], 5, "child sessions are not root turns");
+  assert.equal(v["counts.steps"], 16, "child sessions' steps are not root steps");
   assert.equal(v["counts.tool_calls"], 6, "task waits and cancels, not agent calls");
-  assert.equal(v["counts.subagent_fan_out"], 2);
-  assert.equal(v["counts.subagent_depth"], 1);
   // The first agent call's request to its child session's first turn; the
   // second child was never captured.
   assert.deepEqual(metrics["overhead.agent_start_ms"].samples, [289]);
@@ -192,7 +188,6 @@ test("a pre-v27 capture measures as it did before eve 0.84.0", () => {
   assert.equal(v["tokens.peak_context"], 391);
   assert.equal(v["counts.steps"], 3);
   assert.equal(v["counts.tool_calls"], 2);
-  assert.equal(tools["cost.primary_usd"].reason, "missing-step-cost");
   // One step start before v27: no request-to-start gap was recorded.
   assert.equal(tools["overhead.model_start_ms"].reason, "predates-model-start");
 
@@ -206,9 +201,6 @@ test("a pre-v27 capture measures as it did before eve 0.84.0", () => {
   const subagents = values(delegated);
   assert.equal(subagents["attribution.task_ms"], 2465);
   assert.equal(subagents["attribution.tool_ms"], 133);
-  assert.equal(subagents["counts.turns"], 3);
-  assert.equal(subagents["counts.subagent_fan_out"], 1);
-  assert.equal(subagents["counts.subagent_depth"], 1);
   assert.equal(subagents["overhead.agent_start_ms"], 141);
 });
 
@@ -305,30 +297,6 @@ test("compaction is model work, so no framework overhead counts it", () => {
   assertPartition(metrics);
 });
 
-/** Puts `stepCost` on each of the root session's runs and `rolledUpCost` on the eval total. */
-function withCosts(artifact, { stepCost, rolledUpCost }) {
-  const copy = structuredClone(artifact);
-  copy.result.derived.usage.costUsd = rolledUpCost;
-  for (const session of copy.result.sessions) {
-    if (session.sessionId !== copy.result.sessionId) continue;
-    for (const e of session.events)
-      if (e.type === "usage.recorded" && e.data.owner?.runId !== undefined)
-        e.data.usage.costUsd = stepCost;
-  }
-  return copy;
-}
-
-test("splits cost into primary steps and rolled-up subagent spend", () => {
-  const artifact = withCosts(fixture("agent-subagents-continuation-local"), {
-    stepCost: 0.25,
-    rolledUpCost: 6,
-  });
-  const v = values(deriveAttemptMetrics(artifact).metrics);
-  assert.equal(v["cost.primary_usd"], 4, "sixteen primary steps");
-  assert.equal(v["cost.total_usd"], 6);
-  assert.equal(v["cost.subagent_usd"], 2);
-});
-
 test("cost and tokens are the runner's eval usage, and unavailable without it", () => {
   const artifact = fixture("agent-tools-ends-turn-function");
   artifact.result.derived.usage = {
@@ -342,8 +310,6 @@ test("cost and tokens are the runner's eval usage, and unavailable without it", 
   assert.equal(v["cost.total_usd"], 0.75);
   assert.equal(v["tokens.input"], 200);
   assert.equal(v["tokens.output"], 12);
-  assert.equal(v["tokens.cache_read"], 40);
-  assert.equal(v["tokens.cache_write"], 5);
   assert.equal(v["tokens.cache_hit_ratio"], 0.2);
   // Peak context is per step, from the facts, not the eval total.
   assert.equal(v["tokens.peak_context"], 394);
@@ -363,40 +329,6 @@ test("cost and tokens are the runner's eval usage, and unavailable without it", 
   for (const key of ["cost.total_usd", "tokens.input", "tokens.output", "tokens.cache_hit_ratio"])
     assert.equal(none[key].status, "unavailable", key);
   assert.equal(none["tokens.peak_context"].status, "measured");
-});
-
-test("compaction cost stays in the total but leaves the subagent split unknown", () => {
-  // The summary run's cost rolls up into session usage, but no step spent it:
-  // total − steps would misreport it as subagent spend.
-  const artifact = withCosts(compactedArtifact(), { stepCost: 0.25, rolledUpCost: 2 });
-  const { metrics } = deriveAttemptMetrics(artifact);
-  assert.equal(values(metrics)["cost.total_usd"], 2);
-  assert.equal(values(metrics)["cost.primary_usd"], 0.25);
-  assert.deepEqual(metrics["cost.subagent_usd"], {
-    status: "unavailable",
-    reason: "compaction-cost-unattributed",
-  });
-});
-
-test("a single step without cost makes cost unavailable, and inconsistent rollups are flagged", () => {
-  const artifact = withCosts(fixture("agent-tools-ends-turn-function"), {
-    stepCost: 1,
-    rolledUpCost: 3,
-  });
-  assert.equal(values(deriveAttemptMetrics(artifact).metrics)["cost.subagent_usd"], 0);
-
-  const inconsistent = withCosts(artifact, { stepCost: 1, rolledUpCost: 2 });
-  assert.equal(
-    deriveAttemptMetrics(inconsistent).metrics["cost.subagent_usd"].reason,
-    "inconsistent-cost-rollup",
-  );
-
-  const usage = artifact.result.sessions[0].events.find((e) => e.type === "usage.recorded");
-  delete usage.data.usage.costUsd;
-  const { metrics } = deriveAttemptMetrics(artifact);
-  assert.equal(metrics["cost.primary_usd"].reason, "missing-step-cost");
-  assert.equal(metrics["cost.subagent_usd"].reason, "missing-step-cost");
-  assert.equal(metrics["cost.total_usd"].status, "measured");
 });
 
 test("overlapping parallel tools count once and streaming metrics use model marks", () => {
@@ -424,10 +356,6 @@ test("overlapping parallel tools count once and streaming metrics use model mark
   assert.equal(v["attribution.model_ms"], 300);
   assert.equal(v["attribution.framework_ms"], 400);
   assert.equal(v["latency.ttft_ms_p50"], 50);
-  // 60 tokens from the first delta to model.done (the calls).
-  assert.equal(v["latency.output_tokens_per_s"], 240);
-  assert.equal(v["reliability.tool_error_rate"], 0.5);
-  assert.equal(v["counts.tool_calls_per_step"], 2);
 });
 
 test("a delta is placed between the commits around it, and unknown without a client clock", () => {
@@ -478,7 +406,7 @@ test("partial captures make attribution unavailable instead of guessing", () => 
     events: [{ ...conflicting.result.sessions[0].events[0], data: { turnId: "other" } }],
   });
   assert.equal(
-    deriveAttemptMetrics(conflicting).metrics["counts.turns"].reason,
+    deriveAttemptMetrics(conflicting).metrics["counts.steps"].reason,
     "invalid-session-capture",
   );
 });
@@ -508,7 +436,7 @@ test("counts failures by kind and code", () => {
     { type: "step.failed", code: "MODEL_CALL_FAILED", count: 1 },
     { type: "turn.failed", code: "MODEL_CALL_FAILED", count: 1 },
   ]);
-  assert.equal(values(metrics)["reliability.step_failures"], 1);
+  assert.equal(values(metrics)["reliability.turn_failures"], 1);
 });
 
 test("classifies outcomes and every gap reason", () => {

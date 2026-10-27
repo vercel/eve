@@ -7,7 +7,7 @@
 // one. A call's own time runs from `call.requested` to its `call.settled`, or
 // to the `call.started` that hands it to a task; from there it is task time.
 //
-// Scope: latency, attribution, step-level cost, and efficiency counts read the
+// Scope: latency, attribution, peak context, and efficiency counts read the
 // eval's root sessions (sessions the eval opened, not delegated children).
 // Reliability counts read every captured session, because a failure anywhere
 // matters.
@@ -16,9 +16,6 @@
 // are the runner's `result.derived.usage`, the same totals the eval reporters
 // see: each captured session's latest usage, including delegated work and
 // compaction summaries, less sessions another captured session opened.
-// `cost.primary_usd` sums the `usage.recorded` of the root sessions' completed
-// model steps; `cost.subagent_usd` is the difference, and is unavailable when a
-// root session compacted, since compaction cost is in the total but in no step.
 //
 // Attribution partitions root turn time with a fixed precedence, so the parts
 // add up to the turn total: human wait, then task (delegated work, including
@@ -90,9 +87,7 @@ const framework = (unit, direction, { per, pooled }) => ({
 export const STANDARD_METRICS = Object.freeze({
   "latency.eval_wall_ms": model("ms", "lower"),
   "latency.turn_ms": model("ms", "lower"),
-  "latency.turn_ms_mean": model("ms", "lower"),
   "latency.ttft_ms_p50": model("ms", "lower"),
-  "latency.output_tokens_per_s": model("tokens/s", "higher"),
   "attribution.model_ms": model("ms", "lower"),
   "attribution.tool_ms": model("ms", "lower"),
   "attribution.task_ms": model("ms", "lower"),
@@ -114,28 +109,15 @@ export const STANDARD_METRICS = Object.freeze({
   "durability.step_output_bytes_per_turn": framework("bytes", "lower", { pooled: true }),
   "durability.workflow_steps_per_model_step": framework("ratio", "lower", { pooled: true }),
   "cost.total_usd": model("usd", "lower"),
-  "cost.primary_usd": model("usd", "lower"),
-  "cost.subagent_usd": model("usd", "lower"),
   "tokens.input": model("tokens", "lower"),
   "tokens.output": model("tokens", "lower"),
-  "tokens.cache_read": model("tokens", "neutral"),
-  "tokens.cache_write": model("tokens", "neutral"),
   "tokens.cache_hit_ratio": model("ratio", "higher"),
   "tokens.peak_context": model("tokens", "lower"),
-  "counts.turns": model("count", "neutral"),
   "counts.steps": model("count", "lower"),
-  "counts.steps_per_turn": model("ratio", "lower"),
   "counts.tool_calls": model("count", "neutral"),
-  "counts.tool_calls_per_step": model("ratio", "neutral"),
-  "counts.subagent_fan_out": model("count", "neutral"),
-  "counts.subagent_depth": model("count", "neutral"),
   "counts.compactions": model("count", "lower"),
-  "counts.context_clears": model("count", "neutral"),
-  "reliability.step_failures": model("count", "lower"),
   "reliability.turn_failures": model("count", "lower"),
   "reliability.session_failures": model("count", "lower"),
-  "reliability.tool_errors": model("count", "lower"),
-  "reliability.tool_error_rate": model("ratio", "lower"),
   "reliability.truncations": model("count", "lower"),
 });
 
@@ -188,7 +170,7 @@ export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
     ...durability(roots, world),
     ...streaming(roots),
     ...costAndTokens(evalArtifact, roots),
-    ...efficiency(roots, indexes),
+    ...efficiency(roots),
     ...reliability(capture, indexes),
   };
   return { metrics_version: METRICS_VERSION, metrics, failures: failureCodes(capture, indexes) };
@@ -329,7 +311,6 @@ function latencyAndAttribution(evalArtifact, roots) {
     framework: [],
   };
   let failure;
-  let turnCount = 0;
   const humanIntervals = [];
   for (const { timeline } of roots) {
     const families = ["turns", "human", "actions", "tasks", "compactions", "steps"];
@@ -355,7 +336,6 @@ function latencyAndAttribution(evalArtifact, roots) {
     parts.framework.push(
       total - coveredLengthBetween([...H, ...A, ...K, ...C, ...M], { within: T }),
     );
-    turnCount += T.length;
     humanIntervals.push(...H);
   }
 
@@ -363,11 +343,6 @@ function latencyAndAttribution(evalArtifact, roots) {
   return {
     "latency.eval_wall_ms": failure ?? evalWall(evalArtifact, humanIntervals),
     "latency.turn_ms": sum(parts.turn),
-    "latency.turn_ms_mean":
-      failure ??
-      (turnCount === 0
-        ? notApplicable("no-turns")
-        : measured(parts.turn.reduce((a, b) => a + b, 0) / turnCount)),
     "attribution.model_ms": sum(parts.model),
     "attribution.tool_ms": sum(parts.tool),
     "attribution.task_ms": sum(parts.task),
@@ -387,47 +362,23 @@ function evalWall(evalArtifact, humanIntervals) {
   return measured(endAt - startAt - human);
 }
 
-/** Time to first token and output rate per model step, from its marks. */
+/** Median time to first token over model steps, from their marks. */
 function streaming(roots) {
   const broken = roots.find(({ marks }) => marks.status !== "ready");
-  if (broken !== undefined)
-    return { "latency.ttft_ms_p50": broken.marks, "latency.output_tokens_per_s": broken.marks };
+  if (broken !== undefined) return { "latency.ttft_ms_p50": broken.marks };
   const ttfts = [];
-  let tokens = 0;
-  let streamMs = 0;
-  let missingTokens = false;
-  let untimed = false;
-  for (const { index, marks } of roots) {
+  for (const { marks } of roots) {
     for (const turn of marks.turns.values()) {
       for (const step of turn.steps) {
-        untimed ||= step.untimed;
-        if (step.firstToken === undefined) continue;
-        ttfts.push(step.firstToken.t - step.request.t);
-        const run = index.runs.get(step.key);
-        if (run?.settled?.data?.outcome !== "completed" || step.done === undefined) continue;
-        const outputTokens = usageOf(run, "outputTokens");
-        if (outputTokens === undefined) missingTokens = true;
-        else tokens += outputTokens;
-        streamMs += Math.max(0, step.done.t - step.firstToken.t);
+        // A step whose first token can't be placed would leave the median biased.
+        if (step.untimed) return { "latency.ttft_ms_p50": unavailable("untimed-first-token") };
+        if (step.firstToken !== undefined) ttfts.push(step.firstToken.t - step.request.t);
       }
     }
   }
-  // A step whose first token can't be placed would leave the median biased.
-  if (untimed) {
-    const none = unavailable("untimed-first-token");
-    return { "latency.ttft_ms_p50": none, "latency.output_tokens_per_s": none };
-  }
-  if (ttfts.length === 0) {
-    const none = notApplicable("no-streamed-steps");
-    return { "latency.ttft_ms_p50": none, "latency.output_tokens_per_s": none };
-  }
   return {
-    "latency.ttft_ms_p50": measured(median(ttfts)),
-    "latency.output_tokens_per_s": missingTokens
-      ? unavailable("missing-output-tokens")
-      : streamMs <= 0
-        ? unavailable("zero-stream-duration")
-        : measured((tokens / streamMs) * 1000),
+    "latency.ttft_ms_p50":
+      ttfts.length === 0 ? notApplicable("no-streamed-steps") : measured(median(ttfts)),
   };
 }
 
@@ -450,37 +401,8 @@ function costAndTokens(evalArtifact, roots) {
   // Absent when a counted session reported no usage; `costUsd` is absent when
   // one reported no cost (eve's evalUsage).
   const usage = evalArtifact?.result?.derived?.usage;
-
-  let primary;
-  if (steps.length === 0) primary = notApplicable("no-model-steps");
-  else if (steps.some((run) => usageOf(run, "costUsd") === undefined))
-    primary = unavailable("missing-step-cost");
-  else primary = measured(steps.reduce((total, run) => total + usageOf(run, "costUsd"), 0));
-
   const rolled = (field, reason) =>
     isAmount(usage?.[field]) ? measured(usage[field]) : unavailable(reason);
-  const total = rolled("costUsd", "missing-rolled-up-cost");
-
-  // A compaction's summary run spends outside any step, so total − steps
-  // would count it as subagent spend; the split is unknown.
-  const compacted = roots.some(
-    ({ events }) =>
-      selectEvents(events, "context.settled", { kind: "compaction", outcome: "completed" }).length >
-      0,
-  );
-  let subagent;
-  if (total.status !== "measured") subagent = total;
-  else if (compacted) subagent = unavailable("compaction-cost-unattributed");
-  else if (primary.status === "not-applicable") subagent = total;
-  else if (primary.status !== "measured") subagent = primary;
-  else {
-    const difference = total.value - primary.value;
-    // Float sums of identical costs can differ in the last bits.
-    subagent =
-      difference < -1e-9
-        ? unavailable("inconsistent-cost-rollup")
-        : measured(Math.max(0, difference));
-  }
 
   const input = rolled("inputTokens", "missing-rolled-up-usage");
   const cacheRead = rolled("cacheReadTokens", "missing-rolled-up-usage");
@@ -497,13 +419,9 @@ function costAndTokens(evalArtifact, roots) {
   else peak = measured(Math.max(...steps.map((run) => usageOf(run, "inputTokens"))));
 
   return {
-    "cost.total_usd": total,
-    "cost.primary_usd": primary,
-    "cost.subagent_usd": subagent,
+    "cost.total_usd": rolled("costUsd", "missing-rolled-up-cost"),
     "tokens.input": input,
     "tokens.output": rolled("outputTokens", "missing-rolled-up-usage"),
-    "tokens.cache_read": cacheRead,
-    "tokens.cache_write": rolled("cacheWriteTokens", "missing-rolled-up-usage"),
     "tokens.cache_hit_ratio": cacheHitRatio,
     "tokens.peak_context": peak,
   };
@@ -513,9 +431,8 @@ function isAmount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function efficiency(roots, indexes) {
+function efficiency(roots) {
   const rootEvents = roots.flatMap(({ events }) => events);
-  const turns = selectEvents(rootEvents, "turn.started").length;
   const steps = roots.reduce((total, { index }) => total + index.steps.length, 0);
   const toolCalls = roots.reduce(
     (total, { index }) =>
@@ -524,38 +441,15 @@ function efficiency(roots, indexes) {
         .length,
     0,
   );
-  const ratio = (numerator, denominator, reason) =>
-    denominator === 0 ? notApplicable(reason) : measured(numerator / denominator);
-  const delegated = new Set(
-    roots.flatMap(({ index }) => index.children.map((child) => child.sessionId)),
-  );
-  const contextChanges = (kind) =>
-    selectEvents(rootEvents, "context.settled", { kind, outcome: "completed" }).length;
+  const compactions = selectEvents(rootEvents, "context.settled", {
+    kind: "compaction",
+    outcome: "completed",
+  }).length;
   return {
-    "counts.turns": measured(turns),
     "counts.steps": measured(steps),
-    "counts.steps_per_turn": ratio(steps, turns, "no-turns"),
     "counts.tool_calls": measured(toolCalls),
-    "counts.tool_calls_per_step": ratio(toolCalls, steps, "no-model-steps"),
-    "counts.subagent_fan_out": measured(delegated.size),
-    "counts.subagent_depth": measured(
-      Math.max(...roots.map(({ sessionId }) => delegationDepth(indexes, sessionId))),
-    ),
-    "counts.compactions": measured(contextChanges("compaction")),
-    "counts.context_clears": measured(contextChanges("clear")),
+    "counts.compactions": measured(compactions),
   };
-}
-
-/** Longest chain of opened child sessions below a session; uncaptured children count as leaves. */
-function delegationDepth(indexes, sessionId, visiting = new Set()) {
-  if (visiting.has(sessionId)) return 0;
-  const children = new Set(indexes.get(sessionId)?.children.map((child) => child.sessionId));
-  let depth = 0;
-  visiting.add(sessionId);
-  for (const child of children)
-    depth = Math.max(depth, 1 + delegationDepth(indexes, child, visiting));
-  visiting.delete(sessionId);
-  return depth;
 }
 
 /** Every captured session's failures, since a failure anywhere matters. */
@@ -566,22 +460,14 @@ function allFailures(capture, indexes) {
 }
 
 function reliability(capture, indexes) {
-  const settled = selectEvents(capture.events, "call.settled");
-  const toolErrors = settled.filter((event) => event.data?.outcome === "failed").length;
   const failures = allFailures(capture, indexes);
   const count = (type) => failures.filter((failure) => failure.type === type).length;
   const truncations = [...indexes.values()]
     .flatMap((index) => index.steps)
     .filter((run) => run.settled?.data?.finishReason === "length").length;
   return {
-    "reliability.step_failures": measured(count("step.failed")),
     "reliability.turn_failures": measured(count("turn.failed")),
     "reliability.session_failures": measured(count("session.failed")),
-    "reliability.tool_errors": measured(toolErrors),
-    "reliability.tool_error_rate":
-      settled.length === 0
-        ? notApplicable("no-action-results")
-        : measured(toolErrors / settled.length),
     "reliability.truncations": measured(truncations),
   };
 }
