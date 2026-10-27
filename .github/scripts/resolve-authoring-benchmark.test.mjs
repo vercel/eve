@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { publishedBenchmark } from "../../apps/benchmarks/lib/benchmark-config.ts";
-import { parseDirective, resolveSelection } from "./resolve-authoring-benchmark.mjs";
+import {
+  parseDirective,
+  requestOptions,
+  resolveSelection,
+} from "./resolve-authoring-benchmark.mjs";
 
-const context = { caseExists: (name) => name.startsWith("author-") };
+const context = {
+  caseExists: (name) => name.startsWith("author-"),
+  allCases: () => ["author-000-x", "author-001-y"],
+};
 
 test("does nothing without an authoring-benchmark line", () => {
   assert.equal(parseDirective("Fixes a bug."), null);
@@ -65,5 +72,35 @@ test("rejects unknown models, cases, options, and run counts", () => {
   assert.throws(
     () => resolveSelection({ models: "kimi-k3", runs: "10" }, context),
     /runs must be/u,
+  );
+});
+
+test("runs Haiku 5.5 on every case three times at night", () => {
+  // A stray PR body or dispatch input must not narrow the nightly run.
+  const options = requestOptions({
+    GITHUB_EVENT_NAME: "schedule",
+    INPUT_MODELS: "kimi-k3",
+    PR_BODY: "authoring-benchmark: models=kimi-k3",
+  });
+  assert.deepEqual(resolveSelection(options, context), {
+    models: ["claude-haiku-5-5"],
+    cases: "author-000-x,author-001-y",
+    runs: "3",
+  });
+});
+
+test("reads dispatch inputs, or the PR body for label runs", () => {
+  assert.deepEqual(
+    requestOptions({
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      INPUT_MODELS: "kimi-k3",
+      INPUT_CASES: "",
+      INPUT_RUNS: "2",
+    }),
+    { models: "kimi-k3", cases: "", runs: "2" },
+  );
+  assert.equal(
+    requestOptions({ GITHUB_EVENT_NAME: "pull_request", PR_BODY: "Fixes a bug." }),
+    null,
   );
 });

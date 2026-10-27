@@ -7,17 +7,22 @@ name: Authoring Benchmark
 #   has a line naming what to run. Nothing runs without that line.
 #     authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-008-restock-agent runs=3
 #   `models` is required (`all` selects every supported model); `cases`
-#   defaults to the published cases and `runs` to 1. Remove and re-add the
-#   label to run again after a push or a body edit.
+#   defaults to the published cases (`all` selects every case) and `runs` to
+#   1. Remove and re-add the label to run again after a push or a body edit.
 # - Or dispatch this workflow from the Actions tab on any branch with the same
 #   options as inputs.
+# - Nightly, main runs Haiku 5.5 on every case three times, skipped when main
+#   has not moved since the last successful nightly run.
 #
-# Dispatches on main and labeled PR runs also publish their results to the
+# Nightly runs and dispatches on main also publish their results to the
 # private benchmark Blob store, the same way the nightly Eval Benchmark does.
-# PR runs benchmark unmerged branch code, so they publish under
-# authoring/pull-requests/<number>/, apart from main's authoring/runs/.
-# Dispatches on other branches keep their results in workflow artifacts only.
+# Labeled PR runs publish too, but they benchmark unmerged branch code, so they
+# publish under authoring/pull-requests/<number>/, apart from main's
+# authoring/runs/. Dispatches on other branches keep their results in workflow
+# artifacts only.
 on:
+  schedule:
+    - cron: "41 8 * * *"
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -27,7 +32,7 @@ on:
         type: string
         required: true
       cases:
-        description: Comma-separated case names (default the published cases)
+        description: Comma-separated case names, or "all" (default the published cases)
         type: string
       runs:
         description: Runs per case, 1-5
@@ -36,14 +41,17 @@ on:
 
 # Every label creates a run, so key the group on the label too; otherwise
 # adding an unrelated label would cancel a benchmark in progress. Each dispatch
-# gets its own group, so a dispatch never cancels another benchmark.
+# gets its own group, so a dispatch never cancels another benchmark, and the
+# nightly run keys on its event name, so a dispatch on main never cancels it.
 concurrency:
-  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || format('dispatch-{0}', github.run_id) }}
+  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || (github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id)) || github.event_name }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   statuses: read
+  # Lets the nightly run find the last successful nightly run's commit.
+  actions: read
 
 env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -53,7 +61,7 @@ jobs:
   request:
     name: Resolve benchmark request
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
       (github.event.label.name == 'run-authoring-benchmark' &&
       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
@@ -78,8 +86,22 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Skip an unchanged nightly run
+        id: skip
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow authoring-benchmark.yml \
+            --branch main --event schedule --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
+          if [ "$last_sha" = "$HEAD_SHA" ]; then
+            echo "main is still at the last benchmarked commit ${HEAD_SHA}; skipping."
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve models and cases
         id: selection
+        if: steps.skip.outputs.unchanged != 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
           INPUT_MODELS: ${{ inputs.models }}
@@ -170,11 +192,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter @eve-internal/benchmarks...
 
+      # agent-eval exits 1 when any case fails. Like Eval Benchmark, nightly
+      # runs record those failures as data, so a successful nightly run means
+      # main was benchmarked and the next unchanged night can skip.
       - name: Run benchmark
         working-directory: apps/benchmarks
         run: |
-          pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
-            --treatment "$TREATMENT"
+          if ! pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
+            --treatment "$TREATMENT"; then
+            if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then exit 1; fi
+            echo "::warning::Some cases failed; failures are recorded as benchmark data."
+          fi
 
       - name: Summarize results
         if: ${{ !cancelled() }}
@@ -229,7 +257,8 @@ jobs:
     if: >-
       always() && needs.request.result == 'success' && needs.request.outputs.run == 'true' &&
       (github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+      ((github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') &&
+      github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

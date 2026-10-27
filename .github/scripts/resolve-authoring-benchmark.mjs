@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -27,14 +27,17 @@ export function parseDirective(body) {
   return options;
 }
 
-/** `models` is required; `cases` defaults to the published cases and `runs` to 1. */
-export function resolveSelection({ models, cases, runs }, { caseExists }) {
+/**
+ * `models` is required; `cases` defaults to the published cases (`all` selects
+ * every case) and `runs` to 1.
+ */
+export function resolveSelection({ models, cases, runs }, { caseExists, allCases }) {
   if (!models?.trim()) {
     throw new Error('Name the models to run, for example "models=kimi-k3" or "models=all".');
   }
   return {
     models: resolveModels(models),
-    cases: resolveCases(cases ?? "", caseExists),
+    cases: cases?.trim() === "all" ? allCases().join(",") : resolveCases(cases ?? "", caseExists),
     runs: resolveRuns(runs || "1"),
   };
 }
@@ -76,16 +79,21 @@ function resolveRuns(value) {
   return String(runs);
 }
 
+/** Maps the triggering event to request options, or null when a PR asks for nothing. */
+export function requestOptions(env) {
+  // The nightly run tracks one model across every case, with repeats to smooth noise.
+  if (env.GITHUB_EVENT_NAME === "schedule") {
+    return { models: "claude-haiku-5-5", cases: "all", runs: "3" };
+  }
+  if (env.GITHUB_EVENT_NAME === "workflow_dispatch") {
+    return { models: env.INPUT_MODELS, cases: env.INPUT_CASES, runs: env.INPUT_RUNS };
+  }
+  return parseDirective(env.PR_BODY);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const evalsRoot = join(process.cwd(), "apps/benchmarks/evals");
-  const options =
-    process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
-      ? {
-          models: process.env.INPUT_MODELS,
-          cases: process.env.INPUT_CASES,
-          runs: process.env.INPUT_RUNS,
-        }
-      : parseDirective(process.env.PR_BODY);
+  const options = requestOptions(process.env);
   if (options === null) {
     console.log(
       "::notice::No authoring-benchmark line in the PR body; nothing to run. Add one, then re-add the label.",
@@ -93,8 +101,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     appendFileSync(process.env.GITHUB_OUTPUT, "run=false\n");
     process.exit(0);
   }
+  const caseExists = (name) => existsSync(join(evalsRoot, name, "CASE.ts"));
   const selection = resolveSelection(options, {
-    caseExists: (name) => existsSync(join(evalsRoot, name, "CASE.ts")),
+    caseExists,
+    allCases: () => readdirSync(evalsRoot).filter(caseExists).sort(),
   });
   console.log(JSON.stringify(selection, null, 2));
   appendFileSync(
