@@ -647,7 +647,7 @@ describe("SessionStore acceptance and observation", () => {
   });
 
   // Browsers expose `crypto.randomUUID` only in secure contexts (#5415).
-  it.fails("sends where crypto.randomUUID is not exposed, as on a plain-HTTP origin", async () => {
+  it("sends where crypto.randomUUID is not exposed, as on a plain-HTTP origin", async () => {
     const server = agent();
     const webCrypto = globalThis.crypto;
     vi.stubGlobal("crypto", { getRandomValues: webCrypto.getRandomValues.bind(webCrypto) });
