@@ -4,22 +4,60 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, copyFile } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { parseSummary } from "./changeset-format.mjs";
+import { classifyTitle, parseSummary } from "./changeset-format.mjs";
+import formatter from "../.changeset/changelog.mjs";
 
-test("changeset summaries require a category and one sentence", () => {
-  assert.deepEqual(parseSummary("docs(bugfix): Clarify the setup.\n\nThanks @Alice.", "doc"), {
-    category: "bugfix",
+test("changeset summaries are plain sentences and PR titles select the category", () => {
+  assert.deepEqual(parseSummary("Clarify the setup.\n\nThanks @Alice.", "doc"), {
     summary: "Clarify the setup.",
     contributors: ["Alice"],
   });
-  for (const text of [
-    "A summary.",
-    "feature: Missing punctuation",
-    "feature: First sentence. Second sentence.",
-    "docs: Updated docs.",
-  ]) {
+  for (const text of ["Missing punctuation", "First sentence. Second sentence."]) {
     assert.throws(() => parseSummary(text, "bad"), /Changeset bad:/u);
   }
+  for (const [title, category] of [
+    ["feat(eve): Add a tool", "feature"],
+    ["fix: Repair a tool", "bugfix"],
+    ["docs(feature): Add a guide", "feature"],
+    ["docs(bugfix): Correct a guide", "bugfix"],
+    ["chore: Update tooling", "internal"],
+  ]) {
+    assert.equal(classifyTitle(title), category);
+  }
+  assert.throws(() => classifyTitle("docs: Update the guide"), /Invalid release PR title/u);
+});
+
+test("the Changesets formatter produces readable Markdown without encoded metadata", async (t) => {
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const oldToken = process.env.GITHUB_TOKEN;
+  process.env.GITHUB_TOKEN = "fixture";
+  t.after(() => {
+    if (oldToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = oldToken;
+  });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify([
+          {
+            number: 10,
+            title: "feat: Add a tool",
+            user: { login: "Alice" },
+            merged_at: "2026-01-01",
+            base: { ref: "main" },
+          },
+        ]),
+      ),
+  );
+  const line = await formatter.getReleaseLine({ id: "example", summary: "Add a tool.", commit });
+  assert.match(
+    line,
+    /#### 🚀 Features\n\n- Add a tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
+  );
+  assert.match(line, /#### Contributors\n\n- \[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
+  assert.doesNotMatch(line, /<!--/u);
 });
 
 test("version-packages assembles changesets across bump types and preserves old releases", async (t) => {
@@ -38,6 +76,7 @@ test("version-packages assembles changesets across bump types and preserves old 
     "scripts/changeset-format.mjs",
     "scripts/changeset-github.mjs",
     "scripts/check-changesets.mjs",
+    "scripts/check-release-pr-title.mjs",
     "scripts/version-packages.mjs",
   ]) {
     await copyFile(path, join(root, path));
@@ -60,27 +99,44 @@ test("version-packages assembles changesets across bump types and preserves old 
   git("config", "commit.gpgsign", "false");
   git("add", ".");
   git("commit", "-qm", "Initial fixture");
-  await write(
-    ".changeset/a.md",
-    '---\n"eve": minor\n---\n\nfeature: Add a new tool.\n\nThanks @Alice.\n',
-  );
-  git("add", ".changeset/a.md");
+  const base = git("rev-parse", "HEAD");
+  execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
+    cwd: root,
+    stdio: "pipe",
+    env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "No changeset" },
+  });
+  await write(".changeset/a.md", '---\n"eve": minor\n---\n\nAdd a new tool.\n\nThanks @Alice.\n');
+  await write(".changeset/d.md", '---\n"eve": patch\n---\n\nImprove the new tool.\n');
+  git("add", ".changeset/a.md", ".changeset/d.md");
   git("commit", "-qm", "Add feature\n\nCo-authored-by: Bob <123+Bob@users.noreply.github.com>");
   const first = git("rev-parse", "HEAD");
-  await write(
-    ".changeset/b.md",
-    '---\n"eve": patch\n---\n\ndocs(bugfix): Correct the setup guide.\n',
-  );
-  await write(
-    ".changeset/c.md",
-    '---\n"eve": patch\n---\n\ninternal: Update the release tooling.\n',
-  );
-  git("add", ".changeset/b.md", ".changeset/c.md");
+  await write(".changeset/b.md", '---\n"eve": patch\n---\n\nCorrect the setup guide.\n');
+  await write(".changeset/c.md", '---\n"eve": patch\n---\n\nUpdate the release tooling.\n');
+  git("add", ".changeset/b.md");
   git("commit", "-qm", "Update docs");
+  const second = git("rev-parse", "HEAD");
+  git("add", ".changeset/c.md");
+  git("commit", "-qm", "Update tooling");
   await write(
     "mock-github.mjs",
-    `globalThis.fetch = async (url) => new Response(JSON.stringify([{number: url.includes(${JSON.stringify(first)}) ? 10 : 11, user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]), {status: 200});`,
+    `globalThis.fetch = async (url) => new Response(JSON.stringify([{number: url.includes(${JSON.stringify(first)}) ? 10 : url.includes(${JSON.stringify(second)}) ? 11 : 12, title: url.includes(${JSON.stringify(first)}) ? "feat: Add a tool" : url.includes(${JSON.stringify(second)}) ? "docs(bugfix): Correct the guide" : "chore: Update tooling", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]), {status: 200});`,
   );
+  await write(
+    "mock-invalid-github.mjs",
+    `globalThis.fetch = async () => new Response(JSON.stringify([{number: 10, title: "Update the tool", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]));`,
+  );
+  assert.throws(() =>
+    execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
+      cwd: root,
+      stdio: "pipe",
+      env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "Update docs" },
+    }),
+  );
+  execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
+    cwd: root,
+    stdio: "pipe",
+    env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "docs(bugfix): Update docs" },
+  });
   const envWithoutToken = { ...process.env, GITHUB_TOKEN: "", GH_TOKEN: "" };
   assert.throws(() =>
     execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
@@ -93,7 +149,22 @@ test("version-packages assembles changesets across bump types and preserves old 
     JSON.parse(await readFile(join(root, "packages/eve/package.json"), "utf8")).version,
     "1.0.0",
   );
-  assert.match(await readFile(join(root, ".changeset/a.md"), "utf8"), /feature: Add a new tool\./u);
+  assert.match(await readFile(join(root, ".changeset/a.md"), "utf8"), /Add a new tool\./u);
+  assert.throws(() =>
+    execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
+      cwd: root,
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        GITHUB_TOKEN: "fixture",
+        NODE_OPTIONS: `--import=${join(root, "mock-invalid-github.mjs")}`,
+      },
+    }),
+  );
+  assert.equal(
+    JSON.parse(await readFile(join(root, "packages/eve/package.json"), "utf8")).version,
+    "1.0.0",
+  );
   execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
     cwd: root,
     stdio: "pipe",
@@ -109,6 +180,8 @@ test("version-packages assembles changesets across bump types and preserves old 
     changelog,
     /### 🚀 Features\n\n- Add a new tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
   );
+  assert.match(changelog, /- Improve the new tool\. \[#10\]/u);
+  assert.equal([...changelog.matchAll(/^### 🚀 Features$/gmu)].length, 1);
   assert.match(changelog, /### 🐛 Bug Fix\n\n- Correct the setup guide\. \[#11\]/u);
   assert.match(changelog, /\[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.match(changelog, /\[@Bob\]\(https:\/\/github\.com\/Bob\)/u);

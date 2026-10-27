@@ -28,5 +28,10 @@ export async function pullRequestFor(commit, id) {
   const coauthors = [
     ...message.matchAll(/^Co-authored-by:.*<\d+\+([^@>]+)@users\.noreply\.github\.com>/gimu),
   ].map((match) => match[1]);
-  return { number: pulls[0].number, author: pulls[0].user?.login, coauthors };
+  return {
+    number: pulls[0].number,
+    title: pulls[0].title,
+    author: pulls[0].user?.login,
+    coauthors,
+  };
 }

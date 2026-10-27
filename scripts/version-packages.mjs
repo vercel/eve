@@ -3,43 +3,29 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getPackages } from "@manypkg/get-packages";
 
-const repository = "vercel/eve";
-const markerPattern = /<!-- eve-changeset:([A-Za-z0-9_-]+) -->/gu;
-
-function renderRelease({ version, date, bump, entries }) {
+function renderRelease({ version, date, bump, body }) {
   const sections = [`### Release ${version} | ${date} | ${bump}`];
-  for (const [category, title] of [
-    ["feature", "🚀 Features"],
-    ["bugfix", "🐛 Bug Fix"],
-  ]) {
-    const lines = entries
-      .filter((entry) => entry.category === category)
-      .map(
-        (entry) =>
-          `- ${entry.summary} [#${entry.pull.number}](https://github.com/${repository}/pull/${entry.pull.number})`,
+  const groups = new Map();
+  const headings = [...body.matchAll(/^#{3,4} (.+)$/gmu)];
+  for (let i = 0; i < headings.length; i++) {
+    const match = headings[i];
+    if (!match[0].startsWith("#### ")) continue;
+    const lines = body
+      .slice(match.index + match[0].length, headings[i + 1]?.index)
+      .trim()
+      .split("\n");
+    const group = groups.get(match[1]) ?? [];
+    group.push(...lines.filter(Boolean));
+    groups.set(match[1], group);
+  }
+  for (const title of ["🚀 Features", "🐛 Bug Fix", "Dependencies", "Contributors"]) {
+    let lines = groups.get(title) ?? [];
+    if (title === "Contributors") {
+      lines = [...new Map(lines.map((line) => [line.toLowerCase(), line])).values()].sort((a, b) =>
+        a.localeCompare(b, "en", { sensitivity: "base" }),
       );
-    if (lines.length) sections.push(`### ${title}\n\n${lines.join("\n")}`);
-  }
-  const dependencies = entries.flatMap((entry) => entry.dependencies ?? []);
-  if (dependencies.length)
-    sections.push(
-      `### Dependencies\n\n${dependencies.map(({ name, newVersion }) => `- Updated ${name} to ${newVersion}.`).join("\n")}`,
-    );
-  const contributors = new Map();
-  for (const entry of entries) {
-    for (const login of [
-      entry.pull?.author,
-      ...(entry.pull?.coauthors ?? []),
-      ...(entry.contributors ?? []),
-    ]) {
-      if (login && !login.endsWith("[bot]")) contributors.set(login.toLowerCase(), login);
     }
-  }
-  if (contributors.size) {
-    const lines = [...contributors.values()]
-      .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
-      .map((login) => `- [@${login}](https://github.com/${login})`);
-    sections.push(`### Contributors\n\n${lines.join("\n")}`);
+    if (lines.length) sections.push(`### ${title}\n\n${lines.join("\n")}`);
   }
   return sections.join("\n\n");
 }
@@ -57,14 +43,11 @@ async function formatChangelog(path, version) {
     ["major", "minor", "patch"].find((type) =>
       body.includes(`### ${type[0].toUpperCase()}${type.slice(1)} Changes`),
     ) ?? "patch";
-  const entries = [...body.matchAll(markerPattern)].map((match) =>
-    JSON.parse(Buffer.from(match[1], "base64url").toString("utf8")),
-  );
   const rendered = renderRelease({
     version,
     date: new Date().toISOString().slice(0, 10),
     bump,
-    entries,
+    body,
   });
   await writeFile(path, `${content.slice(0, bodyStart)}\n${rendered}\n${content.slice(end)}`);
 }
