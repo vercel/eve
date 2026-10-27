@@ -472,4 +472,157 @@ describe("generation steering with the real AI SDK", () => {
     expect(providerSignal?.aborted).toBe(false);
     expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
   });
+
+  const toolCallStream = (text?: string) => async () => ({
+    stream: new ReadableStream<Part>({
+      start(controller) {
+        if (text !== undefined) {
+          controller.enqueue({ type: "text-start", id: "preamble" });
+          controller.enqueue({ type: "text-delta", id: "preamble", delta: text });
+          controller.enqueue({ type: "text-end", id: "preamble" });
+        }
+        controller.enqueue({
+          type: "tool-call",
+          toolCallId: "save-1",
+          toolName: "save",
+          input: "{}",
+        });
+        controller.enqueue({
+          type: "finish",
+          finishReason: { unified: "tool-calls", raw: undefined },
+          usage,
+        });
+        controller.close();
+      },
+    }),
+  });
+  const saveTool = new Map([
+    [
+      "save",
+      {
+        name: "save",
+        description: "Save once",
+        inputSchema: jsonSchema({ type: "object" }),
+        execute: async () => "saved",
+      },
+    ],
+  ]);
+  const stepCompletions = (events: UnstampedMessageStreamEvent[]) =>
+    events.filter((event) => event.type === "step.completed") as unknown as {
+      data: { finishReason: string; stepIndex: number; steeredBy?: string };
+    }[];
+
+  it("does not close a step with steered when the turn is cancelled as the steer lands", async () => {
+    const steering = new AbortController();
+    const cancellation = new AbortController();
+    const pending = Promise.withResolvers<void>();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        pending.resolve();
+        return { stream: new ReadableStream<Part>() };
+      },
+    });
+    const running = createToolLoopHarness({
+      abortSignal: cancellation.signal,
+      steeringSignal: steering.signal,
+      resolveModel: async () => model,
+      tools: new Map(),
+      handleEvent: async (event) => {
+        events.push(event);
+      },
+    })(session(), { message: "Start" });
+    await pending.promise;
+    cancellation.abort(new TurnCancelledError());
+    steering.abort("dlv_late");
+    await expect(running).rejects.toBeInstanceOf(TurnCancelledError);
+    expect(stepCompletions(events)).toHaveLength(0);
+  });
+
+  it("closes the step once when two steers land in it, naming the first message", async () => {
+    const steering = new AbortController();
+    const pending = Promise.withResolvers<void>();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        pending.resolve();
+        return { stream: new ReadableStream<Part>() };
+      },
+    });
+    const running = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      resolveModel: async () => model,
+      tools: new Map(),
+      handleEvent: async (event) => {
+        events.push(event);
+      },
+    })(session(), { message: "Start" });
+    await pending.promise;
+    steering.abort("dlv_first");
+    steering.abort("dlv_second");
+    expect((await running).steered).toBe(true);
+    const completions = stepCompletions(events);
+    expect(completions).toHaveLength(1);
+    expect(completions[0]!.data).toMatchObject({ finishReason: "steered", steeredBy: "dlv_first" });
+  });
+
+  it("closes a steered answer step with steered after an earlier step finished normally", async () => {
+    const steering = new AbortController();
+    const pending = Promise.withResolvers<void>();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockImplementationOnce(toolCallStream())
+      .mockImplementationOnce(async () => {
+        pending.resolve();
+        return { stream: new ReadableStream<Part>() };
+      });
+    const harness = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: saveTool,
+      handleEvent: async (event) => {
+        events.push(event);
+      },
+    });
+    const first = await harness(session(), { message: "Save this" });
+    const running = first.next!(first.session);
+    await pending.promise;
+    steering.abort("dlv_last");
+    expect((await running).steered).toBe(true);
+    expect(stepCompletions(events).map(({ data }) => [data.stepIndex, data.finishReason])).toEqual([
+      [0, "tool-calls"],
+      [1, "steered"],
+    ]);
+  });
+
+  it("does not cut a later step once assistant text was published earlier in the turn", async () => {
+    const steering = new AbortController();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockImplementationOnce(toolCallStream("Saving now."))
+      .mockImplementationOnce(async () => {
+        steering.abort("dlv_after_text");
+        return {
+          stream: new ReadableStream<Part>({
+            start(controller) {
+              finish(controller, "Done");
+            },
+          }),
+        };
+      });
+    const harness = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: saveTool,
+      handleEvent: async (event) => {
+        events.push(event);
+      },
+    });
+    const first = await harness(session(), { message: "Save this" });
+    const second = await first.next!(first.session);
+    expect(second.steered).toBeUndefined();
+    expect(stepCompletions(events).map(({ data }) => data.finishReason)).not.toContain("steered");
+  });
 });
