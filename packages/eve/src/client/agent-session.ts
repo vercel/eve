@@ -67,7 +67,7 @@ export class ClientAgentSession implements SessionReader {
       resolveHeaders: () => this.#context.resolveHeaders(),
       signal: options?.signal,
       startIndex: options?.startIndex ?? 0,
-      streamReconnectPolicy: options?.streamReconnectPolicy,
+      reconnect: options?.reconnect,
       onOpen: (headers) => {
         if (onIdentity === undefined) return;
         const key = headers.get(EVE_OBSERVATION_KEY_HEADER);

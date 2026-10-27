@@ -235,7 +235,7 @@ export class AgentStreamFollower {
             signal: controller.signal,
             startIndex: conversation.view.position,
             follow: false,
-            streamReconnectPolicy: { reconnect: false },
+            reconnect: false,
           },
           (key) => {
             if (!current()) throw new Error("Observation stopped.");

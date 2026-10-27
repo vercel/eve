@@ -281,7 +281,7 @@ export class EvalSessionDriver implements EveEvalSession {
         startIndex,
         signal: options.signal,
         headers: options.headers,
-        streamReconnectPolicy: options.streamReconnectPolicy,
+        reconnect: options.reconnect,
       }),
       message,
       { deliveryId },
