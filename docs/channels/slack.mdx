@@ -687,7 +687,7 @@ A turn keeps one card unless it starts a task after every task on its card ended
 `interactionCard` restyles the card for one approval, question, or budget prompt. It receives:
 
 - `interaction`: the request as the session holds it, with its `status`, `outcome`, `call` (including the tool `input`), and `answer`. Once the request settles, `answer` is the answer that decided it. While it's open, `answer` is the latest admitted answer, if any; an answer still being checked, for example by an approval response policy, or one that was refused doesn't count.
-- `destination`: `"thread"` or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided.
+- `destination`: `"thread"` or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided. In a code channel, `"thread"` means the code channel itself.
 - `audience`: who reads the message. A direct message is always `private`; a thread request has the thread's audience, as on the task card.
 - `answeredBy`: the Slack user ID whose answer stands or decided the request, when known.
 - `view`: the session snapshot, for the selectors from `eve/events`.

@@ -89,7 +89,10 @@ export interface SlackInteractionCard {
    * answer, if any; an answer still being checked, or one that was refused, doesn't count.
    */
   readonly interaction: Interaction;
-  /** Where eve posts it, as `approvalChannel` decided. */
+  /**
+   * Where eve posts it, as `approvalChannel` decided. In a code channel, `"thread"` means the code
+   * channel itself.
+   */
   readonly destination: SlackApprovalChannel;
   /**
    * Who reads the message. A direct message is always `private`; a thread request has the

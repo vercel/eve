@@ -67,9 +67,11 @@ function harness(
     channelId: "C1",
     slackUsersByPrincipal: { p_bob: "U_BOB" },
     teamId: null,
-    threadTs: "1.0",
+    threadTs: options.codeChannel === true ? null : "1.0",
     triggeringUserId: "U_ALICE",
   };
+  // A code channel is the session itself, with no thread root, as production state records it.
+  if (options.codeChannel === true) state.codeChannel = true;
   const channel = {
     slack: {
       channelId: "C1",
@@ -889,23 +891,6 @@ describe("Slack input request cards", () => {
     expect(JSON.stringify(calls("chat.update")[0]?.body)).toContain("<@U_BOB>");
   });
 
-  it("brings a direct-message card's routed controls back when its answer is refused", async () => {
-    const { answer, ask, calls, commit } = harness({ approvalChannel: () => "direct-message" });
-    await ask(approval("a_deploy", "deploy"));
-    await answer("a_deploy", { optionId: "approve" });
-
-    await commit({
-      data: { outcome: "refused", responseId: "r_a_deploy" },
-      type: "response.settled",
-    });
-
-    const reopened = calls("chat.update").at(-1);
-    expect(reopened?.body.channel).toBe("D_ALICE");
-    const ids = eveActionIds(reopened?.body);
-    expect(ids).toHaveLength(2);
-    for (const id of ids) expect(id).toMatch(/^eve_input:route:C1:1\.0:tool-approval:/u);
-  });
-
   it("forgets a card a renderer never let eve settle once a later commit handles cards", async () => {
     const { ask, channel, commit } = harness({ skip: ["interaction.settled"] });
     await ask(approval("a_one", "deploy"));
@@ -919,23 +904,58 @@ describe("Slack input request cards", () => {
     ).toEqual(["a_two"]);
   });
 
-  it("routes a code channel's card to the channel's session, before and after an update", async () => {
-    const { answer, ask, calls, commit } = harness({ codeChannel: true });
-    await ask(approval("a_deploy", "deploy"));
-    await answer("a_deploy", { optionId: "approve" });
+  it.each([
+    {
+      channel: "D_ALICE",
+      codeChannel: false,
+      destination: "direct-message" as const,
+      name: "a direct-message card",
+      route: /^eve_input:route:C1:1\.0:tool-approval:/u,
+    },
+    {
+      channel: "D_ALICE",
+      codeChannel: true,
+      destination: "direct-message" as const,
+      name: "a code channel's direct-message card",
+      route: /^eve_input:code:C1:tool-approval:/u,
+    },
+    {
+      channel: "C1",
+      codeChannel: true,
+      destination: "thread" as const,
+      name: "a code channel's card",
+      route: /^eve_input:code:C1:tool-approval:/u,
+    },
+  ])(
+    "keeps $name's route when a refused answer reopens it",
+    async ({ channel, codeChannel, destination, route }) => {
+      const { answer, ask, calls, commit, sent } = harness({
+        approvalChannel: () => destination,
+        codeChannel,
+      });
+      await ask(approval("a_deploy", "deploy"));
+      await answer("a_deploy", { optionId: "approve" });
 
-    await commit({
-      data: { outcome: "refused", responseId: "r_a_deploy" },
-      type: "response.settled",
-    });
+      await commit({
+        data: { outcome: "refused", responseId: "r_a_deploy" },
+        type: "response.settled",
+      });
 
-    // The card sits outside any thread, so its clicks carry the code channel's address.
-    for (const message of [calls("thread.post")[0], calls("chat.update").at(-1)]) {
-      const ids = eveActionIds(message?.body);
-      expect(ids).toHaveLength(2);
-      for (const id of ids) expect(id).toMatch(/^eve_input:code:C1:tool-approval:/u);
-    }
-  });
+      // Clicks decode the session from the route, so a card outside the session's thread needs it.
+      const posted = sent.find(
+        (call) =>
+          (call.method === "thread.post" || call.method === "chat.postMessage") &&
+          eveActionIds(call.body).length > 0,
+      );
+      const reopened = calls("chat.update").at(-1);
+      expect(reopened?.body.channel).toBe(channel);
+      for (const message of [posted, reopened]) {
+        const ids = eveActionIds(message?.body);
+        expect(ids).toHaveLength(2);
+        for (const id of ids) expect(id).toMatch(route);
+      }
+    },
+  );
 });
 
 function controls(
