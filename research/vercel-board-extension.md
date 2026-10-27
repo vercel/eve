@@ -21,17 +21,16 @@ thread, and through the board to whatever platform thread it syncs. User docs:
 
 ## Sources reviewed
 
-| Source                                                   | What it shows                                                                                                                                                             |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@vercel/board@0.19.0` tarball (`docs/`, `dist/*.d.mts`) | The authoritative API: handle, HTTP protocol, identity, access, watchers                                                                                                  |
-| `vercel-labs/code-on-slack-poc@69436ae`                  | A board with one Slack channel synced to `dev`, and a `pi` watcher that starts a Pi coding agent in a Vercel Sandbox for each (thread, Slack user). Pi replies with `vb`  |
-| `vercel/v0@db0a7e7` `chat/app/api/v2/internal/factory`   | The same pattern at scale (`vboard@0.14.0`, patched): 12 watchers, nine synced team channels, per-thread sandbox drives, `vb schedule` as the agent's clock, label claims |
-| `docs/03-guides/05-agent-factory.md`                     | The hosted Factory: a pull-only client with scoped read and post tools, and no wake-ups                                                                                   |
+- The `@vercel/board@0.19.0` package: its bundled `docs/` and type declarations, the
+  authoritative API for the handle, HTTP protocol, identity, access, and watchers.
+- Its "Agent Factory" guide: a pull-only client with scoped read and post tools, and no
+  wake-ups.
 
-The POC and v0 run the board and the agent in the same project. A watcher's `run` starts a
-sandbox, and the agent talks back through `vb`. Durability comes from watcher retries plus files
-in the sandbox (`flock` turn locks, inbox files, `--session-id`). eve already provides that
-durability, so the integration replaces this plumbing instead of copying it.
+The board's examples run the board and the agent in the same project: a watcher's `run`
+starts a sandboxed coding agent, which talks back through the `vb` CLI. Durability then comes
+from watcher retries plus files in the sandbox, such as turn locks, inbox files, and session
+IDs. eve already provides that durability, so the integration replaces this plumbing instead of
+copying it.
 
 ## Decision: eve is a remote registrant, not a board host
 
@@ -41,8 +40,8 @@ credentials, runs them, and acks them. eve implements that role:
 
 - The board stays the one shared surface and owns platform sync.
 - Board ordering (one match at a time per thread, threads in parallel) matches eve's
-  per-session delivery, and activity during a turn steers it. That replaces v0's inbox file and
-  steering extension.
+  per-session delivery, and activity during a turn steers it. That replaces inbox files and a
+  separate steering mechanism.
 - eve speaks the HTTP protocol with an eve-owned client. `@vercel/board` is a `devDependency`
   for tests only.
 
@@ -132,13 +131,12 @@ its maintainers don't promise compatibility. This stays in a draft PR tracking t
 release. The channel joins the shared channel conformance suite with a real in-memory board as
 its platform, and the registration policy and tools are tested against the same board.
 
-## Prerequisites for the `#test-code-on-slack-poc` board
+## Prerequisites for a hosted board
 
-- Membership in `vercel-internal-playground`, or the `code-on-slack-poc` project: its board is
-  behind Deployment Protection, and `vb whoami` currently fails for us.
-- An `access` rule and a Trusted Sources entry for the eve fixture's project.
-- Its `pi` watcher answers every request in `dev`, so an eve fixture should tail
-  `dev --mentions @<profile>`, or get its own synced channel.
+- An `access` rule and, behind Deployment Protection, a Trusted Sources entry for the agent's
+  project, added by the board's owner.
+- A tail that doesn't compete with other watchers on the same channel, such as
+  `dev --mentions @<profile>`, or a channel of the agent's own.
 
 ## Non-goals (v1)
 
