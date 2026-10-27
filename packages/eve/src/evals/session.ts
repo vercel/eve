@@ -194,7 +194,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
   /** @internal */
   async cleanup(signal: AbortSignal): Promise<void> {
-    await this.#session.reset({ reason: "Eval timed out", signal });
+    await this.#session.end({ reason: "Eval timed out", signal });
   }
 
   requireInteraction(filter: EveEvalInteractionMatchOptions = {}): Interaction {

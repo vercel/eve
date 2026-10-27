@@ -37,7 +37,7 @@ const cleared = await session.clear();
 await cleared.result();
 ```
 
-Observe `context.settled` while streaming to check whether summarization succeeded. A failed or empty summary preserves the previous history. `session.reset()` instead retires the session; its delivery settles after retirement and address release.
+Observe `context.settled` while streaming to check whether summarization succeeded. A failed or empty summary preserves the previous history. `session.end()` instead retires the session; its delivery settles after retirement and address release.
 
 ## Aggregate a turn
 

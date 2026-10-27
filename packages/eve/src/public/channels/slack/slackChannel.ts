@@ -464,11 +464,11 @@ export interface SlackInboundEventContext {
   clear(input: {
     readonly target: SlackSessionTarget;
   }): ReturnType<ChannelSource<SlackChannelState>["clear"]>;
-  /** Resets the current session for one Slack thread. */
-  reset(input: {
+  /** Retires the current session for one Slack thread without creating a replacement. */
+  end(input: {
     readonly reason?: string;
     readonly target: SlackSessionTarget;
-  }): ReturnType<ChannelSource<SlackChannelState>["reset"]>;
+  }): ReturnType<ChannelSource<SlackChannelState>["end"]>;
   /** Resolves the current session for one Slack thread. */
   resolveSession(input: { readonly target: SlackSessionTarget }): ReturnType<ChannelResolveSession>;
   /** The complete signed Events API callback envelope. */
@@ -1793,7 +1793,7 @@ async function dispatchSlackEvent(input: {
     clear: ({ target }) => sourceFor(target).clear(),
     compact: ({ target }) => sourceFor(target).compact(),
     envelope: input.envelope,
-    reset: ({ reason, target }) => sourceFor(target).reset({ reason }),
+    end: ({ reason, target }) => sourceFor(target).end({ reason }),
     resolveSession: ({ target }) => input.resolveSession(slackSessionToken(target)),
     respond: (answers, { auth, target }) =>
       sourceFor(target).respond(answers, {

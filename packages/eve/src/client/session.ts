@@ -200,15 +200,15 @@ export class ClientSession {
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */
-  async reset(options?: {
+  async end(options?: {
     readonly reason?: string;
     readonly signal?: AbortSignal;
   }): Promise<Delivery> {
-    return this.#control("reset", options);
+    return this.#control("end", options);
   }
 
   async #control(
-    kind: "cancel" | "clear" | "compact" | "reset",
+    kind: "cancel" | "clear" | "compact" | "end",
     options?: {
       readonly signal?: AbortSignal;
       readonly turnId?: string | null;
@@ -229,7 +229,7 @@ export class ClientSession {
           startIndex,
           { signal: read?.signal },
           receipt.deliveryId,
-          kind !== "reset",
+          kind !== "end",
         ),
     });
   }

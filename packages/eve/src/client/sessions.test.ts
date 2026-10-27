@@ -196,14 +196,14 @@ describe("Client.sessions", () => {
     await session.cancel();
     await session.compact();
     await session.clear();
-    await session.reset({ reason: "fresh start" });
+    await session.end({ reason: "fresh start" });
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
       "/eve/v1/session/wrun_A",
       "/eve/v1/session/wrun_A/cancel",
       "/eve/v1/session/wrun_A/compact",
       "/eve/v1/session/wrun_A/clear",
-      "/eve/v1/session/wrun_A/reset",
+      "/eve/v1/session/wrun_A/end",
     ]);
     expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "follow-up" });
     expect(JSON.parse(requests[4]!.body!)).toEqual({ reason: "fresh start" });
@@ -242,7 +242,7 @@ describe("Client.sessions", () => {
     await session.cancel(options);
     await session.compact(options);
     await session.clear(options);
-    await session.reset(options);
+    await session.end(options);
 
     expect(requests.map(({ body }) => JSON.parse(body!))).toEqual([
       { turnId: "turn_1" },
