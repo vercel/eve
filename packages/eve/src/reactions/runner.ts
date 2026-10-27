@@ -93,7 +93,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
-  dropYieldedSends(ctx, input.written);
+  dropYieldedFollowUps(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -401,11 +401,13 @@ function actOnCancels(
 }
 
 /**
- * A hook's send yields: once another turn starts, or a cancel or reset arrives, the session no
- * longer continues the turn it was sent for, and the send is dropped.
+ * A hook's follow-up yields: once another turn starts, or a cancel or reset arrives, the session
+ * no longer follows up the turn it was queued for, and it's dropped.
  */
-function dropYieldedSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
-  if (!(readReactionsState(ctx).intents ?? []).some((intent) => intent.type === "send")) return;
+function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+  if (!(readReactionsState(ctx).intents ?? []).some((intent) => intent.type === "follow-up")) {
+    return;
+  }
   const latestTurnId = latestTurnIdOf(currentProjection(ctx));
   const stopped = written.some(
     ({ event }) =>
@@ -416,7 +418,7 @@ function dropYieldedSends(ctx: ContextContainer, written: readonly WrittenEvent[
   );
   takeIntents(
     ctx,
-    (intent) => intent.type === "send" && (stopped || intent.turnId !== latestTurnId),
+    (intent) => intent.type === "follow-up" && (stopped || intent.turnId !== latestTurnId),
   );
 }
 

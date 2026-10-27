@@ -1,6 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingHookSend } from "#reactions/hook-send.js";
+import { pendingFollowUp } from "#reactions/follow-up.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -58,14 +58,14 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    // A hook's send continues the turn that settled only once nothing else waits; input that
-    // starts another turn first discards it. Its idempotency key admits it once.
+    // A hook follows up the turn that settled only once nothing else waits; input that starts
+    // another turn first discards it. Its idempotency key admits it once.
     if (queue.pendingCount === 0 && !inbox.hasPending()) {
-      const send = pendingHookSend(
+      const followUp = pendingFollowUp(
         cursor.serializedContext,
         latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
       );
-      if (send !== undefined && queue.enqueueDelivery(send) !== undefined) continue;
+      if (followUp !== undefined && queue.enqueueDelivery(followUp) !== undefined) continue;
     }
 
     if (!inbox.hasPending()) {

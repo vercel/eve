@@ -6,7 +6,7 @@ import type { AlsContext } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import { REACTIONS_STATE_KEY, type HookSendIntent } from "./hook-send.js";
+import { REACTIONS_STATE_KEY, type FollowUpIntent } from "./follow-up.js";
 
 // The session's reactions as they stand, in its checkpointed state, never on the stream: one slot
 // per dynamic value with what's installed, memo results, and the commands hooks queued. Installed values that carry code live in an in-process
@@ -49,7 +49,7 @@ export interface ReactionsState {
 }
 
 /** A command a hook queued, waiting for the session to act on it. */
-export type PendingIntent = TurnIntent | HookSendIntent;
+export type PendingIntent = TurnIntent | FollowUpIntent;
 
 /** Acts on the running turn. */
 export interface TurnIntent {

@@ -45,13 +45,11 @@ export function admitDeliveries(input: {
         "Session delivery has no identity. Assign delivery metadata at dispatch before admission.",
       );
     const deliveryId = metadata.deliveryId;
-    const source: DeliverySource =
-      metadata.hook !== undefined
-        ? { hook: metadata.hook }
-        : defined({
-            channel: metadata.channelKind ?? input.channelKind,
-            scheduleId: delivery.schedule?.definition,
-          });
+    const source: DeliverySource = defined({
+      channel: metadata.channelKind ?? input.channelKind,
+      hook: metadata.hook,
+      scheduleId: delivery.schedule?.definition,
+    });
     // Turn context stays out of facts: stream readers may see it, and the turn reads it from
     // the payload and its private state instead.
     const status = input.status?.(deliveryId);

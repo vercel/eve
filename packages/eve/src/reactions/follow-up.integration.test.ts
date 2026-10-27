@@ -14,7 +14,7 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 
-// A hook's ctx.send() from a settled turn, read from what the model receives and what the session
+// A hook's ctx.followUp() from a settled turn, read from what the model receives and what the session
 // admits.
 
 const ALICE = {
@@ -50,13 +50,15 @@ async function runSession(input: {
   /** Holds the first model call until it resolves. */
   readonly firstCall?: Promise<void>;
   readonly drive: (session: { readonly inbox: string; readonly log: string[] }) => Promise<void>;
-}): Promise<{ readonly log: string[]; readonly inputs: string[] }> {
+}): Promise<{ readonly log: string[]; readonly inputs: string[]; readonly prompts: string[] }> {
   const log: string[] = [];
   const inputs: string[] = [];
+  const prompts: string[] = [];
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         inputs.push(lastUserText(prompt));
+        prompts.push(JSON.stringify(prompt));
         if (inputs.length === 1) await input.firstCall;
         return textStreamResult("Done.");
       },
@@ -68,6 +70,7 @@ async function runSession(input: {
     events: {
       "delivery.admitted": (event) => {
         log.push(`admitted:${JSON.stringify(event.data.source ?? null)}`);
+        log.push(`principal:${event.data.principal?.id ?? "none"}`);
       },
       "turn.settled": (event) => {
         log.push(`turn:${event.data.outcome}`);
@@ -106,13 +109,14 @@ async function runSession(input: {
       await run.cancel().catch(() => {});
     }
   });
-  return { inputs, log };
+  return { inputs, log, prompts };
 }
 
-describe("hook ctx.send()", () => {
+describe("hook ctx.followUp()", () => {
   it("starts the next turn after a completed turn, as a delivery from the hook", async () => {
     let settled = 0;
-    const { inputs, log } = await runSession({
+    const results: unknown[] = [];
+    const { inputs, log, prompts } = await runSession({
       drive: async ({ log }) => {
         await until(log, "turn:completed", 3);
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -120,47 +124,68 @@ describe("hook ctx.send()", () => {
       hooks: {
         "until-done": defineHook({
           events: {
-            "turn.settled": (event, ctx) => {
+            "turn.settled": (_event, ctx) => {
               settled += 1;
               if (settled > 2) return;
-              ctx.send(`Keep going (${settled}).`, { context: ["The report needs a summary."] });
-              // A second send for the same turn adds nothing.
-              ctx.send("Ignored.");
-              expect(event.data.outcome).toBe("completed");
+              results.push(
+                ctx.followUp(`Keep going (${settled}).`, {
+                  context: ["The report needs a summary."],
+                }),
+                // A second follow-up to the same turn adds nothing, and says so.
+                ctx.followUp("Ignored."),
+              );
             },
           },
         }),
       },
-      name: "hook-send-continues",
+      name: "hook-follow-up-continues",
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Keep going (1).", "Keep going (2)."]);
-    expect(log.filter((entry) => entry.startsWith("admitted:"))).toEqual([
-      'admitted:{"channel":"http"}',
-      'admitted:{"hook":"until-done"}',
-      'admitted:{"hook":"until-done"}',
+    expect(results).toEqual([
+      { queued: true },
+      { queued: false, reason: "already-queued" },
+      { queued: true },
+      { queued: false, reason: "already-queued" },
     ]);
-    expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(3);
+    // The source keeps the channel, and the follow-up names no sender.
+    expect(log.filter((entry) => /^(admitted|principal):/u.test(entry))).toEqual([
+      'admitted:{"channel":"http"}',
+      "principal:alice",
+      'admitted:{"channel":"http","hook":"until-done"}',
+      "principal:none",
+      'admitted:{"channel":"http","hook":"until-done"}',
+      "principal:none",
+    ]);
+    // The model reads that no person wrote it, beside the hook's own context.
+    expect(prompts[1]).toContain('The \\"until-done\\" hook sent this follow-up');
+    expect(prompts[1]).toContain("The report needs a summary.");
   }, 90_000);
 
-  it("ignores a send from an event other than a completed turn.settled", async () => {
+  it("reports why a * handler's follow-up wasn't queued, and offers none to other events", async () => {
+    const results: unknown[] = [];
     const { inputs, log } = await runSession({
       drive: async ({ log }) => {
         await until(log, "turn:completed", 1);
         await new Promise((resolve) => setTimeout(resolve, 500));
       },
       hooks: {
-        early: defineHook({
+        every: defineHook({
           events: {
+            "*": (event, ctx) => {
+              if (event.type === "turn.started") results.push(ctx.followUp("Too early."));
+            },
             "turn.started": (_event, ctx) => {
-              ctx.send("Too early.");
+              // @ts-expect-error Only turn.settled and * handlers can follow up.
+              results.push(typeof ctx.followUp);
             },
           },
         }),
       },
-      name: "hook-send-ineligible",
+      name: "hook-follow-up-ineligible",
     });
 
+    expect(results).toEqual(["undefined", { queued: false, reason: "not-settled" }]);
     expect(inputs).toEqual(["Alice asks for the report."]);
     expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(1);
   }, 90_000);
@@ -193,12 +218,12 @@ describe("hook ctx.send()", () => {
           events: {
             "turn.settled": (_event, ctx) => {
               settled += 1;
-              if (settled === 1) ctx.send("Keep going.");
+              if (settled === 1) ctx.followUp("Keep going.");
             },
           },
         }),
       },
-      name: "hook-send-yields",
+      name: "hook-follow-up-yields",
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Bob asks for the appendix."]);

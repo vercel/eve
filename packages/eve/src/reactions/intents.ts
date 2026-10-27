@@ -4,22 +4,23 @@ import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { followsUp } from "./follow-up.js";
 import type { Reaction } from "./reaction.js";
 import { readReactionsState, writeReactionsState, type PendingIntent } from "./state.js";
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. A send targets the next turn, for the
-// turn that settled. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one. A follow-up targets the next turn, for
+// the turn that settled. Repeated requests add nothing.
 
 /** A command a hook asked for, before it's queued. */
 export type Command =
   | { readonly type: "cancel"; readonly reason?: string }
-  | { readonly type: "send"; readonly turnId: string; readonly delivery: DeliverHookPayload };
+  | { readonly type: "follow-up"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
 /**
- * Adds a hook's commands to the session's queue. Cancels between turns are dropped; a send for a
- * turn that already has one is ignored with a warning.
+ * Adds a hook's commands to the session's queue. Cancels between turns are dropped; a turn is
+ * followed up at most once, which `ctx.followUp()` already reported to the hook.
  */
 export function queueCommands(
   ctx: ContextContainer,
@@ -33,14 +34,8 @@ export function queueCommands(
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
-    if (command.type === "send") {
-      if (intents.some((queued) => queued.type === "send" && queued.turnId === command.turnId)) {
-        log.warn(
-          `Hook "${reaction.label}" called ctx.send() for a turn that already sends its next message; this one is ignored.`,
-          { turnId: command.turnId },
-        );
-        continue;
-      }
+    if (command.type === "follow-up") {
+      if (followsUp(intents, command.turnId)) continue;
       intents.push({ ...command, occurrence, reactionId: reaction.id });
       changed = true;
       continue;
