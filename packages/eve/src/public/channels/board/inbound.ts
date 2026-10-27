@@ -13,11 +13,15 @@ export function boardThreadId(message: Pick<BoardMessage, "id" | "re">): string 
 }
 
 /**
- * The session address for a board message's thread: the board's thread key, since message IDs
- * restart on another board or after a store reset and would reach another thread's session.
+ * The session address for one watcher's work on a board thread. It uses the board's thread key,
+ * since message IDs restart on another board or after a store reset and would reach another
+ * thread's session, and the watcher, so each task on a thread has a session of its own.
  */
-export function boardSessionAddress(message: Pick<BoardMessage, "thread">): string {
-  return `thread:${message.thread}`;
+export function boardSessionAddress(
+  watcher: string,
+  message: Pick<BoardMessage, "thread">,
+): string {
+  return `${watcher}:thread:${message.thread}`;
 }
 
 /**
@@ -27,7 +31,7 @@ export function boardSessionAddress(message: Pick<BoardMessage, "thread">): stri
  */
 export function defaultBoardAuth(
   message: BoardMessage,
-  board: { readonly url: string },
+  board: { readonly url: string; readonly watcher?: string },
 ): SessionAuthContext {
   const kind = message.author?.kind ?? "unknown";
   return {
@@ -39,6 +43,7 @@ export function defaultBoardAuth(
       principal: message.by.principal,
       ...(message.by.profile !== null && { profile: message.by.profile }),
       thread_id: boardThreadId(message),
+      ...(board.watcher !== undefined && { watcher: board.watcher }),
     },
     authenticator: "board-watcher",
     issuer: board.url,

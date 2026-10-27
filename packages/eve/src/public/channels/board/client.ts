@@ -205,7 +205,7 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
   const fetchImpl = options.api?.fetch ?? globalThis.fetch;
 
   async function headers(): Promise<Record<string, string>> {
-    const token = await resolveToken(base, options.credentials);
+    const token = await resolveBoardToken(base, options.credentials);
     return {
       authorization: `Bearer ${token}`,
       // On Vercel, Deployment Protection's Trusted Sources reads this header; the board reads the bearer.
@@ -228,6 +228,7 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
     return response;
   }
 
+  let me: Promise<{ principal: string; actor: string }> | undefined;
   const json = async <T>(method: "GET" | "POST", path: string, body?: unknown) =>
     (await (await send(method, path, body)).json()) as T;
 
@@ -239,7 +240,12 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
       if (!response.ok) throw await requestError("GET", "/", response);
       return (await response.json()) as BoardDiscovery;
     },
-    me: () => json("GET", "/me"),
+    // Who this token is doesn't change for the client's life, and dispatch and registration both ask.
+    me: () =>
+      (me ??= json<{ principal: string; actor: string }>("GET", "/me").catch((error) => {
+        me = undefined;
+        throw error;
+      })),
     async watchers() {
       return (await json<{ watchers: BoardRegistration[] }>("GET", "/watchers")).watchers;
     },
@@ -299,9 +305,13 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
   };
 }
 
-async function resolveToken(
+/**
+ * An OIDC token for the board at `audience`: `credentials.token`, then `BOARD_TOKEN`, then the
+ * deployment's Vercel OIDC token exchanged for the board's audience.
+ */
+export async function resolveBoardToken(
   audience: string,
-  credentials: BoardCredentials | undefined,
+  credentials?: BoardCredentials,
 ): Promise<string> {
   const explicit = credentials?.token;
   if (typeof explicit === "function") return await explicit();

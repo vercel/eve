@@ -9,9 +9,7 @@ import {
 
 const watcher = (tail: string): BoardWatcherConfig => ({
   previews: false,
-  profile: "eve",
-  tail,
-  when: "matches",
+  watchers: { eve: { tail, when: "matches" } },
 });
 
 // A production deployment on a board that wakes only URLs.

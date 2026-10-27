@@ -1,5 +1,10 @@
 import { setChannelStartHook } from "#channel/compiled-channel.js";
-import type { ChannelFrom } from "#channel/channel-operations.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import type {
+  ChannelFrom,
+  ChannelSendOptions,
+  ChannelSource,
+} from "#channel/channel-operations.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
@@ -8,6 +13,7 @@ import { surfaceEvents } from "#channel/surface.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { MessageContent } from "#shared/message-content.js";
 import {
   createBoardClient,
   type BoardApiOptions,
@@ -65,8 +71,10 @@ const POLL_WAIT_SECONDS = 25;
 export interface BoardChannelState extends PromptQueueState {
   readonly url: string | null;
   readonly channel: string | null;
-  /** The thread's root message ID: the session's address. */
+  /** The thread's root message ID, which replies name. */
   readonly threadId: string | null;
+  /** The watcher whose match started the session. */
+  readonly watcher?: string | null;
   /** The message the current turn answers, which gets the `eyes` reaction. */
   messageId: string | null;
   pendingSignIns?: Record<string, string>;
@@ -107,6 +115,8 @@ export interface BoardEventContext extends BoardChannelContext, ChannelContinuat
 export interface BoardMessageContext {
   /** The board's URL. */
   readonly url: string;
+  /** The watcher that matched the message. */
+  readonly watcher: string;
   /** The message's thread. */
   readonly board: BoardThreadHandle;
 }
@@ -121,16 +131,31 @@ export type BoardInboundResult = {
   readonly title?: string;
 } | null;
 
-/** Target accepted by `to(board, target)` for proactive sessions. */
-export type BoardReceiveTarget =
+/**
+ * Target accepted by `to(board, target)` for proactive sessions. `watcher` picks whose session
+ * the thread is, when the channel has several; it defaults to the only watcher, or the profile.
+ */
+export type BoardReceiveTarget = { readonly watcher?: string } &
   /** Continues an existing thread, by any message ID in it. */
-  | { readonly thread: string }
-  /** Starts a thread in `channel` with `text`, as the configured profile; the session owns it. */
-  | {
-      readonly channel: string;
-      readonly text: string;
-      readonly labels?: Readonly<Record<string, string>>;
-    };
+  (
+    | { readonly thread: string }
+    /** Starts a thread in `channel` with `text`, as the configured profile; the session owns it. */
+    | {
+        readonly channel: string;
+        readonly text: string;
+        readonly labels?: Readonly<Record<string, string>>;
+      }
+  );
+
+/** One watcher: what wakes the agent for one task, and what that task's turns start with. */
+export interface BoardWatcher {
+  /** What you'd type after `vb tail`, such as `"dev --label kind=bug"`. */
+  readonly tail: string;
+  /** `"enters"` wakes the agent only when a thread comes into view. Defaults to `"matches"`. */
+  readonly when?: "matches" | "enters";
+  /** Added before every turn this watcher starts, such as the task's instructions. */
+  readonly context?: readonly string[];
+}
 
 type BoardEventHandler<T extends SessionEvent["type"]> = (
   event: ChannelEventOf<T>,
@@ -159,16 +184,24 @@ export interface BoardChannelConfig {
   /** The board's full URL, as its discovery returns it. Defaults to `BOARD_URL`. */
   readonly url?: string;
   /**
-   * What wakes the agent: what you'd type after `vb tail`, such as `"dev --mentions @eve"`.
-   * Without it the channel registers nothing, and only proactive sessions use it.
+   * What wakes the agent: what you'd type after `vb tail`, such as `"dev --mentions @eve"`. It's
+   * one watcher named after the profile. Without it or `watchers` the channel registers nothing,
+   * and only proactive sessions use it.
    */
   readonly tail?: string;
   /** `"enters"` wakes the agent only when a thread comes into view. Defaults to `"matches"`. */
   readonly when?: "matches" | "enters";
   /**
+   * Several watchers, by name, instead of `tail`: one per task, up to 32. Each thread a watcher
+   * matches gets a session of that watcher's own, and the session's auth carries the watcher's
+   * name as the `watcher` attribute, for instructions and hooks to read. Names follow the same
+   * rule as `profile`.
+   */
+  readonly watchers?: Readonly<Record<string, BoardWatcher>>;
+  /**
    * The profile eve writes as, under its verified principal: a letter, then up to 31 letters,
-   * numbers, or hyphens. Also the watcher's name, so the agent's own writes never wake it.
-   * Defaults to `"eve"`.
+   * numbers, or hyphens. The agent's own posts as this profile never wake it. Defaults to
+   * `"eve"`.
    */
   readonly profile?: string;
   /** Also register from preview deployments. All previews share one registration. */
@@ -189,7 +222,7 @@ export interface BoardChannelConfig {
 /** The settings a mounted extension binds after its modules load, so the channel reads them late. */
 export type BoardChannelSettings = Pick<
   BoardChannelConfig,
-  "url" | "tail" | "when" | "profile" | "previews"
+  "url" | "tail" | "when" | "watchers" | "profile" | "previews"
 >;
 
 /** Concrete return type of {@link boardChannel}. */
@@ -197,9 +230,15 @@ export interface BoardChannel extends Channel<BoardChannelState, BoardReceiveTar
 
 export interface BoardSettings {
   readonly url: string;
-  readonly watcher: BoardWatcherConfig | undefined;
   readonly profile: string;
+  /** What eve registers, or `undefined` with no watchers. */
+  readonly watcher: BoardWatcherConfig | undefined;
+  /** Each watcher's turn context, by name. */
+  readonly contexts: Readonly<Record<string, readonly string[]>>;
 }
+
+/** The board allows at most 32 watchers per registration. */
+const MAX_WATCHERS = 32;
 
 /**
  * A channel for `@vercel/board`: the board wakes the agent when a post matches `tail`, each
@@ -254,7 +293,9 @@ export function createBoardChannel(
         const wake = drainMatches({
           client: client(),
           config,
+          contexts: resolved.contexts,
           from,
+          profile: resolved.profile,
           // A forged wake-up on an older deployment's own URL must not put its old tail back.
           overwrite: poll || reachedOnWakeHost(request),
           poll,
@@ -277,6 +318,7 @@ export function createBoardChannel(
     ],
 
     async receive({ message, target, ...send }, { from }) {
+      const resolved = settings();
       const board = client();
       let root: BoardMessage;
       if ("thread" in target && typeof target.thread === "string") {
@@ -293,9 +335,17 @@ export function createBoardChannel(
           "boardChannel().receive needs target.thread, or target.channel and target.text.",
         );
       }
-      return from(boardSessionAddress(root)).send(message, {
+      const watchers = Object.keys(resolved.watcher?.watchers ?? {});
+      const watcher = target.watcher ?? (watchers.length === 1 ? watchers[0]! : resolved.profile);
+      return sendRecovering(from(boardSessionAddress(watcher, root)), message, {
         ...send,
-        state: { channel: root.channel, messageId: root.id, threadId: root.id, url: board.url },
+        state: {
+          channel: root.channel,
+          messageId: root.id,
+          threadId: root.id,
+          url: board.url,
+          watcher,
+        },
       });
     },
 
@@ -346,14 +396,63 @@ export function resolveBoardSettings(config: BoardChannelSettings): BoardSetting
     );
   }
   const tail = config.tail?.trim();
+  if (tail && config.watchers !== undefined) {
+    throw new Error("Pass the board channel either `tail` or `watchers`, not both.");
+  }
+  const watchers: Record<string, BoardWatcher> = tail
+    ? { [profile]: { tail, when: config.when } }
+    : { ...config.watchers };
+  const names = Object.keys(watchers);
+  if (names.length > MAX_WATCHERS) {
+    throw new Error(
+      `A board registration holds at most ${MAX_WATCHERS} watchers; got ${names.length}.`,
+    );
+  }
+  for (const name of names) {
+    if (!BOARD_PROFILE_PATTERN.test(name)) {
+      throw new Error(
+        `Board watcher "${name}" is invalid: use a letter, then up to 31 letters, numbers, or hyphens.`,
+      );
+    }
+  }
   return {
+    contexts: Object.fromEntries(names.map((name) => [name, watchers[name]!.context ?? []])),
     profile,
     url,
     watcher:
-      tail === undefined || tail.length === 0
+      names.length === 0
         ? undefined
-        : { previews: config.previews === true, profile, tail, when: config.when ?? "matches" },
+        : {
+            previews: config.previews === true,
+            watchers: Object.fromEntries(
+              names.map((name) => [
+                name,
+                { tail: watchers[name]!.tail, when: watchers[name]!.when ?? "matches" },
+              ]),
+            ),
+          },
   };
+}
+
+/**
+ * Sends to a thread's session, replacing a session another eve version built: it can never run
+ * again, so the thread starts over in a fresh session instead of failing every delivery.
+ */
+async function sendRecovering(
+  source: ChannelSource<BoardChannelState>,
+  message: MessageContent,
+  options: ChannelSendOptions<BoardChannelState>,
+) {
+  try {
+    return await source.send(message, options);
+  } catch (error) {
+    if (!SessionStrandedError.is(error)) throw error;
+    log.warn("board thread's session was stranded by an eve upgrade; starting a new one", {
+      error,
+    });
+    await source.reset({ reason: "Stranded by an eve upgrade; the board thread starts over." });
+    return await source.send(message, options);
+  }
 }
 
 // Local pulls reconcile once per process; a hosted wake-up checks every time.
@@ -362,7 +461,9 @@ const reconciledLocally = new Set<string>();
 async function drainMatches(input: {
   readonly client: BoardClient;
   readonly config: BoardChannelConfig;
+  readonly contexts: Readonly<Record<string, readonly string[]>>;
   readonly from: ChannelFrom<BoardChannelState>;
+  readonly profile: string;
   readonly overwrite: boolean;
   readonly poll: boolean;
   readonly watcher: BoardWatcherConfig;
@@ -379,6 +480,9 @@ async function drainMatches(input: {
     }
   }
 
+  // The board skips a write only for the watcher named after the writer's profile, so with
+  // several watchers eve skips its own posts itself.
+  const self = (await client.me()).principal;
   let dispatched = 0;
   for (let pull = 0; pull < MAX_PULLS_PER_WAKE; pull += 1) {
     const matches = await client.matches({
@@ -386,7 +490,7 @@ async function drainMatches(input: {
       wait: poll ? POLL_WAIT_SECONDS : 0,
     });
     for (const match of matches) {
-      if (await handleMatch({ ...input, match })) dispatched += 1;
+      if (await handleMatch({ ...input, match, self })) dispatched += 1;
     }
     if (poll || matches.length === 0) break;
   }
@@ -396,29 +500,50 @@ async function drainMatches(input: {
 async function handleMatch(input: {
   readonly client: BoardClient;
   readonly config: BoardChannelConfig;
+  readonly contexts: Readonly<Record<string, readonly string[]>>;
   readonly from: ChannelFrom<BoardChannelState>;
   readonly match: BoardMatch;
+  readonly profile: string;
+  /** This deployment's principal on the board. */
+  readonly self: string;
 }): Promise<boolean> {
   const { client, match } = input;
   const message = match.event.message;
   try {
     let dispatched = false;
-    if (match.event.type === "message.posted" && message !== undefined && !message.deleted) {
+    if (
+      match.event.type === "message.posted" &&
+      message !== undefined &&
+      !message.deleted &&
+      !postedBySelf(message, input)
+    ) {
       const threadId = boardThreadId(message);
-      const board = { url: client.url };
+      const board = { url: client.url, watcher: match.watcher };
       const onMessage =
         input.config.onMessage ??
         ((posted: BoardMessage): BoardInboundResult => ({ auth: defaultBoardAuth(posted, board) }));
       const result = await onMessage(message, {
         board: threadHandle(client, threadId, { messageId: message.id }),
         url: client.url,
+        watcher: match.watcher,
       });
       if (result !== null) {
-        await input.from(boardSessionAddress(message)).send(boardMessageContent(message, board), {
+        const source = input.from(boardSessionAddress(match.watcher, message));
+        await sendRecovering(source, boardMessageContent(message, board), {
           auth: result.auth,
-          context: [formatBoardContext(message, board), ...(result.context ?? [])],
+          context: [
+            formatBoardContext(message, board),
+            ...(input.contexts[match.watcher] ?? []),
+            ...(result.context ?? []),
+          ],
           idempotencyKey: `board:${match.id}`,
-          state: { channel: message.channel, messageId: message.id, threadId, url: client.url },
+          state: {
+            channel: message.channel,
+            messageId: message.id,
+            threadId,
+            url: client.url,
+            watcher: match.watcher,
+          },
           title: result.title,
         });
         dispatched = true;
@@ -433,6 +558,18 @@ async function handleMatch(input: {
       .catch((ackError) => logError(log, "board ack failed", ackError, { match: match.id }));
     return false;
   }
+}
+
+/** The agent's own post, unless a schedule posted it: a reminder to itself should wake it. */
+function postedBySelf(
+  message: BoardMessage,
+  input: { readonly profile: string; readonly self: string },
+): boolean {
+  return (
+    message.by.principal === input.self &&
+    message.by.profile === input.profile &&
+    message.schedule === undefined
+  );
 }
 
 function threadHandle(

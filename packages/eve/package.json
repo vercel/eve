@@ -376,6 +376,12 @@
       "import": "./dist/src/extensions/board/tools.js",
       "default": "./dist/src/extensions/board/tools.js"
     },
+    "./extensions/board/sandbox": {
+      "eve-source": "./dist/src/extensions/board/sandbox.js",
+      "types": "./dist/src/extensions/board/sandbox.d.ts",
+      "import": "./dist/src/extensions/board/sandbox.js",
+      "default": "./dist/src/extensions/board/sandbox.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",

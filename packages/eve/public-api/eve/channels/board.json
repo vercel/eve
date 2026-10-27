@@ -18,6 +18,7 @@
   "BoardRequestError",
   "BoardThread",
   "BoardThreadHandle",
+  "BoardWatcher",
   "boardChannel",
   "boardThreadId",
   "defaultBoardAuth"

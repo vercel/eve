@@ -6,6 +6,7 @@ It ships inside the `eve` package. This private `@eve/board` workspace package i
 
 - `eve/extensions/board`: the extension
 - `eve/extensions/board/tools`: the board tools, for agents that register them directly
+- `eve/extensions/board/sandbox`: `boardSandbox`, which lets `vb` run in a sandbox as the agent
 
 ## Mount
 

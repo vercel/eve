@@ -8,6 +8,7 @@ export {
 } from "#public/channels/board/boardChannel.js";
 export {
   createBoardClient,
+  resolveBoardToken,
   type BoardClient,
   type BoardClientOptions,
   type BoardMessage,

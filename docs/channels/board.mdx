@@ -54,13 +54,51 @@ export default board({
 | ---------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `url`      | `BOARD_URL` | The board's full URL, as its discovery returns it. Tokens are minted for exactly this audience.                                                                                            |
 | `tail`     | none        | What wakes the agent: what you'd type after `vb tail`, such as a channel, a `prefix/` subtree, and filters like `--mentions`, `--label`, or `--from`. Without it, nothing wakes the agent. |
+| `watchers` | none        | Several named watchers instead of `tail`, one per task. See [Watch for several tasks](#watch-for-several-tasks).                                                                           |
 | `when`     | `"matches"` | `"enters"` wakes the agent only when a thread comes into view, such as when a label is set.                                                                                                |
-| `profile`  | `"eve"`     | The name the agent writes as, under its project's principal: a letter, then up to 31 letters, numbers, or hyphens. It also names the watcher, so the agent's own posts never wake it.      |
+| `profile`  | `"eve"`     | The name the agent writes as, under its project's principal: a letter, then up to 31 letters, numbers, or hyphens. The agent's own posts as this profile never wake it.                    |
 | `previews` | `false`     | Also register from preview deployments.                                                                                                                                                    |
 
 The mount prefixes its contributions with `board__`: the channel is `board__threads`, and the tools are `board__channels`, `board__read`, `board__post`, `board__reply`, `board__react`, and `board__label`.
 
 Every post the tail matches wakes the agent, including replies in threads it has already answered, so scope the tail to what's meant for the agent. A tail with `--mentions` wakes it only for posts that mention its handle, so replies to its questions must mention it too.
+
+## Watch for several tasks
+
+One agent can do different work on the same board, such as answering questions in one place and reviewing pull requests in another. Give each task a named watcher instead of `tail`. Names follow the same rule as `profile`, and a registration holds at most 32.
+
+```ts title="agent/extensions/board.ts"
+import board from "eve/extensions/board";
+
+export default board({
+  profile: "support",
+  watchers: {
+    questions: { tail: "dev --mentions @support" },
+    review: {
+      tail: "dev --label pr",
+      context: ["Review the pull request this thread is about, then post your verdict."],
+    },
+  },
+});
+```
+
+- **Each watcher has its own sessions.** When both watchers match a thread, the thread has one session per watcher, so each task keeps its own conversation.
+- **`context`** is added before every turn the watcher starts.
+- **The session's auth names the watcher** in its `watcher` attribute, so dynamic instructions and hooks can branch on the task:
+
+```ts title="agent/instructions/board-task.ts"
+import { defineDynamic } from "eve";
+import { defineInstructions } from "eve/instructions";
+
+export default defineDynamic((ctx) => {
+  const watcher = ctx.session.auth.current?.attributes.watcher;
+  if (watcher !== "review") return null;
+  return defineInstructions({
+    content:
+      "You review pull requests. Read the diff, run the tests, and keep the verdict to one line.",
+  });
+});
+```
 
 ## Use the channel or tools alone
 
@@ -94,7 +132,8 @@ eve registers the tail with the board as a watcher. When a post matches, the boa
 - **Each board thread is one session.** A reply in the thread continues the conversation, and a reply during a turn steers it, as on other channels.
 - **Delivery is at least once.** A match eve fails to hand off is retried by the board up to five times. A match delivered twice reaches the session once.
 - **The model sees** the post's text, its author's handle, where it was posted, and its attachments, which eve downloads from the board when it stages them.
-- **The agent's own posts never wake it,** because they're written under the watcher's profile.
+- **The agent's own posts never wake it.**
+- **A session left behind by an eve upgrade starts over.** When the thread's session was built by an eve version this deployment can't run, eve resets it and delivers the post to a fresh session, which has no earlier history.
 
 When the turn starts, the agent reacts with `eyes` to the post and shows typing, which Slack shows in place of "Typing…". The final answer is posted as replies in the thread, split at the board's 10,000-character limit, and a failed turn posts a short note with an error ID.
 
@@ -139,6 +178,50 @@ Run `vercel link` and `vercel env pull` so eve can mint tokens. Locally the boar
 
 The tools aren't limited to the channel's tail: they reach whatever the board's `access` rule grants your project. A retried tool call posts once. Everything posted can reach the platforms the board syncs, so add an approval through an override if writes need a gate.
 
+## Run `vb` in the sandbox
+
+A coding agent that works in a sandbox can use the board's own CLI, `vb`, there instead of the board tools. `boardSandbox` from `eve/extensions/board/sandbox` keeps the board token out of the sandbox: `env()` points `vb` at the board with a placeholder token, and `rules()` returns network-policy rules that replace it with a fresh token, the agent's profile, and the session on the way out. The rules cover only the board's API routes, never its webhooks. Header transforms need a provider that supports them, such as Vercel Sandbox.
+
+Install `vb` and set its environment when the sandbox opens:
+
+```ts title="agent/sandbox.ts"
+import { boardSandbox } from "eve/extensions/board/sandbox";
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  prepare: async (sandbox) => {
+    await sandbox.run({ command: "npm install -g @vercel/board" });
+  },
+});
+
+export default defineSandbox(() =>
+  environment.open({ networkPolicy: "deny-all", env: boardSandbox.env() }),
+);
+```
+
+Tokens expire, so install the rules at the start of each turn, merged with the sandbox's other rules:
+
+```ts title="agent/hooks/board-sandbox.ts"
+import { boardSandbox } from "eve/extensions/board/sandbox";
+import { defineHook } from "eve/hooks";
+
+import { environment } from "../sandbox";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      const sandbox = await ctx.getSandbox(environment);
+      await sandbox.setNetworkPolicy({
+        allow: { ...(await boardSandbox.rules({ session: ctx.session.id })) },
+      });
+    },
+  },
+});
+```
+
+Pass `scope`, such as `"dev/=read,post"`, to narrow what `vb` may do below what your project's `access` rule allows.
+
 ## Proactive sessions
 
 With the channel in `agent/channels/board.ts`, start a thread from a schedule or another channel, and the session owns it:
@@ -161,7 +244,7 @@ export default defineSchedule({
 });
 ```
 
-Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue an existing thread.
+Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue an existing thread. With several watchers, add `watcher` to choose whose session the thread is.
 
 ## Troubleshooting
 

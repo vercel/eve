@@ -17,11 +17,11 @@ export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
 /** The environment variables registration reads. */
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** What eve registers: one watcher, named by the profile eve writes as. */
+/** What eve registers: its named watchers, and whether previews register. */
 export interface BoardWatcherConfig {
-  readonly tail: string;
-  readonly when: "matches" | "enters";
-  readonly profile: string;
+  readonly watchers: Readonly<
+    Record<string, { readonly tail: string; readonly when: "matches" | "enters" }>
+  >;
   readonly previews: boolean;
 }
 
@@ -68,7 +68,9 @@ export function desiredRegistration(
   discovery: Pick<BoardDiscovery, "wake_by_path">,
   env: Env = process.env,
 ): BoardRegistrationInput | undefined {
-  const watch = { [watcher.profile]: { tail: watcher.tail, when: watcher.when } };
+  const watch = Object.fromEntries(
+    Object.entries(watcher.watchers).map(([name, { tail, when }]) => [name, { tail, when }]),
+  );
   const environment = hostedEnvironment(env);
   if (environment === undefined) return { url: null, watch };
   if (environment === "preview" && !watcher.previews) return undefined;

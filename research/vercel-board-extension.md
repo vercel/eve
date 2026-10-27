@@ -64,28 +64,41 @@ import board from "eve/extensions/board";
 export default board({ tail: "dev --mentions @support", profile: "support" });
 ```
 
-- `eve/extensions/board`: config `url` (default `BOARD_URL`), `tail`, `when`, `profile`
-  (default `"eve"`), and `previews`. Contributes `board__threads`, the tools `board__channels`,
+- `eve/extensions/board`: config `url` (default `BOARD_URL`), `tail` or `watchers`, `when`,
+  `profile` (default `"eve"`), and `previews`. Contributes `board__threads`, the tools `board__channels`,
   `board__read`, `board__post`, `board__reply`, `board__react`, and `board__label`, and the
   `board__collaborate` skill. Without `tail`, it's tools and skill only.
 - `eve/channels/board`: `boardChannel(config)` for the channel alone, with `onMessage`,
   `events`, `api`, `credentials`, `turnPolicy`, and `uploadPolicy`, plus `defaultBoardAuth`.
 - `eve/extensions/board/tools`: the six tools, bound to the mount's config, or to `BOARD_URL`
   and the `"eve"` profile without a mount.
+- `eve/extensions/board/sandbox`: `boardSandbox.env()` and `boardSandbox.rules()` let `vb` run in
+  a sandbox, with the board token, profile, and session added by the network policy on the
+  board's API routes only, never its webhooks.
 
 The profile defaults to `"eve"`, not the agent's name, because event handlers and tools don't
-know the agent's name, and the profile must match between registration and writes: it is the
-watcher's name, which is what keeps the agent's own posts from waking it.
+know the agent's name.
+
+**Several watchers.** `watchers` names one watcher per task, each with an optional `context`.
+The board skips a write only for the watcher named after the writer's profile, so the channel
+skips the agent's own posts itself (same principal and profile, unless a schedule posted them).
+Each watcher gets its own session per thread, and the session's auth carries the watcher's name
+as the `watcher` attribute for instructions and hooks. `tail` is shorthand for one watcher named
+after the profile.
 
 ## Semantics
 
-- **Session address.** The board's thread key (`message.thread`), not the root message ID.
+- **Session address.** `<watcher>:thread:<key>`, with the board's thread key, not the root
+  message ID.
   Message IDs are positions in one board's log, so they repeat across boards and after a store
   reset, and would reach another thread's session. The root ID is kept in channel state for
   replies.
 - **Dispatch.** `message.posted` events only, as the board-verified author
   (`principalId = by.actor`). Edits, reactions, and labels are acked without dispatch.
   Attachments are file parts the channel's `fetchFile` downloads from the board.
+- **Stranded sessions.** When the address's session was built by an eve version this deployment
+  can't run, the channel resets the address and sends again, so the thread starts over in a
+  fresh session instead of failing until the board gives up on the match.
 - **At least once.** eve acks after `send()` is accepted, with `board:<match id>` as the
   idempotency key, and acks with `error` when it fails, so the board retries up to five times.
 - **Delivery.** `eyes` and typing on `turn.started`, replies split at 10,000 characters, a
@@ -144,7 +157,5 @@ its platform, and the registration policy and tools are tested against the same 
 ## Non-goals (v1)
 
 - Hosting a board inside an eve app, or eve-side platform sync.
-- `vb` inside eve sandboxes. A later step can inject a board token and a narrowed
-  `x-board-scope` through the sandbox's network policy, as the POC does for Pi.
 - Edits, reactions, and label changes as turn input. Outbound attachments. Tools for `edit`,
   `delete`, `schedule`, `wait`, and uploads. An `eve add channel/board` registry entry.

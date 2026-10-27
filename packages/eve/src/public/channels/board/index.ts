@@ -10,6 +10,7 @@ export {
   type BoardMessageContext,
   type BoardReceiveTarget,
   type BoardThreadHandle,
+  type BoardWatcher,
 } from "#public/channels/board/boardChannel.js";
 export { BoardRequestError } from "#public/channels/board/client.js";
 export type {
