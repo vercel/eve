@@ -87,6 +87,7 @@ describe("catalogAnnouncements", () => {
       [
         `You have more tools, agents, and skills ${HEADER_GUIDANCE} Call tools with eve__tool({ name, input }) and load skills with eve__skill({ name }).`,
         `${NAMESPACES} d0, index, sre, support`,
+        "Some entries have no namespace; search with words describing the capability you need.",
         CONNECTIONS,
         "- linear: Linear issues and projects",
         "- petstore: Pet store inventory API",
@@ -138,6 +139,26 @@ describe("catalogAnnouncements", () => {
     ],
   ])("names only the kinds present: %s", (_case, state: CatalogState, header) => {
     expect(baseline(state)?.split("\n")[0]).toBe(header);
+  });
+
+  it("hints at unnamespaced deferred entries only", () => {
+    const hint =
+      "Some entries have no namespace; search with words describing the capability you need.";
+    expect(baseline({ tools: [deferred("export_ledger")] })).toContain(hint);
+    expect(baseline({ skills: [{ deferred: true, name: "pdf-forms" }] })).toContain(hint);
+    expect(baseline({ tools: [deferred("ops__export"), inlineTool("add")] })).not.toContain(hint);
+    expect(
+      appended(
+        { tools: [deferred("ops__export")] },
+        { tools: [deferred("ops__export"), deferred("export_ledger")] },
+      ),
+    ).toContain(hint);
+    expect(
+      appended(
+        { tools: [deferred("ops__export"), deferred("export_ledger")] },
+        { tools: [deferred("ops__export")] },
+      ),
+    ).not.toContain(hint);
   });
 
   it("lists the 20 largest namespaces by name, then 'and more', and a connection's namespace only as the connection", () => {

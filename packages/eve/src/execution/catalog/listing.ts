@@ -32,6 +32,7 @@ interface Capped<T> {
 interface CatalogListing {
   readonly connections: Capped<ListedConnection>;
   readonly kinds: readonly Kind[];
+  readonly hasUnnamespacedEntries: boolean;
   readonly namespaces: Capped<string>;
 }
 
@@ -78,6 +79,7 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
   return {
     connections: capped(connections, MAX_LISTED_CONNECTIONS),
     kinds,
+    hasUnnamespacedEntries: deferredNames(catalog).some((name) => namespaceOf(name) === ""),
     namespaces: { ...namespaces, items: [...namespaces.items].sort(compareCodeUnits) },
   };
 }
@@ -144,7 +146,12 @@ function renderCatalogAnnouncement(
   ].join("\n");
 }
 
-function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
+function renderListing({
+  connections,
+  kinds,
+  namespaces,
+  hasUnnamespacedEntries,
+}: CatalogListing): string {
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
   const call = !kinds.includes("skills")
@@ -159,6 +166,11 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];
     lines.push(
       `Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__": ${listed.join(", ")}`,
+    );
+  }
+  if (hasUnnamespacedEntries) {
+    lines.push(
+      "Some entries have no namespace; search with words describing the capability you need.",
     );
   }
   if (connections.items.length > 0) {
