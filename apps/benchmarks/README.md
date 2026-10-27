@@ -105,7 +105,7 @@ Without `--models`, publication covers the complete configured model matrix. Use
 publish or refresh selected model rows. The published suite currently includes weather-tool,
 new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
 schedule cases. The iMessage case remains available for local runs but is excluded from the
-published matrix, and so are the company-brain, ops-agent, and invoice-assistant cases. Each
+published matrix, and so are the company-brain, ops-agent, invoice-assistant, and extension cases. Each
 cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
 when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not

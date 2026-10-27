@@ -1,12 +1,16 @@
 import type { Sandbox } from "@vercel/agent-eval";
 
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
+import { crmLocalEnvSetup } from "./setups/crm-local-env.js";
+import { helpdeskExtensionSetup } from "./setups/helpdesk-extension.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
 import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
 import { tallyAppSetup } from "./setups/tally-app.js";
 import { vercelSetup } from "./setups/vercel.js";
 
 const sessionSetups: readonly AuthoringSetup[] = [
+  crmLocalEnvSetup,
+  helpdeskExtensionSetup,
   inventoryOpenApiSetup,
   northstarFulfillmentSetup,
   tallyAppSetup,
