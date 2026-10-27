@@ -15,6 +15,19 @@ npm run typecheck && npm run build
 
 `agent/instructions.md` is the system prompt and `agent/agent.ts` sets the model. Add files only for what you need. Install other packages you import, such as `@vercel/connect`, with `npm install`. See [Getting Started](./getting-started.mdx) and [Agent Files](./reference/agent-files.md).
 
+## Know what an agent can do by default
+
+Every agent, including each subagent, starts with eve's optional default tools: `bash`, `read_file`, and `write_file` in its own sandbox, `web_fetch`, `web_search` (for supported providers), and, on the root only, `agent`, which delegates to a copy of the root. Set `defaultTools: false` in `agent.ts` to remove them, then add back only what you need, such as `export { default } from "eve/tools/bash";` in `agent/tools/bash.ts`. The catalog tools `eve__search`, `eve__tool`, and `eve__skill` appear whenever the agent has connections or skills to reach. A subagent never inherits its parent's tools, connections, or skills. See [Built-in Tools](./concepts/built-in-tools.md).
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+  defaultTools: false,
+});
+```
+
 ## Call an HTTP API from a tool
 
 ```ts title="agent/tools/get_order.ts"
