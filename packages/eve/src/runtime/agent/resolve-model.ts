@@ -225,10 +225,11 @@ export async function resolveRuntimeModelSelection(input: {
   if (promptCache !== undefined && routesThroughGateway) {
     throw gatewayPromptCacheError(formattedId);
   }
-  let id = formattedId;
+  // A Gateway instance carries its Gateway model id, as a string selection does.
+  let id = routesThroughGateway ? selectedModel.modelId : formattedId;
   let contextWindowTokens = selection.modelContextWindowTokens;
   if (contextWindowTokens === undefined) {
-    const entry = await lookupModelMetadata(input.modelMetadata, formattedId, (metadata) =>
+    const entry = await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
       routesThroughGateway
         ? lookupCatalogModelBySlug(metadata, selectedModel.modelId)
         : lookupCatalogModelByProviderModelId(

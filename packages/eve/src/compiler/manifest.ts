@@ -60,7 +60,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 54;
+export const COMPILED_AGENT_MANIFEST_VERSION = 55;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.

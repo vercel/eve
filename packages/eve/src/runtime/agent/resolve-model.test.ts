@@ -182,6 +182,25 @@ describe("dynamic runtime model resolution", () => {
     expect(resolved.reference).toMatchObject({ contextWindowTokens: 256_000, id: input.id });
   });
 
+  it.each([undefined, 128_000])(
+    "names a gateway() model by its Gateway id (window %s)",
+    async (modelContextWindowTokens) => {
+      const resolved = await resolveRuntimeModelSelection({
+        durability: "live",
+        modelMetadata: metadataSource(),
+        selection: {
+          model: createLanguageModel("gateway", "openai/gpt-5.5"),
+          modelContextWindowTokens,
+        },
+      });
+
+      expect(resolved.reference).toMatchObject({
+        contextWindowTokens: modelContextWindowTokens ?? 256_000,
+        id: "openai/gpt-5.5",
+      });
+    },
+  );
+
   it("names a direct provider model by its Gateway slug, as the compiler does", async () => {
     const model = createLanguageModel("anthropic.messages", "claude-opus-5");
 
