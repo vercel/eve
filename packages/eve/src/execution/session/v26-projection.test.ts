@@ -96,6 +96,14 @@ describe("rebuildV26Projection", () => {
     });
   });
 
+  it("refuses a stale v26 checkpoint after a successor has already appended v27", async () => {
+    storeRecords([...KITCHEN_SINK, { progress: null }]);
+    await expect(rebuildV26Projection("session-1", { nextTurnSequence: 12 })).resolves.toEqual({
+      kind: "refused",
+      detail: "the stream contains a non-v26 record",
+    });
+  });
+
   it("refuses a stream whose session waits for an answer", async () => {
     storeRecords(PENDING_APPROVAL);
     await expect(rebuildV26Projection("session-1", { nextTurnSequence: 1 })).resolves.toEqual({

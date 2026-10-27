@@ -1,0 +1,84 @@
+import { writeFile } from "node:fs/promises";
+import { it, expect, vi } from "vitest";
+import { hydrateStepArguments } from "#compiled/@workflow/core/serialization.js";
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { captureTurnEvents } from "#internal/testing/events.js";
+import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { workflowEntry } from "#execution/session/entry.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
+
+it("captures the checkpoint emitted by the released owner after a real model turn", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "v26-capture" } });
+  await runtime.run(async () => {
+    const owner = await startSessionOwner(workflowEntry, [
+      {
+        kind: "initial",
+        sessionTimeoutMs: false,
+        ownerDeploymentId: "dpl_a",
+        input: { message: "Alice asks for the project milestone." },
+        serializedContext: buildSerializedContext({
+          acceptedDeploymentId: "dpl_a",
+          channelKind: "http",
+        }),
+      },
+    ]);
+    const stream = captureTurnEvents(owner);
+    try {
+      expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+      await waitForParkedTurnStep(owner.runId);
+      const readable = getRun(owner.runId).getReadable();
+      const tail = await readable.getTailIndex();
+      const reader = readable.getReader();
+      const chunks = [];
+      try {
+        for (let i = 0; i <= tail; i++) {
+          const next = await reader.read();
+          if (next.done) throw Error("short stream");
+          chunks.push(new TextDecoder().decode(next.value));
+        }
+      } finally {
+        await reader.cancel();
+        reader.releaseLock();
+      }
+      const records = chunks
+        .join("")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const workflowRuntime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      await workflowRuntime.dispatchSession({
+        command: handoffFollowUp("dpl_b", "Bob asks for an update.", "delivery-bob"),
+        sessionId: owner.runId,
+      });
+      const world = await getWorld();
+      let checkpoint: unknown;
+      await vi.waitFor(
+        async () => {
+          const steps = await world.steps.list({ runId: owner.runId, resolveData: "all" });
+          const step = steps.data.find((s) => s.stepName.endsWith("//startSuccessorStep"));
+          expect(step).toBeDefined();
+          const hydrated = (await hydrateStepArguments(step!.input, owner.runId, undefined)) as {
+            args: [{ checkpoint: unknown }];
+          };
+          checkpoint = hydrated.args[0].checkpoint;
+        },
+        { timeout: 10000 },
+      );
+      await writeFile(
+        process.env.V26_CAPTURE_OUTPUT!,
+        JSON.stringify({ version: process.env.V26_CAPTURE_VERSION, checkpoint, records }, null, 2) +
+          "\n",
+      );
+      expect((checkpoint as { version: number }).version).toBe(17);
+    } finally {
+      stream.dispose();
+      await owner.cancel().catch(() => {});
+    }
+  });
+});

@@ -30,7 +30,7 @@ function v26Checkpoint(
       "eve.auth": null,
       "eve.bundle": { source: { kind: "bundled" } },
       "eve.channel": {
-        kind: "discord",
+        kind: "channel:discord",
         state: { channelId: "dm-1", directMessage: true, guildId: null },
       },
       "eve.runtimeModelMetadataCache": { "openai/gpt": { contextWindowTokens: 1 } },
@@ -101,7 +101,7 @@ describe("migrateSessionCheckpoint from an eve 0.83 owner", () => {
         "eve.bundle": { source: { kind: "bundled" } },
         // A DM's sign-in privacy follows the channel type v27 reads.
         "eve.channel": {
-          kind: "discord",
+          kind: "channel:discord",
           state: { channelId: "dm-1", channelType: 1, guildId: null },
         },
         "eve.sessionTitle": "Alice asks for a summary.",
@@ -119,6 +119,86 @@ describe("migrateSessionCheckpoint from an eve 0.83 owner", () => {
       },
       version: SESSION_CHECKPOINT_VERSION,
     });
+  });
+
+  it.each([
+    [
+      "channel:slack",
+      { channelId: "C1", taskCards: { turn_0: { messageTs: "1.2" } } },
+      { channelId: "C1", taskCards: null },
+    ],
+    [
+      "channel:teams",
+      { conversationId: "thread", pendingAuthActivityId: null },
+      { conversationId: "thread" },
+    ],
+    [
+      "channel:telegram",
+      {
+        chatId: "chat",
+        nextHitlCallbackId: 7,
+        hitlCallbacks: { "eve_hitl:6": { requestId: "settled", optionId: "approve" } },
+      },
+      { chatId: "chat", nextHitlCallbackId: 7 },
+    ],
+    [
+      "channel:linq",
+      { thread: { id: "thread" }, streamStepIndex: null },
+      { thread: { id: "thread" } },
+    ],
+    [
+      "channel:photon",
+      { thread: { id: "thread" }, streamStepIndex: null },
+      { thread: { id: "thread" } },
+    ],
+    [
+      "channel:custom",
+      { routing: { thread: "thread", audience: "private" }, appState: 4 },
+      { routing: { thread: "thread", audience: "private" }, appState: 4 },
+    ],
+  ])("upgrades settled %s state without losing its routing", (kind, state, expected) => {
+    const result = migrateSessionCheckpoint(
+      v26Checkpoint({
+        context: {
+          "eve.channel": { kind, state },
+        },
+      }),
+    );
+    if (result.kind !== "current") throw new Error(result.detail);
+    expect(result.checkpoint.serializedContext["eve.channel"]).toEqual({ kind, state: expected });
+  });
+
+  it.each([
+    ["channel:discord", { hitlPrompts: { approval: { messageId: "message" } } }],
+    ["channel:discord", { pendingAuthMessageIds: { service: "message" } }],
+    ["channel:slack", { pendingApprovalCards: { approval: {} } }],
+    ["channel:slack", { pendingAuthMessageTs: { service: "1.2" } }],
+    ["channel:slack", { pendingTaskResults: { names: ["worker"], turnId: "turn_0" } }],
+    ["channel:teams", { pendingAuthActivityId: "activity" }],
+    ["channel:teams", { pendingPromptCards: { approval: {} } }],
+    ["channel:telegram", { hitlPrompts: { approval: {} } }],
+    ["channel:telegram", { pendingFreeformReplies: { message: "question" } }],
+    ["channel:telegram", { pendingAuthMessageIds: { service: "message" } }],
+    ["channel:linq", { pendingInputCards: { message: {} } }],
+    ["channel:photon", { pendingAuthMessageIds: { service: "message" } }],
+    ["channel:chat-sdk", { anchorMessageId: "message", streamStepIndex: 0 }],
+    ["channel:github", { shownPromptId: "question" }],
+    ["channel:linear", { shownPromptId: "question" }],
+    ["channel:twilio", { shownPromptId: "question" }],
+    ["channel:renamed-discord", { directMessage: true }],
+    ["channel:renamed-telegram", { hitlCallbacks: { callback: { requestId: "old" } } }],
+    ["channel:renamed-slack", { taskCards: { turn_0: {} } }],
+    ["channel:discord", { directMessage: true, channelType: 0 }],
+  ])("refuses ambiguous or pending %s channel state", (kind, state) => {
+    expect(
+      migrateSessionCheckpoint(
+        v26Checkpoint({
+          context: {
+            "eve.channel": { kind, state },
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "incompatible" });
   });
 
   it.each([

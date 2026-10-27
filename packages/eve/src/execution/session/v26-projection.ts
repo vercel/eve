@@ -16,7 +16,7 @@ import {
 import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { isV26Line } from "#protocol/v26-lines.js";
 
-/** A long but healthy history must finish reading; only a stalled read gives up. */
+/** Refuse before takeover if rebuilding the entire history exceeds the preparation budget. */
 const HISTORY_READ_TIMEOUT_MS = 30_000;
 
 export type V26ProjectionRebuild =
@@ -40,7 +40,7 @@ export async function rebuildV26Projection(
     signal,
   })) {
     if (position !== next) return refused("the stream skips a stored line");
-    if (position === 0 && !isV26Line(record)) return refused("the stream did not begin in v26");
+    if (!isV26Line(record)) return refused("the stream contains a non-v26 record");
     // A record that reads as no v27 commit still takes its stored position.
     const line = reader.read(record, position) ?? { progress: null };
     projection = foldOrphanedLines(projection, [{ line, position }]);

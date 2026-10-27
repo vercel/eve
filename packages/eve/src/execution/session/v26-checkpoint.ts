@@ -214,40 +214,72 @@ function upgradeContext(
   return upgraded;
 }
 
-/** Built-in channel state v27 renamed. Authored channels own their state's shape. */
+// These registries can outlive the harness request that created them. Check every channel,
+// including renamed wrappers, before deciding whether its remaining state needs conversion.
+const CHANNEL_PENDING_WORK = [
+  "shownPromptId",
+  "hitlPrompts",
+  "pendingFreeformReplies",
+  "pendingAuthMessageIds",
+  "pendingAuthMessageTs",
+  "pendingAuthActivityId",
+  "pendingAuthActivityIds",
+  "pendingSignIns",
+  "pendingApprovalCards",
+  "pendingInputCards",
+  "pendingPromptCards",
+  "pendingTaskResults",
+  "anchorMessageId",
+  "streamText",
+  "streamStepIndex",
+];
+
+/** Built-in channels at their conventional paths; custom state migrations remain app-owned. */
 function upgradeChannel(
   channel: CheckpointRecord,
   refuse: (detail: string) => never,
 ): CheckpointRecord {
+  if (typeof channel.kind !== "string") refuse("the channel kind is malformed");
   if (channel.kind === "subagent") refuse("a parent session drives the session");
-  if (!isObject(channel.state)) return channel;
-  const state: CheckpointRecord = { ...channel.state };
-  switch (channel.kind) {
+  const state = record(channel.state, refuse);
+  for (const key of CHANNEL_PENDING_WORK)
+    if (holds(state[key])) refuse(`the channel holds pending "${key}"`);
+  const kind = channel.kind.startsWith("channel:") ? channel.kind.slice(8) : channel.kind;
+  switch (kind) {
     case "discord": {
-      if (holds(state.pendingAuthMessageIds)) refuse("the Discord channel holds a sign-in prompt");
       const { directMessage, pendingAuthMessageIds: _ids, ...rest } = state;
-      // v26 kept whether the session is a DM; v27 reads the channel type, which decides privacy.
+      if (directMessage !== undefined && typeof directMessage !== "boolean")
+        refuse("the Discord direct-message flag is malformed");
+      if (directMessage === true && rest.channelType !== undefined && rest.channelType !== 1)
+        refuse("the Discord channel type conflicts with its direct-message flag");
       return {
         ...channel,
-        state:
-          directMessage === true && rest.channelType === undefined
-            ? { ...rest, channelType: 1 }
-            : rest,
+        state: directMessage === true ? { ...rest, channelType: 1 } : rest,
       };
     }
     case "slack":
-      if (holds(state.pendingAuthMessageTs) || holds(state.pendingApprovalCards))
-        refuse("the Slack channel holds an open prompt");
-      if (holds(state.pendingTaskResults)) refuse("the Slack channel holds pending task results");
-      // v26 cards name the turn they render; an idle session's cards all finished.
       return { ...channel, state: { ...state, taskCards: null } };
     case "teams": {
-      if (holds(state.pendingAuthActivityId) || holds(state.pendingPromptCards))
-        refuse("the Teams channel holds an open prompt");
       const { pendingAuthActivityId: _id, ...rest } = state;
       return { ...channel, state: rest };
     }
+    case "telegram": {
+      // Settled v26 callbacks contain InputResponse, not Answer. Retire them rather than allow
+      // an old platform button to address a new interaction; keep the monotonically growing id.
+      const { hitlCallbacks: _callbacks, ...rest } = state;
+      return { ...channel, state: rest };
+    }
+    case "chat-sdk":
+    case "linq":
+    case "photon": {
+      const { streamStepIndex: _index, ...rest } = state;
+      return { ...channel, state: rest };
+    }
     default:
+      // The path-derived kind cannot identify a renamed built-in. Never guess at an authored
+      // channel's schema: leave it on the source when a retired format needs conversion.
+      if (state.directMessage !== undefined || holds(state.hitlCallbacks) || holds(state.taskCards))
+        refuse("the channel holds legacy state without a known migration");
       return channel;
   }
 }
