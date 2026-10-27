@@ -54,7 +54,7 @@ export type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
-  ResetSessionResult,
+  EndSessionResult,
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";

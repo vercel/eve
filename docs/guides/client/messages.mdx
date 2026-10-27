@@ -54,7 +54,7 @@ or terminal session throws `SessionNotActiveError` immediately with `retryable: 
 [stranded](../../concepts/execution-model-and-durability#stranded-sessions) session throws
 `ClientSessionStrandedError`, a `ClientError` with `code: "session_stranded"` and the
 `eveVersion` that built the session when it recorded one. It is never retried automatically. Call
-`session.reset()` and create a new session.
+`session.end()` and create a new session.
 The client never creates a replacement session. Following or reconnecting to a stranded session's
 stream reports the same typed error without retrying, including when you were waiting for a
 response to a message accepted before the upgrade. That accepted message is not redelivered.

@@ -34,7 +34,10 @@ export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:ses
 /** Stable route pattern for clearing one exact session ID. */
 export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
 
-/** Stable route pattern for resetting one exact session ID. */
+/** Stable route pattern for ending one exact session ID. */
+export const EVE_SESSION_END_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/end`;
+
+/** Compatibility route for independently deployed parents that still call /reset. */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
 /** Stable route pattern for eval tool-stub verification. */
@@ -154,7 +157,12 @@ export function createEveSessionClearRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
 }
 
-/** Builds the ID-addressed reset route for one session. */
+/** Builds the ID-addressed end route for one session. */
+export function createEveSessionEndRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/end`;
+}
+
+/** Compatibility path used when ending a remote child on an older deployment. */
 export function createEveSessionResetRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
 }

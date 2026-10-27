@@ -278,7 +278,7 @@ async onAppMention(ctx) {
   await ctx.cancel();
   await ctx.compact();
   await ctx.clear();
-  await ctx.reset({ reason: "Start over" });
+  await ctx.end({ reason: "Start over" });
   const session = await ctx.resolveSession();
   return { auth: null };
 }
@@ -286,9 +286,11 @@ async onAppMention(ctx) {
 
 These calls are independent examples; a handler normally chooses one. `ctx.send()` is the only method that can create a session when the thread is unowned. It derives Slack auth from the inbound user unless `auth` is supplied explicitly. Use `await ctx.resolveSession()` only when later work must stay pinned to the currently owning durable session ID.
 
-#### Reset a conversation
+<a id="reset-a-conversation" />
 
-Use the thread-bound `ctx.reset({ reason? })` method when the conversation should start over instead. Reset terminally retires the session that currently owns the thread, including any in-flight turn. The next delivered message starts a new session with fresh history, state, and a new session-scoped sandbox:
+#### End a conversation
+
+Use the thread-bound `ctx.end({ reason? })` method to retire the conversation. End terminally retires the session that currently owns the thread, including any in-flight turn. The next delivered message starts a new session with fresh history, state, and a new session-scoped sandbox:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
@@ -296,14 +298,14 @@ export default slackChannel({
   async onMessage(ctx, message) {
     if (message.text.trim() !== "/new") return null;
 
-    await ctx.reset({ reason: "Slack user requested /new" });
+    await ctx.end({ reason: "Slack user requested /new" });
     await ctx.thread.post("Started a fresh conversation.");
     return null;
   },
 });
 ```
 
-Reset returns a `Delivery` for the retiring session; `await delivery.result()` waits for retirement and address release. An already unowned thread throws `SessionNotActiveError`. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same flat operations, which is useful for a New conversation button.
+End returns a `Delivery` for the retiring session; `await delivery.result()` waits for retirement and address release. An already unowned thread throws `SessionNotActiveError`. Returning `null` after end consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same flat operations, which is useful for a New conversation button.
 
 #### Serve Slack code channels
 
@@ -465,7 +467,7 @@ await ctx.respond(answers, { auth: null, target });
 await ctx.cancel({ target, turnId });
 await ctx.compact({ target });
 await ctx.clear({ target });
-await ctx.reset({ reason: "Start over", target });
+await ctx.end({ reason: "Start over", target });
 const session = await ctx.resolveSession({ target });
 ```
 
