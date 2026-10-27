@@ -8,12 +8,12 @@ This guide covers breaking changes to agent definitions, approvals, channels, cl
 ## Before you upgrade
 
 - Rebuild and republish installed extensions. Earlier epoch-based distributions cannot be loaded by this release; see [Extensions](../extensions).
-- Keep the deployments that own existing sessions available. This release requires checkpoint version 18 and cannot take over sessions with earlier checkpoint formats. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
+- Keep the deployments that own existing sessions available. A session started on eve 0.66 through 0.83 moves to this release the next time it receives a message while idle. Until then, the deployment that owns the session keeps running it. That deployment also keeps a session that still has work running, such as a background task or a subagent, and a session whose stream holds more than 100,000 lines. After a session moves, a tool approval it remembered is asked for again the next time the tool runs. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
 - Update event consumers, frontend persistence, and custom channel handlers using the mappings below. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
 ## Restore saved history
 
-New sessions use v27. Sessions started on an earlier deployment keep their stored stream format, but a current deployment can serve their recorded history as v27 events.
+New sessions use v27. Sessions started on an earlier deployment keep the lines they already stored in the earlier format. When such a session moves to this release, it appends v27 facts to the same stream, and a current deployment serves the whole stream as v27 events.
 
 Don't pass event arrays saved before the upgrade as `initialEvents`. When the session's stream is still available, read it again from position 0 and replace what you saved. Saved cursors still count the same stored lines.
 

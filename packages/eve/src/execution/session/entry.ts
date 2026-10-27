@@ -38,10 +38,13 @@ import {
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
 import {
+  isSessionStreamTailStep,
   prepareSuccessorStep,
   signalSessionOwnerActivationStep,
+  stopUntrackedChildSessionsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
+import { withSeededProjection } from "#execution/session/pre-v27-checkpoint.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -250,6 +253,11 @@ export async function bootInitialOwner(
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
   readonly serializedContext: Record<string, unknown>;
+  /** A session from an owner before v27: where its stream ended when folded, and what to stop. */
+  readonly preV27?: {
+    readonly childRunIdsToStop: readonly string[];
+    readonly streamPosition: number;
+  };
 }
 
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
@@ -284,11 +292,32 @@ async function prepareSuccessor(
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
-  const { checkpoint } = migration;
+  if (migration.kind === "current") {
+    const { checkpoint } = migration;
+    return {
+      checkpoint,
+      serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
+    };
+  }
+  const { projection } = validation;
+  if (projection === undefined) throw new Error("Session import is missing its folded projection.");
+  const checkpoint = withSeededProjection(migration.imported.checkpoint, projection);
   return {
     checkpoint,
+    preV27: {
+      childRunIdsToStop: migration.imported.childRunIdsToStop,
+      streamPosition: projection.view.position,
+    },
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
+}
+
+/** Throws when the previous owner wrote to the stream after this successor folded it. */
+async function confirmFoldedStream(sessionId: string, prepared: PreparedSuccessor): Promise<void> {
+  if (prepared.preV27 === undefined) return;
+  const position = prepared.preV27.streamPosition;
+  if (await isSessionStreamTailStep({ position, sessionId })) return;
+  throw new Error("The session's previous owner wrote to its stream after this successor read it.");
 }
 
 async function signalFailedActivation(
@@ -348,6 +377,7 @@ async function bootForcedHandoffOwner(
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHooks(hookTokens, { force: true, handover: attemptKey });
+    await confirmFoldedStream(sessionId, prepared);
   } catch (error) {
     const claimedHooks = inbox.claimedTokens.length > 0;
     await signalFailedActivation(input, error, { claimedHooks, payloads: [] });
@@ -404,6 +434,7 @@ async function bootReleasedHandoffOwner(
         sessionState: prepared.checkpoint.sessionState,
       }),
     );
+    await confirmFoldedStream(input.sessionId, prepared);
     await signalSessionOwnerActivationStep({
       activation: { kind: "active" },
       token: input.activationToken,
@@ -422,6 +453,10 @@ async function startSuccessor(
 ): Promise<BootOutcome> {
   const { sessionId } = input;
   const { checkpoint, serializedContext } = prepared;
+  const childRunIds = prepared.preV27?.childRunIdsToStop ?? [];
+  if (childRunIds.length > 0) {
+    await stopUntrackedChildSessionsStep({ runIds: childRunIds, sessionId });
+  }
   return {
     inbox,
     session: {

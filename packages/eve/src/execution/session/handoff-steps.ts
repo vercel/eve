@@ -1,4 +1,9 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  EntityConflictError,
+  HookNotFoundError,
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
@@ -15,8 +20,8 @@ import {
   type SessionCheckpoint,
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
-import { createLogger } from "#internal/logging.js";
-import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { createLogger, logError } from "#internal/logging.js";
+import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
   hasRunEnded,
   startWorkflowOnDeployment,
@@ -42,6 +47,11 @@ import {
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
+import { withSeededProjection } from "#execution/session/pre-v27-checkpoint.js";
+import { foldPreV27SessionStream } from "#execution/session/pre-v27-successor.js";
+import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
+import { walkCauseChain } from "#shared/errors.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
 
 const log = createLogger("execution.handoff");
 
@@ -120,7 +130,11 @@ export async function hasRunEndedStep(input: { readonly runId: string }): Promis
 }
 
 export type SessionCheckpointValidation =
-  | { readonly kind: "valid" }
+  | {
+      readonly kind: "valid";
+      /** For a checkpoint from an owner before v27: the projection folded from its stream. */
+      readonly projection?: SessionProjection;
+    }
   | { readonly kind: "incompatible"; readonly reason: "checkpoint-version" }
   /** The source no longer holds every address it handed over, so none may be taken. */
   | { readonly kind: "source-gone" };
@@ -151,7 +165,16 @@ export async function prepareSuccessorStep(input: {
     return { kind: "incompatible", reason: "checkpoint-version" };
   };
   if (migration.kind === "incompatible") return unreadable(migration.detail);
-  const { checkpoint } = migration;
+  let checkpoint: SessionCheckpoint;
+  let projection: SessionProjection | undefined;
+  if (migration.kind === "pre-v27") {
+    const folded = await foldPreV27SessionStream(input.sessionId, migration.imported.seed);
+    if (folded.kind === "refused") return unreadable(folded.detail);
+    projection = folded.projection;
+    checkpoint = withSeededProjection(migration.imported.checkpoint, projection);
+  } else {
+    checkpoint = migration.checkpoint;
+  }
   const timeout = checkpoint.sessionTimeoutMs;
   if (
     timeout !== false &&
@@ -204,7 +227,10 @@ export async function prepareSuccessorStep(input: {
       sessionId: input.sessionId,
     });
   }
-  return { kind: "valid" };
+  if (projection === undefined) return { kind: "valid" };
+  // This line shows when no owner before v27 remains, which is when that import can go.
+  log.info("session handoff accepted from an owner before v27", { sessionId: input.sessionId });
+  return { kind: "valid", projection };
 }
 
 /**
@@ -345,4 +371,47 @@ export async function signalSessionAnchorStep(input: {
 }): Promise<void> {
   "use step";
   await resumeHook(input.token, input.result);
+}
+
+/**
+ * Whether the stream still ends where the successor folded it. On its normal path an owner before
+ * v27 writes nothing once it starts a successor; only a failure it records could land after.
+ */
+export async function isSessionStreamTailStep(input: {
+  readonly position: number;
+  readonly sessionId: string;
+}): Promise<boolean> {
+  "use step";
+  return (await readSessionStreamTailIndex(input.sessionId)) + 1 === input.position;
+}
+
+/**
+ * Stops idle subagent sessions an eve 0.66–0.68 owner kept resumable, after this owner activates.
+ * Best effort: a child that cannot be stopped ends at its own timeout.
+ */
+export async function stopUntrackedChildSessionsStep(input: {
+  readonly runIds: readonly string[];
+  readonly sessionId: string;
+}): Promise<void> {
+  "use step";
+  const world = await getWorld();
+  for (const runId of input.runIds) {
+    if (runId === input.sessionId) continue;
+    try {
+      await cancelRun(world, runId, { cancelReason: "Session upgraded" });
+    } catch (error) {
+      const settled = [...walkCauseChain(error)].some(
+        (cause) =>
+          EntityConflictError.is(cause) ||
+          RunExpiredError.is(cause) ||
+          WorkflowRunNotFoundError.is(cause),
+      );
+      if (!settled) {
+        logError(log, "could not stop a subagent session after handoff", error, {
+          childRunId: runId,
+          sessionId: input.sessionId,
+        });
+      }
+    }
+  }
 }
