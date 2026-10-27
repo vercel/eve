@@ -19,7 +19,7 @@ import { createLogger } from "#internal/logging.js";
 import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
 import { authenticateJwtHmacStrategy } from "#channel/auth/jwt-hmac.js";
-import { authenticateOidcStrategy } from "#channel/auth/oidc.js";
+import { authenticateOidcStrategy, prepareOidcIssuer } from "#channel/auth/oidc.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import {
   createRuntimeSessionAuthContext,
@@ -537,6 +537,8 @@ export type AuthFn<TEvent = Request> = (
   event: TEvent,
 ) => AuthResult | null | undefined | Promise<AuthResult | null | undefined>;
 
+const authPreparations = new WeakMap<AuthFn<Request>, (request: Request) => Promise<void>>();
+
 /**
  * OAuth protected-resource metadata attached to an inbound auth policy.
  * `issuer` is shorthand for a single authorization server.
@@ -722,6 +724,11 @@ export async function routeAuth(
     : [auth as AuthFn<Request>];
 
   try {
+    // Only metadata preparation overlaps. Identity selection and guards still run in order.
+    for (const fn of list) {
+      const prepare = authPreparations.get(fn);
+      if (prepare !== undefined) void prepare(request).catch(() => {});
+    }
     for (const fn of list) {
       const result = await fn(request);
       if (result) return result;
@@ -1152,7 +1159,7 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
     ...verification,
     subjects: subjects?.map((entry) => (typeof entry === "string" ? entry : entry.subject)),
   };
-  return withAuthChallenges(
+  const auth = withAuthChallenges<Request>(
     async (request) => {
       const token = extractBearerToken(request.headers.get("authorization"));
       const currentVercelProject =
@@ -1180,6 +1187,16 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
     },
     [{ scheme: "Bearer" }],
   );
+  authPreparations.set(auth, async (request) => {
+    if (extractBearerToken(request.headers.get("authorization")) === null) return;
+    // The runtime supplies this token; request claims never choose a speculative fetch URL.
+    const runtimeToken = process.env.VERCEL_OIDC_TOKEN;
+    const claims = runtimeToken === undefined ? null : decodeUnverifiedJwtClaims(runtimeToken);
+    if (claims !== null && isVercelOidcIssuer(claims.issuer)) {
+      await prepareOidcIssuer(claims.issuer);
+    }
+  });
+  return auth;
 }
 
 function isLocalDevelopmentVercelOidc(): boolean {

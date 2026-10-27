@@ -352,6 +352,8 @@ export default eveChannel({
 
 `onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
+When an idle session is already on the current deployment, a successful prewarm response may carry an opaque `inbox` handle internally. The client retains it for the next send and includes it in saved session state, avoiding another inbox lookup. An `accepted` prewarm still means preparation was requested; it does not mean a handoff has finished.
+
 ### Turn context
 
 `context` strings become user messages in durable session history. For context that applies to one turn only, return `clientContext` instead. It replaces the request's [`clientContext`](../guides/client/messages) for that turn: it reaches every model call in the turn and is not kept in session history.

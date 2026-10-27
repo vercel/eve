@@ -10,6 +10,60 @@ afterEach(() => {
 });
 
 describe("Client.sessions", () => {
+  it("preserves an inbox handle through creation and a finite snapshot", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ sessionId: "session_1", inbox: "created_handle" }))
+      .mockResolvedValueOnce(
+        new Response("", {
+          headers: {
+            [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+            "x-eve-stream-tail-index": "-1",
+          },
+        }),
+      );
+    const client = new Client({ host: "https://eve.test" });
+    const { session } = await client.sessions.create();
+    const snapshot = await session.snapshot();
+    const restored = client.sessions.attach(snapshot.session.sessionId, snapshot.session);
+
+    expect(restored.state.inbox).toBe("created_handle");
+  });
+
+  it("uses the ready prewarm handle on the next send without another client lookup", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", inbox: "prepared_handle" }))
+      .mockResolvedValueOnce(Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }));
+    const session = new Client({ host: "https://eve.test" }).sessions.attach("session_1");
+
+    await session.prewarm();
+    await session.send("Continue the conversation.");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).inbox).toBe("prepared_handle");
+  });
+
+  it("does not replace a newer send handle when an earlier prewarm finishes late", async () => {
+    let finishPrewarm: ((response: Response) => void) | undefined;
+    const prewarmed = new Promise<Response>((resolve) => {
+      finishPrewarm = resolve;
+    });
+    vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => prewarmed)
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1", inbox: "new_handle" }),
+      );
+    const session = new Client({ host: "https://eve.test" }).sessions.attach("session_1");
+
+    const preparing = session.prewarm();
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    await session.send("Send while preparation is running.");
+    finishPrewarm!(Response.json({ ok: true, status: "ready", inbox: "old_handle" }));
+    await preparing;
+
+    expect(session.state.inbox).toBe("new_handle");
+  });
+
   it("carries the refreshed inbox handle across sends and restored session state", async () => {
     const hints: Array<string | null> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {

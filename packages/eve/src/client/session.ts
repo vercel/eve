@@ -63,6 +63,7 @@ export interface ClientSessionContext {
 export class ClientSession {
   readonly #context: ClientSessionContext;
   #state: ClientSessionState;
+  #inboxRevision = 0;
 
   /** @internal */
   constructor(context: ClientSessionContext, state: ClientSessionState) {
@@ -78,8 +79,11 @@ export class ClientSession {
     const startedAt = Date.now();
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input.stubs);
     const acceptedAt = Date.now();
-    const { sessionId, deliveryId } = await readAcceptedMessage(response);
-    const session = new ClientSession(context, { sessionId, streamIndex: 0 });
+    const { sessionId, deliveryId, inbox } = await readAcceptedMessage(response);
+    const session = new ClientSession(
+      context,
+      inbox === undefined ? { sessionId, streamIndex: 0 } : { sessionId, streamIndex: 0, inbox },
+    );
     const receipt = { deliveryId, startedAt, notReadyMs: 0, acceptedAt };
 
     return {
@@ -94,8 +98,11 @@ export class ClientSession {
     options: CreateSessionOptions = {},
   ): Promise<ClientSession> {
     const response = await postCreateSession(context, options);
-    const { sessionId } = await readAcceptedMessage(response);
-    return new ClientSession(context, { sessionId, streamIndex: 0 });
+    const { sessionId, inbox } = await readAcceptedMessage(response);
+    return new ClientSession(
+      context,
+      inbox === undefined ? { sessionId, streamIndex: 0 } : { sessionId, streamIndex: 0, inbox },
+    );
   }
 
   /** Current fixed session identity and durable stream cursor. */
@@ -119,7 +126,14 @@ export class ClientSession {
     throwIfAborted(options?.signal);
     return {
       events,
-      session: { sessionId: this.#state.sessionId, streamIndex: events.length },
+      session:
+        this.#state.inbox === undefined
+          ? { sessionId: this.#state.sessionId, streamIndex: events.length }
+          : {
+              sessionId: this.#state.sessionId,
+              streamIndex: events.length,
+              inbox: this.#state.inbox,
+            },
     };
   }
 
@@ -164,6 +178,7 @@ export class ClientSession {
       throw new Error("Message route returned a different session id.");
     }
     this.#state = { ...this.#state, inbox };
+    this.#inboxRevision += 1;
     if (input.message !== undefined && deliveryId === undefined) {
       throw new Error(
         "Message route did not return a delivery id. Update the server before sending with this client.",
@@ -184,11 +199,21 @@ export class ClientSession {
   async prewarm(options?: {
     readonly signal?: AbortSignal;
   }): Promise<import("#protocol/prewarm-session.js").PrewarmSessionResult> {
-    return await prewarmClientSession({
+    const inboxRevision = this.#inboxRevision;
+    const result = await prewarmClientSession({
       context: this.#context,
       sessionId: this.#state.sessionId,
       signal: options?.signal,
     });
+    if (
+      this.#inboxRevision === inboxRevision &&
+      result.status === "ready" &&
+      result.inbox !== undefined
+    ) {
+      this.#state = { ...this.#state, inbox: result.inbox };
+      this.#inboxRevision += 1;
+    }
+    return result;
   }
 
   /** Requests cooperative cancellation of this session's active turn. */

@@ -30,7 +30,7 @@ export async function prewarmClientSession(input: {
   readonly context: SessionControlContext;
   readonly sessionId: string;
   readonly signal?: AbortSignal;
-}): Promise<PrewarmSessionResult> {
+}): Promise<PrewarmSessionResult & { readonly inbox?: string }> {
   const { payload } = await postJson({
     context: input.context,
     operation: "Prewarm",
@@ -39,7 +39,9 @@ export async function prewarmClientSession(input: {
   });
   const result = PrewarmResponseSchema.safeParse(payload);
   if (!result.success) throw new Error("Prewarm route returned an invalid response.");
-  return { status: result.data.status };
+  return result.data.inbox === undefined
+    ? { status: result.data.status }
+    : { status: result.data.status, inbox: result.data.inbox };
 }
 
 export async function cancelClientSession(input: {

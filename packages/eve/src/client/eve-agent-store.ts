@@ -161,7 +161,16 @@ export class EveAgentStore<TData> {
     const promise = (async () => {
       try {
         if (session !== undefined) {
+          const inbox = session.state.inbox;
           await session.prewarm({ signal: controller.signal });
+          if (
+            generation === this.#prewarmGeneration &&
+            session === this.#session &&
+            inbox !== session.state.inbox
+          ) {
+            this.#callbacks.onSessionChange?.(session.state);
+            this.#publish();
+          }
           return;
         }
         const created = await client!.sessions.create({ signal: controller.signal });

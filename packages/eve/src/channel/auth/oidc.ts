@@ -23,6 +23,25 @@ const oidcDiscoveryDocumentCache = new Map<
   Promise<z.output<typeof oidcDiscoveryDocumentSchema>>
 >();
 const oidcJwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const oidcPreparationCache = new Map<string, Promise<void>>();
+
+/** Prepares a server-configured issuer without authenticating or selecting a caller. */
+export function prepareOidcIssuer(issuer: string): Promise<void> {
+  const discoveryUrl = `${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
+  let pending = oidcPreparationCache.get(discoveryUrl);
+  if (pending === undefined) {
+    pending = getOidcRemoteJwks({ discoveryUrl })
+      .then(async (jwks) => {
+        if (jwks.jwks() === undefined) await jwks.reload();
+      })
+      .catch((error: unknown) => {
+        oidcPreparationCache.delete(discoveryUrl);
+        throw error;
+      });
+    oidcPreparationCache.set(discoveryUrl, pending);
+  }
+  return pending;
+}
 
 /**
  * Verifies one bearer token against a resolved OIDC strategy.
@@ -156,7 +175,7 @@ export async function authenticateOidcStrategy(input: {
 }
 
 async function getOidcRemoteJwks(
-  strategy: ResolvedOidcAuthStrategy,
+  strategy: Pick<ResolvedOidcAuthStrategy, "discoveryUrl">,
 ): Promise<ReturnType<typeof createRemoteJWKSet>> {
   const discoveryDocument = await getOidcDiscoveryDocument(strategy.discoveryUrl);
   const existing = oidcJwksCache.get(discoveryDocument.jwks_uri);

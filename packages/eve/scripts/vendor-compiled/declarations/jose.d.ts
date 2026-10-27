@@ -29,7 +29,10 @@ export type GetKeyFunction = (
   token?: unknown,
 ) => KeyLike | Promise<KeyLike>;
 
-export declare function createRemoteJWKSet(url: URL): GetKeyFunction;
+export declare function createRemoteJWKSet(url: URL): GetKeyFunction & {
+  jwks(): { keys: Record<string, unknown>[] } | undefined;
+  reload(): Promise<void>;
+};
 export declare function decodeJwt(jwt: string): JWTPayload;
 export declare function importJWK(jwk: unknown, alg?: string): Promise<KeyLike>;
 export declare function importSPKI(spki: string, alg: string): Promise<KeyLike>;

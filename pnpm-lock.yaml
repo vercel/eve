@@ -254,9 +254,6 @@ catalogs:
       version: 4.5.4
 
 overrides:
-  '@workflow/core': file:packages/eve/vendor/workflow-core-5.2.3-resolved-v2.tgz
-  '@workflow/world': file:packages/eve/vendor/workflow-world-5.0.5.tgz
-  '@workflow/world-vercel': file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz
   '@vercel/cli-config>zod': 4.5.4
   '@vercel/connect>eve': workspace:*
 
@@ -1869,8 +1866,8 @@ importers:
         specifier: 1.28.8
         version: 1.28.8
       '@workflow/core':
-        specifier: file:vendor/workflow-core-5.2.3-resolved-v2.tgz
-        version: file:packages/eve/vendor/workflow-core-5.2.3-resolved-v2.tgz(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+        specifier: 5.2.3
+        version: 5.2.3(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/errors':
         specifier: 5.0.5
         version: 5.0.5
@@ -1878,14 +1875,14 @@ importers:
         specifier: 5.0.0
         version: 5.0.0
       '@workflow/world':
-        specifier: file:vendor/workflow-world-5.0.5.tgz
-        version: file:packages/eve/vendor/workflow-world-5.0.5.tgz
+        specifier: 5.0.5
+        version: 5.0.5
       '@workflow/world-local':
         specifier: 5.1.2
         version: 5.1.2(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel':
-        specifier: file:vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz
-        version: file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
+        specifier: 5.2.3
+        version: 5.2.3(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       ai:
         specifier: 'catalog:'
         version: 7.0.137(zod@4.5.4)
@@ -8150,8 +8147,8 @@ packages:
   '@webgpu/types@0.1.72':
     resolution: {integrity: sha512-0cF7RFM2edNoiIS1ODJp0/Gzv4/xSXhwoR0YCza+OWpJWtn4wmo9DvK91aLlH9+uUnwIriP7ZiC3WitmyhuzBw==}
 
-  '@workflow/core@file:packages/eve/vendor/workflow-core-5.2.3-resolved-v2.tgz':
-    resolution: {integrity: sha512-VVVmdGEFITraHH2JSaTUNWxBN5T2n+48SA3a345RLYlGcHuqWAiWrKozRgsrDSIilcGBQHSGSqG8z0CiFpBYBA==, tarball: file:packages/eve/vendor/workflow-core-5.2.3-resolved-v2.tgz}
+  '@workflow/core@5.2.3':
+    resolution: {integrity: sha512-mhV8UhqmSZl4Z3K1FYA4R4WUiS+uVrqDKwJ+3fYCFzJNKb2jnvVf3FAXxvr+yI0BDYmCzDcueucDLe+uw09/2w==}
     version: 5.2.3
     peerDependencies:
       '@opentelemetry/api': '1'
@@ -8186,8 +8183,8 @@ packages:
     resolution: {integrity: sha512-Q7X8iORVOf+AjBHZzOPzSACtq316cY+ld3zXwAyXeOuSb7/AR2D4GCyjziAULeV7WcYymXqteUOdGzWmuDwADA==}
     hasBin: true
 
-  '@workflow/world-vercel@file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz':
-    resolution: {integrity: sha512-IgOHLqfdCdug5tkOMMXBPYyKlvr12QaxWF5UsL/y5mqrs8IUPnubC6ySGZHB6MBECsftzYyR9qCwjH3MBLGN2A==, tarball: file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz}
+  '@workflow/world-vercel@5.2.3':
+    resolution: {integrity: sha512-cutA7lAIahDAEvyDaysbx43T4nX192hjrN9RcG5KRZ9zjJAcxz88UJy9eemKam/HHJrJLKRbGpFRSUJV//BJ6g==}
     version: 5.2.3
     peerDependencies:
       '@opentelemetry/api': '1'
@@ -8195,8 +8192,8 @@ packages:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world@file:packages/eve/vendor/workflow-world-5.0.5.tgz':
-    resolution: {integrity: sha512-DcTDtqNn5S4feVnAWYZHJGOqyfKu9baaU6e9PfDKZaUEfFH3TbsNF16PIle52uX8ThKjsocTPUClPpMmohn50Q==, tarball: file:packages/eve/vendor/workflow-world-5.0.5.tgz}
+  '@workflow/world@5.0.5':
+    resolution: {integrity: sha512-/Kg87kfZheyLrGjUo0HYXIs0yHSI/8VMWUeoBjfFfecmOgX9XufnsWisYiGiqX6mRzrl+6exorgw043BnLWnXQ==}
     version: 5.0.5
 
   '@zernio/chat-sdk-adapter@0.5.0':
@@ -22141,7 +22138,7 @@ snapshots:
 
   '@webgpu/types@0.1.72': {}
 
-  '@workflow/core@file:packages/eve/vendor/workflow-core-5.2.3-resolved-v2.tgz(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
+  '@workflow/core@5.2.3(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       '@jridgewell/trace-mapping': 0.3.31
@@ -22151,9 +22148,9 @@ snapshots:
       '@workflow/errors': 5.0.5
       '@workflow/serde': 5.0.0
       '@workflow/utils': 5.0.2
-      '@workflow/world': file:packages/eve/vendor/workflow-world-5.0.5.tgz
+      '@workflow/world': 5.0.5
       '@workflow/world-local': 5.1.2(@opentelemetry/api@1.9.1)
-      '@workflow/world-vercel': file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
+      '@workflow/world-vercel': 5.2.3(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       acorn: 8.15.0
       debug: 4.4.3(supports-color@10.2.2)
       devalue: 6.0.3
@@ -22174,7 +22171,7 @@ snapshots:
   '@workflow/errors@5.0.5':
     dependencies:
       '@workflow/utils': 5.0.2
-      '@workflow/world': file:packages/eve/vendor/workflow-world-5.0.5.tgz
+      '@workflow/world': 5.0.5
       ms: 2.1.3
 
   '@workflow/serde@4.1.0': {}
@@ -22192,7 +22189,7 @@ snapshots:
       '@vercel/queue': 0.8.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.5
       '@workflow/utils': 5.0.2
-      '@workflow/world': file:packages/eve/vendor/workflow-world-5.0.5.tgz
+      '@workflow/world': 5.0.5
       async-sema: 3.1.1
       proper-lockfile: 4.1.2
       ulid: 3.0.2
@@ -22206,7 +22203,7 @@ snapshots:
       '@vercel/queue': 0.8.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.5
       '@workflow/utils': 5.0.2
-      '@workflow/world': file:packages/eve/vendor/workflow-world-5.0.5.tgz
+      '@workflow/world': 5.0.5
       '@workflow/world-local': 5.1.2(@opentelemetry/api@1.9.1)
       cbor-x: 1.6.0
       dotenv: 17.3.1
@@ -22248,14 +22245,14 @@ snapshots:
       - supports-color
       - typescript
 
-  '@workflow/world-vercel@file:packages/eve/vendor/workflow-world-vercel-5.2.3-resolved-v2.tgz(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)':
+  '@workflow/world-vercel@5.2.3(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)':
     dependencies:
       '@vercel/functions': 3.9.8(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
       '@vercel/oidc': 3.2.0
       '@vercel/queue': 0.10.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.5
       '@workflow/utils': 5.0.2
-      '@workflow/world': file:packages/eve/vendor/workflow-world-5.0.5.tgz
+      '@workflow/world': 5.0.5
       cbor-x: 1.6.0
       ulid: 3.0.2
       undici: 7.30.0
@@ -22268,7 +22265,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@workflow/world@file:packages/eve/vendor/workflow-world-5.0.5.tgz':
+  '@workflow/world@5.0.5':
     dependencies:
       ulid: 3.0.2
       zod: 4.5.4

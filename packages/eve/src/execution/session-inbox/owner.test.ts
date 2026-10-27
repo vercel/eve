@@ -1,12 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HookSchema } from "@workflow/world";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { issueInboxHandle, readInboxHandle } from "#execution/session-inbox/handle.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 
-const runtime = vi.hoisted(() => ({ resumeHook: vi.fn(), getWorld: vi.fn() }));
+const runtime = vi.hoisted(() => ({
+  resumeHook: vi.fn(),
+  getWorld: vi.fn(),
+  parseHookResumeHandle: vi.fn(),
+  supportsHandles: true,
+}));
 vi.mock("#internal/workflow/runtime.js", async (importActual) => ({
   ...(await importActual<typeof import("#internal/workflow/runtime.js")>()),
   ...runtime,
+  get parseHookResumeHandle() {
+    return runtime.supportsHandles ? runtime.parseHookResumeHandle : undefined;
+  },
 }));
 
 const hook = {
@@ -25,17 +34,61 @@ const hook = {
 };
 const payload = { kind: "message", message: "How do preview deployments work?" };
 
-beforeEach(() =>
-  vi.stubEnv("EVE_INBOX_HANDLE_SECRET", "test-inbox-key-with-at-least-32-characters"),
-);
+beforeEach(() => {
+  vi.stubEnv("EVE_INBOX_HANDLE_SECRET", "test-inbox-key-with-at-least-32-characters");
+  runtime.supportsHandles = true;
+  runtime.parseHookResumeHandle.mockImplementation((value: unknown) =>
+    HookSchema.omit({ metadata: true, resumeCapabilities: true }).parse(value),
+  );
+});
 afterEach(() => {
   vi.resetAllMocks();
   vi.unstubAllEnvs();
 });
 
 describe("reusing a session inbox handle", () => {
-  it("uses the resolved inbox and refreshes it only after a definite stale-owner refusal", async () => {
+  it("does not expose user metadata, cached capabilities, or server trace baggage", () => {
+    const handle = issueInboxHandle({
+      ...hook,
+      metadata: { private: "server metadata" },
+      resumeCapabilities: { hookResumeDedupVersion: 1 },
+      resumeContext: {
+        ...hook.resumeContext,
+        traceCarrier: { traceparent: "parent", baggage: "private=value" },
+      },
+    })!;
+    const descriptor = JSON.parse(Buffer.from(handle.split(".")[1]!, "base64url").toString());
+    expect(descriptor.metadata).toBeUndefined();
+    expect(descriptor.resumeCapabilities).toBeUndefined();
+    expect(descriptor.resumeContext.traceCarrier).toBeUndefined();
+    expect(readInboxHandle(handle)).toEqual(hook);
+  });
+
+  it("does not reuse a handle through an adapter without the guarded write contract", async () => {
+    const handle = issueInboxHandle(hook)!;
     runtime.getWorld.mockResolvedValue({ capabilities: { deploymentAffinity: true } });
+    runtime.resumeHook.mockResolvedValue(hook);
+    await resumeRunnableHook(hook.token, payload, handle);
+    expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith(hook.token, payload);
+  });
+
+  it("uses ordinary token resolution when the SDK lacks guarded handle support", async () => {
+    const handle = issueInboxHandle(hook)!;
+    runtime.supportsHandles = false;
+    expect(issueInboxHandle(hook)).toBeUndefined();
+    expect(readInboxHandle(handle)).toBeUndefined();
+    runtime.getWorld.mockResolvedValue({
+      capabilities: { deploymentAffinity: true, resolvedHookResume: true },
+    });
+    runtime.resumeHook.mockResolvedValue(hook);
+    await resumeRunnableHook(hook.token, payload, handle);
+    expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith(hook.token, payload);
+  });
+
+  it("uses the resolved inbox and refreshes it only after a definite stale-owner refusal", async () => {
+    runtime.getWorld.mockResolvedValue({
+      capabilities: { deploymentAffinity: true, resolvedHookResume: true },
+    });
     runtime.resumeHook
       .mockRejectedValueOnce(new HookNotFoundError(hook.token))
       .mockResolvedValueOnce({ ...hook, runId: "wrun_successor", hookId: "hook_successor" });
@@ -45,7 +98,9 @@ describe("reusing a session inbox handle", () => {
   });
 
   it("does not redeliver when the resolved write has an uncertain outcome", async () => {
-    runtime.getWorld.mockResolvedValue({ capabilities: { deploymentAffinity: true } });
+    runtime.getWorld.mockResolvedValue({
+      capabilities: { deploymentAffinity: true, resolvedHookResume: true },
+    });
     const timeout = new Error("The write response timed out");
     runtime.resumeHook.mockRejectedValue(timeout);
     await expect(resumeRunnableHook(hook.token, payload, issueInboxHandle(hook))).rejects.toBe(
@@ -62,7 +117,9 @@ describe("reusing a session inbox handle", () => {
     descriptor.resumeContext.encryptionPublicKey = "attacker-key";
     const tampered = `${version}.${Buffer.from(JSON.stringify(descriptor)).toString("base64url")}.${mac}`;
     expect(readInboxHandle(tampered)).toBeUndefined();
-    runtime.getWorld.mockResolvedValue({ capabilities: { deploymentAffinity: true } });
+    runtime.getWorld.mockResolvedValue({
+      capabilities: { deploymentAffinity: true, resolvedHookResume: true },
+    });
     runtime.resumeHook.mockResolvedValue(hook);
     await resumeRunnableHook(hook.token, payload, tampered);
     expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith(hook.token, payload);
@@ -75,7 +132,9 @@ describe("reusing a session inbox handle", () => {
   it.each(["malformed", JSON.stringify(hook)])(
     "resolves the token normally for an unsigned hint: %s",
     async (hint) => {
-      runtime.getWorld.mockResolvedValue({ capabilities: { deploymentAffinity: true } });
+      runtime.getWorld.mockResolvedValue({
+        capabilities: { deploymentAffinity: true, resolvedHookResume: true },
+      });
       runtime.resumeHook.mockResolvedValue(hook);
       await resumeRunnableHook(hook.token, payload, hint);
       expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith(hook.token, payload);

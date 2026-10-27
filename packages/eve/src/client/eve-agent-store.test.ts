@@ -669,6 +669,22 @@ describe("EveAgentStore agent-session following", () => {
 });
 
 describe("EveAgentStore prewarming", () => {
+  it("publishes the prepared inbox in saved session state", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, status: "ready", inbox: "prepared_handle" }),
+    );
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+      followIdle: false,
+    });
+    const changed = vi.fn();
+    store.setCallbacks({ onSessionChange: changed });
+    await store.prewarm();
+    expect(store.snapshot.session?.inbox).toBe("prepared_handle");
+    expect(changed).toHaveBeenLastCalledWith(store.snapshot.session);
+  });
+
   it("deduplicates existing-session preparation and sends while it is pending or fails", async () => {
     const preparation = Promise.withResolvers<Response>();
     const stream = controlledStreamResponse();

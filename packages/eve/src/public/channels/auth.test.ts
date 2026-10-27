@@ -41,6 +41,53 @@ import {
 
 const TEST_ROUTE_URL = `https://example.com${EVE_SESSION_ROUTE_PATH}`;
 
+describe("OIDC preparation during route authentication", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("prepares the runtime issuer while an earlier ownership guard is pending, without bypassing it", async () => {
+    const issuer = await installMockedVercelIssuer("overlapping-auth");
+    const token = await issuer.signToken({});
+    vi.stubEnv("VERCEL_OIDC_TOKEN", token);
+    let releaseGuard: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      releaseGuard = resolve;
+    });
+    const guard: AuthFn = async () => {
+      await waiting;
+      throw new ForbiddenError({ message: "Another user owns this session." });
+    };
+    const request = new Request(TEST_ROUTE_URL, { headers: { authorization: `Bearer ${token}` } });
+
+    const result = routeAuth(request, [guard, vercelOidc()]);
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    releaseGuard!();
+    const response = await result;
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(403);
+    await routeAuth(request, [none(), vercelOidc()]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not use a request token's issuer for speculative metadata requests", async () => {
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const payload = Buffer.from(JSON.stringify({ iss: "https://attacker.example" })).toString(
+      "base64url",
+    );
+    const request = new Request(TEST_ROUTE_URL, {
+      headers: { authorization: `Bearer header.${payload}.signature` },
+    });
+
+    await routeAuth(request, [none(), vercelOidc()]);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("verifyHttpBasic", () => {
   it("returns ok with the authenticated principal when credentials match", () => {
     const result = verifyHttpBasic(

@@ -6,6 +6,7 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { issueInboxHandle } from "#execution/session-inbox/handle.js";
 import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 
 /** Internal hint, scoped to the owner inspected by ingress to avoid stale transfers. */
@@ -18,7 +19,7 @@ export interface SessionPrewarmPayload {
 export async function prewarmWorkflowSession(
   sessionId: string,
   targetDeploymentId: string | undefined,
-): Promise<PrewarmSessionResult> {
+): Promise<PrewarmSessionResult & { readonly inbox?: string }> {
   if (
     targetDeploymentId === undefined ||
     targetDeploymentId.length === 0 ||
@@ -38,7 +39,10 @@ export async function prewarmWorkflowSession(
   const owner = await world.runs.get(hook.runId, { resolveData: "none" });
   if (owner.status !== "running" && owner.status !== "pending")
     return { status: "no_active_session" };
-  if (owner.deploymentId === targetDeploymentId) return { status: "ready" };
+  if (owner.deploymentId === targetDeploymentId) {
+    const inbox = issueInboxHandle(hook);
+    return inbox === undefined ? { status: "ready" } : { status: "ready", inbox };
+  }
   // Never wake an older owner with an inbox payload it cannot decode.
   if (owner.attributes[EVE_PREWARM_ATTRIBUTE] !== "1") return { status: "unsupported" };
   await resumeSessionInbox(
