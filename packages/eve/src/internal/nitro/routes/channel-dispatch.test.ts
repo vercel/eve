@@ -407,7 +407,7 @@ describe("dispatchChannelRequest", () => {
   });
 
   // https://github.com/vercel/eve/issues/5408
-  it.fails("tags ctx.to() sends with the Vercel deployment that accepted them", async () => {
+  it("tags ctx.to() sends with the Vercel deployment that accepted them", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const runtimeForTest = createRuntime({
       dispatchContinuation: vi.fn().mockResolvedValue({
