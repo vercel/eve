@@ -298,7 +298,7 @@ Only `turn.settled` and `*` handlers receive `ctx.followUp`; on any other key it
 | `context`        | none                                                                                     |
 | `idempotencyKey` | `ctx.occurrence.idempotencyKey`                                                          |
 
-The model reads the message as the next user message, after a context note that the hook sent it and no person wrote it. Its `delivery.admitted` records `source: { channel, hook: "until-green" }` and no principal unless you pass `auth`, so UIs can tell it from a person's message. It passes through the channel's `deliver` hook like any other message.
+The model reads the message and its `context` exactly as the hook passed them. Its `delivery.admitted` records `source: { channel, hook: "until-green" }` and no principal unless you pass `auth`, so UIs can tell it from a person's message. From that source, eve places a note ahead of the message in each prompt saying the hook sent it and no person wrote it; the note never joins history. It passes through the channel's `deliver` hook like any other message.
 
 `ctx.followUp()` returns synchronously what eve did with the request:
 
@@ -309,7 +309,7 @@ The model reads the message as the next user message, after a context note that 
 | `{ queued: false, reason: "already-queued" }` | this or another hook already followed up this turn       |
 | `{ queued: false, reason: "not-settled" }`    | a `*` handler ran for an event other than `turn.settled` |
 
-A queued follow-up can still be dropped, because it yields. When any other turn starts first, such as one from a person's message, or a `session.cancel()` or reset arrives, eve drops it. That other turn settles too, so a hook that follows up every `turn.settled` sees it and decides again with the person's input in view. A control that starts no turn, such as a compaction, leaves the follow-up waiting. It always queues; it never steers a running turn.
+A queued follow-up can still be dropped, because it yields. When any other turn starts first, such as one from a person's message, or a `session.cancel()`, clear, or reset arrives, eve drops it. If the session expires first, it ends with the follow-up unsent. That other turn settles too, so a hook that follows up every `turn.settled` sees it and decides again with the person's input in view. A compaction leaves the follow-up waiting. It always queues; it never steers a running turn.
 
 Unlike `session.send()`, `ctx.followUp()` returns no `Delivery`: the delivery doesn't exist until the session admits it, after the handler returns. Like `ctx.cancel()`, it throws after the handler has settled and counts only if the handler returns.
 

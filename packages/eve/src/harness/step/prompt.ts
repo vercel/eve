@@ -3,6 +3,7 @@ import {
   anchorToTurn,
   createFrameworkUserMessage,
   followsToolResults,
+  followUpHookOf,
   type HarnessModelMessage,
   normalizeModelMessages,
   validateHarnessModelMessages,
@@ -117,21 +118,36 @@ function withTurnInput(
   ];
 }
 
-/** `messages`, the prompt's by default, with the client's context at its position. */
+/**
+ * `messages`, the prompt's by default, as the model reads them: with the client's context at its
+ * position, and a note ahead of each hook follow-up. Neither joins history.
+ */
 export function withClientContext(
   prompt: Prompt,
   messages: readonly HarnessModelMessage[] = prompt.messages,
 ): HarnessModelMessage[] {
   const { clientContext } = prompt;
-  if (clientContext === undefined || clientContext.messages.length === 0) return [...messages];
+  if (clientContext === undefined || clientContext.messages.length === 0) {
+    return withFollowUpNotes(messages);
+  }
   const insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
-  return [
+  return withFollowUpNotes([
     ...messages.slice(0, insertionIndex),
     ...clientContext.messages.map((content) =>
       createFrameworkUserMessage("context.instruction", content),
     ),
     ...messages.slice(insertionIndex),
-  ];
+  ]);
+}
+
+/** Tells the model which messages a hook sent, from the follow-up's delivery source. */
+function withFollowUpNotes(messages: readonly HarnessModelMessage[]): HarnessModelMessage[] {
+  return messages.flatMap((message) => {
+    const hook = followUpHookOf(message);
+    if (hook === undefined) return [message];
+    const note = `The next message is a follow-up the "${hook}" hook sent after the last turn. No person wrote it.`;
+    return [createFrameworkUserMessage("context.instruction", note), message];
+  });
 }
 
 /** The prompt as the model reads it: with the client's context. */

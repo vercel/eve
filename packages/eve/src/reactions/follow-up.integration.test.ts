@@ -24,6 +24,7 @@ const ALICE = {
   principalId: "alice",
   principalType: "user" as const,
 };
+const BOB = { ...ALICE, principalId: "bob" };
 
 function lastUserText(prompt: LanguageModelV4Prompt): string {
   for (const message of [...prompt].reverse()) {
@@ -130,6 +131,8 @@ describe("hook ctx.followUp()", () => {
               results.push(
                 ctx.followUp(`Keep going (${settled}).`, {
                   context: ["The report needs a summary."],
+                  // The second follow-up acts for Bob; the first names no sender.
+                  ...(settled === 2 && { auth: BOB }),
                 }),
                 // A second follow-up to the same turn adds nothing, and says so.
                 ctx.followUp("Ignored."),
@@ -148,18 +151,20 @@ describe("hook ctx.followUp()", () => {
       { queued: true },
       { queued: false, reason: "already-queued" },
     ]);
-    // The source keeps the channel, and the follow-up names no sender.
+    // The source keeps the channel; a follow-up names no sender unless it passes `auth`.
     expect(log.filter((entry) => /^(admitted|principal):/u.test(entry))).toEqual([
       'admitted:{"channel":"http"}',
       "principal:alice",
       'admitted:{"channel":"http","hook":"until-done"}',
       "principal:none",
       'admitted:{"channel":"http","hook":"until-done"}',
-      "principal:none",
+      "principal:bob",
     ]);
-    // The model reads that no person wrote it, beside the hook's own context.
-    expect(prompts[1]).toContain('The \\"until-done\\" hook sent this follow-up');
+    // The model reads which messages the hook sent, ahead of each one, on every later call.
+    const note = 'a follow-up the \\"until-done\\" hook sent after the last turn';
+    expect(prompts[1]).toContain(note);
     expect(prompts[1]).toContain("The report needs a summary.");
+    expect(prompts[2]?.split(note)).toHaveLength(3);
   }, 90_000);
 
   it("reports why a * handler's follow-up wasn't queued, and offers none to other events", async () => {
@@ -227,5 +232,38 @@ describe("hook ctx.followUp()", () => {
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Bob asks for the appendix."]);
+  }, 90_000);
+
+  it("drops a follow-up when the history is cleared before it's admitted", async () => {
+    let release!: () => void;
+    const firstCall = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { inputs, log } = await runSession({
+      drive: async ({ inbox, log }) => {
+        await until(log, 'admitted:{"channel":"http"}', 1);
+        // Alice clears the conversation while the first turn still runs; the clear waits for it.
+        await resumeHook(inbox, { deliveryId: "clear-1", kind: "clear" });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        release();
+        await until(log, "turn:completed", 1);
+        await until(log, 'admitted:{"control":"clear"}', 1);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      },
+      firstCall,
+      hooks: {
+        "until-done": defineHook({
+          events: {
+            "turn.settled": (_event, ctx) => {
+              expect(ctx.followUp("Keep going.")).toEqual({ queued: true });
+            },
+          },
+        }),
+      },
+      name: "hook-follow-up-cleared",
+    });
+
+    expect(inputs).toEqual(["Alice asks for the report."]);
+    expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(1);
   }, 90_000);
 });

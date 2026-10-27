@@ -401,24 +401,32 @@ function actOnCancels(
 }
 
 /**
- * A hook's follow-up yields: once another turn starts, or a cancel or reset arrives, the session
- * no longer follows up the turn it was queued for, and it's dropped.
+ * A hook's follow-up yields: once another turn starts, a cancel or reset arrives, or the history
+ * is cleared, the session no longer follows up the turn it was queued for, and it's dropped.
+ * A compaction keeps it: the conversation it follows up is still there, summarized.
  */
 function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
   if (!(readReactionsState(ctx).intents ?? []).some((intent) => intent.type === "follow-up")) {
     return;
   }
   const latestTurnId = latestTurnIdOf(currentProjection(ctx));
-  const stopped = written.some(
-    ({ event }) =>
-      event.type === "delivery.admitted" &&
-      event.data.source !== undefined &&
-      "control" in event.data.source &&
-      (event.data.source.control === "cancel" || event.data.source.control === "reset"),
-  );
+  const stopped = written.some(({ event }) => stopsFollowUps(event));
   takeIntents(
     ctx,
     (intent) => intent.type === "follow-up" && (stopped || intent.turnId !== latestTurnId),
+  );
+}
+
+function stopsFollowUps(event: WrittenEvent["event"]): boolean {
+  if (event.type === "context.settled") {
+    return event.data.kind === "clear" && event.data.outcome === "completed";
+  }
+  if (event.type !== "delivery.admitted") return false;
+  const { source } = event.data;
+  return (
+    source !== undefined &&
+    "control" in source &&
+    (source.control === "cancel" || source.control === "reset")
   );
 }
 

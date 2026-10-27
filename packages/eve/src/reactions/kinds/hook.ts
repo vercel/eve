@@ -188,7 +188,8 @@ function agentOf(ctx: ContextContainer): HookContext["agent"] {
 /**
  * A hook's message as a delivery into its own session. It queues behind the running turn and
  * keeps the channel of the turn that settled, so the channel's `deliver` hook reads it like any
- * other message. A note ahead of it tells the model no person wrote it.
+ * other message. Its source names the hook, from which the prompt tells the model no person wrote
+ * it; the message and context stay as the hook passed them.
  */
 function hookDelivery(
   ctx: ContextContainer,
@@ -203,7 +204,6 @@ function hookDelivery(
     channel?.channelKind ??
     ctx.get(ChannelInstrumentationKey)?.kind ??
     getAdapterKind(ctx.require(ChannelKey));
-  const note = `The "${input.slug}" hook sent this follow-up after the last turn. No person wrote it.`;
   return {
     ...(input.auth !== undefined && { auth: input.auth }),
     deliveryMetadata: [
@@ -219,7 +219,7 @@ function hookDelivery(
     kind: "deliver",
     payloads: [
       {
-        context: [note, ...(input.context ?? [])],
+        ...(input.context !== undefined && { context: input.context }),
         message: serializeFilePartsInMessage(input.message),
       },
     ],

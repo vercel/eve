@@ -658,4 +658,86 @@ describe("runReactions", () => {
       expect.stringMatching(/:hook:audit:2\.0:turn\.started$/),
     ]);
   });
+
+  describe("follow-ups", () => {
+    const settledFacts = [
+      {
+        data: { cause: { deliveryId: "d_1" }, follows: null, turnId: "turn-1" },
+        type: "turn.started",
+      },
+      { data: { outcome: "completed", turnId: "turn-1" }, type: "turn.settled" },
+    ];
+
+    // A session whose turn-1 settled, and a hook that followed it up.
+    async function followedUp() {
+      const ctx = session(noTools, [
+        {
+          events: {
+            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
+              ctx.followUp("Keep going."),
+          },
+          slug: "until-done",
+        },
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts: settledFacts },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
+      // The delivery carries what the hook passed, and no sender; the prompt adds the note.
+      expect(readReactionsState(ctx).intents).toMatchObject([
+        { delivery: { payloads: [{ message: "Keep going." }] }, turnId: "turn-1" },
+      ]);
+      const [intent] = readReactionsState(ctx).intents ?? [];
+      expect(intent?.type === "follow-up" && intent.delivery).toMatchObject({
+        deliveryMetadata: [{ channelKind: "http", hook: "until-done" }],
+        turnPolicy: "queue",
+      });
+      expect(intent?.type === "follow-up" && intent.delivery).not.toHaveProperty("auth");
+      expect(intent?.type === "follow-up" && intent.delivery.payloads[0]).toEqual({
+        message: "Keep going.",
+      });
+      return ctx;
+    }
+
+    const control = (control: string) =>
+      written(2, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
+
+    it.each(["cancel", "reset"])("drops a follow-up when a %s arrives", async (kind) => {
+      const ctx = await followedUp();
+      await commit(ctx, { written: control(kind) });
+      expect(readReactionsState(ctx).intents).toEqual([]);
+    });
+
+    it("drops a follow-up when the history is cleared", async () => {
+      const ctx = await followedUp();
+      await commit(ctx, {
+        written: written(2, "context.settled", {
+          changeId: "c_1",
+          kind: "clear",
+          outcome: "completed",
+          selects: null,
+        }),
+      });
+      expect(readReactionsState(ctx).intents).toEqual([]);
+    });
+
+    it("keeps a follow-up through a compaction", async () => {
+      const ctx = await followedUp();
+      await commit(ctx, { written: control("compact") });
+      await commit(ctx, {
+        written: written(3, "context.settled", {
+          changeId: "c_1",
+          kind: "compaction",
+          outcome: "completed",
+          selects: null,
+        }),
+      });
+      expect(readReactionsState(ctx).intents).toMatchObject([{ type: "follow-up" }]);
+    });
+  });
 });

@@ -85,6 +85,21 @@ export function createFrameworkUserMessage(
   return createUserMessage(kind, content, metadata);
 }
 
+/** The metadata key naming the hook whose `ctx.followUp()` brought a message into history. */
+const FOLLOW_UP_HOOK_KEY = "eve.followUpHook";
+
+/** Marks a message a hook's follow-up delivered, from the delivery's `source.hook`. */
+export function markFollowUp<T extends UserModelMessage>(message: T, hook: string): T {
+  return { ...message, metadata: { ...message.metadata, [FOLLOW_UP_HOOK_KEY]: hook } };
+}
+
+/** The hook that sent a message, when a follow-up brought it. */
+export function followUpHookOf(message: HarnessModelMessage): string | undefined {
+  if (message.role !== "user") return undefined;
+  const hook = message.metadata?.[FOLLOW_UP_HOOK_KEY];
+  return typeof hook === "string" ? hook : undefined;
+}
+
 /** The metadata key that marks the messages a turn's input brought into history. */
 const TURN_ANCHOR_KEY = "eve.turn";
 
