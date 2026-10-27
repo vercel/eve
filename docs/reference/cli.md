@@ -51,14 +51,14 @@ Existing packages do not need a target-selection prompt: run `eve init` from the
 
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                    | Type   | Default                                              | Description                                                                                                              |
-| ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--agents <names>`      | string | unset                                                | Create a workspace with comma-separated agent names, such as `support,research`.                                         |
-| `-y, --yes`             | flag   | off                                                  | Accepted for compatibility; warns and has no effect.                                                                     |
-| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
-| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
+| Flag                    | Type   | Default                                              | Description                                                                                                                                                                   |
+| ----------------------- | ------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                                                                     |
+| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored.                                                      |
+| `--agents <names>`      | string | unset                                                | Create a new workspace with comma-separated agent names, such as `support,research`, or add members to an existing workspace. Cannot be combined with `--channel-web-nextjs`. |
+| `-y, --yes`             | flag   | off                                                  | Accepted for compatibility; warns and has no effect.                                                                                                                          |
+| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                                                                          |
+| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                                                                               |
 
 ## `eve extension`
 
