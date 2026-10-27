@@ -63,6 +63,10 @@ trusted-forwarder verifier.
 
 ## Tapbacks
 
+`IMESSAGE_TAPBACKS` from `eve/channels/photon` lists the built-in tapback names.
+Use it to populate a picker or validate a named reaction. Tapback APIs can also
+accept a single emoji; the list does not enumerate those.
+
 eve ignores tapbacks people send unless you pass `onTapback`. It receives the
 tapback and returns the same result as `onMessage`, or `null` to ignore it:
 

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  defineInstrumentation,
-  disableInstrumentation,
-  isInstrumentationDisabled,
-} from "#public/instrumentation/index.js";
+import { defineInstrumentation, disableInstrumentation } from "#public/instrumentation/index.js";
 
 describe("defineInstrumentation", () => {
   it("brands a provider-shaped declaration", () => {
@@ -105,4 +101,4 @@ describe("disableInstrumentation", () => {
   });
 });
 
-import { isInstrumentationProvider } from "#instrumentation/provider.js";
+import { isInstrumentationDisabled, isInstrumentationProvider } from "#instrumentation/provider.js";

@@ -536,6 +536,21 @@ slackContinuationToken({ channelId: "C0123ABC", threadTs: "1800000000.001234" })
 twilioContinuationToken({ from: "+15551234567", to: "+15557654321" }); // "+15551234567:+15557654321"
 ```
 
+Built-in channels export token builders from their own `eve/channels/<platform>` entry:
+
+| Builder                     | Address fields                                                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `slackContinuationToken`    | `channelId`, `threadTs`                                                                                                 |
+| `twilioContinuationToken`   | `from`, `to`                                                                                                            |
+| `githubContinuationToken`   | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
+| `discordContinuationToken`  | `channelId`, optional `conversationId`                                                                                  |
+| `teamsContinuationToken`    | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
+| `telegramContinuationToken` | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
+| `linearContinuationToken`   | `agentSessionId`                                                                                                        |
+
+Pass the resulting channel-local token to that channel's `from(...)` helper.
+Tokens are routing addresses, not credentials or substitutes for authorization.
+
 Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
 When another identity should address a session, add it with `channel.continuation?.alias(rawToken)`. The runtime preserves the current channel namespace and exposes the new token as `channel.continuation.token` for later handlers.

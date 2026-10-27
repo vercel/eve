@@ -158,6 +158,27 @@ export default git({
 
 `code({ github })` is rejected. Move the `github` option to `git({ github })`, and import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`.
 
+## Override bundled tools
+
+`apply_patch` from `eve/extensions/code/tools` is the reusable patch tool
+definition. Import it in an extension override to change approval or other tool
+options without copying its implementation:
+
+```ts title="agent/extensions/code/tools/apply_patch.ts"
+import { apply_patch } from "eve/extensions/code/tools";
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+
+export default defineTool({ ...apply_patch, approval: always() });
+```
+
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports
+`executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`.
+The execution helper enforces repository and command constraints and brokers a
+credential lease; dependencies supply the session ID and sandbox access. Reuse
+`githubShellApproval` to reject invalid command inputs through the approval
+policy rather than bypassing those constraints.
+
 ## Prepare the sandbox
 
 Install the CLI tooling in your sandbox environment's `prepare` callback:
