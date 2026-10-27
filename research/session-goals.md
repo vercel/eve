@@ -34,13 +34,15 @@ Today a hook acts on the session in exactly one way: `ctx.cancel(reason?)`. The 
 A goal continuation is a message into the current conversation, so it takes what every send takes: `MessageContent` and the shared send options. It isn't a send, though. Everywhere else in eve, `send` (`Session.send`, `from().send`, `to().send`, Slack's `ctx.send`) dispatches into the inbox now and returns a `Promise<Delivery>`. A hook runs inside a session step, its message can't be admitted until the handler returns, and it is dropped if other input starts a turn first. There is no receipt to return. So it gets its own verb, `followUp`, with the shared types and a small synchronous result:
 
 ```ts
-type HookFollowUpOptions = Pick<SessionSendOptions, "context" | "idempotencyKey"> & {
-  readonly auth?: SessionAuthContext | null;
-};
+type HookFollowUpOptions = Pick<SessionSendOptions, "context"> &
+  Partial<Pick<SessionSendOptions, "auth">>;
 
 type HookFollowUpResult =
   | { readonly queued: true }
-  | { readonly queued: false; readonly reason: "not-settled" | "not-completed" | "already-queued" };
+  | {
+      readonly queued: false;
+      readonly reason: "not-settled" | "not-completed" | "already-queued" | "auth-conflict";
+    };
 
 // Only `turn.settled` and `*` handlers receive it: HookContext<TKey> adds it from a total map
 // over hook event keys, so a handler on any other key can't call it.
@@ -49,7 +51,7 @@ interface HookFollowUp {
 }
 ```
 
-Defaults fill what a hook should not have to know. `idempotencyKey` is the hook's `occurrence.idempotencyKey`. `auth` is omitted: the follow-up names no sender, and the turn runs as the session's current identity, so a shared thread doesn't attribute the hook's words to whoever spoke last. `turnPolicy` is not an option: a follow-up always queues. `history`, `outputSchema`, and `title` are omitted because the session, its history, and its title already exist.
+Defaults fill what a hook should not have to know. There's no `idempotencyKey`: the follow-up is recorded with the step that settled the turn, which a retry never runs handlers for again, and its delivery's key derives from the settled turn. `auth` is omitted: the follow-up names no sender, and the turn runs as the session's current identity, so a shared thread doesn't attribute the hook's words to whoever spoke last. `turnPolicy` is not an option: a follow-up always queues. `history`, `outputSchema`, and `title` are omitted because the session, its history, and its title already exist.
 
 The smallest use needs no model judge. This hook keeps the agent working until the test suite passes, for at most ten follow-ups:
 
@@ -83,15 +85,16 @@ Semantics reuse the `ctx.cancel()` command path where they can, and differ where
 |                 | `cancel(reason?)`                        | `followUp(message, options?)`                                          |
 | --------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
 | Targets         | The running turn                         | The next turn                                                          |
-| Eligible on     | Events while a turn runs                 | `turn.settled` and `*` handlers; queues on a completed turn only       |
+| Eligible on     | Events while a turn runs                 | `turn.settled` and `*` handlers; a completed turn, or one it cancelled |
 | Stored as       | An intent keyed by the active `turnId`   | A session-level intent with no turn, keyed by the settled `turnId`     |
 | Consumed by     | `actOnCancels` after the commit          | The idle wait in `nextTurnDelivery`, when nothing is queued            |
 | Effect          | `turn.cancelled`, then `session.waiting` | A message delivery that starts a normal turn                           |
 | Competing input | The first cancel wins                    | Yields to any other turn, cancel, clear, or reset; survives compaction |
 
 - **Recorded now, applied later.** It returns `{ queued }` synchronously: it is recorded during the handler and admitted after the event's hooks return, so retries and workflow replay stay deterministic. Like `cancel()`, calling it after the handler settled throws. If the handler throws, its commands are discarded with the rest of its requests.
-- **Fails closed on events, in the types.** A total map over hook event keys decides which handlers receive `followUp`, so a new event does not compile until it is classified, and a `turn.started` handler has no `followUp` to call. A `*` handler receives it for every event and gets `{ queued: false, reason: "not-settled" }` off `turn.settled`; a `failed` or `cancelled` turn returns `not-completed`.
-- **At most one per settled turn.** The intent is keyed by the settled `turnId`, and the hook's `occurrence.idempotencyKey` dedupes retried steps. A second request for the same turn, from the same or another hook, returns `already-queued`.
+- **Fails closed on events, in the types.** A total map over hook event keys decides which handlers receive `followUp`, so a new event does not compile until it is classified, and a `turn.started` handler has no `followUp` to call. A `*` handler receives it for every event and gets `{ queued: false, reason: "not-settled" }` off `turn.settled`; a `failed` turn, or one a person or another hook cancelled, returns `not-completed`.
+- **Cancel, then redirect.** A hook that cancelled the turn can follow it up, for example to cancel an agent that started editing test files and tell it not to. Only that hook can: a person's `session.cancel()` must still stop the session, and letting another hook follow up would let a guard and a goal loop against each other. Failed turns can't be followed up yet: a failure that repeats, such as `SESSION_USAGE_LIMIT_REACHED`, would turn a retry hook into a loop of failing turns.
+- **One next turn per settled turn, shared by hooks.** The intent is keyed by the settled `turnId`. Each hook that follows up adds a payload to its one delivery, in hook order, the way the input queue coalesces one principal's consecutive messages into a turn, so a goal hook and a lint hook both contribute and load order can't starve either. A hook asking twice returns `already-queued`. One delivery acts for one principal: a follow-up whose `auth` differs from the queued one returns `auth-conflict`, since it couldn't run as a separate turn without yielding to the first.
 - **Queues, never steers, and yields.** The intent belongs to the turn that settled. `nextTurnDelivery` admits it only when the input queue and inbox are empty. Any other turn that starts first discards it: a person's message, an answer, a schedule send, or another hook's follow-up. A compaction leaves it queued, so it cannot stall a goal. `cancel`, `clear`, and `reset` discard it, so a person can always stop a loop from any channel, and a cleared session doesn't start on stale guidance. An expiry ends the session with the follow-up unsent. `queued: true` means recorded; yielding happens later, and the hook sees the turn that won settle next.
 - **Arrives as a marked message delivery.** `delivery.admitted` records `source: { channel, hook: "<slug>" }` and no principal unless the hook passes `auth`. The delivery passes through the owning channel's `deliver` hook like any other message. The model receives the message and `context` exactly as the hook passed them; history records nothing else. From `source.hook`, prompt projection places a note ahead of the message on every model call saying a hook sent it, the way client context is placed without joining history. Channels and UIs can render hook-origin turns distinctly.
 - **Same session only.** A follow-up never creates or reaches another session, so the delegated-session refusal on `ctx.to()` in #5096 does not apply: that refusal exists because a new session would outlive the delegation and act for the caller, and a message into the running session creates nothing new. Whether the caller waits for those extra turns is an open question below.
