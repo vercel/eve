@@ -43,7 +43,7 @@ For example, a Vercel environment returns a handle with `setNetworkPolicy()`. Th
 
 ## Define an environment
 
-A sandbox module exports an environment and returns a sandbox from `defineSandbox()`. Put it at `agent/sandbox.ts`, or at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, eve reads the definition only from `agent/sandbox/sandbox.ts`.
+A sandbox module exports an environment and returns a sandbox from `defineSandbox()`. Put it at `agent/sandbox.ts`, or at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, put the definition at `agent/sandbox/sandbox.ts`. Keeping `agent/sandbox.ts` beside that folder is a build error, even when the folder only contains workspace seeds or a Dockerfile.
 
 ```ts title="agent/sandbox.ts"
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";
