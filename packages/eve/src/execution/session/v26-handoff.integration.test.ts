@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import capture0820 from "./v26-fixtures/0.82.0.json" with { type: "json" };
 import capture0830 from "./v26-fixtures/0.83.0.json" with { type: "json" };
 import capture0831 from "./v26-fixtures/0.83.1.json" with { type: "json" };
 import capture0832 from "./v26-fixtures/0.83.2.json" with { type: "json" };
@@ -29,7 +30,7 @@ import {
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { telegramChannel } from "#public/channels/telegram/telegramChannel.js";
 
-it.each([capture0830, capture0831, capture0832, capture0833])(
+it.each([capture0820, capture0830, capture0831, capture0832, capture0833])(
   "continues the checkpoint and stream captured from eve $version",
   async ({ checkpoint: capturedCheckpoint, records }) => {
     const runtime = await createTestRuntime({ agent: { name: "v26-handoff" } });

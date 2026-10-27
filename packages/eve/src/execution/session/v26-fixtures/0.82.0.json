@@ -1,0 +1,266 @@
+{
+  "version": "0.82.0",
+  "checkpoint": {
+    "sessionTimeoutMs": false,
+    "admittedDeliveryKeys": [],
+    "history": [
+      {
+        "content": "Alice asks for the project milestone.",
+        "kind": "user",
+        "role": "user"
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Bootstrap reply [Tool execution]: Alice asks for the project milestone."
+          }
+        ]
+      }
+    ],
+    "serializedContext": {
+      "eve.bundle": {
+        "source": {
+          "kind": "bundled"
+        }
+      },
+      "eve.auth": null,
+      "eve.channel": {
+        "kind": "http",
+        "state": {}
+      },
+      "eve.channelDelivery": {
+        "acceptedDeploymentId": "dpl_a",
+        "channelKind": "http",
+        "channelName": "test",
+        "deliveryId": "delivery-initial"
+      },
+      "eve.sessionId": "captured-session",
+      "eve.sessionInbox": {
+        "sessionId": "captured-session"
+      },
+      "eve.callbackBaseUrl": "http://localhost:3000",
+      "eve.conversationId": "captured-session",
+      "eve.sessionTitle": "Alice asks for the project milestone.",
+      "eve.turnDeliveryIds": ["delivery-initial"],
+      "eve.channelInstrumentation": {
+        "channelType": "http",
+        "kind": "http",
+        "metadata": {}
+      },
+      "eve.sessionDynamicSubagentRuntimeRevision": "bundled",
+      "eve.sessionDynamicToolRuntimeRevision": "bundled",
+      "eve.sessionDynamicSubagentSelections": {},
+      "eve.sessionDynamicToolMetadata": [],
+      "eve.turnDynamicSubagentSelections": {},
+      "eve.stepDynamicToolMetadata": [],
+      "eve.turnDynamicToolMetadata": [],
+      "eve.turnDynamicInstructions": {},
+      "eve.historyState": {},
+      "eve.stateLayout": 1
+    },
+    "sessionState": {
+      "continuationToken": "",
+      "hasProxyInputRequests": false,
+      "sessionId": "captured-session",
+      "version": 2,
+      "snapshot": {
+        "session": {
+          "agent": {
+            "system": "Tool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other."
+          },
+          "continuationToken": "",
+          "sessionId": "captured-session",
+          "compaction": {
+            "lastKnownInputTokens": 310,
+            "lastKnownPromptMessageCount": 1
+          },
+          "sandboxState": {
+            "session": null
+          },
+          "state": {
+            "eve.harness.turnUsage": {
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": 0,
+              "inputTokens": 310,
+              "outputTokens": 18,
+              "sawCost": false,
+              "turnId": "turn_0",
+              "session": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": 0,
+                "inputTokens": 310,
+                "outputTokens": 18,
+                "sawCost": false
+              }
+            },
+            "eve.harness.requestEnvelopeTokens": 1953.75,
+            "eve.harness.sessionProjection": {
+              "authorizations": {},
+              "calls": {},
+              "candidates": {},
+              "inputs": {},
+              "nextSequence": 1,
+              "tasks": {},
+              "turns": {},
+              "started": true
+            },
+            "eve.harness.reportedSessionUsage": {
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": 0,
+              "inputTokens": 310,
+              "outputTokens": 18,
+              "sawCost": false
+            }
+          }
+        }
+      }
+    },
+    "version": 16
+  },
+  "records": [
+    {
+      "data": {
+        "runtime": {
+          "agentId": "v26-capture",
+          "agentName": "v26-capture",
+          "eveVersion": "0.82.0"
+        }
+      },
+      "type": "session.started",
+      "meta": {
+        "at": "2026-10-27T21:12:07.415Z",
+        "id": "evt_01M5ZK9HFQ9016ZSH2C9VFNBZ8",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "sequence": 0,
+        "turnId": "turn_0"
+      },
+      "type": "turn.started",
+      "meta": {
+        "at": "2026-10-27T21:12:07.420Z",
+        "id": "evt_01M5ZK9HFWGE3BKAPEXE467B5D",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "message": "Alice asks for the project milestone.",
+        "parts": [
+          {
+            "text": "Alice asks for the project milestone.",
+            "type": "text"
+          }
+        ],
+        "sequence": 0,
+        "turnId": "turn_0"
+      },
+      "type": "message.received",
+      "meta": {
+        "at": "2026-10-27T21:12:07.420Z",
+        "id": "evt_01M5ZK9HFWGE3BKAPEXE467B5E",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "modelId": "openai/gpt-5.4",
+        "sequence": 0,
+        "stepIndex": 0,
+        "turnId": "turn_0"
+      },
+      "type": "step.started",
+      "meta": {
+        "at": "2026-10-27T21:12:07.423Z",
+        "id": "evt_01M5ZK9HFZB10AS3BDF1JZS7QD",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "messageDelta": "Bootstrap reply [Tool execution]: Alice asks for the project milestone.",
+        "sequence": 0,
+        "stepIndex": 0,
+        "turnId": "turn_0"
+      },
+      "type": "message.appended",
+      "meta": {
+        "at": "2026-10-27T21:12:07.468Z",
+        "id": "evt_01M5ZK9HHCT436RXJMYRCJ8HJR",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "finishReason": "stop",
+        "message": "Bootstrap reply [Tool execution]: Alice asks for the project milestone.",
+        "sequence": 0,
+        "stepIndex": 0,
+        "turnId": "turn_0"
+      },
+      "type": "message.completed",
+      "meta": {
+        "at": "2026-10-27T21:12:07.806Z",
+        "id": "evt_01M5ZK9HVYRPDYTVHMKT8QSBW4",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "finishReason": "stop",
+        "sequence": 0,
+        "stepIndex": 0,
+        "turnId": "turn_0",
+        "usage": {
+          "inputTokens": 310,
+          "outputTokens": 18,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      },
+      "type": "step.completed",
+      "meta": {
+        "at": "2026-10-27T21:12:07.808Z",
+        "id": "evt_01M5ZK9HW0KXYQ1NFWBK7ZZE6F",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "sequence": 0,
+        "turnId": "turn_0"
+      },
+      "type": "turn.completed",
+      "meta": {
+        "at": "2026-10-27T21:12:07.819Z",
+        "id": "evt_01M5ZK9HWBGJY43A1ZJDC3CK8D",
+        "deliveryIds": ["delivery-initial"]
+      }
+    },
+    {
+      "data": {
+        "continuationToken": "captured-session",
+        "usage": {
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "inputTokens": 310,
+          "outputTokens": 18
+        },
+        "wait": "next-user-message"
+      },
+      "type": "session.waiting",
+      "meta": {
+        "at": "2026-10-27T21:12:07.819Z",
+        "id": "evt_01M5ZK9HWBGJY43A1ZJDC3CK8E",
+        "deliveryIds": ["delivery-initial"]
+      }
+    }
+  ]
+}

@@ -75,7 +75,9 @@ it("captures the checkpoint emitted by the released owner after a real model tur
         JSON.stringify({ version: process.env.V26_CAPTURE_VERSION, checkpoint, records }, null, 2) +
           "\n",
       );
-      expect((checkpoint as { version: number }).version).toBe(17);
+      expect((checkpoint as { version: number }).version).toBe(
+        Number(process.env.V26_CAPTURE_CHECKPOINT_VERSION ?? 17),
+      );
     } finally {
       stream.dispose();
       await owner.cancel().catch(() => {});

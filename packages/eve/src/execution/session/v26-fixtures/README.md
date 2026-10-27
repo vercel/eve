@@ -1,4 +1,4 @@
-# Captured eve 0.83 handoffs
+# Captured eve 0.82 and 0.83 handoffs
 
 These fixtures were emitted by running `workflowEntry` from each release tag,
 not assembled from checkpoint types. Each owner completed one HTTP-channel
@@ -19,6 +19,7 @@ remain as emitted. No credentials or personal data were present.
 
 | Release | Source commit                              |
 | ------- | ------------------------------------------ |
+| 0.82.0  | `714ca1e29ec6fcd0c5305c15442e30405e698035` |
 | 0.83.0  | `261043d87ef0844a705c2ccf90ce5ea77d1c0bf9` |
 | 0.83.1  | `68c09772ff2b6d02ebd045111c8652abd17e17a8` |
 | 0.83.2  | `9f73f9dbe5841253657b9037614cb43887937fe8` |
@@ -38,6 +39,11 @@ V26_CAPTURE_OUTPUT="$TMPDIR/captured-0833.json" \
 pnpm exec vitest run --config vitest.integration.config.ts \
   src/execution/session/capture-v26.integration.test.ts
 ```
+
+For eve 0.82.0, also set `V26_CAPTURE_CHECKPOINT_VERSION=16`; the 0.83 releases
+write version 17, which is the harness default. The 16→17 upgrade changes no
+checkpoint data: version 17 introduced the proactive-preparation idle-deadline
+contract.
 
 Repeat from clean source for each release; do not overlay a newer source tree
 onto an older tag. Replace only the emitted session ID with `captured-session`

@@ -1,4 +1,4 @@
-// Reads an idle checkpoint an eve 0.83 owner (checkpoint version 17) hands to a v27 successor.
+// Reads an idle checkpoint an eve 0.82 or 0.83 owner (version 16 or 17) hands to a v27 successor.
 // Its stream holds v26 lines, which every v27 reader already reads as the commits they record;
 // the successor appends v27 lines after them. Only idle top-level sessions move. A pure upgrade
 // keeps what v27 runs on unchanged and refuses anything still in flight, so the owner keeps any

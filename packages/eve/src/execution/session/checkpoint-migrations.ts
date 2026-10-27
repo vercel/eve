@@ -7,11 +7,10 @@ import {
 import { upgradeV26Checkpoint, type V26CarriedState } from "#execution/session/v26-checkpoint.js";
 
 /**
- * Oldest checkpoint a successor accepts: eve 0.83's, the last whose stream holds v26 lines. An
- * idle one moves: v27 reads its stream, and the successor rebuilds the projection from it. Older
- * sessions stay on the deployment that owns them.
+ * Oldest checkpoint a successor accepts: eve 0.82's. Idle v26 sessions move after the successor
+ * rebuilds their projection from the stored stream. Older sessions stay on their owning deployment.
  */
-export const MIN_SESSION_CHECKPOINT_VERSION = 17;
+export const MIN_SESSION_CHECKPOINT_VERSION = 16;
 
 export type SessionCheckpointMigration =
   | {
@@ -37,7 +36,9 @@ type CheckpointRecord = Record<string, unknown>;
 const CHECKPOINT_UPGRADES: Readonly<
   Record<number, (checkpoint: CheckpointRecord, effects: UpgradeEffects) => CheckpointRecord>
 > = {
-  // The stream's first v27 lines follow the v26 ones an eve 0.83 owner wrote.
+  // Version 17 added proactive preparation's idle-deadline contract, not checkpoint data.
+  16: (checkpoint) => checkpoint,
+  // The stream's first v27 lines follow the v26 ones an eve 0.82 or 0.83 owner wrote.
   17: (checkpoint, effects) => {
     const upgraded = upgradeV26Checkpoint(checkpoint, refuse);
     effects.v26 = upgraded.carried;
@@ -61,7 +62,7 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   if (typeof version === "number" && version < MIN_SESSION_CHECKPOINT_VERSION) {
     return {
       kind: "incompatible",
-      detail: `checkpoint version ${version} predates eve 0.83; the session continues on the deployment that owns it`,
+      detail: `checkpoint version ${version} predates eve 0.82; the session continues on the deployment that owns it`,
     };
   }
   if (

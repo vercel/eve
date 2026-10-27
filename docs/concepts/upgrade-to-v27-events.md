@@ -8,18 +8,18 @@ This guide covers breaking changes to agent definitions, approvals, channels, cl
 ## Before you upgrade
 
 - Rebuild and republish installed extensions. Earlier epoch-based distributions cannot be loaded by this release; see [Extensions](../extensions).
-- Keep the deployments that own existing sessions available. An eligible idle session whose deployment runs eve 0.83 can move to the new deployment with its next message. Its recorded history stays in v26 lines, and new turns are recorded in v27 after it. A session that is mid-turn, waiting for an answer or sign-in, running tools, tasks, or subagents, or driven by a parent or remote caller stays on its current deployment. Sessions on deployments that run releases before 0.83 always stay. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
+- Keep the deployments that own existing sessions available. An eligible idle session whose deployment runs eve 0.82 or 0.83 can move to the new deployment with its next message. Its recorded history stays in v26 lines, and new turns are recorded in v27 after it. A session that is mid-turn, waiting for an answer or sign-in, running tools, tasks, or subagents, or driven by a parent or remote caller stays on its current deployment. Sessions on deployments that run releases before 0.82 always stay. On worlds without deployment routing, follow the [stranded-session recovery guidance](./execution-model-and-durability#stranded-sessions).
 - Update event consumers, frontend persistence, and custom channel handlers using the mappings below. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
 ## Move existing sessions
 
-The successor accepts idle checkpoints from eve 0.83.0–0.83.3 only after validating their saved state and rebuilding the session projection from the recorded history. If preparation refuses the checkpoint, the original deployment keeps the session. Keep that deployment available for sessions that cannot move.
+The successor accepts idle checkpoints from eve 0.82.0 and 0.83.0–0.83.3 only after validating their saved state and rebuilding the session projection from the recorded history. If preparation refuses the checkpoint, the original deployment keeps the session. Keep that deployment available for sessions that cannot move.
 
 Remembered `once()` approvals are discarded during this migration. The next call that requires approval asks again; previous consent is not carried into the new policy. Settled Telegram button mappings are also retired, so old buttons cannot answer new interactions.
 
 The built-in channel conversions recognize conventional paths such as `channels/discord.ts` and `channels/telegram.ts`. A renamed or custom channel whose state still needs one of these conversions stays on the original deployment rather than guessing its schema. Other authored state must remain compatible with your new application code, as with any deployment handoff.
 
-**Do not roll an upgraded session back to eve 0.83 after its first v27 write.** An eve 0.83 owner cannot safely continue the mixed v26/v27 stream or read the new checkpoint. Roll forward with a compatible build, or start a new session on the older deployment instead.
+**Do not roll an upgraded session back to eve 0.82 or 0.83 after its first v27 write.** An eve 0.82 or 0.83 owner cannot safely continue the mixed v26/v27 stream or read the new checkpoint. Roll forward with a compatible build, or start a new session on the older deployment instead.
 
 ## Restore saved history
 

@@ -21,11 +21,11 @@ describe("migrateSessionCheckpoint", () => {
     });
   });
 
-  it.each([8, 11, 13, 14, 15, 16])(
+  it.each([8, 11, 13, 14, 15])(
     "keeps a version %i session on the deployment that owns it",
     (version) => {
       expect(migrateSessionCheckpoint(checkpoint(version))).toEqual({
-        detail: `checkpoint version ${version} predates eve 0.83; the session continues on the deployment that owns it`,
+        detail: `checkpoint version ${version} predates eve 0.82; the session continues on the deployment that owns it`,
         kind: "incompatible",
       });
     },

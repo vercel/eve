@@ -1,4 +1,4 @@
-// Rebuilds the projection of a session an eve 0.83 owner hands over, from its stored v26 lines,
+// Rebuilds the projection of a session an eve 0.82 or 0.83 owner hands over from its v26 lines,
 // so the successor's first v27 line takes the next stored position. See `v26-checkpoint.ts`.
 //
 // Delete once no v26 owner remains.
