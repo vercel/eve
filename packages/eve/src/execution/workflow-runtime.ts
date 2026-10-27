@@ -31,7 +31,7 @@ import {
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { createLogger, logError } from "#internal/logging.js";
+import { createLogger } from "#internal/logging.js";
 import { formatCapabilityError } from "#internal/capability-error.js";
 import {
   getHookByToken,
@@ -257,8 +257,8 @@ export function createWorkflowRuntime(config: {
         startOptions,
       );
     } catch (error) {
-      logError(log, "failed to start workflow run", error, {
-        continuationToken: input.continuationToken,
+      log.error("failed to start workflow run", {
+        error: formatCapabilityError(error, [input.continuationToken]),
       });
       throw error;
     }
@@ -415,9 +415,10 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
       }
       return inactiveCommandResult(command);
     }
-    logError(log, "failed to dispatch session command", error, {
+    const logicalToken = logicalSessionToken(token);
+    log.error("failed to dispatch session command", {
       command: command.kind,
-      token,
+      error: formatCapabilityError(error, [logicalToken, sessionInboxHookToken(logicalToken)]),
     });
     throw error;
   }
