@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -79,42 +80,45 @@ test("requires an API key and defaults the base URL", async () => {
 
 test("lookup_customer reads the customer with the mounted key", async () => {
   await bindMount();
-  const fetch = stubFetch({ id: "cus_1", email: "ada@example.com" });
-  const tool = await loadTool("lookup_customer");
-  const output = await tool.execute(parse(tool, { email: "ada@example.com" }), {});
+  const fetch = stubFetch();
+  const output = await runTool(await loadTool("lookup_customer"), { email: customer.email });
 
-  expect(output).toMatchObject({ id: "cus_1" });
+  expect(JSON.stringify(output)).toContain(customer.id);
   const [call] = await requests(fetch);
   const url = new URL(call!.url);
   expect(call!.method).toBe("GET");
   expect(url.origin + url.pathname).toBe(`${defaultBaseUrl}/v1/customers`);
-  expect(url.searchParams.get("email")).toBe("ada@example.com");
+  expect(url.searchParams.get("email")).toBe(customer.email);
   expect(call!.headers.get("authorization")).toBe("Bearer test-crm-key");
 });
 
+// After a lookup in the same conversation, since the agent may enforce that order itself.
 test("add_note posts the note with the mounted key", async () => {
   await bindMount();
-  const fetch = stubFetch({ id: "note_1" });
-  const tool = await loadTool("add_note");
-  await tool.execute(parse(tool, { customerId: "cus_1", note: "Prefers email." }), {});
+  const fetch = stubFetch();
+  await lookUpThenAddNote();
 
-  const [call] = await requests(fetch);
-  expect(call!.method).toBe("POST");
-  expect(call!.url).toBe(`${defaultBaseUrl}/v1/customers/cus_1/notes`);
-  expect(call!.headers.get("authorization")).toBe("Bearer test-crm-key");
-  expect(JSON.parse(call!.body)).toEqual({ note: "Prefers email." });
+  const posts = (await requests(fetch)).filter((call) => call.method === "POST");
+  expect(posts).toHaveLength(1);
+  expect(posts[0]!.url).toBe(`${defaultBaseUrl}/v1/customers/${customer.id}/notes`);
+  expect(posts[0]!.headers.get("authorization")).toBe("Bearer test-crm-key");
+  expect(JSON.parse(posts[0]!.body)).toEqual({ note: "Prefers email." });
 });
 
-// In the package, so every agent that mounts it asks, and in this agent's compiled tool.
+// In the package, so every agent that mounts it asks, and in this agent's compiled tool. The
+// policy runs after a lookup, since it may also refuse notes for customers nobody looked up.
 test("add_note always asks for approval", async () => {
+  await bindMount();
+  stubFetch();
+  const session = new SessionState();
+  await runTool(await loadTool("lookup_customer"), { email: customer.email }, session);
   const tool = await loadTool("add_note");
   const policy = typeof tool.approval === "function" ? tool.approval : tool.approval?.request;
   expect(typeof policy).toBe("function");
-  for (const toolInput of [
-    { customerId: "cus_1", note: "short" },
-    { customerId: "cus_2", note: "x".repeat(500) },
-  ]) {
-    const decision = await policy({ callId: "call-1", session: {}, toolInput, toolName: "x" });
+  for (const note of ["short", "x".repeat(500)]) {
+    const toolInput = { customerId: customer.id, email: customer.email, note };
+    const request = { callId: "call-1", session: {}, toolInput, toolName: "x" };
+    const decision = await sessionStorage().run({ context: session }, () => policy(request));
     expect(requiresApproval(decision)).toBe(true);
   }
   const manifest = readJson(eveInfo().artifacts.compiledManifest);
@@ -126,14 +130,22 @@ test("add_note always asks for approval", async () => {
 test("honors a configured base URL", async () => {
   const handle = await loadExtension();
   handle({ apiKey: "test-crm-key", baseUrl: "https://crm.internal.example" });
-  const fetch = stubFetch({ id: "cus_1" });
-  const lookup = await loadTool("lookup_customer");
-  await lookup.execute(parse(lookup, { email: "ada@example.com" }), {});
-  const addNote = await loadTool("add_note");
-  await addNote.execute(parse(addNote, { customerId: "cus_1", note: "Prefers email." }), {});
+  const fetch = stubFetch();
+  await lookUpThenAddNote();
   const origins = (await requests(fetch)).map((call) => new URL(call.url).origin);
-  expect(origins).toEqual(["https://crm.internal.example", "https://crm.internal.example"]);
+  expect(origins.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(origins)).toEqual(new Set(["https://crm.internal.example"]));
 });
+
+const customer = { id: "cus_1", email: "ada@example.com", name: "Ada Lovelace" };
+
+/** One conversation: look the customer up, then add a note to their record. */
+async function lookUpThenAddNote(): Promise<void> {
+  const session = new SessionState();
+  await runTool(await loadTool("lookup_customer"), { email: customer.email }, session);
+  const input = { customerId: customer.id, email: customer.email, note: "Prefers email." };
+  await runTool(await loadTool("add_note"), input, session);
+}
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded files are untyped.
 function readJson(path: string): any {
@@ -227,15 +239,70 @@ async function bindMount(): Promise<void> {
   expect(mount.default).toBeDefined();
 }
 
-// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
-function parse(tool: any, input: unknown): unknown {
-  return tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
-}
-
-function stubFetch(body: unknown) {
-  const fetch = vi.fn(async () => Response.json(body));
+/** Answers like Acme: the customer for a lookup, the created note for a POST. */
+function stubFetch() {
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+    new Request(input, init).method === "POST"
+      ? Response.json({ id: "note_1", note: "Prefers email." }, { status: 201 })
+      : Response.json(customer),
+  );
   vi.stubGlobal("fetch", fetch);
   return fetch;
+}
+
+/**
+ * Runs a tool call the way eve does: with a call context, inside a session whose state the
+ * tools can read and write. Pass the same session to calls that belong to one conversation.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function runTool(tool: any, input: unknown, session = new SessionState()): Promise<unknown> {
+  const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
+  const call = {
+    abortSignal: new AbortController().signal,
+    callId: `call-${Math.random().toString(36).slice(2)}`,
+    toolName: "graded",
+    messages: [],
+    channel: { kind: "eve" },
+  };
+  return sessionStorage().run({ context: session }, () => tool.execute(parsed, call));
+}
+
+/** The process-wide storage eve keeps its session context in, shared by every eve copy. */
+function sessionStorage(): AsyncLocalStorage<{ context: SessionState }> {
+  const key = Symbol.for("eve.context-storage");
+  const global = globalThis as Record<symbol, AsyncLocalStorage<{ context: SessionState }>>;
+  global[key] ??= new AsyncLocalStorage();
+  return global[key];
+}
+
+/** A session's context values, as `defineState` reads and writes them. */
+class SessionState {
+  private readonly values = new Map<string, unknown>();
+  get(key: { name: string }) {
+    return this.values.get(key.name);
+  }
+  require(key: { name: string }) {
+    if (!this.values.has(key.name)) throw new Error(`Context key "${key.name}" is not set.`);
+    return this.values.get(key.name);
+  }
+  has(key: { name: string }) {
+    return this.values.has(key.name);
+  }
+  set(key: { name: string }, value: unknown) {
+    const next = typeof value === "function" ? value(this.values.get(key.name)) : value;
+    this.values.set(key.name, next);
+    return next;
+  }
+  ensure(key: { name: string }, create: () => unknown) {
+    return this.has(key) ? this.values.get(key.name) : this.set(key, create());
+  }
+  delete(key: { name: string }) {
+    return this.values.delete(key.name);
+  }
+  setVirtualContext(key: { name: string }, value: unknown) {
+    this.values.set(key.name, value);
+  }
+  *entries() {}
 }
 
 async function requests(fetch: ReturnType<typeof stubFetch>) {

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -42,7 +43,7 @@ test("adds the package to this agent for the support queue", async () => {
   await import(pathToFileURL(resolve(mountFile())).href);
   const fetch = stubFetch();
   const search = (await packageTools()).search_tickets;
-  await search.execute(search.inputSchema.parse({ query: "refund" }), {});
+  await runTool(search, { query: "refund" });
   const [call] = await requests(fetch);
   const url = new URL(call!.url);
   expect(url.origin + url.pathname).toBe(`${helpdeskUrl}/v1/queues/support/tickets`);
@@ -70,7 +71,7 @@ test("asks for approval before closing a ticket", async () => {
   // Once approved, the call still closes the ticket in the helpdesk.
   await import(pathToFileURL(resolve(mountFile())).href);
   const fetch = stubFetch();
-  await close.execute(close.inputSchema.parse(toolInput), {});
+  await runTool(close, toolInput);
   const [call] = await requests(fetch);
   expect(call!.method).toBe("POST");
   expect(call!.url).toBe(`${helpdeskUrl}/v1/tickets/T-7/close`);
@@ -215,7 +216,7 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   }
 
   const tool = await load(toolSource(name));
-  const output = await tool.execute(tool.inputSchema.parse(input), {});
+  const output = await runTool(tool, input);
 
   const { emptySessionView, foldEvents } = await importProjectEve("./events");
   const callId = `call-${name}`;
@@ -255,6 +256,61 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
     }
   }
   return output;
+}
+
+/**
+ * Runs a tool call the way eve does: with a call context, inside a session whose state the
+ * tools can read and write. Pass the same session to calls that belong to one conversation.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function runTool(tool: any, input: unknown, session = new SessionState()): Promise<unknown> {
+  const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
+  const call = {
+    abortSignal: new AbortController().signal,
+    callId: `call-${Math.random().toString(36).slice(2)}`,
+    toolName: "graded",
+    messages: [],
+    channel: { kind: "eve" },
+  };
+  return sessionStorage().run({ context: session }, () => tool.execute(parsed, call));
+}
+
+/** The process-wide storage eve keeps its session context in, shared by every eve copy. */
+function sessionStorage(): AsyncLocalStorage<{ context: SessionState }> {
+  const key = Symbol.for("eve.context-storage");
+  const global = globalThis as Record<symbol, AsyncLocalStorage<{ context: SessionState }>>;
+  global[key] ??= new AsyncLocalStorage();
+  return global[key];
+}
+
+/** A session's context values, as `defineState` reads and writes them. */
+class SessionState {
+  private readonly values = new Map<string, unknown>();
+  get(key: { name: string }) {
+    return this.values.get(key.name);
+  }
+  require(key: { name: string }) {
+    if (!this.values.has(key.name)) throw new Error(`Context key "${key.name}" is not set.`);
+    return this.values.get(key.name);
+  }
+  has(key: { name: string }) {
+    return this.values.has(key.name);
+  }
+  set(key: { name: string }, value: unknown) {
+    const next = typeof value === "function" ? value(this.values.get(key.name)) : value;
+    this.values.set(key.name, next);
+    return next;
+  }
+  ensure(key: { name: string }, create: () => unknown) {
+    return this.has(key) ? this.values.get(key.name) : this.set(key, create());
+  }
+  delete(key: { name: string }) {
+    return this.values.delete(key.name);
+  }
+  setVirtualContext(key: { name: string }, value: unknown) {
+    this.values.set(key.name, value);
+  }
+  *entries() {}
 }
 
 /** Imports an `eve` entry point as the authored modules resolve it, sharing their module instance. */
