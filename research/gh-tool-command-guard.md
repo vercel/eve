@@ -124,8 +124,8 @@ parentheses, and a literal `$` waits for sandbox process hardening. The design c
 found that the program boundary needs that hardening before the guard accepts more
 input. The deferred work also covers bash parity for accepted input: joining line
 continuations, keeping a backslash inside double quotes unless bash removes it, and
-splitting words only on space, tab, and newline. A parked draft carries that change and
-a bash parity harness built from the token table.
+splitting words only on space, tab, and newline. The parked draft #5470 carries that
+change and a bash parity harness built from the token table.
 
 The parity work records where accepted input still diverges from bash with or without
 the deferred change: an unquoted `#` that starts a word starts a bash comment, a `~` at
