@@ -67,6 +67,8 @@ function deployment(origin: string, token: string) {
     Promise.resolve({ authorization: `Bearer ${tokens.get(binding.url)}` }),
   );
   const channel = eveChannel({
+    // Synthetic histories have no HTTP creation record; the fixture operator owns them all.
+    authorizeSession: ({ caller }) => caller.principalId === "alice",
     auth: (request) =>
       request.headers.get("authorization") === `Bearer ${token}`
         ? { authenticator: "test", principalId: "alice", principalType: "user", attributes: {} }

@@ -21,7 +21,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
-For existing-session routes, `eveChannel({ authorizeSession })` adds a resource check after authentication. User principals require an explicit policy; non-user transports keep shared access unless a policy narrows it. The auth examples below show identity verification only. Configure [existing-session authorization](../channels/eve#existing-session-authorization) before using them for multi-user conversations.
+For existing-session routes, eve checks ownership after authentication: a user may access HTTP sessions created under that same verified issuer/authenticator and principal ID. Same-user development and starter flows need no additional configuration. Use `eveChannel({ authorizeSession })` to replace that check with application-owned permissions or intentional sharing. Non-user transports keep shared access unless a policy narrows it. See [existing-session authorization](../channels/eve#existing-session-authorization).
 
 The health route created by `eveChannel()` is public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials. Replacing `agent/channels/eve.ts` with a custom `defineChannel(...)` or disabling that slot also replaces or removes the health route.
 
@@ -304,7 +304,7 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 
 Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. This mutable turn identity does not establish session ownership.
 
-For the eve HTTP channel, `auth` identifies the transport caller and `authorizeSession` checks that caller against the requested session before messages, controls, preparation, and streams. User principals without a policy are denied existing-session access. eve does not maintain an application ownership database: load permissions from your own server records. Custom `defineChannel` routes must enforce their own resource checks. See [existing-session authorization](../channels/eve#existing-session-authorization).
+For the eve HTTP channel, `auth` identifies the transport caller. By default, a user must match the immutable creator identity recorded for that HTTP session before messages, controls, preparation, or streams. Missing ownership records fail closed. `authorizeSession` replaces that default with your application's server-owned permissions when you need sharing, another channel's sessions, or existing sessions without a recorded HTTP owner. Custom `defineChannel` routes must enforce their own resource checks. See [existing-session authorization](../channels/eve#existing-session-authorization).
 
 ## Tool replacement permission
 

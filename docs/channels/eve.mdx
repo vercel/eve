@@ -316,7 +316,9 @@ Neither admits browser users or external clients in production. For a public app
 
 ### Existing-session authorization
 
-`auth` identifies the caller; `authorizeSession` decides whether that caller may access the session ID in the route. For a `user` principal, existing-session requests return `403 session_access_denied` unless you configure this policy. Creation and inspection still use `auth` alone. Non-user principals retain deployment-wide access by default for intentionally shared channels and infrastructure; configure a policy for them too when they represent separate tenants.
+`auth` identifies the caller. By default, a `user` principal can access only HTTP sessions that caller created under the same issuer (or authenticator when no issuer is supplied) and principal ID. Creation records this identity before returning the session ID, including creation without an initial message. Follow-ups, streams, preparation, and controls use that immutable ownership record, not the mutable caller of the latest turn. Ownership remains available independently of workflow-input retention.
+
+A missing or different owner returns `403 session_access_denied`. This includes sessions created before ownership recording was introduced and sessions created through another channel. Use `authorizeSession` when your application has its own ownership records or intentionally shares sessions. Creation and inspection still use `auth` alone. Non-user principals retain deployment-wide access by default for intentionally shared channels and infrastructure; configure a policy for them too when they represent separate tenants.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -329,7 +331,7 @@ export default eveChannel({
 });
 ```
 
-Load ownership or membership from an application-owned server record, using the verified caller's issuer and identity. Record that association before returning a session ID, for example in the custom conversation-creation route under [Start from prior history](#start-from-prior-history). Do not trust a client-supplied owner, tenant, or role. Returning exactly `true` allows access; every other return value denies it. A thrown error fails the request without accessing the session.
+A custom policy replaces the default creator check. Load ownership or membership from an application-owned server record, using the verified caller's issuer and identity. For sessions created through a custom route, record that association before returning a session ID, for example under [Start from prior history](#start-from-prior-history). Do not trust a client-supplied owner, tenant, or role. Returning exactly `true` allows access; every other return value denies it. A thrown error fails the request without accessing the session.
 
 The policy runs on every existing-session message, answer, preparation, control, stub read, and stream request. Descendant and subagent streams authorize the parent/root session first. It runs after authentication but before reading the body or attaching the session. `onMessage` is not a substitute: it does not run on streams, controls, preparation, or answers. An intentionally shared user channel can opt into shared access with `authorizeSession: () => true`; only do this when every authenticated caller may read and modify every session served by that channel.
 

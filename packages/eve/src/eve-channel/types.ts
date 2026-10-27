@@ -107,8 +107,10 @@ export interface EveChannelConfig {
    * Return exactly `true` to allow access. Check an application-owned session
    * record against `caller`; the URL's session ID alone is not authorization.
    *
-   * Without this policy, user principals cannot access existing sessions.
-   * Non-user principals retain deployment-wide access for shared transports.
+   * Without this policy, user principals may access only HTTP sessions they
+   * created under the same issuer/authenticator and principal ID. Sessions
+   * without a recorded owner are denied. Non-user principals retain
+   * deployment-wide access for shared transports.
    * For descendant streams, `sessionId` is the parent/root session being read.
    */
   readonly authorizeSession?: (input: {

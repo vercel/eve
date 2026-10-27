@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Add `eveChannel({ authorizeSession })` for per-session access checks across messages, controls, preparation, and streams. User principals now require an explicit policy to access existing sessions; non-user shared transports retain their existing default access.
+User-authenticated HTTP sessions now enforce creator ownership across messages, preparation, controls, and streams, while preserving same-user starter and development flows. Use `eveChannel({ authorizeSession })` for intentional sharing, other channels' sessions, or existing sessions without an ownership record; non-user transport access is unchanged.

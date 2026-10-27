@@ -20,6 +20,12 @@ import { readClientContext } from "#internal/client-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import { isHttpSessionOwner, recordHttpSessionOwner } from "#eve-channel/session-owner.js";
+
+vi.mock("#eve-channel/session-owner.js", () => ({
+  isHttpSessionOwner: vi.fn(async () => false),
+  recordHttpSessionOwner: vi.fn(async () => {}),
+}));
 
 function route(
   method: "GET" | "POST",
@@ -105,7 +111,7 @@ describe("eve ID-addressed session routes", () => {
     expect(session.prewarm).not.toHaveBeenCalled();
   });
 
-  it("requires an explicit existing-session policy for user principals", async () => {
+  it("denies user access when the session has no matching owner or policy", async () => {
     const session = createFixedSession();
     const response = await route("POST", "/eve/v1/session/:sessionId", {
       auth: () => ({
@@ -121,6 +127,47 @@ describe("eve ID-addressed session routes", () => {
 
     expect(response.status).toBe(403);
     expect(session.prewarm).not.toHaveBeenCalled();
+  });
+
+  it("permits the creating user without an application policy", async () => {
+    const session = createFixedSession();
+    vi.mocked(isHttpSessionOwner).mockResolvedValueOnce(true);
+    const caller = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const response = await route("POST", "/eve/v1/session/:sessionId", { auth: () => caller })(
+      new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST" }),
+      createArgs(session),
+    );
+    expect(response.status).toBe(202);
+    expect(isHttpSessionOwner).toHaveBeenLastCalledWith(
+      "wrun_A",
+      expect.objectContaining({ principalId: "alice" }),
+    );
+    expect(session.prewarm).toHaveBeenCalledOnce();
+  });
+
+  it("records creation ownership before returning the session ID", async () => {
+    const createSession = vi.fn().mockResolvedValue({ sessionId: "created-for-alice" });
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+    const caller = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const response = await route("POST", "/eve/v1/session", { auth: () => caller })(
+      new Request("https://eve.test/eve/v1/session", { method: "POST" }),
+      args,
+    );
+    expect(response.status).toBe(202);
+    expect(recordHttpSessionOwner).toHaveBeenLastCalledWith(
+      "created-for-alice",
+      expect.objectContaining({ principalId: "alice" }),
+    );
   });
 
   it.each([
