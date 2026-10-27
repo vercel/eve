@@ -188,11 +188,19 @@ Use `gen_ai.tool.call.id` to correlate tool and approval spans. Tool failures us
 `error.type`. These attributes replace the duplicate `agent.action.call_id` and
 `agent.action.error.code` fields without changing trace schema version 4.
 
-A failed tool span's `error.type` is the call's `call.settled` error code. When
-that code is `ACTION_RESULT_FAILED` and the tool threw an error whose `name` is
-not `Error`, `error.type` is the name, on every trace. To classify a tool
-failure, throw an error class that sets its own `name`, such as
-`GitBrokerRefusedError`.
+A failed tool span's `error.type` is the call's error code or, when the tool
+threw, the error's `name`. A failure that carries its own code keeps it, and
+the name `Error` says nothing, so a plain `Error` keeps eve's code:
+`ACTION_RESULT_FAILED`, or `TOOL_FAILED` for a direct `invokeTool` call. The
+type is the same whether or not the trace records outputs, and it holds both
+eve's codes and error names. A subclass of `Error` keeps the name `Error`, so
+set `name` to classify a failure:
+
+```ts
+class QuotaError extends Error {
+  override name = "QuotaError";
+}
+```
 
 Model and activation spans record token counts under `gen_ai.usage.*`, without
 duplicate `agent.usage.*` token fields. Step and tool spans retain `agent.usage.*`.

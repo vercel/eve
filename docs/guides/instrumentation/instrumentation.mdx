@@ -174,7 +174,7 @@ Use `InstrumentationEvent<"model.call.settled">` from `eve/instrumentation` when
 standalone handler. Model input content is `unknown`: the messages are the provider's request
 messages, not an eve conversation-message schema. Narrow that content before reading it.
 
-Each call emits one `call.*` lifecycle; SDK callbacks do not duplicate it. A subagent's `call.settled` includes its reported usage. A thrown tool error is reconstructed from the durable record, so don't use `instanceof` to classify it; inspect `error.name` instead. A failed call's `call.settled` carries `errorCode`, and for a thrown error `errorName`, to every provider. `error`, which holds the message, is content.
+Each call emits one `call.*` lifecycle; SDK callbacks do not duplicate it. A subagent's `call.settled` includes its reported usage. A thrown tool error is reconstructed from the durable record, so don't use `instanceof` to classify it; read `errorName`. `errorName` and `errorCode` reach every provider; `error`, which carries the message, is content and is absent unless the provider records outputs.
 
 When upgrading, use each operation's terminal event and inspect its `outcome` instead of subscribing to separate completion and failure events. See the [v27 event mapping](/docs/concepts/upgrade-to-v27-events#event-mapping). Provider metadata moved to `model.call.settled`. Replace step indices and encoded attempt IDs with `runId` and `attempt`; use `capability` for call kind and name. Channel types and `isChannel` now come from `eve/channels`. Runtime-context resolvers receive `run: { id, attempt }` instead of `step.index`.
 

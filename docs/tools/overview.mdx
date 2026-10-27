@@ -263,7 +263,7 @@ Use operation-specific idempotency keys for external writes such as charges or e
 
 ## When a tool throws
 
-If an authored tool's `execute` function throws, eve records the call as `call.settled` with `outcome: "failed"` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
+If an authored tool's `execute` function throws, eve records the call as `call.settled` with `outcome: "failed"` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property. To classify the failure on traces, set `name` on the error you throw; it becomes the tool span's [`error.type`](/docs/observability/otel#trace-topology).
 
 Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: the model can issue a fresh call, and authored workflow steps have their own durable retries. A tool-call ID does not deduplicate an application operation across fresh calls.
 
