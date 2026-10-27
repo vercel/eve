@@ -321,16 +321,16 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
       POST<TwilioChannelState>(routes.transcription, transcription),
     ],
 
-    async receive(input, { from }) {
-      const phoneNumber = readNonEmptyString(input.target.phoneNumber);
+    async receive({ message, target, ...send }, { from }) {
+      const phoneNumber = readNonEmptyString(target.phoneNumber);
       if (!phoneNumber) {
         throw new Error("twilioChannel().receive requires target.phoneNumber.");
       }
-      const senderNumber = readNonEmptyString(input.target.from) ?? config.messaging?.from ?? null;
+      const senderNumber = readNonEmptyString(target.from) ?? config.messaging?.from ?? null;
       return from(
         twilioContinuationToken({ from: phoneNumber, to: senderNumber ?? undefined }),
-      ).send(input.message, {
-        auth: input.auth,
+      ).send(message, {
+        ...send,
         state: {
           from: phoneNumber,
           lastCallSid: null,

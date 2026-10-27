@@ -39,11 +39,12 @@ export async function postSessionCallbackRequest(input: {
 }): Promise<Response> {
   const timeoutMs = input.timeoutMs ?? SESSION_CALLBACK_TIMEOUT_MS;
   const signal = AbortSignal.timeout(timeoutMs);
+  const headers = await resolveSessionCallbackHeaders(input.url);
   let response: Response;
   try {
     response = await requestCallback(input.url, {
       body: JSON.stringify(input.body),
-      headers: await resolveSessionCallbackHeaders(input.url),
+      headers,
       signal,
     });
   } catch (error) {
@@ -147,14 +148,38 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
   } catch {
     return headers;
   }
-  const currentHost = VERCEL_CALLBACK_HOST_ENVS.some(
-    (name) => process.env[name]?.trim().toLowerCase() === url.hostname.toLowerCase(),
-  );
-  if (url.protocol !== "https:" || !currentHost) return headers;
+  const currentHost = VERCEL_CALLBACK_HOST_ENVS.some((name) => {
+    const host = process.env[name]?.trim();
+    return host !== undefined && host !== "" && URL.parse(`https://${host}`)?.origin === url.origin;
+  });
+  if (url.protocol !== "https:") return headers;
+  if (!currentHost && !configuredCallbackOrigins().includes(url.origin)) return headers;
 
   const token = readAmbientVercelOidcToken();
   if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
   return headers;
+}
+
+function configuredCallbackOrigins(): string[] {
+  const configured = process.env.EVE_CALLBACK_TRUSTED_ORIGINS?.trim();
+  if (!configured) return [];
+  return configured.split(",").map((entry) => {
+    const url = URL.parse(entry.trim());
+    if (
+      url === null ||
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      throw new FatalError(
+        "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments.",
+      );
+    }
+    return url.origin;
+  });
 }
 
 function readAmbientVercelOidcToken(): string | undefined {

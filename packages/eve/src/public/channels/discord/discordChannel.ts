@@ -343,8 +343,8 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
           ]),
     ],
 
-    async receive(input, { from }) {
-      const receiveTarget = input.target as Partial<DiscordReceiveTarget>;
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Partial<DiscordReceiveTarget>;
       const channelId = readNonEmptyString(receiveTarget.channelId);
       if (!channelId) {
         throw new Error("discordChannel().receive requires target.channelId.");
@@ -374,8 +374,8 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
       return from(
         discordContinuationToken({ channelId: channelId, conversationId: conversationId }),
-      ).send(input.message, {
-        auth: input.auth,
+      ).send(message, {
+        ...send,
         state: {
           applicationId: null,
           channelId,

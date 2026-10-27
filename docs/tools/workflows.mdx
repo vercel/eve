@@ -85,14 +85,14 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In an `execute` or `task` body, `ctx` is a `WorkflowToolContext` with `session`, `callId`,
-  `toolName`, `abortSignal`, `agent`, `agents`, and `ask`. A `serve` body gets a
-  `WorkflowServeContext` with `session`, `toolName`,
+  `toolName`, `abortSignal`, `channel`, `agent`, `agents`, and `ask`. A `serve` body gets a
+  `WorkflowServeContext` with `session`, `toolName`, `channel`,
   `agent`, `agents`, `ask`, and `reply`; each call it receives carries its own `callId` and
   `abortSignal`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `getSandbox`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
-  `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
-  Call `getSandbox`, `getToken`, and `requireAuth` in a step: the workflow body throws when it calls them.
+  `session`, `callId`, `toolName`, `abortSignal`, `channel`, `getSandbox`, `getToken`, `requireAuth`, and `to`. Read `ctx.agents`, and call
+  `ctx.agent()` and `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
+  Call `getSandbox`, `getToken`, `requireAuth`, and `to` in a step: the workflow body throws when it calls them.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools a `defineDynamic` function returns.
 
@@ -781,6 +781,48 @@ runs as a [task](#run-calls-as-tasks-task), so the reply reaches the model as th
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
+
+## Start channel sessions: `ctx.to`
+
+A workflow tool reaches the agent's channels with [`ctx.to(channel, target)`](/docs/tools#start-channel-sessions-ctxto), as an ordinary tool does. Call it in a `"use step"` helper that receives `ctx`, like `ctx.getSandbox()`; the workflow body throws when it calls it:
+
+```ts title="agent/tools/open_incident_channel.ts"
+import { defineWorkflowTool, type WorkflowStepToolContext } from "eve/tools";
+import { z } from "zod";
+import slack from "../channels/slack";
+import { createIncidentChannel } from "../lib/incidents";
+
+export default defineWorkflowTool({
+  description: "Open a Slack channel for an incident and continue the investigation there.",
+  inputSchema: z.object({ title: z.string(), summary: z.string() }),
+  async task({ title, summary }, ctx) {
+    "use workflow";
+    const channelId = await createChannel(title);
+    return await openIncident(ctx, channelId, summary);
+  },
+});
+
+async function createChannel(title: string) {
+  "use step";
+  return await createIncidentChannel(title);
+}
+
+async function openIncident(ctx: WorkflowStepToolContext, channelId: string, summary: string) {
+  "use step";
+  const delivery = await ctx
+    .to(slack, { channelId })
+    .send("Continue the investigation in this channel.", {
+      auth: ctx.session.auth.current,
+      history: [{ role: "user", text: summary }],
+      idempotencyKey: `${ctx.session.id}:${ctx.callId}:incident`,
+    });
+  return { channelId, sessionId: delivery.sessionId };
+}
+```
+
+A step that fails retries, so pass an `idempotencyKey` the retry repeats. The destination session dedupes keys from every sender, and `ctx.callId` is unique only within the calling session and is the same for every step of the call, so include `ctx.session.id` and add a label for each send. Create the channel in its own step: a retried send step then reuses the recorded `channelId` instead of creating another channel.
+
+`ctx.channel` holds the `kind`, `continuationToken`, and `metadata` of the channel serving the calling session, in the workflow body and in steps, as in [ordinary tools](/docs/tools#the-ctx-parameter).
 
 ## Report progress: `yield`
 

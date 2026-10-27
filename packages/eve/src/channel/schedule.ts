@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -6,7 +6,13 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import type { Delivery } from "#shared/delivery.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { commandDelivery } from "#channel/delivery.js";
-import type { Runtime } from "#channel/types.js";
+import type {
+  DispatchContinuationInput,
+  RunInput,
+  Runtime,
+  SessionCommand,
+  SessionCommandResult,
+} from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
@@ -135,29 +141,43 @@ export class ScheduleDispatcher {
     scope.set(AuthKey, auth);
     scope.set(OccurrenceIdKey, occurrence.executionId);
     scope.set(ScheduleInstanceKey, occurrence.name);
+    // A scheduled send must not steer a conversation it didn't start, so it never reaches the
+    // channel's address. A keyed send gets an address of its own, scoped to this schedule, so a
+    // retried callback reaches the session its first attempt started.
+    const scheduledToken = (channelToken: string | undefined, key: string | undefined) =>
+      key === undefined
+        ? `eve-scheduled-send:${randomUUID()}`
+        : `eve-scheduled-send:${createHash("sha256")
+            .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
+            .digest("hex")}`;
+    const freshRun = (run: RunInput): RunInput => ({
+      ...run,
+      auth,
+      initiatorAuth: auth,
+      capabilities: { requestInput: false },
+      continuationToken: scheduledToken(run.continuationToken, run.idempotencyKey),
+      continuationConflictCommand:
+        run.idempotencyKey === undefined ? undefined : run.continuationConflictCommand,
+    });
     return await contextStorage.run(scope, async () => {
       const runtime: Runtime = {
         ...this.runtime,
-        // A scheduled send must not steer an existing conversation or inherit interactive input.
         resolveContinuation: async () => undefined,
-        dispatchContinuation: async <TCommand extends import("#channel/types.js").SessionCommand>(
-          delivery: import("#channel/types.js").DispatchContinuationInput<TCommand>,
+        dispatchContinuation: async <TCommand extends SessionCommand>(
+          delivery: DispatchContinuationInput<TCommand>,
         ) => {
-          if (delivery.command.kind !== "send")
+          const { command } = delivery;
+          if (command.kind !== "send")
             throw new Error("Scheduled channel receive can only start a fresh session.");
-          return {
-            status: "session_not_active",
-          } as import("#channel/types.js").SessionCommandResult<TCommand>;
+          if (command.idempotencyKey === undefined)
+            return { status: "session_not_active" } as SessionCommandResult<TCommand>;
+          return await this.runtime.dispatchContinuation({
+            command,
+            continuationToken: scheduledToken(delivery.continuationToken, command.idempotencyKey),
+            successor: delivery.successor && freshRun(delivery.successor),
+          });
         },
-        createSession: async (run) =>
-          await this.runtime.createSession({
-            ...run,
-            auth,
-            initiatorAuth: auth,
-            capabilities: { requestInput: false },
-            continuationToken: `eve-scheduled-send:${randomUUID()}`,
-            continuationConflictCommand: undefined,
-          }),
+        createSession: async (run) => await this.runtime.createSession(freshRun(run)),
       };
       const { args, sessions, waitUntilTasks } = this.createHandlerContext(runtime);
       await definition.run({
@@ -165,7 +185,7 @@ export class ScheduleDispatcher {
         occurrence,
         auth,
         to: (channel, target) => ({
-          send: (message) => args.to(channel, target).send(message, { auth }),
+          send: (message, options) => args.to(channel, target).send(message, { ...options, auth }),
         }),
         waitUntil: args.waitUntil,
       });

@@ -118,26 +118,60 @@ describe("Client request policy", () => {
     }
   });
 
-  it("enforces its redirect policy for info, health, raw fetch, and sessions", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json(AGENT_INFO))
-      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
-      )
-      .mockResolvedValueOnce(endedStream());
-    const client = new Client({ baseUrl: "https://eve.test", redirect: "manual" });
+  it.each([undefined, "manual", "error"] as const)(
+    "enforces redirect policy %s for info, health, raw fetch, and sessions",
+    async (redirect) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json(AGENT_INFO))
+        .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(
+          Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
+        )
+        .mockResolvedValueOnce(endedStream());
+      const client = new Client({
+        baseUrl: "https://eve.test",
+        headers: { "x-client-credential": "test-only-credential" },
+        redirect,
+      });
 
-    await client.info();
-    await client.health();
-    await client.fetch("/custom", { redirect: "follow" });
-    await (await client.sessions.create({ message: "hello" })).delivery.result();
+      await client.info();
+      await client.health();
+      await client.fetch("/custom", { redirect: "follow" });
+      await (await client.sessions.create({ message: "hello" })).delivery.result();
 
-    expect(fetchMock.mock.calls).toHaveLength(5);
-    for (const [, init] of fetchMock.mock.calls) {
-      expect(init?.redirect).toBe("manual");
+      expect(fetchMock.mock.calls).toHaveLength(5);
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(init?.redirect).toBe(redirect ?? "error");
+        expect(new Headers(init?.headers).get("x-client-credential")).toBe("test-only-credential");
+      }
+    },
+  );
+
+  it("fails fast when a stream redirect is rejected by policy", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(
+          new TypeError("fetch failed", { cause: new Error("unexpected redirect") }),
+        );
+      const client = new Client({ baseUrl: "https://eve.test" });
+      const failed = client.sessions
+        .attach("session-1")
+        .stream({ follow: false })
+        [Symbol.asyncIterator]()
+        .next()
+        .catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+
+      expect(await failed).toMatchObject({
+        message: expect.stringContaining("refused a redirect"),
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
     }
   });
 

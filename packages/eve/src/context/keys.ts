@@ -29,6 +29,8 @@ import {
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 } from "#context/key-names.js";
 import type { HandleEventFn } from "#harness/types.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { DynamicRemoteBinding } from "#reactions/remote.js";
@@ -185,6 +187,11 @@ export const SandboxTerminalCleanupKey = new ContextKey<
   (reason: SandboxSessionEndReason) => Promise<void>
 >("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
+/** A tool's `ctx.channel` and `ctx.to()`, which the turn running the tool provides. */
+export const ToolChannelKey = new ContextKey<{
+  readonly channel: InstrumentationChannel;
+  readonly to: CrossChannelToFn;
+}>("eve.internal.toolChannel");
 
 // ---------------------------------------------------------------------------
 // Model keys

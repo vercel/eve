@@ -43,6 +43,8 @@ interface Asked {
 function harness(
   options: {
     readonly approvalChannel?: SlackApprovalChannelResolver;
+    /** Binds the session to a code channel instead of a thread. */
+    readonly codeChannel?: boolean;
     readonly renderers?: readonly SlackRenderer[];
     /** Slack's error code for a call it fails, or `NETWORK` for one that never gets an answer. */
     readonly fails?: (sent: Sent) => string | undefined;
@@ -71,8 +73,9 @@ function harness(
   const channel = {
     slack: {
       channelId: "C1",
+      codeChannel: options.codeChannel === true,
       request: async (method: string, body: Record<string, unknown>) => respond(method, body),
-      threadTs: "1.0",
+      threadTs: options.codeChannel === true ? "" : "1.0",
     },
     state,
     thread: {
@@ -914,6 +917,24 @@ describe("Slack input request cards", () => {
     expect(
       channel.state.interactionCards?.map((record) => record.requests[0]?.interactionId),
     ).toEqual(["a_two"]);
+  });
+
+  it("routes a code channel's card to the channel's session, before and after an update", async () => {
+    const { answer, ask, calls, commit } = harness({ codeChannel: true });
+    await ask(approval("a_deploy", "deploy"));
+    await answer("a_deploy", { optionId: "approve" });
+
+    await commit({
+      data: { outcome: "refused", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    // The card sits outside any thread, so its clicks carry the code channel's address.
+    for (const message of [calls("thread.post")[0], calls("chat.update").at(-1)]) {
+      const ids = eveActionIds(message?.body);
+      expect(ids).toHaveLength(2);
+      for (const id of ids) expect(id).toMatch(/^eve_input:code:C1:tool-approval:/u);
+    }
   });
 });
 

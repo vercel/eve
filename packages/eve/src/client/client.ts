@@ -29,7 +29,7 @@ export class Client {
   readonly #auth: ClientAuth | undefined;
   readonly #headers: HeadersValue | undefined;
   readonly #baseUrl: string;
-  readonly #redirect: ClientRedirectPolicy | undefined;
+  readonly #redirect: ClientRedirectPolicy;
   /** Explicit create/attach surface for ID-addressed sessions. */
   readonly sessions: ClientSessions;
 
@@ -37,7 +37,7 @@ export class Client {
     this.#baseUrl = options.baseUrl;
     this.#auth = options.auth;
     this.#headers = options.headers;
-    this.#redirect = options.redirect;
+    this.#redirect = options.redirect ?? "error";
     this.sessions = new ClientSessions({
       baseUrl: this.#baseUrl,
       redirect: this.#redirect,
@@ -224,9 +224,6 @@ function headersInitToRecord(
   return Object.fromEntries(new Headers(headers).entries());
 }
 
-function withRedirectPolicy(
-  init: RequestInit,
-  redirect: ClientRedirectPolicy | undefined,
-): RequestInit {
-  return redirect === undefined ? init : { ...init, redirect };
+function withRedirectPolicy(init: RequestInit, redirect: ClientRedirectPolicy): RequestInit {
+  return { ...init, redirect };
 }

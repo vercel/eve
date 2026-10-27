@@ -12,6 +12,7 @@ import {
   responderOf,
 } from "#channel/interaction-prompts.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { slackSessionTargetOf } from "#public/channels/slack/api.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { ChannelEventContext } from "#public/definitions/channel.js";
@@ -20,7 +21,6 @@ import {
   slackUserIdFromAuthContext,
 } from "#public/channels/slack/auth.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import type { SlackHitlRoute } from "#public/channels/slack/hitl.js";
 import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
@@ -103,9 +103,11 @@ async function postThreadCards(
     });
     return;
   }
+  // A card in a code channel sits outside any thread, so its clicks carry the session's address.
+  const route = channel.slack.codeChannel ? slackSessionTargetOf(channel.slack) : undefined;
   const entries = requests.map((request): CardEntry => ({
     interactionId: request.interactionId,
-    ...renderRequestCard(chain, cardOf(request, "thread", ctx)),
+    ...renderRequestCard(chain, cardOf(request, "thread", ctx), route),
   }));
   const post = async (message: SlackCardMessage) =>
     (await channel.thread.post({ blocks: [...message.blocks], text: message.text })).id;
@@ -115,16 +117,18 @@ async function postThreadCards(
     for (const part of parts) detailsTs.set(part.interactionId, ts);
   });
   // Each controls message is recorded as it posts, so a later group's failure keeps it tracked.
-  await postGroups(entries, "controls", post, (parts, ts) =>
-    remember(channel.state, {
+  await postGroups(entries, "controls", post, (parts, ts) => {
+    const record: Mutable<SlackInteractionCardRecord> = {
       channelId,
       destination: "thread",
       requests: parts.map(({ interactionId, message }) =>
         cardRequest(interactionId, message.blocks, detailsTs.get(interactionId)),
       ),
       ts,
-    }),
-  );
+    };
+    if (route !== undefined) record.route = route;
+    remember(channel.state, record);
+  });
 }
 
 /**
@@ -199,10 +203,7 @@ async function postDirectMessageCard(
     });
     return;
   }
-  const route: SlackHitlRoute = {
-    channelId: channel.slack.channelId,
-    threadTs: channel.slack.threadTs,
-  };
+  const route = slackSessionTargetOf(channel.slack);
   const delivery = await deliverPrivateInteraction({
     card: renderRequestCard(chain, cardOf(request, "direct-message", ctx), route),
     previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,

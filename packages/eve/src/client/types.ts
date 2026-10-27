@@ -94,10 +94,11 @@ export interface ClientOptions {
   readonly headers?: HeadersValue;
 
   /**
-   * Redirect policy for every request, including streams. Overrides a
-   * per-request `RequestInit.redirect`. Credential-bearing clients should use
-   * `"manual"` or `"error"` so custom auth headers can't follow a cross-origin
-   * redirect.
+   * Redirect policy for every request, including streams. Defaults to
+   * `"error"` and overrides a per-request `RequestInit.redirect`. Use
+   * `"manual"` to stop at redirects. Browsers expose an opaque response;
+   * Node.js exposes the redirect status and headers.
+   * `"follow"` explicitly permits forwarding custom headers on redirects.
    */
   readonly redirect?: ClientRedirectPolicy;
 }

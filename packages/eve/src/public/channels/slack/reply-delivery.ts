@@ -147,8 +147,9 @@ export async function deliverCompletedSlackReply(
  * from a missing message, so the check is skipped.
  */
 async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
-  const { channelId, threadTs } = channel.slack;
-  if (!channelId || !threadTs) return false;
+  const { channelId, codeChannel, threadTs } = channel.slack;
+  // A code channel has no session root, and a reply that lands top-level stays in the channel.
+  if (!channelId || !threadTs || codeChannel) return false;
   if ((channel as Partial<SlackChannelContext>).state?.postedInThread === true) return false;
   try {
     const response = await channel.slack.request("chat.getPermalink", {
@@ -168,7 +169,8 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
     mimeType: "text/markdown",
   };
 
-  const hasThread = channel.slack.threadTs.length > 0;
+  // A code channel posts top-level by design; only a threadless proactive session needs an anchor.
+  const hasThread = channel.slack.codeChannel || channel.slack.threadTs.length > 0;
   if (!hasThread) {
     // Uploads cannot anchor proactive sessions; post the notice first.
     const anchor = await channel.thread.post(LONG_RESPONSE_NOTICE);
