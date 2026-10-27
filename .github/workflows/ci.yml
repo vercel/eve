@@ -36,9 +36,6 @@ jobs:
       - name: Check dependency versions are in sync
         run: pnpm check:deps
 
-      - name: Validate changeset summaries
-        run: node scripts/check-changesets.mjs
-
       - name: Check the pinned sandbox image tag matches the Dockerfile
         run: pnpm check:sandbox-image-tag
 

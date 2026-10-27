@@ -50,7 +50,8 @@
  *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
- *   rule 29 — Changeset package keys must match workspace package names.
+ *   rule 29 — Changeset package keys must match workspace package names and
+ *             summaries must start with one complete sentence.
  *             Release metadata is consumed before `pnpm release`, so bad
  *             changeset package names must fail in PR CI rather than in the
  *             post-merge release workflow.
@@ -170,6 +171,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
+import { parseSummary } from "./changeset-format.mjs";
 import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
@@ -1253,7 +1255,7 @@ function checkRule28(posix, lines, violations) {
   }
 }
 
-// ---------- Rule 29: changeset package names exist in the workspace ----------
+// ---------- Rule 29: changeset package names and summaries ----------
 
 const CHANGESET_DIR = ".changeset";
 
@@ -1331,6 +1333,16 @@ async function checkRule29ChangesetPackageNames() {
         rule: 29,
         file: relPath,
         message: `changeset references package "${packageName}", but no workspace package has that name. Use the exact package.json "name" from the target workspace package; for packages/eve that is "eve".`,
+      });
+    }
+    try {
+      const frontmatter = FRONTMATTER_RE.exec(content);
+      parseSummary(content.slice(frontmatter[0].length), entry.name);
+    } catch (error) {
+      violations.push({
+        rule: 29,
+        file: relPath,
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   }

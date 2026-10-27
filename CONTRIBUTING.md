@@ -254,7 +254,9 @@ Thanks @octocat for reporting this in #1234.
 
 For a PR with a changeset, use `feat:` or `fix:` at the start of the PR title. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. The title selects the category independently of the version bump, and applies to every changeset in the PR. Put contributor credits in the following paragraphs; mentioned GitHub handles appear in the contributor list.
 
-CI validates the summary format and the PR title. The release workflow finds the original pull request from the commit that introduced the changeset and uses its title for classification. It includes the pull request author, GitHub noreply co-authors, and credited handles, excluding bots. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
+Run `pnpm guard:invariants` to validate changeset summaries. To check a proposed PR title before opening the PR, run `pnpm check:pr-title "feat: description"`. CI also checks the actual PR title.
+
+The release workflow finds the original pull request from the commit that introduced the changeset and uses its title for classification. It includes the pull request author, GitHub noreply co-authors, and credited handles, excluding bots. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
 
 ## Developer Certificate of Origin (DCO)
 

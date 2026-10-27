@@ -27,6 +27,17 @@ test("changeset summaries are plain sentences and PR titles select the category"
   assert.throws(() => classifyTitle("docs: Update the guide"), /Invalid release PR title/u);
 });
 
+test("proposed PR titles can be validated locally without GitHub", () => {
+  execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs", "feat(eve): Add a tool"]);
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs", "Update the guide"], {
+        stdio: "pipe",
+      }),
+    /Command failed/u,
+  );
+});
+
 test("the Changesets formatter produces readable Markdown without encoded metadata", async (t) => {
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const oldToken = process.env.GITHUB_TOKEN;
@@ -75,7 +86,6 @@ test("version-packages assembles changesets across bump types and preserves old 
     ".changeset/changelog.mjs",
     "scripts/changeset-format.mjs",
     "scripts/changeset-github.mjs",
-    "scripts/check-changesets.mjs",
     "scripts/check-release-pr-title.mjs",
     "scripts/version-packages.mjs",
   ]) {

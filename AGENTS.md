@@ -263,9 +263,10 @@ For PRs with changesets, use `feat:`, `fix:`, `docs(feature):`,
 `build:`, or `internal:`) in the PR title. An optional scope is allowed for
 all types except `docs`, where the scope selects the feature or bug fix section.
 The title determines the release section independently of the version bump;
-internal changes are omitted from both public sections. CI validates the title
-and changeset summaries; run `node scripts/check-changesets.mjs` to check
-summaries locally. See
+internal changes are omitted from both public sections. Run
+`pnpm guard:invariants` to validate changeset summaries and
+`pnpm check:pr-title "feat: description"` to check a proposed PR title locally.
+CI validates the actual PR title. See
 [Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When

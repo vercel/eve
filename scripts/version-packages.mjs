@@ -53,7 +53,6 @@ async function formatChangelog(path, version) {
 }
 
 async function main() {
-  execFileSync(process.execPath, ["scripts/check-changesets.mjs"], { stdio: "inherit" });
   const before = await getPackages(process.cwd());
   const versions = new Map(
     before.packages.map(({ dir, packageJson }) => [dir, packageJson.version]),
