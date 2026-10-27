@@ -177,7 +177,7 @@ test("attaches metrics to captured attempts and marks missing attempts as gaps",
   assert.equal(captured.gap_reason, null);
   assert.equal(captured.metrics_version, METRICS_VERSION);
   assert.deepEqual(Object.keys(captured.metrics).sort(), Object.keys(STANDARD_METRICS).sort());
-  assert.deepEqual(captured.metrics["tokens.input"], { status: "measured", value: 1117 });
+  assert.deepEqual(captured.metrics["tokens.input"], { status: "measured", value: 1126 });
   // The fixture's model reports no cost: unavailable with a reason, never zero.
   assert.deepEqual(captured.metrics["cost.total_usd"], {
     status: "unavailable",
@@ -203,7 +203,7 @@ test("derives durable work from the leg's world probe", (t) => {
     new URL("../eval-metrics/fixtures/agent-tools-ends-turn-function.json", import.meta.url),
     join(leg, "run", "evals", "static-tools", "ends-turn-function.json"),
   );
-  const runId = "wrun_01M476RTSJ569Y4TN0BBRB2ED0";
+  const runId = "wrun_01M5Y50PP56494TX3DF4AK0K3D";
   const step = (n) => [
     { eventType: "step_created", payloadBytes: { input: 100 * n } },
     { eventType: "step_started", payloadBytes: {} },

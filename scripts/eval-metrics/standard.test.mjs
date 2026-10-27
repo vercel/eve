@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { classifyOutcome } from "./gaps.mjs";
+import { sessionEvents } from "./measurements/events.mjs";
 import { listMarks, sessionMarks } from "./measurements/marks.mjs";
 import {
   METRICS_VERSION,
@@ -12,7 +13,8 @@ import {
 
 // Fixtures are trimmed `eve eval` detail artifacts captured from mock-model
 // runs of e2e/fixtures/agent-tools and agent-subagents (mock models report
-// no cost, so cost cases inject it below).
+// no cost, so cost cases inject it below). `legacy-*` ones predate v27
+// session facts (eve before 0.84.0).
 const fixture = (name) =>
   JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 const values = (metrics) =>
@@ -20,11 +22,33 @@ const values = (metrics) =>
     Object.entries(metrics).map(([key, m]) => [key, m.status === "measured" ? m.value : m.status]),
   );
 const at = (ms) => new Date(Date.UTC(2026, 0, 1) + ms).toISOString();
-const event = (type, ms, data = {}) => ({
-  type,
-  meta: { id: `${type}@${ms}:${JSON.stringify(data)}`, at: at(ms) },
-  data,
-});
+
+// v27 facts; `synthetic` puts each in its own commit line, in stream order.
+const fact = (type, ms, data = {}) => ({ type, data, meta: { at: at(ms) } });
+const turn = (start, end, inner, outcome = "completed", turnId = "t") => [
+  fact("turn.started", start, { turnId, cause: { deliveryId: `d-${turnId}` } }),
+  ...inner,
+  fact("turn.settled", end, { turnId, outcome }),
+];
+const run = (runId, ms, turnId = "t") => [
+  fact("model.requested", ms, { runId, owner: { turnId } }),
+  fact("model.started", ms, { runId, modelId: "m", attempt: 0 }),
+];
+const settled = (runId, ms, usage, data = {}) => [
+  fact("model.settled", ms, { runId, outcome: "completed", ...data }),
+  ...(usage === undefined
+    ? []
+    : [fact("usage.recorded", ms, { owner: { runId }, kind: "model", usage })]),
+];
+const call = (callId, runId, ms, kind = "tool") =>
+  fact("call.requested", ms, { callId, owner: { runId }, capability: { kind, name: callId } });
+const callSettled = (callId, ms, outcome = "completed") =>
+  fact("call.settled", ms, { callId, outcome });
+// Streamed text, which carries the time of the commit before it (`after`).
+const delta = (runId, after, partId = `${runId}.0`, kind = "text") =>
+  fact("content.delta", after, { partId, kind, delta: "." });
+const completed = (runId, ms, partId = `${runId}.0`, kind = "text") =>
+  fact("content.completed", ms, { runId, partId, kind, phase: "reply" });
 
 const synthetic = (events, extra = {}) => ({
   id: "synthetic",
@@ -34,34 +58,45 @@ const synthetic = (events, extra = {}) => ({
   result: {
     sessionId: "s",
     status: "completed",
-    sessions: [{ sessionId: "s", primary: true, events }],
+    sessions: [
+      {
+        sessionId: "s",
+        primary: true,
+        events: events.map((e, line) =>
+          typeof e.meta.id === "string"
+            ? e
+            : { ...e, meta: { ...e.meta, position: { line, index: 0 } } },
+        ),
+      },
+    ],
   },
   ...extra,
 });
-const turn = (start, end, inner, terminal = "turn.completed") => [
-  event("turn.started", start, { turnId: "t" }),
-  ...inner,
-  event(terminal, end, { turnId: "t" }),
-];
+/** Each event reaches the client `lag` ms after its commit; deltas arrive at `arrivals`. */
+const clocked = (events, { lag = 10, arrivals = new Map(), sends = [] } = {}) => {
+  const artifact = synthetic(events);
+  artifact.result.sessions[0].clock = {
+    receivedAt: events.map((e) => arrivals.get(e) ?? Date.parse(e.meta.at) + lag),
+    sends,
+  };
+  return artifact;
+};
 const compactedArtifact = () => {
   const artifact = synthetic([
-    ...turn(0, 100, [
-      event("step.started", 10, { turnId: "t", stepIndex: 0 }),
-      event("step.completed", 90, {
-        turnId: "t",
-        stepIndex: 0,
-        usage: { inputTokens: 10, outputTokens: 2 },
-      }),
-    ]),
-    event("compaction.requested", 150, { turnId: "t", stepIndex: 1 }),
-    event("compaction.completed", 200, { turnId: "t", stepIndex: 1 }),
+    ...turn(0, 100, [...run("r", 10), ...settled("r", 90, { inputTokens: 10, outputTokens: 2 })]),
+    fact("context.started", 150, { changeId: "c", kind: "compaction" }),
+    fact("model.requested", 151, { runId: "summary", owner: { changeId: "c" } }),
+    fact("model.started", 151, { runId: "summary", modelId: "m", attempt: 0 }),
+    ...settled("summary", 199, { inputTokens: 50, outputTokens: 8 }),
+    fact("context.settled", 200, { changeId: "c", kind: "compaction", outcome: "completed" }),
   ]);
-  artifact.result.derived = { usage: { inputTokens: 10, outputTokens: 2 } };
+  artifact.result.derived = { usage: { inputTokens: 60, outputTokens: 10 } };
   return artifact;
 };
 
 // Recorded eve streams from durable-harness, with the marks and /compare
 // breakdown its own code computes (fixtures/durable-harness/generate.mjs).
+// They predate v27, so they also cover the upgrade of older captures.
 const durableHarness = JSON.parse(
   readFileSync(new URL("./fixtures/durable-harness/expected.json", import.meta.url), "utf8"),
 );
@@ -90,27 +125,27 @@ test("derives representative metrics from a captured tool eval", () => {
   assert.deepEqual(Object.keys(metrics).sort(), Object.keys(STANDARD_METRICS).sort());
   assert.deepEqual(failures, []);
   const v = values(metrics);
-  assert.equal(v["latency.eval_wall_ms"], 1050);
-  assert.equal(v["latency.turn_ms"], 116);
-  assert.equal(v["latency.ttft_ms_p50"], 4);
-  // Model steps end at model.done (here, the tool calls), not step.completed.
-  assert.equal(v["attribution.model_ms"], 15);
-  assert.equal(v["attribution.tool_ms"], 3);
-  assert.equal(v["attribution.framework_ms"], 98);
-  assert.deepEqual(metrics["overhead.pre_model_ms"], {
-    status: "measured",
-    value: 1,
-    count: 2,
-    samples: [2, 0],
-  });
+  assert.equal(v["latency.eval_wall_ms"], 296);
+  assert.equal(v["latency.turn_ms"], 92);
+  // Model steps run from model.started to model.done: the call, or the last output.
+  assert.equal(v["attribution.model_ms"], 25);
+  assert.equal(v["attribution.tool_ms"], 8);
+  assert.equal(v["attribution.framework_ms"], 59);
+  // The last step's delta carries the time of the commit before it; its
+  // arrival, less the next commit's delivery lag, places it at 273 ms.
+  assert.equal(v["latency.ttft_ms_p50"], 8);
+  assert.deepEqual(metrics["overhead.pre_model_ms"].samples, [7, 8]);
   // The first turn's tool ends its turn, so only the second has a next model call.
-  assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [68]);
-  assert.deepEqual(metrics["overhead.finalize_ms"].samples, [18, 10]);
-  // Artifacts from before eve recorded client timing, and legs with no world probe.
-  assert.equal(metrics["overhead.turn_ms"].reason, "missing-client-clock");
+  assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [20]);
+  assert.deepEqual(metrics["overhead.finalize_ms"].samples, [12, 12]);
+  // On the client clock: the create request and the second message.
+  assert.deepEqual(metrics["overhead.first_output_ms"].samples, [120, 109]);
+  assert.deepEqual(metrics["overhead.turn_ms"].samples, [126, 132]);
+  assert.deepEqual(metrics["overhead.tool_call_ms"].samples, [26]);
+  assert.deepEqual(metrics["session.create_ms"].samples, [28]);
   assert.equal(metrics["durability.workflow_steps_per_turn"].reason, "missing-world-probe");
-  assert.equal(v["tokens.input"], 1117);
-  assert.equal(v["tokens.peak_context"], 391);
+  assert.equal(v["tokens.input"], 1126);
+  assert.equal(v["tokens.peak_context"], 394);
   assert.equal(v["counts.turns"], 2);
   assert.equal(v["counts.steps"], 3);
   assert.equal(v["counts.tool_calls"], 2);
@@ -123,29 +158,67 @@ test("derives representative metrics from a captured tool eval", () => {
 test("attributes delegated work to tasks across repeated captures of one session", () => {
   const { metrics } = deriveAttemptMetrics(fixture("agent-subagents-continuation-local"));
   const v = values(metrics);
-  assert.equal(v["attribution.task_ms"], 2465);
-  assert.equal(v["attribution.tool_ms"], 133);
-  assert.equal(v["counts.turns"], 3, "child sessions are not root turns");
-  assert.equal(v["counts.subagent_fan_out"], 1);
+  // Each agent call from its task handoff to its result.
+  assert.equal(v["attribution.task_ms"], 285 + 197 + 2120 + 185 + 144);
+  // The agent calls until their handoff, and task waits outside task time.
+  assert.equal(v["attribution.tool_ms"], 340);
+  assert.equal(v["counts.turns"], 5, "child sessions are not root turns");
+  assert.equal(v["counts.tool_calls"], 6, "task waits and cancels, not agent calls");
+  assert.equal(v["counts.subagent_fan_out"], 2);
   assert.equal(v["counts.subagent_depth"], 1);
-  // The task call's request to the child session's first turn.
-  assert.deepEqual(metrics["overhead.agent_start_ms"].samples, [141]);
-  // Rolled-up usage includes the child's spend.
-  assert.equal(v["tokens.input"], 6006);
+  // The first agent call's request to its child session's first turn; the
+  // second child was never captured.
+  assert.deepEqual(metrics["overhead.agent_start_ms"].samples, [289]);
+  // Rolled-up usage includes the children's spend.
+  assert.equal(v["tokens.input"], 11901);
   assertPartition(metrics);
+});
+
+test("a pre-v27 capture measures as it did before eve 0.84.0", () => {
+  const tools = deriveAttemptMetrics(fixture("legacy-agent-tools-ends-turn-function")).metrics;
+  const v = values(tools);
+  assert.equal(v["latency.eval_wall_ms"], 1050);
+  assert.equal(v["latency.turn_ms"], 116);
+  assert.equal(v["latency.ttft_ms_p50"], 4);
+  assert.equal(v["attribution.model_ms"], 15);
+  assert.equal(v["attribution.tool_ms"], 3);
+  assert.equal(v["attribution.framework_ms"], 98);
+  assert.deepEqual(tools["overhead.pre_model_ms"].samples, [2, 0]);
+  assert.deepEqual(tools["overhead.tool_hop_ms"].samples, [68]);
+  assert.deepEqual(tools["overhead.finalize_ms"].samples, [18, 10]);
+  // Artifacts from before eve recorded client timing.
+  assert.equal(tools["overhead.turn_ms"].reason, "missing-client-clock");
+  assert.equal(v["tokens.peak_context"], 391);
+  assert.equal(v["counts.steps"], 3);
+  assert.equal(v["counts.tool_calls"], 2);
+  assert.equal(tools["cost.primary_usd"].reason, "missing-step-cost");
+
+  const subagents = values(
+    deriveAttemptMetrics(fixture("legacy-agent-subagents-continuation-local")).metrics,
+  );
+  assert.equal(subagents["attribution.task_ms"], 2465);
+  assert.equal(subagents["attribution.tool_ms"], 133);
+  assert.equal(subagents["counts.turns"], 3);
+  assert.equal(subagents["counts.subagent_fan_out"], 1);
+  assert.equal(subagents["counts.subagent_depth"], 1);
+  assert.equal(subagents["overhead.agent_start_ms"], 141);
 });
 
 test("an attempt from before agent.started delegation measures nothing", () => {
   // eve < 0.69.0: the child session has no `agent.started` link to its parent.
-  const artifact = synthetic(
-    turn(0, 100, [
-      event("subagent.called", 10, { turnId: "t", callId: "c" }),
-      event("subagent.completed", 90, { turnId: "t", callId: "c" }),
-    ]),
-  );
+  const legacy = (type, ms, data) => ({ type, data, meta: { id: `${type}@${ms}`, at: at(ms) } });
+  const artifact = synthetic([
+    legacy("turn.started", 0, { turnId: "t" }),
+    legacy("subagent.called", 10, { turnId: "t", callId: "c" }),
+    legacy("subagent.completed", 90, { turnId: "t", callId: "c" }),
+    legacy("turn.completed", 100, { turnId: "t" }),
+  ]);
   artifact.result.sessions.push({
     sessionId: "child",
-    events: turn(20, 80, []).map((e) => ({ ...e, meta: { ...e.meta, id: `child:${e.meta.id}` } })),
+    events: [legacy("turn.started", 20, { turnId: "t" })].map((e) => ({
+      ...e,
+      meta: { ...e.meta, id: `child:${e.meta.id}` },
+    })),
   });
   const { metrics } = deriveAttemptMetrics(artifact);
   assert.deepEqual(
@@ -155,11 +228,18 @@ test("an attempt from before agent.started delegation measures nothing", () => {
   );
 });
 
-test("excludes sign-in wait from latency and counts it as human wait", () => {
+test("excludes a person's wait from latency and counts it as human wait", () => {
   const artifact = synthetic(
     turn(0, 1000, [
-      event("authorization.required", 100, { turnId: "t", name: "account" }),
-      event("authorization.completed", 274, { turnId: "t", name: "account" }),
+      fact("interaction.opened", 100, {
+        interactionId: "i",
+        subject: { turnId: "t" },
+        request: { kind: "sign-in", prompt: "Sign in" },
+      }),
+      fact("turn.paused", 100, { turnId: "t", awaiting: [{ interactionId: "i" }] }),
+      // An invalid answer leaves the question open.
+      fact("interaction.settled", 200, { interactionId: "i", outcome: "invalid" }),
+      fact("interaction.settled", 274, { interactionId: "i", outcome: "accepted" }),
     ]),
   );
   artifact.completedAt = at(1072);
@@ -170,23 +250,24 @@ test("excludes sign-in wait from latency and counts it as human wait", () => {
   assertPartition(metrics);
 });
 
-test("compaction outside a turn does not count toward turn time", () => {
+test("compaction outside a turn does not count toward turn time or steps", () => {
   const { metrics } = deriveAttemptMetrics(compactedArtifact());
-  assert.equal(values(metrics)["counts.compactions"], 1);
-  assert.equal(values(metrics)["attribution.compaction_ms"], 0);
+  const v = values(metrics);
+  assert.equal(v["counts.compactions"], 1);
+  assert.equal(v["counts.steps"], 1, "the summary run is not a model step");
+  assert.equal(v["attribution.compaction_ms"], 0);
   assertPartition(metrics);
 });
 
+/** Puts `stepCost` on each of the root session's runs and `rolledUpCost` on the eval total. */
 function withCosts(artifact, { stepCost, rolledUpCost }) {
   const copy = structuredClone(artifact);
-  // The runner's eval total (result.derived.usage) carries the rolled-up cost.
   copy.result.derived.usage.costUsd = rolledUpCost;
   for (const session of copy.result.sessions) {
-    for (const e of session.events) {
-      if (session.sessionId !== copy.result.sessionId) continue;
-      if (e.type === "step.completed") e.data.usage.costUsd = stepCost;
-      if (["session.waiting", "turn.waiting"].includes(e.type)) e.data.usage.costUsd = rolledUpCost;
-    }
+    if (session.sessionId !== copy.result.sessionId) continue;
+    for (const e of session.events)
+      if (e.type === "usage.recorded" && e.data.owner?.runId !== undefined)
+        e.data.usage.costUsd = stepCost;
   }
   return copy;
 }
@@ -194,12 +275,12 @@ function withCosts(artifact, { stepCost, rolledUpCost }) {
 test("splits cost into primary steps and rolled-up subagent spend", () => {
   const artifact = withCosts(fixture("agent-subagents-continuation-local"), {
     stepCost: 0.25,
-    rolledUpCost: 4,
+    rolledUpCost: 6,
   });
   const v = values(deriveAttemptMetrics(artifact).metrics);
-  assert.equal(v["cost.primary_usd"], 2.5, "ten primary steps");
-  assert.equal(v["cost.total_usd"], 4);
-  assert.equal(v["cost.subagent_usd"], 1.5);
+  assert.equal(v["cost.primary_usd"], 4, "sixteen primary steps");
+  assert.equal(v["cost.total_usd"], 6);
+  assert.equal(v["cost.subagent_usd"], 2);
 });
 
 test("cost and tokens are the runner's eval usage, and unavailable without it", () => {
@@ -218,8 +299,8 @@ test("cost and tokens are the runner's eval usage, and unavailable without it", 
   assert.equal(v["tokens.cache_read"], 40);
   assert.equal(v["tokens.cache_write"], 5);
   assert.equal(v["tokens.cache_hit_ratio"], 0.2);
-  // Peak context is per step, from the events, not the eval total.
-  assert.equal(v["tokens.peak_context"], 391);
+  // Peak context is per step, from the facts, not the eval total.
+  assert.equal(v["tokens.peak_context"], 394);
 
   // A counted session reported no cost: the runner leaves costUsd out.
   delete artifact.result.derived.usage.costUsd;
@@ -239,15 +320,12 @@ test("cost and tokens are the runner's eval usage, and unavailable without it", 
 });
 
 test("compaction cost stays in the total but leaves the subagent split unknown", () => {
-  // Compaction summary calls are paid and roll up into session usage, but no
-  // step reports them: total − steps would misreport them as subagent spend.
-  const artifact = withCosts(compactedArtifact(), {
-    stepCost: 0.25,
-    rolledUpCost: 2,
-  });
+  // The summary run's cost rolls up into session usage, but no step spent it:
+  // total − steps would misreport it as subagent spend.
+  const artifact = withCosts(compactedArtifact(), { stepCost: 0.25, rolledUpCost: 2 });
   const { metrics } = deriveAttemptMetrics(artifact);
   assert.equal(values(metrics)["cost.total_usd"], 2);
-  assert.equal(metrics["cost.primary_usd"].status, "measured");
+  assert.equal(values(metrics)["cost.primary_usd"], 0.25);
   assert.deepEqual(metrics["cost.subagent_usd"], {
     status: "unavailable",
     reason: "compaction-cost-unattributed",
@@ -267,8 +345,8 @@ test("a single step without cost makes cost unavailable, and inconsistent rollup
     "inconsistent-cost-rollup",
   );
 
-  const step = artifact.result.sessions[0].events.find((e) => e.type === "step.completed");
-  delete step.data.usage.costUsd;
+  const usage = artifact.result.sessions[0].events.find((e) => e.type === "usage.recorded");
+  delete usage.data.usage.costUsd;
   const { metrics } = deriveAttemptMetrics(artifact);
   assert.equal(metrics["cost.primary_usd"].reason, "missing-step-cost");
   assert.equal(metrics["cost.subagent_usd"].reason, "missing-step-cost");
@@ -276,60 +354,78 @@ test("a single step without cost makes cost unavailable, and inconsistent rollup
 });
 
 test("overlapping parallel tools count once and streaming metrics use model marks", () => {
-  const step = { turnId: "t", stepIndex: 0 };
+  const reasoning = delta("r", 100, "r.reasoning", "reasoning");
+  const text = delta("r", 100);
   const events = turn(0, 1000, [
-    event("step.started", 100, step),
-    event("reasoning.appended", 150, step),
-    event("message.appended", 300, step),
-    event("actions.requested", 400, {
-      ...step,
-      actions: [
-        { kind: "tool-call", callId: "a" },
-        { kind: "tool-call", callId: "b" },
-      ],
-    }),
-    event("action.result", 700, { ...step, result: { callId: "b" }, status: "failed" }),
-    event("action.result", 600, { ...step, result: { callId: "a" }, status: "completed" }),
-    event("step.completed", 750, { ...step, usage: { outputTokens: 60, inputTokens: 900 } }),
+    ...run("r", 100),
+    reasoning,
+    text,
+    completed("r", 380),
+    completed("r", 380, "r.reasoning", "reasoning"),
+    call("a", "r", 400),
+    call("b", "r", 400),
+    callSettled("b", 700, "failed"),
+    callSettled("a", 600),
+    ...settled("r", 750, { outputTokens: 60, inputTokens: 900 }),
   ]);
-  const v = values(deriveAttemptMetrics(synthetic(events)).metrics);
+  // The deltas were streamed at 150 and 300: their arrivals, less the next commit's lag.
+  const arrivals = new Map([
+    [reasoning, Date.parse(at(160))],
+    [text, Date.parse(at(310))],
+  ]);
+  const v = values(deriveAttemptMetrics(clocked(events, { arrivals })).metrics);
   assert.equal(v["attribution.tool_ms"], 300);
   assert.equal(v["attribution.model_ms"], 300);
   assert.equal(v["attribution.framework_ms"], 400);
   assert.equal(v["latency.ttft_ms_p50"], 50);
-  // 60 tokens from the first delta to model.done (the tool calls).
+  // 60 tokens from the first delta to model.done (the calls).
   assert.equal(v["latency.output_tokens_per_s"], 240);
   assert.equal(v["reliability.tool_error_rate"], 0.5);
   assert.equal(v["counts.tool_calls_per_step"], 2);
 });
 
+test("a delta is placed between the commits around it, and unknown without a client clock", () => {
+  const text = delta("r", 100);
+  const events = turn(0, 500, [
+    ...run("r", 100),
+    text,
+    completed("r", 300),
+    ...settled("r", 300, { outputTokens: 10 }),
+  ]);
+  // Read in one late batch: its arrival less the smallest lag would land after the next commit.
+  const batched = clocked(events, { arrivals: new Map([[text, Date.parse(at(400))]]) });
+  assert.equal(values(deriveAttemptMetrics(batched).metrics)["latency.ttft_ms_p50"], 200);
+  // Its own time is only the commit before it, which would read as an instant first token.
+  assert.equal(
+    deriveAttemptMetrics(synthetic(events)).metrics["latency.ttft_ms_p50"].reason,
+    "no-streamed-steps",
+  );
+});
+
 test("partial captures make attribution unavailable instead of guessing", () => {
-  const openTurn = [
-    event("turn.started", 0, { turnId: "t" }),
-    event("step.started", 10, { turnId: "t", stepIndex: 0 }),
-  ];
+  const openTurn = [fact("turn.started", 0, { turnId: "t" }), ...run("r", 10)];
   assert.equal(
     deriveAttemptMetrics(synthetic(openTurn)).metrics["attribution.framework_ms"].reason,
     "turn-incomplete",
   );
-  const orphanResult = turn(0, 100, [event("action.result", 50, { result: { callId: "x" } })]);
+  const orphanResult = turn(0, 100, [callSettled("x", 50)]);
   assert.equal(
     deriveAttemptMetrics(synthetic(orphanResult)).metrics["attribution.tool_ms"].reason,
     "action-start-missing",
   );
-  const openInput = turn(0, 100, [
-    event("input.requested", 50, { turnId: "unknown", requests: [{ requestId: "r" }] }),
+  const openInteraction = turn(0, 100, [
+    fact("interaction.opened", 50, { interactionId: "i", subject: { turnId: "unknown" } }),
   ]);
   assert.equal(
-    deriveAttemptMetrics(synthetic(openInput)).metrics["attribution.human_wait_ms"].reason,
-    "input-incomplete",
+    deriveAttemptMetrics(synthetic(openInteraction)).metrics["attribution.human_wait_ms"].reason,
+    "interaction-incomplete",
   );
   const noCapture = { ...synthetic([]), result: { status: "completed" } };
   assert.equal(
     deriveAttemptMetrics(noCapture).metrics["latency.turn_ms"].reason,
     "missing-session-capture",
   );
-  const conflicting = synthetic([event("turn.started", 0, { turnId: "t" })]);
+  const conflicting = synthetic([fact("turn.started", 0, { turnId: "t" })]);
   conflicting.result.sessions.push({
     sessionId: "s",
     events: [{ ...conflicting.result.sessions[0].events[0], data: { turnId: "other" } }],
@@ -341,36 +437,24 @@ test("partial captures make attribution unavailable instead of guessing", () => 
 });
 
 test("a cancelled turn closes work it abandoned", () => {
-  const events = turn(
-    0,
-    500,
-    [
-      event("step.started", 10, { turnId: "t", stepIndex: 0 }),
-      event("actions.requested", 100, {
-        turnId: "t",
-        stepIndex: 0,
-        actions: [{ kind: "tool-call", callId: "a" }],
-      }),
-    ],
-    "turn.cancelled",
-  );
+  const events = turn(0, 500, [...run("r", 10), call("a", "r", 100)], "cancelled");
   const v = values(deriveAttemptMetrics(synthetic(events)).metrics);
   assert.equal(v["attribution.tool_ms"], 400);
   assert.equal(v["attribution.model_ms"], 90);
 });
 
-test("counts failures by event and code", () => {
-  const events = turn(
-    0,
-    100,
-    [
-      event("step.started", 10, { turnId: "t", stepIndex: 0 }),
-      event("step.failed", 20, { turnId: "t", stepIndex: 0, code: "MODEL_CALL_FAILED" }),
-      event("session.failed", 99, { code: "MODEL_CALL_FAILED" }),
-    ],
-    "turn.failed",
-  );
-  events.at(-1).data.code = "MODEL_CALL_FAILED";
+test("counts failures by kind and code", () => {
+  const error = { code: "MODEL_CALL_FAILED", message: "failed" };
+  const events = [
+    ...turn(
+      0,
+      100,
+      [...run("r", 10), fact("model.settled", 20, { runId: "r", outcome: "failed", error })],
+      "failed",
+    ),
+    fact("session.ended", 100, { outcome: "failed", error }),
+  ];
+  events.find((e) => e.type === "turn.settled").data.error = error;
   const { failures, metrics } = deriveAttemptMetrics(synthetic(events));
   assert.deepEqual(failures, [
     { type: "session.failed", code: "MODEL_CALL_FAILED", count: 1 },
@@ -381,13 +465,19 @@ test("counts failures by event and code", () => {
 });
 
 test("classifies outcomes and every gap reason", () => {
-  const failed = (code, details, message = "failed") =>
+  const failed = (code, message = "failed") =>
     synthetic(
-      turn(0, 100, [
-        event("step.failed", 50, { turnId: "t", stepIndex: 0, code, details, message }),
-      ]),
+      turn(
+        0,
+        100,
+        [
+          ...run("r", 10),
+          fact("model.settled", 50, { runId: "r", outcome: "failed", error: { code, message } }),
+        ],
+        "failed",
+      ),
     );
-  const completedStep = event("step.completed", 50, { turnId: "t", stepIndex: 0 });
+  const completedStep = [...run("r", 10), ...settled("r", 50)];
 
   assert.deepEqual(classifyOutcome(fixture("agent-tools-ends-turn-function")), {
     outcome: "completed",
@@ -395,21 +485,41 @@ test("classifies outcomes and every gap reason", () => {
   assert.deepEqual(classifyOutcome({ ...synthetic([]), verdict: "skipped" }), {
     outcome: "skipped",
   });
-  for (const details of [
-    { statusCode: 429 },
-    { upstreamStatusCode: 503 },
-    { semanticErrorId: "network-request-failed" },
-    { detail: "TypeError: fetch failed [cause]: UND_ERR_HEADERS_TIMEOUT" },
+  for (const message of [
+    "AI Gateway rate-limited the request.",
+    "The model provider is overloaded or timing out upstream of AI Gateway.",
+    "A network request failed before completing (ECONNRESET).",
+    "fetch failed: UND_ERR_HEADERS_TIMEOUT",
   ])
-    assert.deepEqual(classifyOutcome(failed("MODEL_CALL_FAILED", details)), {
+    assert.deepEqual(classifyOutcome(failed("MODEL_CALL_FAILED", message)), {
       outcome: "gap",
       gap_reason: "provider-unavailable",
     });
-  for (const details of [{ statusCode: 400 }, { statusCode: 413 }])
-    assert.equal(classifyOutcome(failed("MODEL_CALL_FAILED", details)).outcome, "completed");
-  assert.equal(classifyOutcome(failed("OUTPUT_SCHEMA_NOT_FULFILLED", {})).outcome, "completed");
+  // Before v27, failures carried the provider's status instead.
+  const legacyFailure = (details) =>
+    synthetic(
+      [
+        ["step.started", {}],
+        ["step.failed", { code: "MODEL_CALL_FAILED", message: "failed", details }],
+      ].map(([type, data], i) => ({
+        type,
+        data: { turnId: "t", stepIndex: 0, ...data },
+        meta: { id: `${type}:${JSON.stringify(details)}`, at: at(10 + i) },
+      })),
+    );
   assert.equal(
-    classifyOutcome(failed("WORKFLOW_STREAM_WRITE_FAILED", {})).gap_reason,
+    classifyOutcome(legacyFailure({ statusCode: 429 })).gap_reason,
+    "provider-unavailable",
+  );
+  assert.equal(classifyOutcome(legacyFailure({ statusCode: 400 })).outcome, "completed");
+  assert.equal(
+    classifyOutcome(failed("MODEL_CALL_FAILED", "The request exceeded the context window."))
+      .outcome,
+    "completed",
+  );
+  assert.equal(classifyOutcome(failed("OUTPUT_SCHEMA_NOT_FULFILLED")).outcome, "completed");
+  assert.equal(
+    classifyOutcome(failed("WORKFLOW_STREAM_WRITE_FAILED")).gap_reason,
     "stream-write-failed",
   );
 
@@ -422,22 +532,26 @@ test("classifies outcomes and every gap reason", () => {
     classifyOutcome(synthetic([], { error: "connect ECONNREFUSED" })).gap_reason,
     "error-before-first-step",
   );
-  assert.deepEqual(classifyOutcome(synthetic([completedStep], { error: timeout })), {
+  assert.deepEqual(classifyOutcome(synthetic(completedStep, { error: timeout })), {
     outcome: "timed_out",
   });
   // A first step that fails for a real reason is the eval's failure, not a gap,
   // even though the eval then records an error (e.g. from expectOk()).
-  for (const details of [{ statusCode: 400 }, { statusCode: 413 }]) {
-    const rejected = { ...failed("MODEL_CALL_FAILED", details), error: "expectOk: session failed" };
-    assert.deepEqual(classifyOutcome(rejected), { outcome: "completed" });
-    assert.deepEqual(classifyOutcome({ ...rejected, error: timeout }), { outcome: "timed_out" });
-  }
-  const sessionFailed = synthetic([event("session.failed", 40, { code: "SESSION_FAILED" })], {
-    error: "expectOk: session failed",
-  });
+  const rejected = { ...failed("MODEL_CALL_FAILED"), error: "expectOk: session failed" };
+  assert.deepEqual(classifyOutcome(rejected), { outcome: "completed" });
+  assert.deepEqual(classifyOutcome({ ...rejected, error: timeout }), { outcome: "timed_out" });
+  const sessionFailed = synthetic(
+    [
+      fact("session.ended", 40, {
+        outcome: "failed",
+        error: { code: "SESSION_FAILED", message: "" },
+      }),
+    ],
+    { error: "expectOk: session failed" },
+  );
   assert.deepEqual(classifyOutcome(sessionFailed), { outcome: "completed" });
   // Parked is the runner's derived fact (eve's derive-run-facts), not re-derived here.
-  const parked = synthetic([completedStep]);
+  const parked = synthetic(completedStep);
   parked.result.derived = { parked: true };
   assert.deepEqual(classifyOutcome(parked), { outcome: "parked" });
 });
@@ -448,7 +562,7 @@ for (const [name, expected] of Object.entries(durableHarness.fixtures)) {
     const events = recordedStream(name);
     const byTime = (a, b) => a.t - b.t || a.name.localeCompare(b.name);
     assert.deepEqual(
-      listMarks(sessionMarks(events)).sort(byTime),
+      listMarks(sessionMarks(sessionEvents({ events }))).sort(byTime),
       expected.marks
         .map((mark) => ({ ...mark, key: mark.key?.replace(/:(\d+)$/, "/$1") ?? null }))
         .sort(byTime),
@@ -480,46 +594,37 @@ for (const [name, expected] of Object.entries(durableHarness.fixtures)) {
 }
 
 test("concurrent tools count once in turn overhead, and a batch is one tool hop", () => {
-  const first = { turnId: "t", stepIndex: 0 };
-  const second = { turnId: "t", stepIndex: 1 };
-  const started = event("turn.started", 0, { turnId: "t" });
-  started.meta.deliveryIds = ["d"];
-  const events = [
-    started,
-    event("step.started", 100, first),
-    // eve may stream one actions.requested per call, flushing text before each.
-    ...["a", "b", "c"].flatMap((callId, i) => [
-      ...(i === 0
-        ? []
-        : [event("message.appended", 395 + i * 10, { ...first, messageDelta: "." })]),
-      event("actions.requested", 400 + i * 10, {
-        ...first,
-        actions: [{ kind: "tool-call", callId }],
-      }),
-    ]),
-    event("step.completed", 430, first),
-    event("action.result", 500, { ...first, result: { callId: "a" } }),
-    event("action.result", 600, { ...first, result: { callId: "c" } }),
-    event("action.result", 900, { ...first, result: { callId: "b" } }),
-    event("step.started", 950, second),
-    event("message.appended", 1000, { ...second, messageDelta: "done" }),
-    event("step.completed", 1100, second),
-    event("turn.completed", 1200, { turnId: "t" }),
-  ];
   const zero = Date.parse(at(0));
-  // Every event reaches the client 10 ms after it is written.
-  const clocked = (streamed) => {
-    const artifact = synthetic(streamed);
-    artifact.result.sessions[0].clock = {
-      receivedAt: streamed.map((e) => Date.parse(e.meta.at) + 10),
-      sends: [
-        { kind: "message", deliveryId: "d", startedAt: zero - 20, notReadyMs: 0, acceptedAt: zero },
-      ],
-    };
-    return artifact;
-  };
-  const artifact = clocked(events);
-  const { metrics } = deriveAttemptMetrics(artifact);
+  const sends = [
+    { kind: "message", deliveryId: "d-t", startedAt: zero - 20, notReadyMs: 0, acceptedAt: zero },
+  ];
+  // eve may stream text between one step's calls.
+  const narration = [delta("r1", 400, "r1.1"), delta("r1", 410, "r1.2")];
+  const done = delta("r2", 950, "r2.0");
+  const arrivals = new Map([
+    [narration[0], Date.parse(at(415))],
+    [narration[1], Date.parse(at(425))],
+    [done, Date.parse(at(1010))],
+  ]);
+  const events = turn(0, 1200, [
+    ...run("r1", 100),
+    call("a", "r1", 400),
+    narration[0],
+    completed("r1", 410, "r1.1"),
+    call("b", "r1", 410),
+    narration[1],
+    completed("r1", 420, "r1.2"),
+    call("c", "r1", 420),
+    ...settled("r1", 430),
+    callSettled("a", 500),
+    callSettled("c", 600),
+    callSettled("b", 900),
+    ...run("r2", 950),
+    done,
+    completed("r2", 1000),
+    ...settled("r2", 1100),
+  ]);
+  const { metrics } = deriveAttemptMetrics(clocked(events, { arrivals, sends }));
   // The tools ran from 400 to 900: 500 ms, not the 770 ms their durations add
   // up to. The rest is sent→first request (130), last tool→next request (50),
   // and the second step's output→idle (200).
@@ -530,45 +635,34 @@ test("concurrent tools count once in turn overhead, and a batch is one tool hop"
 
   // The next model call waits for every call, so a batch with an unfinished
   // call has no hop to measure.
-  const unfinished = { ...artifact, result: { ...artifact.result } };
-  unfinished.result.sessions = [
-    {
-      ...artifact.result.sessions[0],
-      events: events.map((e) =>
-        e.type === "action.result" && e.data.result.callId === "b"
-          ? { ...e, type: "action.partial" }
-          : e,
-      ),
-    },
-  ];
-  const partial = deriveAttemptMetrics(unfinished).metrics;
+  const unfinished = events.filter((e) => !(e.type === "call.settled" && e.data.callId === "b"));
+  const partial = deriveAttemptMetrics(clocked(unfinished, { arrivals, sends })).metrics;
   assert.equal(partial["overhead.tool_hop_ms"].reason, "no-tool-hops");
   assert.equal(partial["overhead.tool_call_ms"].reason, "no-tool-hops");
 
-  // Two batches: one event requesting two calls, then a step whose first
+  // Two batches: one step requesting two calls, then a step whose first
   // output is its own call. The second hop starts at the later of that step's
   // model.done and the first batch's tool ends.
-  const third = { turnId: "t", stepIndex: 2 };
-  const twoBatches = clocked([
-    started,
-    event("step.started", 100, first),
-    event("actions.requested", 400, {
-      ...first,
-      actions: ["a", "b"].map((callId) => ({ kind: "tool-call", callId })),
-    }),
-    event("step.completed", 410, first),
-    event("action.result", 500, { ...first, result: { callId: "a" } }),
-    event("action.result", 600, { ...first, result: { callId: "b" } }),
-    event("step.started", 650, second),
-    event("actions.requested", 700, { ...second, actions: [{ kind: "tool-call", callId: "c" }] }),
-    event("step.completed", 710, second),
-    event("action.result", 800, { ...second, result: { callId: "c" } }),
-    event("step.started", 850, third),
-    event("message.appended", 900, { ...third, messageDelta: "done" }),
-    event("step.completed", 950, third),
-    event("turn.completed", 1000, { turnId: "t" }),
+  const last = delta("r3", 850, "r3.0");
+  const twoBatches = turn(0, 1000, [
+    ...run("r1", 100),
+    call("a", "r1", 400),
+    call("b", "r1", 400),
+    ...settled("r1", 410),
+    callSettled("a", 500),
+    callSettled("b", 600),
+    ...run("r2", 650),
+    call("c", "r2", 700),
+    ...settled("r2", 710),
+    callSettled("c", 800),
+    ...run("r3", 850),
+    last,
+    completed("r3", 900),
+    ...settled("r3", 950),
   ]);
-  const both = deriveAttemptMetrics(twoBatches).metrics;
+  const both = deriveAttemptMetrics(
+    clocked(twoBatches, { arrivals: new Map([[last, Date.parse(at(910))]]), sends }),
+  ).metrics;
   // 1030 from send to idle, less 400 of model and 300 of tools.
   assert.deepEqual(both["overhead.turn_ms"].samples, [330]);
   assert.deepEqual(both["overhead.tool_hop_ms"].samples, [50, 50]);

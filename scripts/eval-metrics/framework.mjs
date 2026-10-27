@@ -16,8 +16,14 @@
 // with `count` and the raw `samples` so quantiles can be recomputed across
 // attempts. An occurrence the definition does not cover (a tool that ended
 // its turn has no next model call) is left out, never estimated.
-import { notApplicable, selectEvents, timestamp, unavailable } from "./measurements/events.mjs";
-import { coveredLengthBetween, stepKey } from "./measurements/intervals.mjs";
+import {
+  eventKey,
+  notApplicable,
+  selectEvents,
+  timestamp,
+  unavailable,
+} from "./measurements/events.mjs";
+import { coveredLengthBetween } from "./measurements/intervals.mjs";
 import { hopStart, toolBatches } from "./measurements/marks.mjs";
 
 /** Time at least one of `tools` was running, so concurrent calls count once. */
@@ -34,7 +40,7 @@ function batchEnd(batch) {
 /**
  * Server-clock parts, from the root sessions' marks.
  *
- * @param {{ sessionId: string, marks: ReturnType<typeof import("./measurements/marks.mjs").sessionMarks> }[]} roots
+ * @param {{ sessionId: string, index: ReturnType<typeof import("./measurements/session.mjs").indexSession>, marks: ReturnType<typeof import("./measurements/marks.mjs").sessionMarks> }[]} roots
  * @param {Map<string, object[]>} bySession every captured session's events
  */
 export function serverOverheads(roots, bySession) {
@@ -52,7 +58,7 @@ export function serverOverheads(roots, bySession) {
   const finalize = [];
   const agentStart = [];
   let missingChild = false;
-  for (const { sessionId, marks } of roots) {
+  for (const { index, marks } of roots) {
     for (const turn of marks.turns.values()) {
       const [first] = turn.steps;
       if (first !== undefined) preModel.push(first.request.t - turn.started.t);
@@ -79,10 +85,9 @@ export function serverOverheads(roots, bySession) {
     const toolStarts = new Map(
       [...marks.turns.values()].flatMap((turn) => turn.tools.map((tool) => [tool.callId, tool])),
     );
-    const events = bySession.get(sessionId) ?? [];
-    for (const started of selectEvents(events, "agent.started")) {
-      const call = toolStarts.get(started.data?.callId);
-      const child = bySession.get(started.data?.sessionId);
+    for (const opened of index.children) {
+      const call = toolStarts.get(opened.callId);
+      const child = bySession.get(opened.sessionId);
       if (call === undefined) continue;
       if (child === undefined) {
         missingChild = true;
@@ -122,11 +127,10 @@ const CLIENT_METRICS = [
  * turn's numbers include creating it. Server times map onto the client clock
  * with the smallest delivery lag (`arrival − meta.at`) the session's marks had.
  *
- * @param {object[]} sessionEntries the artifact's raw `result.sessions`
+ * @param {ReturnType<typeof readClock>} clock
  * @param {{ sessionId: string, marks: object }[]} roots
  */
-export function clientOverheads(sessionEntries, roots) {
-  const clock = readClock(sessionEntries);
+export function clientOverheads(clock, roots) {
   if (clock === undefined) return everyClientMetric(unavailable("missing-client-clock"));
   const broken = roots.find(({ marks }) => marks.status !== "ready");
   if (broken !== undefined) return everyClientMetric(broken.marks);
@@ -143,7 +147,7 @@ export function clientOverheads(sessionEntries, roots) {
         create.push(send.acceptedAt - send.startedAt);
       if (send.kind === "message") notReady.push(send.notReadyMs);
     }
-    const arrival = (event) => clock.arrivals.get(event.meta.id);
+    const arrival = (event) => clock.arrivals.get(eventKey(sessionId, event));
     const lags = marks.carriers
       .map((event) => arrival(event) - timestamp(event))
       .filter((lag) => Number.isFinite(lag));
@@ -159,9 +163,7 @@ export function clientOverheads(sessionEntries, roots) {
         send.kind === "create"
           ? turns[0]
           : send.kind === "message"
-            ? turns.find((candidate) =>
-                candidate.started.via.meta?.deliveryIds?.includes(send.deliveryId),
-              )
+            ? turns.find((candidate) => candidate.deliveries.has(send.deliveryId))
             : undefined;
       if (turn === undefined) continue;
       const measuredTurn = measureTurn(turn, send.startedAt + send.notReadyMs, arrival, offset);
@@ -188,7 +190,7 @@ function measureTurn(turn, sent, arrival, offset) {
   for (const step of turn.steps) {
     for (const event of step.outputs ?? []) {
       const at = arrival(event);
-      if (inWindow(at)) outputs.push({ at, event });
+      if (inWindow(at)) outputs.push({ at, step: step.key });
     }
   }
   outputs.sort((a, b) => a.at - b.at);
@@ -230,13 +232,13 @@ function measureTurn(turn, sent, arrival, offset) {
   }
 
   for (const batch of toolBatches(turn)) {
-    const batchStep = stepKey(batch[0].start.via);
+    const batchStep = batch[0].runId;
     const startAt = arrival(batch[0].start.via);
     const end = batchEnd(batch);
     if (end === undefined || !inWindow(startAt)) continue;
     // The requesting step can still stream between its calls (its later
     // requests, text flushed before each one); the next output is past it.
-    const nextOut = outputs.find(({ at, event }) => at >= startAt && stepKey(event) !== batchStep);
+    const nextOut = outputs.find(({ at, step }) => at >= startAt && step !== batchStep);
     if (nextOut === undefined) continue;
     const next =
       calls.find(({ step, reqAt }) => step.request.t >= end && reqAt <= nextOut.at) ??
@@ -257,8 +259,10 @@ function measureTurn(turn, sent, arrival, offset) {
  * Arrival time of every captured event (the earliest, across repeated
  * captures) and every session's sends, or undefined when the artifact
  * predates client timing.
+ *
+ * @param {object[]} sessionEntries the artifact's raw `result.sessions`
  */
-function readClock(sessionEntries) {
+export function readClock(sessionEntries) {
   const withClock = (sessionEntries ?? []).filter(
     (entry) =>
       Array.isArray(entry?.clock?.receivedAt) &&
@@ -270,8 +274,8 @@ function readClock(sessionEntries) {
   for (const entry of withClock) {
     entry.events.forEach((event, index) => {
       const at = entry.clock.receivedAt[index];
-      const id = event?.meta?.id;
-      if (typeof id !== "string" || !Number.isFinite(at)) return;
+      const id = eventKey(entry.sessionId, event);
+      if (id === undefined || !Number.isFinite(at)) return;
       arrivals.set(id, Math.min(arrivals.get(id) ?? Infinity, at));
     });
     const valid = (entry.clock.sends ?? []).filter(
@@ -314,7 +318,7 @@ export function durability(roots, world) {
   let outputBytes = 0;
   let turns = 0;
   let modelSteps = 0;
-  for (const { sessionId, events } of roots) {
+  for (const { sessionId, events, index } of roots) {
     const run = world.get(sessionId);
     if (!Array.isArray(run?.events)) return everyDurabilityMetric(unavailable("missing-world-run"));
     const sessionTurns = selectEvents(events, "turn.started").length;
@@ -335,7 +339,7 @@ export function durability(roots, world) {
       return everyDurabilityMetric(unavailable("empty-world-run"));
     steps += sessionSteps;
     turns += sessionTurns;
-    modelSteps += selectEvents(events, "step.started").length;
+    modelSteps += index.steps.length;
   }
   const perTurn = (value) => (turns === 0 ? notApplicable("no-turns") : measured(value / turns));
   return {

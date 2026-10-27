@@ -1,45 +1,45 @@
-// durable-harness's timing marks for one eve session, derived from its events
-// the way its eve adapter does (`EveTranslator`, packages/bench/src/eve.ts):
+// durable-harness's timing marks for one eve session, derived from its v27
+// facts the way its eve adapter does (`EveTranslator`, packages/bench/src/eve.ts):
 //
-//   model.request      `step.started`
-//   model.first_token  the step's first text, reasoning, or tool-input delta
-//                      (or its `actions.requested`, when nothing streamed)
-//   model.done         `actions.requested` for a tool step; else the step's
-//                      last output, written when `step.completed` arrives
-//   tool.start / end   `actions.requested` / `action.result`, by call id
-//   idle               `turn.completed` / `turn.failed` / `turn.cancelled`
+//   model.request      the step's first `model.started`: eve chose the model and
+//                      the provider call begins
+//   model.first_token  the step's first text, reasoning, or call-input delta
+//                      (or its `call.requested`, when nothing streamed)
+//   model.done         the step's first `call.requested` for a tool step; else
+//                      its last output, written when `model.settled` arrives
+//   tool.start / end   `call.requested` / the call's `call.settled`, or the
+//                      `call.started` that handed it to a task
+//   idle               `turn.settled`
 //
-// Each mark has a server time `t` (`meta.at`) and the event that carried it
-// to the client (`via`). They differ only for a back-dated `model.done`,
-// whose time is the step's last output but which arrives with `step.completed`.
-// Steps are keyed by turn and step index, not stream position, so repeated
-// captures of a session merge cleanly.
-import { selectEvents, timestamp, unavailable } from "./events.mjs";
-import { stepKey } from "./intervals.mjs";
+// A step is a model run a turn owns (not a compaction's summary run). Each mark
+// has a server time `t` and the event that carried it to the client (`via`).
+// They differ only for a back-dated `model.done`, whose time is the step's last
+// output but which arrives with `model.settled`. A progress record (a delta)
+// has no server time of its own, so its time is its client arrival less the
+// session's smallest delivery lag, which needs the eval's client clock.
+import { hasOwnTime, selectEvents, timestamp, unavailable } from "./events.mjs";
+import { indexSession } from "./session.mjs";
 
-const FIRST_TOKEN = new Set([
-  "message.appended",
-  "reasoning.appended",
-  "action.input.appended",
-  "actions.requested",
-]);
-const OUTPUT = new Set([...FIRST_TOKEN, "message.completed"]);
-const IDLE = new Set(["turn.completed", "turn.failed", "turn.cancelled"]);
+const FIRST_TOKEN = new Set(["content.delta", "call.input", "call.requested"]);
+const STREAMED_KINDS = new Set(["text", "reasoning"]);
 
 /**
  * @typedef {{ t: number, via: object }} Mark
  * @typedef {{ key: string, turnId: string, request: Mark, firstToken?: Mark, done?: Mark, outputs: object[] }} StepMarks
- *   `outputs` are the events a client shows: streamed text, or tools starting.
- * @typedef {{ callId: string, turnId: string | undefined, start: Mark, end?: Mark }} ToolMarks
- * @typedef {{ turnId: string, started: Mark, idle?: Mark, steps: StepMarks[], tools: ToolMarks[] }} TurnMarks
+ *   `key` is the run id. `outputs` are the events a client shows: streamed text, or calls starting.
+ * @typedef {{ callId: string, runId: string, turnId: string | undefined, start: Mark, end?: Mark }} ToolMarks
+ * @typedef {{ turnId: string, started: Mark, deliveries: Set<string>, idle?: Mark, steps: StepMarks[], tools: ToolMarks[] }} TurnMarks
+ *   `deliveries` are the deliveries that started the turn.
  * @typedef {{ status: "ready", turns: Map<string, TurnMarks>, carriers: object[] }} SessionMarks
  */
 
 /**
- * @param {object[]} events one session's events, in capture order
+ * @param {object[]} events one session's v27 events
+ * @param {{ index?: ReturnType<typeof indexSession>, arrival?: (event: object) => number | undefined }} [options]
+ *   `arrival` is an event's client arrival time, when the eval recorded a clock.
  * @returns {SessionMarks | { status: "unavailable", reason: string }}
  */
-export function sessionMarks(events) {
+export function sessionMarks(events, { index = indexSession(events), arrival } = {}) {
   const mark = (event) => {
     const t = timestamp(event);
     return t === undefined ? undefined : { t, via: event };
@@ -53,76 +53,123 @@ export function sessionMarks(events) {
     const turnId = event.data?.turnId;
     if (typeof turnId !== "string") return unavailable("missing-turn-identity");
     if (turns.has(turnId)) return unavailable("ambiguous-turn");
-    turns.set(turnId, { turnId, started, steps: [], tools: [] });
+    turns.set(turnId, {
+      turnId,
+      started,
+      deliveries: index.deliveries.get(turnId) ?? new Set(),
+      steps: [],
+      tools: [],
+    });
+  }
+  const requests = new Set();
+  for (const event of selectEvents(events, "model.requested")) {
+    if (requests.has(event.data?.runId)) return unavailable("ambiguous-step");
+    requests.add(event.data?.runId);
   }
 
   const steps = new Map();
-  const seenByStep = new Map();
-  const tools = new Map();
-  const later = [];
-  for (const event of events) {
-    const relevant =
-      event.type === "step.started" ||
-      event.type === "step.completed" ||
-      event.type === "action.result" ||
-      OUTPUT.has(event.type) ||
-      IDLE.has(event.type);
-    if (!relevant) continue;
-    const at = mark(event);
-    if (at === undefined) return unavailable("missing-timestamp");
-    if (event.type === "action.result" || IDLE.has(event.type)) {
-      later.push(at);
-      continue;
-    }
-    const key = stepKey(event);
-    if (event.type === "step.started") {
-      if (key === undefined) return unavailable("missing-step-identity");
-      if (steps.has(key)) return unavailable("ambiguous-step");
-      steps.set(key, { key, turnId: event.data.turnId, request: at });
-      continue;
-    }
-    if (key === undefined) continue;
-    const seen = seenByStep.get(key) ?? { outputs: [] };
-    seenByStep.set(key, seen);
-    if (event.type === "step.completed") {
-      seen.completed = earliest(seen.completed, at);
-      continue;
-    }
-    if (FIRST_TOKEN.has(event.type)) seen.first = earliest(seen.first, at);
-    if (isVisibleOutput(event)) seen.outputs.push(event);
-    if (seen.last === undefined || at.t > seen.last.t) seen.last = at;
-    if (event.type !== "actions.requested") continue;
-    seen.requested = earliest(seen.requested, at);
-    for (const action of Array.isArray(event.data?.actions) ? event.data.actions : []) {
-      const callId = action?.callId;
-      if (typeof callId === "string" && !tools.has(callId))
-        tools.set(callId, { callId, turnId: event.data?.turnId, start: at });
-    }
-  }
-  // Ends pair with starts by identity, whatever order the captures merged in.
-  for (const at of later) {
-    if (at.via.type === "action.result") {
-      const tool = tools.get(at.via.data?.result?.callId);
-      if (tool !== undefined) tool.end = earliest(tool.end, at);
-    } else {
-      const turn = turns.get(at.via.data?.turnId);
-      if (turn !== undefined) turn.idle = earliest(turn.idle, at);
-    }
+  for (const run of index.steps) {
+    const request = mark(run.started);
+    if (request === undefined) return unavailable("missing-timestamp");
+    const completed = run.settled?.data?.outcome === "completed" ? mark(run.settled) : undefined;
+    if (run.settled?.data?.outcome === "completed" && completed === undefined)
+      return unavailable("missing-timestamp");
+    steps.set(run.runId, { key: run.runId, turnId: run.turnId, request, completed, seen: [] });
   }
 
+  const tools = [];
+  for (const call of index.calls.values()) {
+    const step = steps.get(call.runId);
+    if (step === undefined) continue;
+    const start = mark(call.requested);
+    if (start === undefined) return unavailable("missing-timestamp");
+    const endEvent = [call.taskStarted, call.settled]
+      .filter((event) => event !== undefined)
+      .reduce(
+        (a, b) => ((timestamp(b) ?? Infinity) < (timestamp(a) ?? Infinity) ? b : a),
+        undefined,
+      );
+    const end = endEvent === undefined ? undefined : mark(endEvent);
+    if (endEvent !== undefined && end === undefined) return unavailable("missing-timestamp");
+    tools.push({ callId: call.callId, runId: call.runId, turnId: step.turnId, start, end });
+  }
+
+  for (const event of events) {
+    const isOutput =
+      FIRST_TOKEN.has(event.type) ||
+      (event.type === "content.completed" && event.data?.kind === "text");
+    if (!isOutput) continue;
+    const step = steps.get(index.runOf(event));
+    if (step === undefined) continue;
+    if (event.type === "content.delta" && !STREAMED_KINDS.has(partKind(index, event))) continue;
+    if (hasOwnTime(event) && timestamp(event) === undefined)
+      return unavailable("missing-timestamp");
+    step.seen.push(event);
+  }
+
+  // Server time for deltas: client arrival less the smallest delivery lag of the
+  // facts that carry marks, the same offset the client-clock overheads use.
+  const own = [
+    ...[...turns.values()].map((turn) => turn.started.via),
+    ...selectEvents(events, "turn.settled"),
+    ...[...steps.values()].flatMap((step) => [step.request.via, step.completed?.via]),
+    ...tools.flatMap((tool) => [tool.start.via, tool.end?.via]),
+  ].filter((event) => event !== undefined);
+  const lags = arrival === undefined ? [] : own.map((event) => arrival(event) - timestamp(event));
+  const finiteLags = lags.filter((lag) => Number.isFinite(lag));
+  const offset = finiteLags.length === 0 ? undefined : Math.min(...finiteLags);
+  // A delta was written after the commit before it (its `meta.at`) and before
+  // the next one. Its arrival is mapped with the next commit's delivery lag, the
+  // nearest it has, or the session's smallest when nothing followed it.
+  const nextCommit = nextCommits(events);
+  const timeOf = (event) => {
+    if (hasOwnTime(event)) return timestamp(event);
+    const at = arrival?.(event);
+    if (!Number.isFinite(at)) return undefined;
+    const next = nextCommit.get(event);
+    const nextLag = next === undefined ? undefined : arrival(next) - timestamp(next);
+    const lag = Number.isFinite(nextLag) ? nextLag : offset;
+    if (lag === undefined) return undefined;
+    const after = timestamp(event) ?? -Infinity;
+    return Math.min(Math.max(at - lag, after), next === undefined ? Infinity : timestamp(next));
+  };
+
   for (const step of steps.values()) {
-    const seen = seenByStep.get(step.key);
-    step.outputs = seen?.outputs ?? [];
-    step.firstToken = seen?.first;
-    if (seen?.requested !== undefined) step.done = seen.requested;
-    else if (seen?.completed !== undefined)
-      step.done = { t: seen.last?.t ?? seen.completed.t, via: seen.completed.via };
+    step.outputs = [];
+    let first;
+    let last;
+    let requested;
+    let firstUnknown = false;
+    for (const event of step.seen) {
+      const t = timeOf(event);
+      if (FIRST_TOKEN.has(event.type)) {
+        if (t === undefined) firstUnknown = true;
+        else first = earliest(first, { t, via: event });
+      }
+      if (isVisibleOutput(event, index)) step.outputs.push(event);
+      if (t !== undefined && (last === undefined || t > last.t)) last = { t, via: event };
+      if (event.type === "call.requested" && t !== undefined)
+        requested = earliest(requested, { t, via: event });
+    }
+    // A delta it can't place in time could be the first token, so the step has none.
+    step.firstToken = firstUnknown ? undefined : first;
+    if (requested !== undefined) step.done = requested;
+    else if (step.completed !== undefined)
+      step.done = { t: last?.t ?? step.completed.t, via: step.completed.via };
+    delete step.seen;
     turns.get(step.turnId)?.steps.push(step);
   }
-  for (const tool of tools.values()) turns.get(tool.turnId)?.tools.push(tool);
+  for (const turnEnd of selectEvents(events, "turn.settled")) {
+    const at = mark(turnEnd);
+    if (at === undefined) return unavailable("missing-timestamp");
+    const turn = turns.get(turnEnd.data?.turnId);
+    if (turn !== undefined) turn.idle = earliest(turn.idle, at);
+  }
+  for (const tool of tools) turns.get(tool.turnId)?.tools.push(tool);
   for (const turn of turns.values()) {
     turn.steps.sort((a, b) => a.request.t - b.request.t);
     turn.tools.sort((a, b) => a.start.t - b.start.t);
+    for (const step of turn.steps) delete step.completed;
   }
 
   // Every event that carries a mark: the offset rule maps server time onto
@@ -135,17 +182,44 @@ export function sessionMarks(events) {
     for (const tool of turn.tools)
       for (const m of [tool.start, tool.end]) if (m) carriers.push(m.via);
   }
-  return { status: "ready", turns, carriers: [...new Set(carriers)] };
+  return { status: "ready", turns, carriers: [...new Set(carriers)], timeOf };
 }
 
-function isVisibleOutput(event) {
-  if (event.type === "message.appended")
-    return typeof event.data?.messageDelta === "string" && event.data.messageDelta.length > 0;
-  return (
-    event.type === "actions.requested" &&
-    Array.isArray(event.data?.actions) &&
-    event.data.actions.length > 0
-  );
+/** For each progress record, the first fact after it in its stream. */
+function nextCommits(events) {
+  const order = (event) => {
+    const { line, index } = event.meta?.position ?? {};
+    return Number.isInteger(line) && Number.isInteger(index) ? line * 1e6 + index : undefined;
+  };
+  const positioned = events
+    .filter((event) => order(event) !== undefined)
+    .sort((a, b) => order(a) - order(b));
+  const next = new Map();
+  let pending = [];
+  for (const event of positioned) {
+    if (!hasOwnTime(event)) {
+      pending.push(event);
+      continue;
+    }
+    if (timestamp(event) === undefined) continue;
+    for (const record of pending) next.set(record, event);
+    pending = [];
+  }
+  return next;
+}
+
+function partKind(index, event) {
+  return index.parts.get(event.data?.partId)?.kind ?? event.data?.kind;
+}
+
+function isVisibleOutput(event, index) {
+  if (event.type === "content.delta")
+    return (
+      partKind(index, event) === "text" &&
+      typeof event.data?.delta === "string" &&
+      event.data.delta.length > 0
+    );
+  return event.type === "call.requested";
 }
 
 /** Marks in durable-harness's flat `{ name, key, t }` form, for conformance checks. */
@@ -168,19 +242,15 @@ export function listMarks(marks) {
 }
 
 /**
- * A turn's tool calls, grouped by the model step that requested them. eve
- * may stream one `actions.requested` per call, so a step's calls can arrive
- * as several events. Calls keep the turn's start order, so a batch's first call
- * started first.
+ * A turn's tool calls, grouped by the model step that requested them. Calls
+ * keep the turn's start order, so a batch's first call started first.
  */
 export function toolBatches(turn) {
   const batches = new Map();
   for (const tool of turn.tools) {
-    // Every tool start has a step key: sessionMarks skips keyless outputs.
-    const key = stepKey(tool.start.via);
-    const batch = batches.get(key) ?? [];
+    const batch = batches.get(tool.runId) ?? [];
     batch.push(tool);
-    batches.set(key, batch);
+    batches.set(tool.runId, batch);
   }
   return [...batches.values()];
 }
