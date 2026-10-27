@@ -48,6 +48,48 @@ test("proposed PR titles can be validated locally without GitHub", () => {
   );
 });
 
+test("PR title validation ignores changesets added to the base after the event", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "eve-title-check-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "scripts"));
+  await mkdir(join(root, ".changeset"));
+  await copyFile(
+    "scripts/check-release-pr-title.mjs",
+    join(root, "scripts/check-release-pr-title.mjs"),
+  );
+  await copyFile("scripts/changeset-format.mjs", join(root, "scripts/changeset-format.mjs"));
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: root, stdio: "pipe" }).toString().trim();
+  git("init", "-q");
+  git("config", "user.name", "Test Author");
+  git("config", "user.email", "test@example.com");
+  git("config", "commit.gpgsign", "false");
+  await writeFile(join(root, "initial.txt"), "initial\n");
+  git("add", "initial.txt");
+  git("commit", "-qm", "Initial fixture");
+  const staleBase = git("rev-parse", "HEAD");
+  const baseBranch = git("branch", "--show-current");
+  git("checkout", "-qb", "topic");
+  await writeFile(join(root, "work.txt"), "unrelated change\n");
+  git("add", "work.txt");
+  git("commit", "-qm", "Update tooling");
+  git("checkout", "-q", baseBranch);
+  await writeFile(join(root, ".changeset/base.md"), '---\n"eve": patch\n---\n\nBase change.\n');
+  git("add", ".changeset/base.md");
+  git("commit", "-qm", "Update base");
+  git("merge", "--no-ff", "--no-edit", "topic");
+  execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
+    cwd: root,
+    stdio: "pipe",
+    env: {
+      ...process.env,
+      GITHUB_EVENT_NAME: "pull_request",
+      PR_BASE_SHA: staleBase,
+      PR_TITLE: "Update tooling",
+    },
+  });
+});
+
 test("the Changesets formatter produces readable Markdown without encoded metadata", async (t) => {
   const originalCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "eve-formatter-test-"));
@@ -150,7 +192,7 @@ test("version-packages assembles changesets across bump types and preserves old 
   execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
     cwd: root,
     stdio: "pipe",
-    env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "No changeset" },
+    env: { ...process.env, GITHUB_EVENT_NAME: "", PR_BASE_SHA: base, PR_TITLE: "No changeset" },
   });
   await write(
     ".changeset/a.md",
@@ -185,13 +227,18 @@ test("version-packages assembles changesets across bump types and preserves old 
     execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
       cwd: root,
       stdio: "pipe",
-      env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "Update docs" },
+      env: { ...process.env, GITHUB_EVENT_NAME: "", PR_BASE_SHA: base, PR_TITLE: "Update docs" },
     }),
   );
   execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {
     cwd: root,
     stdio: "pipe",
-    env: { ...process.env, PR_BASE_SHA: base, PR_TITLE: "docs(bugfix): Update docs" },
+    env: {
+      ...process.env,
+      GITHUB_EVENT_NAME: "",
+      PR_BASE_SHA: base,
+      PR_TITLE: "docs(bugfix): Update docs",
+    },
   });
   const envWithoutToken = { ...process.env, GITHUB_TOKEN: "", GH_TOKEN: "" };
   assert.throws(() =>
