@@ -1,4 +1,7 @@
-import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
+import {
+  MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH,
+  validateDeliveryIdempotencyKey,
+} from "#channel/delivery-idempotency.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
@@ -16,7 +19,13 @@ import { queueCommands, reportReactionFailure, type Command } from "../intents.j
 import { sessionFrameOf } from "../frame.js";
 import type { CommitContext, CommitReaction } from "../reaction.js";
 import { openMemos } from "../records.js";
-import { discardedByDeployment, keepMemos, mergeMemos, readReactionsState } from "../state.js";
+import {
+  digestOf,
+  discardedByDeployment,
+  keepMemos,
+  mergeMemos,
+  readReactionsState,
+} from "../state.js";
 
 const log = createLogger("hooks");
 
@@ -111,11 +120,17 @@ async function runHandler(call: {
       return;
     }
     validateDeliveryIdempotencyKey(options.idempotencyKey);
+    // A long hook path can push the occurrence key past the delivery key limit.
+    const sendKey =
+      options.idempotencyKey ??
+      (idempotencyKey.length <= MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH
+        ? idempotencyKey
+        : `${sessionId}:hook-send:${digestOf(idempotencyKey)}`);
     requested.push({
       delivery: hookDelivery(ctx, {
         auth: options.auth === undefined ? frame.session.auth.current : options.auth,
         context: options.context,
-        idempotencyKey: options.idempotencyKey ?? idempotencyKey,
+        idempotencyKey: sendKey,
         message,
         slug: call.slug,
       }),
