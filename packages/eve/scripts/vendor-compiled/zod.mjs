@@ -32,8 +32,8 @@ function createNoEvalPlugin() {
       patched = true;
       return { code: code.replace(EVAL_PROBE_SOURCE, "    return false;"), map: null };
     },
-    buildEnd() {
-      if (!patched) {
+    buildEnd(error) {
+      if (!error && !patched) {
         throw new Error("Zod's allowsEval probe was not patched.");
       }
     },
