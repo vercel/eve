@@ -531,7 +531,7 @@ class ActiveTurn {
       isSteeringMessage(delivery, this.identity) &&
       !this.input.cursor.optionalSessionState?.hasProxyInputRequests
     )
-      this.steeringController.abort();
+      this.steeringController.abort(delivery.deliveryMetadata?.[0]?.deliveryId);
   };
 
   get signal(): AbortSignal {

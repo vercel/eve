@@ -43,13 +43,15 @@ export const EVE_STREAM_LEASE_ENDED_CONTROL = {
  *
  * `tool-calls` is the only non-terminal assistant step in the current
  * tool-loop harness. All other values indicate the assistant step ended the
- * current turn.
+ * current turn, except a step superseded by a steering message: it completes
+ * with `steered` and the turn continues with the next step.
  */
 export type AssistantStepFinishReason =
   | "content-filter"
   | "error"
   | "length"
   | "other"
+  | "steered"
   | "stop"
   | "tool-calls";
 
@@ -571,6 +573,8 @@ export interface StepCompletedStreamEvent {
     providerMetadata?: StepCompletedProviderMetadata;
     sequence: number;
     stepIndex: number;
+    /** The delivery id of the message that cut this step short; set only with `finishReason: "steered"`. */
+    steeredBy?: string;
     turnId: string;
     usage?: {
       readonly costUsd?: number;
@@ -1608,6 +1612,7 @@ export function createStepCompletedEvent(input: {
   readonly providerMetadata?: StepCompletedProviderMetadata;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly steeredBy?: string;
   readonly turnId: string;
   readonly usage?: {
     readonly costUsd?: number;
@@ -1629,6 +1634,9 @@ export function createStepCompletedEvent(input: {
   }
   if (input.providerMetadata !== undefined) {
     data.providerMetadata = input.providerMetadata;
+  }
+  if (input.steeredBy !== undefined) {
+    data.steeredBy = input.steeredBy;
   }
 
   return {
