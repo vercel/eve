@@ -10,10 +10,12 @@ test("pre-push rejects invalid new commits but allows valid commits and existing
   t.after(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
   const remote = join(root, "remote.git");
+  const fork = join(root, "fork.git");
   await mkdir(repo);
   await mkdir(join(repo, "empty-hooks"));
   await symlink(resolve("scripts"), join(repo, "scripts"), "dir");
   execFileSync("git", ["init", "--bare", "-q", remote]);
+  execFileSync("git", ["init", "--bare", "-q", fork]);
   const git = (...args) =>
     execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: "pipe" }).trim();
   git("init", "-q");
@@ -21,6 +23,7 @@ test("pre-push rejects invalid new commits but allows valid commits and existing
   git("config", "user.email", "test@example.com");
   git("config", "commit.gpgsign", "false");
   git("remote", "add", "origin", remote);
+  git("remote", "add", "fork", fork);
   await writeFile(join(repo, "file.txt"), "base\n");
   git("add", "file.txt");
   git("commit", "-qm", "Old unclassified history");
@@ -45,6 +48,7 @@ test("pre-push rejects invalid new commits but allows valid commits and existing
   await writeFile(join(repo, "file.txt"), "valid\n");
   git("add", "file.txt");
   git("-c", "core.hooksPath=empty-hooks", "commit", "-qm", "feat(eve): Add a feature");
+  git("push", "-q", "-u", "fork", "valid");
   git("push", "-q", "-u", "origin", "valid");
   git("switch", "-qc", "side");
   await writeFile(join(repo, "side.txt"), "side\n");

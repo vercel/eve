@@ -3,9 +3,6 @@ import { readFileSync } from "node:fs";
 import { classifyTitle } from "./changeset-format.mjs";
 
 const checked = new Set();
-const remoteName = process.argv[2];
-const remotes = execFileSync("git", ["remote"], { encoding: "utf8" }).trim().split("\n");
-const knownRemoteRefs = remotes.includes(remoteName) ? `--remotes=${remoteName}` : "--remotes";
 for (const line of readFileSync(0, "utf8").split(/\r?\n/u)) {
   if (!line) continue;
   const [, local, remoteRef, remote] = line.split(" ");
@@ -21,7 +18,7 @@ for (const line of readFileSync(0, "utf8").split(/\r?\n/u)) {
   }
   const commits = execFileSync(
     "git",
-    ["log", "--no-merges", "--format=%H%x09%s", local, ...exclusions, "--not", knownRemoteRefs],
+    ["log", "--no-merges", "--format=%H%x09%s", local, ...exclusions, "--not", "--remotes"],
     { encoding: "utf8" },
   );
   for (const entry of commits.split("\n")) {
