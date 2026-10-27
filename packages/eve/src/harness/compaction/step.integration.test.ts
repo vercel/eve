@@ -185,7 +185,8 @@ describe("compaction summary call", () => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (system.includes("You help Alice.")) return await turnCalls();
         throw new APICallError({
-          isRetryable: true,
+          // eve's retry policy still retries the 429; this skips the AI SDK's slower inner retry.
+          isRetryable: false,
           message: "Too Many Requests",
           requestBodyValues: {},
           statusCode: 429,
