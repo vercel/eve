@@ -82,7 +82,7 @@ export default await withEve({
 });
 ```
 
-`withEve` adds your agents and their routes for you.
+`withEve` adds your agents and their routes for you: `/eve/v1/*` for one agent, or `/eve/<name>/v1/*` for each agent in a workspace.
 
 - Install `eve` in the root `package.json`.
 - Remove any `vercel.json`.
@@ -195,7 +195,17 @@ export function SessionChat({ sessionId }: { readonly sessionId: string }) {
 
 Three things to get right:
 
-- **Use `history.replaceState` for the first message.** Once `/s` creates a session, change the URL to `/s/{sessionId}` with `window.history.replaceState`. The Next.js router would remount the page and cut off the reply.
+- **Change the URL without the router.** Once `/s` creates a session, switch the address to `/s/{sessionId}` with the browser's own `replaceState`. Next.js patches `window.history`, and going through its router would remount the page and cut off the reply:
+
+  ```ts
+  History.prototype.replaceState.call(
+    window.history,
+    window.history.state,
+    "",
+    `/s/${encodeURIComponent(sessionId)}`,
+  );
+  ```
+
 - **Use a `key` to switch conversations.** Keying the chat on the session ID gives each conversation a fresh hook.
 - **Disable input while loading.** While `status` is `"resuming"`, show the messages but don't accept new ones.
 
@@ -217,6 +227,7 @@ const appSession: AuthFn<Request> = async (request) => {
     authenticator: "app",
     principalId: session.userId,
     principalType: "user",
+    attributes: {},
   };
 };
 
@@ -276,8 +287,12 @@ Route Handlers, Server Actions, and cron jobs can call the agent with `Client` f
 ```ts title="apps/web/app/api/summarize/route.ts"
 import { getVercelOidcToken } from "@vercel/oidc";
 import { Client } from "eve/client";
+import { getSession } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const session = await getSession(request);
+  if (!session) return new Response("Unauthorized", { status: 401 });
+
   const client = new Client({
     baseUrl: new URL(request.url).origin,
     auth: { vercelOidc: { token: async () => await getVercelOidcToken() } },
@@ -290,6 +305,7 @@ export async function POST(request: Request) {
 }
 ```
 
+- Check who's calling before you call the agent, as above. The OIDC token gives your code the app's own access, so an unchecked route would let anyone use it.
 - Install `@vercel/oidc`, and run `eve link` once so the token works locally.
 - The token identifies your app, not a user. To act as the signed-in user, forward their cookie in `headers` instead.
 - Without an incoming request, as in a cron job, use `https://${process.env.VERCEL_URL}` as the domain.
@@ -357,10 +373,12 @@ next start apps/web
 
 The agent listens on port `4274`. Set `EVE_NEXT_PRODUCTION_PORT` to change it.
 
+With several agents, a root `eve build` doesn't build them for `next start`. Run `eve build` in each `agents/<name>/` directory instead.
+
 ### Self-host
 
 - **Vercel services:** run the app and each agent with your own process manager and proxy. See [Self-host eve](../deployment/self-hosting#run-workspace-members).
-- **Next.js hosting:** `next start` runs the agent for you. To run the agent separately, set `EVE_NEXT_PRODUCTION_ORIGIN` to its address when you build and start Next.js.
+- **Next.js hosting:** `next start` runs the agent for you. To run the agent yourself instead, put it behind a proxy that serves it under the private path `/_eve_internal/eve` (the `servicePrefix` option), then set `EVE_NEXT_PRODUCTION_ORIGIN` to that proxy's address when you build and start Next.js.
 
 ## Troubleshooting
 
@@ -368,7 +386,7 @@ The agent listens on port `4274`. Set `EVE_NEXT_PRODUCTION_PORT` to change it.
 | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `401` "Production auth is not configured"                      | Replace `placeholderAuth()`. See [Authenticate users](#authenticate-users)                                                 |
 | "The Next.js output directory `.next` was not found" on deploy | Set the Build Command and Output Directory. See [Deploy to Vercel](#deploy-to-vercel)                                      |
-| The reply stops after the first message                        | Update the URL with `window.history.replaceState`, not the Next.js router                                                  |
+| The reply stops after the first message                        | Change the URL with `History.prototype.replaceState`. See [Give each conversation a URL](#give-each-conversation-a-url)    |
 | Messages repeat or vanish after a reload                       | Save `session` from `onSessionChange` as is                                                                                |
 | `next dev` times out waiting for the agent                     | Raise `devServerTimeoutMs`                                                                                                 |
 | A custom channel route returns `404` with Vercel services      | Route it to the agent in `vercel.ts`. See [Compose agents](../deployment/vercel#compose-agents-with-other-vercel-services) |
@@ -389,12 +407,12 @@ Options for `withEve` from `eve/next`. All are optional.
 
 ### Environment variables
 
-| Variable                     | Purpose                                                                              |
-| ---------------------------- | ------------------------------------------------------------------------------------ |
-| `EVE_BASE_URL`               | Next.js hosting, development: use an agent you already started                       |
-| `EVE_NEXT_PRODUCTION_PORT`   | Next.js hosting: first port for agents that `next start` runs. Defaults to `4274`    |
-| `EVE_NEXT_PRODUCTION_ORIGIN` | Next.js hosting: address of agents you run yourself. Turns off automatic startup     |
-| `EVE_PUBLIC_ROUTE_PREFIX`    | Self-hosting: an agent's public path, such as `/eve/support`, so callback links work |
+| Variable                     | Purpose                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `EVE_BASE_URL`               | Next.js hosting, development: use an agent you already started                                             |
+| `EVE_NEXT_PRODUCTION_PORT`   | Next.js hosting: first port for agents that `next start` runs. Defaults to `4274`                          |
+| `EVE_NEXT_PRODUCTION_ORIGIN` | Next.js hosting: address of a proxy serving your agents under `servicePrefix`. Turns off automatic startup |
+| `EVE_PUBLIC_ROUTE_PREFIX`    | Self-hosting: an agent's public path, such as `/eve/support`, so callback links work                       |
 
 ## What to read next
 

@@ -422,6 +422,24 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("<model>");
     expect(help).toContain("--reasoning <effort>");
     expect(help).toContain("-n, --non-interactive");
+    expect(help).not.toContain("--channel-web-nextjs");
+  });
+
+  it("still accepts the hidden --channel-web-nextjs flag", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", "my-agent", "--channel-web-nextjs"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      expect.objectContaining({ channelWebNextjs: true }),
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("does not print the boot banner because interactive onboarding owns its header", async () => {
