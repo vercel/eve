@@ -8,23 +8,31 @@ import {
 } from "#execution/session-inbox/address.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { KITCHEN_SINK } from "#execution/v26-history.fixtures.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { releasingSessionOwnerWorkflow } from "#internal/testing/session-inbox-workflow.js";
+import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  releasingSessionOwnerWorkflow,
+  sessionCommandInboxWorkflow,
+} from "#internal/testing/session-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, resumeHook, start } from "#internal/workflow/runtime.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 
 const FOLLOW_UP = "Bob asks for the weekend forecast.";
 
-it("continues an idle session an eve before v27 recorded on the same stream", async () => {
+it.each([
+  ["an eve 0.79 owner, which releases its addresses first", handOffReleased],
+  ["an eve 0.83 owner, whose addresses the successor takes over", handOffForced],
+])("continues an idle session from %s on the same stream", async (_name, handOff) => {
   const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff" } });
   await runtime.run(async () => {
     const turnCount = turnsIn(KITCHEN_SINK);
-    const { activation, owner, sessionId, successor } = await handOff(KITCHEN_SINK, turnCount);
+    const { owner, sessionId, successor } = await handOff(KITCHEN_SINK, turnCount);
     try {
-      expect(activation).toEqual({ kind: "active" });
       const followUp = await readTurn(sessionId, KITCHEN_SINK.length);
       // The successor's first line follows the v26 lines: it compacts the earlier conversation.
       expect(followUp[0]?.meta.position.line).toBe(KITCHEN_SINK.length);
@@ -52,7 +60,20 @@ it("continues an idle session an eve before v27 recorded on the same stream", as
           data: expect.objectContaining({ value: expect.stringContaining(FOLLOW_UP) }),
         }),
       );
-      // A reader of the whole stream sees the v26 conversation and the new turn as one session.
+      // The import already started a fresh run, so its compaction moves the session nowhere: once
+      // the follow-up parks, the successor itself runs the next message.
+      await waitForParkedTurnStep(successor.runId, 2);
+      const nextLine = (followUp.at(-1)?.meta.position.line ?? 0) + 1;
+      await createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      }).dispatchSession({
+        command: handoffFollowUp("dpl_b", "Bob asks about Sunday.", "delivery-next"),
+        sessionId,
+      });
+      await readTurn(sessionId, nextLine);
+      const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+      expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
+      // A reader of the whole stream sees the v26 conversation and the new turns as one session.
       const history: SessionStreamEvent[] = [];
       for await (const event of streamSessionEvents(sessionId, { follow: false })) {
         history.push(event);
@@ -61,7 +82,7 @@ it("continues an idle session an eve before v27 recorded on the same stream", as
       expect(lines).toEqual([...lines].sort((a, b) => a - b));
       const turns = history.filter((event) => event.type === "turn.started").map(turnIdOf);
       expect(new Set(turns).size).toBe(turns.length);
-      expect(turns.at(-1)).toBe(`turn_${turnCount}`);
+      expect(turns.slice(-2)).toEqual([`turn_${turnCount}`, `turn_${turnCount + 1}`]);
     } finally {
       await successor.cancel().catch(() => {});
       await owner.cancel().catch(() => {});
@@ -70,11 +91,10 @@ it("continues an idle session an eve before v27 recorded on the same stream", as
 });
 
 /**
- * An owner from before handoff version 3, like eve 0.79, whose session stream holds `records` as
- * an eve before v27 recorded them, hands its session to this build: it releases its addresses and
- * waits for the successor's verdict.
+ * An eve 0.69–0.82 owner (handoff version 2), whose session stream holds `records`, hands its
+ * session to this build: it releases its addresses and waits for the successor's verdict.
  */
-async function handOff(records: readonly unknown[], turnCount: number) {
+async function handOffReleased(records: readonly unknown[], turnCount: number) {
   const release = `pre-v27-release-${crypto.randomUUID()}`;
   const owner = await start(releasingSessionOwnerWorkflow, [{ aliases: [], release }]);
   const sessionId = owner.runId;
@@ -87,7 +107,7 @@ async function handOff(records: readonly unknown[], turnCount: number) {
   const successor = await start(workflowEntry, [
     {
       activationToken: `${sessionId}:handoff`,
-      checkpoint: v17Checkpoint(sessionId, turnCount),
+      checkpoint: savedCheckpoint(14, sessionId, turnCount),
       delivery: followUpDelivery(),
       handoffVersion: 2,
       kind: "handoff",
@@ -96,8 +116,39 @@ async function handOff(records: readonly unknown[], turnCount: number) {
       sessionWritable: getRun(sessionId).getWritable<Uint8Array>(),
     },
   ]);
-  const { activation } = await owner.returnValue;
-  return { activation, owner, sessionId, successor };
+  await expect(owner.returnValue).resolves.toMatchObject({ activation: { kind: "active" } });
+  return { owner, sessionId, successor };
+}
+
+/**
+ * An eve 0.83 owner (handoff version 3), whose session stream holds `records`, keeps its addresses
+ * while the successor starts; the successor takes them over and the owner exits.
+ */
+async function handOffForced(records: readonly unknown[], turnCount: number) {
+  const alias = `http:pre-v27:${crypto.randomUUID()}`;
+  const owner = await start(sessionCommandInboxWorkflow, [{ token: alias }]);
+  const sessionId = owner.runId;
+  const commandToken = sessionCommandHookToken(sessionId);
+  await waitForHook(owner, { token: sessionInboxHookToken(commandToken) });
+  await waitForHook(owner, { token: sessionInboxHookToken(alias) });
+  await recordLines(sessionId, records);
+  const successor = await start(workflowEntry, [
+    {
+      activationToken: `${sessionId}:handoff:0`,
+      attemptKey: `${sessionId}:0`,
+      checkpoint: savedCheckpoint(17, sessionId, turnCount),
+      delivery: followUpDelivery(),
+      handoffVersion: 3,
+      hookTokens: [commandToken, alias],
+      kind: "handoff",
+      ownerDeploymentId: "dpl_b",
+      sessionId,
+      sessionWritable: getRun(sessionId).getWritable<Uint8Array>(),
+      sourceRunId: sessionId,
+    },
+  ]);
+  await owner.returnValue;
+  return { owner, sessionId, successor };
 }
 
 async function recordLines(sessionId: string, records: readonly unknown[]): Promise<void> {
@@ -153,10 +204,13 @@ function followUpDelivery(): DeliverHookPayload {
   };
 }
 
-/** The checkpoint an idle eve 0.83 owner hands off after `turnCount` turns. */
-function v17Checkpoint(sessionId: string, turnCount: number) {
+/**
+ * The checkpoint an idle owner before v27 hands off after `turnCount` turns: eve 0.79 writes
+ * version 14, which predates the admitted delivery keys eve 0.83's version 17 carries.
+ */
+function savedCheckpoint(version: 14 | 17, sessionId: string, turnCount: number) {
   return {
-    admittedDeliveryKeys: [],
+    ...(version === 17 && { admittedDeliveryKeys: [] }),
     history: [
       { content: "hello there", kind: "user", role: "user" },
       { content: [{ text: "Echo: hello there", type: "text" }], role: "assistant" },
@@ -182,6 +236,6 @@ function v17Checkpoint(sessionId: string, turnCount: number) {
       version: 2,
     },
     sessionTimeoutMs: 60_000,
-    version: 17,
+    version,
   } as never;
 }

@@ -419,8 +419,12 @@ async function runSessionLoop(
     }
   };
   const runInitialAction = async (): Promise<SessionActionResult> => {
-    // A failed compaction keeps the history; the session continues either way.
-    if (boot.compactFirst === true) await runTurn({ control: "compact" });
+    if (boot.compactFirst === true) {
+      // A failed compaction keeps the history; the session continues either way. This run already
+      // starts fresh, so the compaction moves it nowhere.
+      await runTurn({ control: "compact" });
+      compactionHandoffDue = false;
+    }
     switch (boot.start.kind) {
       case "first-message":
         // Beside the wait, so a first message starts its turn without waiting
