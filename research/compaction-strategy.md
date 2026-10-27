@@ -37,14 +37,11 @@ type CompactionDefinition =
       /** eve's default strategy: the model that writes its summary, and that model's window. */
       readonly model?: ModelDefinition;
       readonly modelContextWindowTokens?: number;
-      readonly compact?: never;
     }
   | {
       readonly thresholdPercent?: number;
       /** A custom strategy. It chooses its own summary model, if it uses one. */
       readonly compact: CompactionStrategy;
-      readonly model?: never;
-      readonly modelContextWindowTokens?: never;
     };
 ```
 
@@ -71,8 +68,11 @@ export default defineAgent({
 });
 ```
 
-A block that sets both `model` and `compact` doesn't type-check. eve also rejects it at load
-time, for JavaScript and dynamic values, with: "`compaction.model` configures eve's default
+The two forms are exclusive. A plain TypeScript union would accept `{ model, compact }`, because
+excess-property checks pass when a property exists in any member, so the published type marks each
+form's fields `never` in the other, the way `ExactDefinition` does for definitions. A block that
+sets both doesn't type-check. eve also rejects it at load time, for JavaScript and dynamic values,
+with: "`compaction.model` configures eve's default
 strategy. With `compaction.compact`, choose the summary model in the strategy, for example
 `fixedTail({ model })`."
 
