@@ -14,7 +14,7 @@
 //   message|reasoning.appended   content.delta
 //   message|reasoning.completed  content.completed (synthesized for parts that never completed)
 //   action.input.appended        call.input
-//   actions.requested            call.requested, one per action
+//   actions.requested            call.requested, one per action (an agent task's call is `agent`)
 //   action.result                call.settled, except a task's start acknowledgement
 //   task.started / task.settled  call.started {taskId} / call.settled
 //   agent.started                child.opened
@@ -64,8 +64,12 @@ export function isLegacyCapture(events) {
 export function upgradeLegacyEvents(events) {
   // A task's call is acknowledged with an `action.result` once the task starts;
   // in v27 the call settles only with the task's result.
-  const taskCalls = new Set(
-    events.filter((e) => e.type === "task.started").map((e) => e.data?.callId),
+  const taskStarts = events.filter((e) => e.type === "task.started");
+  const taskCalls = new Set(taskStarts.map((e) => e.data?.callId));
+  // An agent call was an ordinary tool call that started an agent task; v27
+  // names it an `agent` capability, which tool counts leave out.
+  const agentCalls = new Set(
+    taskStarts.filter((e) => e.data?.kind !== "tool").map((e) => e.data?.callId),
   );
   const requestedCalls = new Set(
     events
@@ -159,7 +163,12 @@ export function upgradeLegacyEvents(events) {
           emit("call.requested", {
             callId: action?.callId,
             owner: { runId },
-            capability: { kind: CAPABILITY[action?.kind] ?? action?.kind, name: action?.toolName },
+            capability: {
+              kind: agentCalls.has(action?.callId)
+                ? "agent"
+                : (CAPABILITY[action?.kind] ?? action?.kind),
+              name: action?.toolName,
+            },
           });
         return;
       case "action.result":

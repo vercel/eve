@@ -135,6 +135,7 @@ test("derives representative metrics from a captured tool eval", () => {
   // arrival, less the next commit's delivery lag, places it at 273 ms.
   assert.equal(v["latency.ttft_ms_p50"], 8);
   assert.deepEqual(metrics["overhead.pre_model_ms"].samples, [7, 8]);
+  assert.deepEqual(metrics["overhead.model_start_ms"].samples, [1, 2, 2]);
   // The first turn's tool ends its turn, so only the second has a next model call.
   assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [20]);
   assert.deepEqual(metrics["overhead.finalize_ms"].samples, [12, 12]);
@@ -192,10 +193,17 @@ test("a pre-v27 capture measures as it did before eve 0.84.0", () => {
   assert.equal(v["counts.steps"], 3);
   assert.equal(v["counts.tool_calls"], 2);
   assert.equal(tools["cost.primary_usd"].reason, "missing-step-cost");
+  // One step start before v27: no request-to-start gap was recorded.
+  assert.equal(tools["overhead.model_start_ms"].reason, "predates-model-start");
 
-  const subagents = values(
-    deriveAttemptMetrics(fixture("legacy-agent-subagents-continuation-local")).metrics,
-  );
+  const delegated = deriveAttemptMetrics(
+    fixture("legacy-agent-subagents-continuation-local"),
+  ).metrics;
+  // As in v27, an agent call is not a tool call, and its own time ends when
+  // its task starts, not at the call's start acknowledgement.
+  assert.equal(delegated["counts.tool_calls"].value, 4);
+  assert.deepEqual(delegated["overhead.tool_hop_ms"].samples, [16, 0, 18, 1, 0, 16, 1]);
+  const subagents = values(delegated);
   assert.equal(subagents["attribution.task_ms"], 2465);
   assert.equal(subagents["attribution.tool_ms"], 133);
   assert.equal(subagents["counts.turns"], 3);
@@ -256,6 +264,44 @@ test("compaction outside a turn does not count toward turn time or steps", () =>
   assert.equal(v["counts.compactions"], 1);
   assert.equal(v["counts.steps"], 1, "the summary run is not a model step");
   assert.equal(v["attribution.compaction_ms"], 0);
+  assertPartition(metrics);
+});
+
+test("compaction is model work, so no framework overhead counts it", () => {
+  const compaction = (changeId, start, end) => [
+    fact("context.started", start, { changeId, kind: "compaction", turnId: "t" }),
+    fact("context.settled", end, { changeId, kind: "compaction", outcome: "completed" }),
+  ];
+  const text = delta("r2", 310);
+  // Each step compacts between its request and its provider call.
+  const events = turn(0, 400, [
+    fact("model.requested", 10, { runId: "r1", owner: { turnId: "t" } }),
+    ...compaction("c1", 20, 70),
+    fact("model.started", 80, { runId: "r1", modelId: "m", attempt: 0 }),
+    call("a", "r1", 100),
+    ...settled("r1", 110),
+    callSettled("a", 200),
+    fact("model.requested", 210, { runId: "r2", owner: { turnId: "t" } }),
+    ...compaction("c2", 220, 300),
+    fact("model.started", 310, { runId: "r2", modelId: "m", attempt: 0 }),
+    text,
+    completed("r2", 350),
+    ...settled("r2", 360),
+  ]);
+  const zero = Date.parse(at(0));
+  const sends = [
+    { kind: "message", deliveryId: "d-t", startedAt: zero - 20, notReadyMs: 0, acceptedAt: zero },
+  ];
+  const arrivals = new Map([[text, Date.parse(at(330))]]);
+  const { metrics } = deriveAttemptMetrics(clocked(events, { arrivals, sends }));
+  assert.deepEqual(metrics["overhead.pre_model_ms"].samples, [30]);
+  assert.deepEqual(metrics["overhead.model_start_ms"].samples, [20, 20]);
+  assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [30]);
+  // Send to idle is 430 ms: 60 of model, 100 of tool, and 130 of compaction.
+  assert.deepEqual(metrics["overhead.turn_ms"].samples, [140]);
+  assert.deepEqual(metrics["overhead.first_output_ms"].samples, [60]);
+  assert.deepEqual(metrics["overhead.tool_call_ms"].samples, [30]);
+  assert.equal(values(metrics)["attribution.compaction_ms"], 130);
   assertPartition(metrics);
 });
 
@@ -395,11 +441,12 @@ test("a delta is placed between the commits around it, and unknown without a cli
   // Read in one late batch: its arrival less the smallest lag would land after the next commit.
   const batched = clocked(events, { arrivals: new Map([[text, Date.parse(at(400))]]) });
   assert.equal(values(deriveAttemptMetrics(batched).metrics)["latency.ttft_ms_p50"], 200);
-  // Its own time is only the commit before it, which would read as an instant first token.
-  assert.equal(
-    deriveAttemptMetrics(synthetic(events)).metrics["latency.ttft_ms_p50"].reason,
-    "no-streamed-steps",
-  );
+  // Its own time is only the commit before it, which would read as an instant
+  // first token; the step streamed, so its TTFT is unknown, not inapplicable.
+  assert.deepEqual(deriveAttemptMetrics(synthetic(events)).metrics["latency.ttft_ms_p50"], {
+    status: "unavailable",
+    reason: "untimed-first-token",
+  });
 });
 
 test("partial captures make attribution unavailable instead of guessing", () => {

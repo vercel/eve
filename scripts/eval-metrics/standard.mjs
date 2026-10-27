@@ -53,7 +53,7 @@ import { sessionMarks } from "./measurements/marks.mjs";
 import { indexSession, sessionFailures } from "./measurements/session.mjs";
 
 /** Bump whenever a definition below changes meaning. */
-export const METRICS_VERSION = 3;
+export const METRICS_VERSION = 4;
 
 /**
  * Where the framework definitions come from. The conformance data in
@@ -66,9 +66,13 @@ export const METRIC_DEFINITIONS = Object.freeze({
   path: "packages/demo-ui/src/compare-glossary.ts",
   commit: "ea8aa4060cf4fb8cd39737ce8ab21c4e0f40c741",
   deviations: Object.freeze({
-    "overhead.turn_ms": "concurrent tool time counts once",
-    "overhead.tool_hop_ms": "one sample per batch of calls a model step requested",
-    "overhead.tool_call_ms": "one sample per batch of calls a model step requested",
+    "overhead.pre_model_ms": "compaction time excluded",
+    "overhead.first_output_ms": "compaction time excluded",
+    "overhead.turn_ms": "concurrent tool time counts once; compaction time excluded",
+    "overhead.tool_hop_ms":
+      "one sample per batch of calls a model step requested; compaction time excluded",
+    "overhead.tool_call_ms":
+      "one sample per batch of calls a model step requested; compaction time excluded",
   }),
 });
 
@@ -96,6 +100,7 @@ export const STANDARD_METRICS = Object.freeze({
   "attribution.compaction_ms": model("ms", "lower"),
   "attribution.framework_ms": framework("ms", "lower", { pooled: false }),
   "overhead.pre_model_ms": framework("ms", "lower", { per: "turn", pooled: true }),
+  "overhead.model_start_ms": framework("ms", "lower", { per: "step", pooled: true }),
   "overhead.tool_hop_ms": framework("ms", "lower", { per: "batch", pooled: true }),
   "overhead.finalize_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.agent_start_ms": framework("ms", "lower", { per: "call", pooled: true }),
@@ -391,9 +396,11 @@ function streaming(roots) {
   let tokens = 0;
   let streamMs = 0;
   let missingTokens = false;
+  let untimed = false;
   for (const { index, marks } of roots) {
     for (const turn of marks.turns.values()) {
       for (const step of turn.steps) {
+        untimed ||= step.untimed;
         if (step.firstToken === undefined) continue;
         ttfts.push(step.firstToken.t - step.request.t);
         const run = index.runs.get(step.key);
@@ -404,6 +411,11 @@ function streaming(roots) {
         streamMs += Math.max(0, step.done.t - step.firstToken.t);
       }
     }
+  }
+  // A step whose first token can't be placed would leave the median biased.
+  if (untimed) {
+    const none = unavailable("untimed-first-token");
+    return { "latency.ttft_ms_p50": none, "latency.output_tokens_per_s": none };
   }
   if (ttfts.length === 0) {
     const none = notApplicable("no-streamed-steps");

@@ -25,8 +25,9 @@ const STREAMED_KINDS = new Set(["text", "reasoning"]);
 
 /**
  * @typedef {{ t: number, via: object }} Mark
- * @typedef {{ key: string, turnId: string, request: Mark, firstToken?: Mark, done?: Mark, outputs: object[] }} StepMarks
+ * @typedef {{ key: string, turnId: string, request: Mark, firstToken?: Mark, untimed: boolean, done?: Mark, outputs: object[] }} StepMarks
  *   `key` is the run id. `outputs` are the events a client shows: streamed text, or calls starting.
+ *   `untimed`: the step streamed output it can't place in time, so it has no first token.
  * @typedef {{ callId: string, runId: string, turnId: string | undefined, start: Mark, end?: Mark }} ToolMarks
  * @typedef {{ turnId: string, started: Mark, deliveries: Set<string>, idle?: Mark, steps: StepMarks[], tools: ToolMarks[] }} TurnMarks
  *   `deliveries` are the deliveries that started the turn.
@@ -153,6 +154,7 @@ export function sessionMarks(events, { index = indexSession(events), arrival } =
     }
     // A delta it can't place in time could be the first token, so the step has none.
     step.firstToken = firstUnknown ? undefined : first;
+    step.untimed = firstUnknown;
     if (requested !== undefined) step.done = requested;
     else if (step.completed !== undefined)
       step.done = { t: last?.t ?? step.completed.t, via: step.completed.via };
