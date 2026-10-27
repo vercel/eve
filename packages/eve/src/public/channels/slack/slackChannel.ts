@@ -1136,7 +1136,7 @@ async function receiveOnSlack(
 
   let threadTs = requestedThreadTs;
   if (initialMessage) {
-    const { thread } = buildSlackBinding({
+    const { thread, slack } = buildSlackBinding({
       api: deps.api,
       botToken: deps.credentials?.botToken,
       channelId,
@@ -1150,7 +1150,7 @@ async function receiveOnSlack(
     threadTs = posted.id;
     if (files?.length) {
       try {
-        await thread.uploadFiles(files);
+        await slack.uploadFiles(files);
       } catch (error) {
         log.warn("file upload after initial message post failed", { error });
       }
