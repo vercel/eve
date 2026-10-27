@@ -351,7 +351,24 @@ async function sendSummary(ctx: WorkflowStepToolContext, userId: string) {
   const dm = defineChannel({ routes: [POST("/dm", async () => new Response("ok"))] });
   const delivery = await ctx.to(dm, { userId }).send("Here is the summary.", {
     auth: ctx.session.auth.current,
-    idempotencyKey: `${ctx.callId}:summary`,
+    idempotencyKey: `${ctx.session.id}:${ctx.callId}:summary`,
   });
   return { sessionId: delivery.sessionId };
+}
+
+/** Calls ctx.to() from a step and returns what it threw, for a test that reads the refusal. */
+export async function sendFromStepWorkflow(_input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await trySendNote(ctx);
+}
+
+async function trySendNote(ctx: WorkflowStepToolContext) {
+  "use step";
+  const dm = defineChannel({ routes: [POST("/dm", async () => new Response("ok"))] });
+  try {
+    ctx.to(dm, { userId: "alice" });
+    return { refused: null };
+  } catch (error) {
+    return { refused: (error as Error).message };
+  }
 }

@@ -209,7 +209,9 @@ export type ToolContext = SessionContext & {
    * runs the channel's `receive()` hook and returns the delivery. The session
    * belongs to the channel, not this one, and keeps running after the tool
    * returns. The tool runs again when its step retries, so pass
-   * `idempotencyKey: ctx.callId` to deliver once. Throws in a delegated
+   * `` idempotencyKey: `${ctx.session.id}:${ctx.callId}` `` to deliver once.
+   * `callId` alone is unique only within this session, and every sender to the
+   * destination shares its keys. Throws in a delegated
    * session: a subagent, a root copy, or a remote agent call.
    */
   readonly to: CrossChannelToFn;

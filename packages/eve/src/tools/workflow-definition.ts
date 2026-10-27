@@ -62,6 +62,7 @@ export type WorkflowStepToolContext = Pick<
   ToolContext,
   | "abortSignal"
   | "callId"
+  | "channel"
   | "session"
   | "toolName"
   | "getSandbox"

@@ -8,9 +8,13 @@ import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { getRun } from "#internal/workflow/runtime.js";
 import { captureTurnEvents, readFirstTurnReply } from "#internal/testing/events.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
-import { sendThenSleepWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import {
+  sendFromStepWorkflow,
+  sendThenSleepWorkflow,
+} from "#internal/testing/workflow-tool-fixtures.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
   buildWorkflowToolSerializedContext,
@@ -18,7 +22,7 @@ import {
 } from "#internal/testing/workflow-tool-run-harness.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
-import { defineChannel, POST } from "#public/channels/index.js";
+import { defineChannel, isChannel, POST } from "#public/channels/index.js";
 import { callSlackApi } from "#public/channels/slack/index.js";
 import { type SlackChannel, slackChannel } from "#public/channels/slack/slackChannel.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
@@ -146,16 +150,7 @@ describe("ctx.to() in tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: "Run fork_to_dm" },
-          serializedContext: {
-            ...buildWorkflowToolSerializedContext({ continuationToken: "http:slack-fork-source" }),
-            "eve.auth": {
-              attributes: { user_id: "U_ALICE" },
-              authenticator: "slack-webhook",
-              issuer: "slack:T01",
-              principalId: "slack:T01:U_ALICE",
-              principalType: "user",
-            },
-          },
+          serializedContext: slackSourceContext("slack-fork-source", "U_ALICE"),
         },
       ]);
       const sourceTurns = captureTurnEvents(source);
@@ -187,7 +182,131 @@ describe("ctx.to() in tools", () => {
       }
     });
   }, 90_000);
+
+  it("gives two sessions whose fork calls share a call id separate forks in one Slack channel", async () => {
+    let nextTs = 1;
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.hostname !== "slack.com") return realFetch(input, init);
+      const ts = `1700000000.${String(nextTs++).padStart(6, "0")}`;
+      return Response.json({ ok: true, channel: "C_TEAM", message: { ts }, messages: [], ts });
+    });
+    vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
+    const slack = slackChannel({ credentials: { botToken: "xoxb-test", signingSecret: "s" } });
+    const runtime = await createToolRuntime({
+      agentName: "tool-slack-fork-thread",
+      execute: forkToSlackThread(slack),
+      modules: [
+        { logicalPath: "channels/slack.ts", loadNamespace: async () => ({ default: slack }) },
+      ],
+      toolName: "fork_thread",
+    });
+
+    await runtime.run(async () => {
+      // Alice and Bob each ask to fork their own thread; the test model gives both calls one id.
+      const sources = await Promise.all(
+        ["U_ALICE", "U_BOB"].map((userId) =>
+          startSessionOwner(workflowEntry, [
+            {
+              kind: "initial",
+              ownerDeploymentId: "dpl_inline",
+              input: { message: "Run fork_thread" },
+              serializedContext: slackSourceContext(`slack-thread-${userId}`, userId),
+            },
+          ]),
+        ),
+      );
+      try {
+        const forks = await Promise.all(
+          sources.map(async (source) => {
+            const turns = captureTurnEvents(source);
+            try {
+              return forkedSessionId(await turns.nextTurn());
+            } finally {
+              turns.dispose();
+            }
+          }),
+        );
+        expect(forks[0]).not.toBe(forks[1]);
+        await Promise.all(forks.map((fork) => getRun(fork).cancel()));
+      } finally {
+        await Promise.all(sources.map((source) => source.cancel()));
+      }
+    });
+  }, 90_000);
+
+  it.each(["ordinary", "workflow"] as const)(
+    "refuses ctx.to() in a %s tool that a root copy calls",
+    async (kind) => {
+      const dm = defineChannel({ routes: [POST("/dm", async () => new Response("ok"))] });
+      const modules: ProgrammaticAgentModule[] = [
+        { logicalPath: "channels/dm.ts", loadNamespace: async () => ({ default: dm }) },
+      ];
+      const runtime =
+        kind === "ordinary"
+          ? await createToolRuntime({
+              agentName: "delegated-ordinary-to",
+              execute: async (_input, ctx) => {
+                try {
+                  ctx.to(dm, { userId: "alice" });
+                  return { refused: null };
+                } catch (error) {
+                  return { refused: (error as Error).message };
+                }
+              },
+              modules,
+              toolName: "send_note",
+            })
+          : await createWorkflowToolRuntime({
+              agentName: "delegated-workflow-to",
+              execute: sendFromStepWorkflow,
+              modules,
+              toolName: "send_note",
+            });
+
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Delegate to a subagent: Run send_note" },
+            serializedContext: buildWorkflowToolSerializedContext({
+              continuationToken: `http:delegated-${kind}-to`,
+            }),
+          },
+        ]);
+        expect(String(await readFirstTurnReply(run))).toContain(
+          "ctx.to() isn't available in a delegated session",
+        );
+      });
+    },
+    60_000,
+  );
 });
+
+/** A source session in a Slack thread, started by the given user, as Slack's webhook starts one. */
+function slackSourceContext(name: string, userId: string): Record<string, unknown> {
+  return {
+    ...buildWorkflowToolSerializedContext({ continuationToken: `http:${name}` }),
+    "eve.auth": {
+      attributes: { user_id: userId },
+      authenticator: "slack-webhook",
+      issuer: "slack:T01",
+      principalId: `slack:T01:${userId}`,
+      principalType: "user",
+    },
+    "eve.channelInstrumentation": {
+      kind: "channel:slack",
+      metadata: {
+        channelId: "C_TEAM",
+        teamId: "T01",
+        threadTs: `1699999999.${userId}`,
+        triggeringUserId: userId,
+      },
+    },
+  };
+}
 
 /** A runtime whose agent has one ordinary tool, which the test model calls on "Run <toolName>". */
 async function createToolRuntime(input: {
@@ -361,19 +480,34 @@ function forkToSlackDm(slack: SlackChannel) {
   return async (_input: Record<string, never>, ctx: ToolContext) => {
     const auth = ctx.session.auth.current;
     const userId = auth?.attributes.user_id;
-    if (auth?.authenticator !== "slack-webhook" || typeof userId !== "string")
+    if (!isChannel(ctx.channel, slack) || typeof userId !== "string")
       return { forked: false, reason: "No Slack user to message." };
 
     const channelId = await openDirectMessage(userId);
     const history = toHistory(ctx.messages);
-    const delivery = await ctx
-      .to(slack, { channelId })
-      // The test model reuses one call id per tool name, so the turn tells its forks apart.
-      .send("Continue this conversation here.", {
-        auth,
-        history,
-        idempotencyKey: `${ctx.session.turn.id}:${ctx.callId}`,
-      });
+    const delivery = await ctx.to(slack, { channelId }).send("Continue this conversation here.", {
+      auth,
+      history,
+      idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
+    });
+    return { forked: true, sessionId: delivery.sessionId };
+  };
+}
+
+/** The thread tool from docs/patterns/fork-conversations-into-new-threads.md. */
+function forkToSlackThread(slack: SlackChannel) {
+  return async (_input: Record<string, never>, ctx: ToolContext) => {
+    if (!isChannel(ctx.channel, slack) || ctx.channel.metadata.channelId === null)
+      return { forked: false, reason: "This conversation is not in Slack." };
+    const { channelId } = ctx.channel.metadata;
+    const auth = ctx.session.auth.current;
+
+    const history = toHistory(ctx.messages);
+    const delivery = await ctx.to(slack, { channelId }).send("Continue this conversation here.", {
+      auth,
+      history,
+      idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
+    });
     return { forked: true, sessionId: delivery.sessionId };
   };
 }

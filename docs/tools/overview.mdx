@@ -281,7 +281,7 @@ export default defineTool({
       .send("Take over this investigation.", {
         auth: ctx.session.auth.current,
         history: [{ role: "user", text: summary }],
-        idempotencyKey: ctx.callId,
+        idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
       });
     return { sessionId: delivery.sessionId };
   },
@@ -290,7 +290,7 @@ export default defineTool({
 
 - The session belongs to the channel. People on that channel continue it, it has no parent, and it keeps running after the tool returns.
 - It runs the root agent with the `auth` you pass. Pass `ctx.session.auth.current` to start it as the caller.
-- A tool call that retries runs the tool again. Pass `idempotencyKey: ctx.callId`, and the session at the target gets the message once. Built-in channels map a retry to the same session, including a Slack target with only a `channelId`. A platform post made before the session exists, such as an `initialMessage`, repeats.
+- A tool call that retries runs the tool again. Pass `` idempotencyKey: `${ctx.session.id}:${ctx.callId}` ``, and the session at the target gets the message once. The destination session dedupes keys from every sender, and `ctx.callId` alone is unique only within the calling session, so include the session id. Built-in channels map a retry to the same session, including a Slack target with only a `channelId`. A platform post made before the session exists, such as an `initialMessage`, repeats.
 - `ctx.to()` throws in a delegated session: a subagent, a root copy, or a remote agent call. A session it started would outlive the delegation and act for the caller, so return the result and send from a tool on the root agent.
 
 See [Fork conversations into a new thread](/docs/patterns/fork-conversations-into-new-threads) for a tool that copies the current conversation into a new Slack thread.

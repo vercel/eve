@@ -1,4 +1,3 @@
-import { hasDelegatedCaller } from "#execution/session/delegated-caller.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#reactions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
@@ -668,7 +667,7 @@ async function runSessionStepBody(
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({
-                delegated: hasDelegatedCaller(ctx),
+                delegated: hasDelegatedSessionContext(input.serializedContext),
                 loadBundle: () => ctx.require(BundleKey),
               }),
             });

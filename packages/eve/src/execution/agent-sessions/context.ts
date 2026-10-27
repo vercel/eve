@@ -1,11 +1,11 @@
-import { isDelegatedSessionContext } from "#execution/session/delegated-caller.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type {
   ChannelInstrumentationProjection,
   SessionCapabilities,
   SessionParent,
   SessionTraceRoot,
 } from "#channel/types.js";
-import type { LocalDevRequestProvenance } from "#context/keys.js";
+import { ContinuationTokenKey, type LocalDevRequestProvenance } from "#context/keys.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
@@ -41,6 +41,8 @@ export interface AgentSessionContext {
   readonly capabilities?: SessionCapabilities;
   readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** The calling session's address on its channel, which `ctx.channel.continuationToken` reads. */
+  readonly continuationToken?: string;
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
@@ -100,9 +102,10 @@ export function captureAgentSessionContext(
     capabilities: caller.capabilities,
     schedule: readSerializedSessionSchedule(caller.serializedContext),
     channelMetadata: caller.channelMetadata,
+    continuationToken: caller.serializedContext[ContinuationTokenKey.name] as string | undefined,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
-    delegated: isDelegatedSessionContext(caller.serializedContext),
+    delegated: hasDelegatedSessionContext(caller.serializedContext),
     localDevRequest: caller.localDevRequest,
     parent: {
       callId,

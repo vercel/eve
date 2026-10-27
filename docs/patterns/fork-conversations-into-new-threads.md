@@ -33,6 +33,7 @@ three things:
 This tool lets someone in a Slack thread say "split this off into its own thread":
 
 ```ts title="agent/tools/fork_thread.ts"
+import { isChannel } from "eve/channels";
 import { defineTool, type ToolContext } from "eve/tools";
 import { z } from "zod";
 import slack from "../channels/slack";
@@ -41,15 +42,17 @@ export default defineTool({
   description: "Continue this conversation in a new thread in the current Slack channel.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
-    const auth = ctx.session.auth.current;
-    const channelId = auth?.attributes.channel_id;
-    if (auth?.authenticator !== "slack-webhook" || typeof channelId !== "string")
+    if (!isChannel(ctx.channel, slack) || ctx.channel.metadata.channelId === null)
       return { forked: false, reason: "This conversation is not in Slack." };
+    const { channelId } = ctx.channel.metadata;
+    const auth = ctx.session.auth.current;
 
     const history = toHistory(ctx.messages);
-    const delivery = await ctx
-      .to(slack, { channelId })
-      .send("Continue this conversation here.", { auth, history, idempotencyKey: ctx.callId });
+    const delivery = await ctx.to(slack, { channelId }).send("Continue this conversation here.", {
+      auth,
+      history,
+      idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
+    });
     return { forked: true, sessionId: delivery.sessionId };
   },
 });
@@ -66,8 +69,9 @@ function toHistory(messages: ToolContext["messages"]) {
 }
 ```
 
-The Slack channel's default auth sets `channel_id` and `user_id` from the message. A call from
-anywhere else, such as a schedule or another channel, gets `forked: false`.
+`ctx.channel` is the channel serving the calling session, and `isChannel` narrows its `metadata`
+to the Slack channel's, which includes the conversation's `channelId`. A call from anywhere else,
+such as a schedule or another channel, gets `forked: false`.
 
 A Slack target with only a `channelId` posts the agent's first reply as a new top-level message,
 which becomes the fork's thread. Every call starts a new thread and session. To fork into a
@@ -87,8 +91,9 @@ Slack user id and use its channel id as the target:
 import { callSlackApi } from "eve/channels/slack";
 
 // In execute(), replace the channelId lookup:
+const auth = ctx.session.auth.current;
 const userId = auth?.attributes.user_id;
-if (auth?.authenticator !== "slack-webhook" || typeof userId !== "string")
+if (!isChannel(ctx.channel, slack) || typeof userId !== "string")
   return { forked: false, reason: "No Slack user to message." };
 const channelId = await openDirectMessage(userId);
 
@@ -102,6 +107,9 @@ async function openDirectMessage(userId: string) {
   return (response.channel as { id: string }).id;
 }
 ```
+
+The caller's `user_id` comes from `auth.current`, not `ctx.channel.metadata.triggeringUserId`,
+which is whoever started the thread.
 
 `conversations.open` needs the `im:write` scope. The example reads `SLACK_BOT_TOKEN`. If your
 channel uses Vercel Connect, pass the connector's `botToken` resolver to `callSlackApi` instead.
@@ -134,6 +142,9 @@ fork would outlive the delegation and act for the caller.
 
 Each call starts a new thread. A tool call that retries runs the tool again with the same
 `ctx.callId`, so Slack maps the retry to the same thread and session, which gets the message once.
+The key also chooses the Slack thread, so it has to be unique across every session that forks
+into this channel, not only across retries. `ctx.callId` is unique only within one session, which
+is why the key includes `ctx.session.id`.
 To stop the model from forking the same conversation twice, say so in the tool's
 `description`, or record each fork in your app and check for one before sending.
 

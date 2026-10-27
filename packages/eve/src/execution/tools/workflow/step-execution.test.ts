@@ -250,13 +250,6 @@ describe("workflow step authorization", () => {
     expect(stopped).toEqual([sessionConnection]);
   });
 
-  it("refuses ctx.to() when a parent delegated the calling session", async () => {
-    const channel = { __kind: "eve:channel", routes: [] };
-    await expect(
-      runStep((ctx) => ctx.to(channel as never, {} as never), { ...context(), delegated: true }),
-    ).rejects.toThrow("ctx.to() isn't available in a delegated session");
-  });
-
   it("fails ctx.getSandbox() without retrying once its step has returned", async () => {
     const { registry, starts } = upsertSandboxes();
     bundle.registry = registry;

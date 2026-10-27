@@ -307,6 +307,7 @@ export function createSharedContext(
 export function workflowToolChannel(context: AgentSessionContext): InstrumentationChannel {
   const projection = context.channelMetadata;
   return {
+    continuationToken: context.continuationToken,
     kind: normalizeInstrumentationChannelKind(projection?.kind),
     metadata: projection?.metadata ?? {},
   };
