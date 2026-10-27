@@ -985,7 +985,7 @@ describe("calls in flight", () => {
     const settled = ofType(events, "model.settled").map((event) => event.data);
     const consumed = ofType(events, "delivery.consumed").map((event) => event.data.deliveryId);
     expect(settled[0]).toMatchObject({ finishReason: "steered" });
-    expect(consumed).toContain(settled[0]!.steeredBy);
+    expect(settled[0]!.steeredBy).toBe(consumed[1]);
     expect(settled.at(-1)).toMatchObject({ finishReason: "stop" });
   });
 
