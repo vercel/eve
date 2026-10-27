@@ -61,7 +61,8 @@ Reading the settlement code turned up more problems:
 export interface SlackInteractionCard {
   /**
    * The request, read from the session: `status`, `outcome`, `call` (with `input`), and `answer`.
-   * While open, `answer` is the answer that stands until the request settles, if any.
+   * Once settled, `answer` is the answer that decided it. While open, it is the latest admitted
+   * answer, if any; an answer still being checked, or one that was refused, doesn't count.
    */
   readonly interaction: Interaction;
   /** Where eve posts it, as `approvalChannel` decided. */
@@ -172,7 +173,10 @@ interaction.settled ─▶ interactionCard for each request of the message that 
   in their commit's view and leave it to `interaction.settled`. A handler's view covers its whole
   commit, so when several requests of one message settle together, the first `interaction.settled`
   writes all of them in one update. eve records, per request, that its settled rendering was sent,
-  and forgets a message only once every request in it was.
+  and forgets a message only once every request in it was. A card handler also forgets messages
+  whose requests all settled in an earlier commit, so records stay bounded when a renderer's
+  `interaction.settled` skips `next()`. A refused answer re-renders the card before eve tells the
+  responder why, so a failed notice can't leave an open request without controls.
 - **Actions.** eve renders its own default controls from the original `Interaction`, outside the
   chain. It then checks the chain's result against them:
   - **Open, unanswered.** `controls` must hold exactly eve's interactive elements: every
@@ -190,16 +194,18 @@ interaction.settled ─▶ interactionCard for each request of the message that 
   such as a timeout or `rate_limited`, since the first message may have landed. A dropped request
   would hold the turn, so a default card beats none. `taskCard` differs: a card that throws stays as last written, since a
   stale card holds nothing up.
-- **Block limits.** eve records the number of blocks each request's controls had when posted. A
-  rendering that would grow beyond that number falls back to eve's default for that request, text
-  included, which is one block once the request is answered or settled. An open request whose default would also
-  grow keeps its recorded blocks. Other requests in the message keep their recorded blocks, so a
-  message never grows past 50 blocks after posting.
+- **Block limits.** An update must keep the whole message within Slack's 50 blocks. eve uses the
+  renderers' output when it fits, else eve's default for the changed requests, text included, else
+  that default at its smallest: only the block holding eve's controls, or the one answered block.
+  Every request held at least one block when posted, so the smallest form always fits, and an open
+  request always shows eve's controls.
 - **DM delivery.** The hook runs for requests that `approvalChannel` sends to a DM, with
   `destination: "direct-message"`. eve records the destination, so it never calls `approvalChannel`
   again when it re-renders.
 - **No longer active.** A click after the session has gone runs in the webhook, where there's no
-  view. That card keeps today's rewrite of the echoed blocks. If a renderer nested eve's controls,
+  view. That card keeps today's rewrite of the echoed blocks. A freeform modal submission at that
+  point (`settleFreeformCard`) replaces the whole message, grouped requests included. If a renderer
+  nested eve's controls,
   this path can replace the whole message with the answer line.
 - **Purity.** The hook is synchronous and makes no Slack calls.
 
@@ -207,7 +213,7 @@ interaction.settled ─▶ interactionCard for each request of the message that 
 
 - Card bookkeeping replaces `pendingApprovalCards` with `interactionCards`, a record per message:
   its `ts` and channel, its destination and a direct message's route, a direct message's thread
-  announcement, and each request's recorded controls blocks, stored once, with their posted count,
+  announcement, and each request's recorded controls blocks, stored once, with
   its details message, and whether its settled rendering was sent. Details are recorded per request
   because details and controls group separately, so one details message can serve requests in two
   controls messages. eve records each controls message as soon as it posts, so a later group's

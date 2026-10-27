@@ -565,7 +565,7 @@ A turn keeps one card unless it starts a task after every task on its card ended
 
 `interactionCard` restyles the card for one approval, question, or budget prompt. It receives:
 
-- `interaction`: the request as the session holds it, with its `status`, `outcome`, `call` (including the tool `input`), and `answer`. While the request is open, `answer` is the answer that stands until it settles, if any.
+- `interaction`: the request as the session holds it, with its `status`, `outcome`, `call` (including the tool `input`), and `answer`. Once the request settles, `answer` is the answer that decided it. While it's open, `answer` is the latest admitted answer, if any; an answer still being checked, for example by an approval response policy, or one that was refused doesn't count.
 - `destination`: `"thread"` or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided.
 - `audience`: who reads the message. A direct message is always `private`; a thread request has the thread's audience, as on the task card.
 - `answeredBy`: the Slack user ID whose answer stands or decided the request, when known.
@@ -601,7 +601,7 @@ eve still routes, batches, and posts the messages, and owns the controls' action
 - While the request is open and unanswered, `controls` holds exactly the controls `next` renders, each once, with the same `value` or option values. Every eve control's `action_id` starts with `eve_input:` or `eve_input_freeform:`.
 - Once the request is answered or settled, `controls` holds no eve controls.
 - `details` never holds eve controls, and each message holds at most 50 blocks.
-- An update never uses more blocks than the request's controls had when eve posted them. A larger result falls back to eve's default, which is one block once the request is answered or settled.
+- A message holds at most 50 blocks, including the requests eve grouped with yours. An update that would pass that uses eve's default for the changed request instead, and if that doesn't fit either, only the block holding eve's controls, so an open request always shows them.
 
 If `interactionCard` throws or breaks these rules, eve logs it and renders that request with its default, since a request nobody can answer would hold the turn. If Slack refuses a rendered message's content, such as with `invalid_blocks` or `msg_too_long`, eve sends that message once more with its defaults. eve doesn't resend after any other failure, such as a timeout or `rate_limited`, because the first message may have landed.
 
@@ -697,7 +697,7 @@ The callback receives the `Interaction` and current `SessionContext`, so it can 
 
 Each card updates from the session as its request changes. Once an answer is admitted, the card shows the answer and who gave it in place of the buttons, even while other approvals from the same step still wait for theirs. Clicks can't change an admitted answer, since the buttons are gone; if a policy or check refuses the answer, the buttons come back. Once the request settles, the separate tool-input post is deleted after the last open request it covers settles, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome the card shows. This applies to approvals, questions, and budget prompts, however they end: a click, a typed reply in the thread, or a withdrawal, in which case the card reads `No longer needed`. When several requests share one message, answering one updates only its part of the message. To change how these cards look, use [`interactionCard`](#customize-rendering).
 
-A click on any request whose session is no longer active, for example because its run was cancelled outside eve, can never be answered. eve removes the card's buttons, marks it `No longer active`, and tells the person who clicked, in an ephemeral message, to send a new message.
+A click on any request whose session is no longer active, for example because its run was cancelled outside eve, can never be answered. eve removes the card's buttons, marks it `No longer active`, and tells the person who clicked, in an ephemeral message, to send a new message. eve has no session to render from at that point, so it edits the message Slack sent with the click. A freeform answer submitted from the **Type your answer** modal at that point replaces the whole message, including any requests grouped with it.
 
 A renderer's `interaction.opened` handler can extend delivery and then hand the request on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
 
