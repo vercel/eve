@@ -33,9 +33,10 @@ on:
         default: "1"
 
 # Every label creates a run, so key the group on the label too; otherwise
-# adding an unrelated label would cancel a benchmark in progress.
+# adding an unrelated label would cancel a benchmark in progress. Dispatches
+# key on their models, so benchmarking one model never cancels another's run.
 concurrency:
-  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || 'dispatch' }}
+  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || format('dispatch-{0}', inputs.models) }}
   cancel-in-progress: true
 
 permissions:
