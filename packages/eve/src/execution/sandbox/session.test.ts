@@ -90,6 +90,19 @@ describe("createConnectionSession", () => {
     await expect(session.ping()).resolves.toBe("pong");
   });
 
+  it("passes stdin to the connection and rejects a process without one", async () => {
+    const { connection } = memoryConnection();
+    const kill = vi.fn(async () => {});
+    connection.spawn.mockResolvedValueOnce({ ...syntheticProcess({}), kill });
+    const session = createConnectionSession(connection);
+
+    await expect(session.spawn({ command: "cat", stdin: true })).rejects.toThrow(
+      "This sandbox provider does not support `stdin` on spawn.",
+    );
+    expect(connection.spawn).toHaveBeenCalledWith(expect.objectContaining({ stdin: true }));
+    expect(kill).toHaveBeenCalledOnce();
+  });
+
   it("rejects connection extensions that would replace a session member", () => {
     const { connection } = memoryConnection();
     expect(() =>

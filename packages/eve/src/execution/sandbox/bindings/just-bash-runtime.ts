@@ -159,6 +159,9 @@ export async function createBashSandbox(input: {
       if (options.signal?.aborted) {
         throw new DOMException("The operation was aborted.", "AbortError");
       }
+      if (options.stdin === true) {
+        throw new Error("The just-bash sandbox does not support `stdin` on spawn yet.");
+      }
       // The command sits on its own lines so a trailing `# comment` cannot
       // swallow the closing brace. `cd X || exit` would lose cd's error in
       // just-bash, so the braces keep `&&` applying to the whole command.

@@ -110,7 +110,7 @@ export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 
 A `SandboxConnection` is the byte-level link to one sandbox. Each method has a fixed contract:
 
-- `spawn({ command, workingDirectory, env, signal })` runs `command` as a Bash login-shell script (`bash -lc`) in `workingDirectory`, with the sandbox's environment plus `env`. `env` holds only the per-call variables. Aborting kills the process tree. It resolves to a process with `stdout` and `stderr` byte streams, `wait()`, and `kill()`.
+- `spawn({ command, workingDirectory, env, signal })` runs `command` as a Bash login-shell script (`bash -lc`) in `workingDirectory`, with the sandbox's environment plus `env`. `env` holds only the per-call variables. Aborting kills the process tree. It resolves to a process with `stdout` and `stderr` byte streams, `wait()`, and `kill()`. When the call passes `stdin: true`, the process must also have a writable `stdin` stream; without one, eve kills the process and rejects the call.
 - `readFile({ path, signal })` resolves to the file's bytes or a byte stream, or to `null` only when the path does not exist. A directory or an unreadable path rejects.
 - `writeFiles({ files, signal })` writes every file, creating missing parent directories and overwriting existing files. It is the only write primitive.
 - `removePath({ path, force, recursive, signal })` removes a file or directory. `force` ignores a missing path, and `recursive` removes a non-empty directory.
