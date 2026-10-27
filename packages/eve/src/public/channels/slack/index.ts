@@ -25,8 +25,6 @@ export {
   type SlackAnswerSubmission,
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
-  type SlackInteractionCardRecord,
-  type SlackInteractionCardRequest,
   type SlackInteractionContext,
   type SlackSlashCommand,
   type SlackSlashCommandContext,

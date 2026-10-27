@@ -201,11 +201,6 @@ export interface SlackInteractionCardRequest {
   readonly interactionId: string;
   /** The controls blocks the message shows for this request now. */
   readonly blocks: readonly BlockKitBlock[];
-  /**
-   * How many blocks the controls had when posted. A later rendering never grows past it, so a
-   * message that held 50 blocks when posted never holds more.
-   */
-  readonly count: number;
   /** The separate details message, deleted once every request it covers settled. */
   readonly detailsTs?: string;
   /**

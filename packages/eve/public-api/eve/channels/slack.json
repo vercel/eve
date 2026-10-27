@@ -99,8 +99,6 @@
   "SlackInteractionAction",
   "SlackInteractionCard",
   "SlackInteractionCardParts",
-  "SlackInteractionCardRecord",
-  "SlackInteractionCardRequest",
   "SlackInteractionContext",
   "SlackMentionResult",
   "SlackMessage",

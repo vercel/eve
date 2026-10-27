@@ -87,7 +87,9 @@ function harness(
         return { id: response.ts };
       },
       async postEphemeral(user: string, text: string) {
-        respond("chat.postEphemeral", { text, user });
+        const response = respond("chat.postEphemeral", { text, user });
+        if (!response.ok)
+          throw Object.assign(new Error("Slack refused the ephemeral"), { response });
         return { id: "" };
       },
     },
@@ -100,9 +102,17 @@ function harness(
   let position = 0;
 
   async function commit(...facts: SessionEvent[]): Promise<void> {
-    foldLine(view, { at, facts }, position, { retention: "operational" });
+    // State persists as JSON between workflow steps, so each commit starts from a round trip.
+    channel.state = JSON.parse(JSON.stringify(channel.state)) as SlackChannelState;
+    const line = position;
+    foldLine(view, { at, facts }, line, { retention: "operational" });
     position += 1;
-    const ctx = { channel, session: { auth: {}, id: "s_0" }, view: snapshotOf(view) };
+    const ctx = {
+      channel,
+      position: { index: 0, line },
+      session: { auth: {}, id: "s_0" },
+      view: snapshotOf(view),
+    };
     for (const fact of facts) {
       if (options.skip?.includes(fact.type)) continue;
       const handler = events[fact.type as keyof typeof events] as
@@ -112,15 +122,25 @@ function harness(
     }
   }
 
+  let started = false;
   /** Opens `requests` in one commit, as one step asking them together. */
   async function ask(...requests: Asked[]): Promise<void> {
+    const first = !started;
+    const start: SessionEvent[] = !first
+      ? []
+      : [
+          { data: { cause: { deliveryId: "d_0" }, follows: null, turnId }, type: "turn.started" },
+          { data: { owner: { turnId }, runId }, scope, type: "model.requested" },
+        ];
+    if (first) {
+      await commit(
+        { data: {}, type: "session.started" },
+        { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+      );
+    }
+    started = true;
     await commit(
-      { data: {}, type: "session.started" },
-      { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
-    );
-    await commit(
-      { data: { cause: { deliveryId: "d_0" }, follows: null, turnId }, type: "turn.started" },
-      { data: { owner: { turnId }, runId }, scope, type: "model.requested" },
+      ...start,
       ...requests.flatMap(({ call, interactionId }): SessionEvent[] =>
         call === undefined
           ? []
@@ -137,7 +157,9 @@ function harness(
               },
             ],
       ),
-      { data: { outcome: "completed", runId }, scope, type: "model.settled" },
+      ...(first
+        ? [{ data: { outcome: "completed", runId }, scope, type: "model.settled" } as SessionEvent]
+        : []),
       ...requests.map(({ call, interactionId, request }): SessionEvent => ({
         data: {
           interactionId,
@@ -185,6 +207,25 @@ function harness(
 }
 
 const NETWORK = "network";
+
+/** `principal`'s answer `approve` to `interactionId`, submitted but not yet admitted. */
+function submitted(responseId: string, interactionId: string, principal: string): SessionEvent[] {
+  return [
+    {
+      data: { deliveryId: `d_${responseId}`, principal: { id: principal, type: "user" } },
+      type: "delivery.admitted",
+    },
+    {
+      data: {
+        deliveryId: `d_${responseId}`,
+        interactionId,
+        responseId,
+        value: { optionId: "approve" },
+      },
+      type: "response.submitted",
+    },
+  ];
+}
 
 /** `interactionId`'s settlement, decided by the answer `answer` recorded when `response` is given. */
 function settled(
@@ -412,13 +453,8 @@ describe("Slack input request cards", () => {
     readonly name: string;
     readonly render: (parts: SlackInteractionCardParts) => SlackInteractionCardParts;
   }[] = [
-    { name: "drops eve's controls", render: (parts) => controls(parts, [section("Approve?")]) },
     {
-      name: "duplicates eve's controls",
-      render: (parts) => controls(parts, [...parts.controls.blocks, ...parts.controls.blocks]),
-    },
-    {
-      name: "changes a control's value",
+      name: "changes eve's controls",
       render: (parts) =>
         controls(
           parts,
@@ -489,7 +525,7 @@ describe("Slack input request cards", () => {
     expect(JSON.stringify(blocksOf(update))).toContain("No longer needed");
   });
 
-  it("falls back to the one-block default when a settled card outgrows its posted size", async () => {
+  it("settles with eve's one-block default when the renderer's card would pass 50 blocks", async () => {
     const tall = defineSlackRenderer({
       interactionCard(card, next) {
         if (card.interaction.status === "open") return next(card);
@@ -497,15 +533,48 @@ describe("Slack input request cards", () => {
       },
     });
     const { ask, blocksOf, calls, settle } = harness({ renderers: [tall] });
-    await ask(approval("a_deploy", "deploy"));
+    await ask(...Array.from({ length: 50 }, (_, index) => approval(`a_${index}`, "deploy")));
 
-    await settle("a_deploy", "withdrawn");
+    await settle("a_0", "withdrawn");
 
     const [update] = calls("chat.update");
-    expect(blocksOf(update)).toHaveLength(1);
-    expect(JSON.stringify(blocksOf(update))).toContain("No longer needed");
+    expect(blocksOf(update)).toHaveLength(50);
+    expect(JSON.stringify(blocksOf(update)[0])).toContain("No longer needed");
     expect(update?.body.text).toBe("No longer needed");
   });
+
+  it.each([
+    { questions: 1, blocks: 2, shows: "eve's default" },
+    { questions: 50, blocks: 50, shows: "only eve's controls" },
+  ])(
+    "shows $shows again when a refused answer reopens a compact card whose renderer then throws",
+    async ({ blocks, questions }) => {
+      let broken = false;
+      // One block per open question, where eve's default needs a prompt and a select: two.
+      const compact = defineSlackRenderer({
+        interactionCard(card, next) {
+          const parts = next(card);
+          const { answer, status } = card.interaction;
+          if (status !== "open" || answer !== undefined) return parts;
+          if (broken) throw new Error("renderer bug");
+          return controls(parts, [{ child_blocks: parts.controls.blocks, type: "container" }]);
+        },
+      });
+      const { answer, ask, blocksOf, calls, commit } = harness({ renderers: [compact] });
+      await ask(...Array.from({ length: questions }, (_, index) => dayQuestion(`q_${index}`)));
+      await answer("q_0", { optionId: "Saturday" });
+      broken = true;
+
+      await commit({
+        data: { outcome: "refused", responseId: "r_q_0" },
+        type: "response.settled",
+      });
+
+      const update = calls("chat.update").at(-1);
+      expect(blocksOf(update)).toHaveLength(blocks);
+      expect(eveActionIds(blocksOf(update))).toContain("eve_input:q_0");
+    },
+  );
 
   it("posts and updates once more with eve's default when Slack rejects a rendered message", async () => {
     const { ask, calls, settle } = harness({ fails: refusesStyled, renderers: [styledRenderer] });
@@ -773,6 +842,78 @@ describe("Slack input request cards", () => {
     await settle("a_deploy", "withdrawn");
 
     expect(calls("chat.update")).toEqual([]);
+  });
+
+  it("brings the controls back even when the refusal notice fails", async () => {
+    const { answer, ask, blocksOf, calls, commit } = harness({
+      fails: ({ method }) => (method === "chat.postEphemeral" ? "user_not_in_channel" : undefined),
+    });
+    await ask(approval("a_deploy", "deploy"));
+    const [posted] = calls("thread.post");
+    await answer("a_deploy", { optionId: "approve" });
+
+    await commit({
+      data: { outcome: "refused", reason: "Only owners approve.", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    expect(calls("chat.postEphemeral")).toHaveLength(1);
+    expect(blocksOf(calls("chat.update")[1])).toEqual(blocksOf(posted));
+  });
+
+  it("shows only an admitted answer, crediting the person who gave it", async () => {
+    const seen: unknown[] = [];
+    const watching = defineSlackRenderer({
+      interactionCard(card, next) {
+        seen.push([card.interaction.answer?.optionId, card.answeredBy]);
+        return next(card);
+      },
+    });
+    const { ask, calls, commit } = harness({ renderers: [watching] });
+    await ask(approval("a_deploy", "deploy"));
+
+    // Bob's answer waits on a response policy while Carol's is refused.
+    await commit(...submitted("r_bob", "a_deploy", "p_bob"));
+    await commit(...submitted("r_carol", "a_deploy", "p_carol"), {
+      data: { outcome: "refused", responseId: "r_carol" },
+      type: "response.settled",
+    });
+    expect(calls("chat.update")).toEqual([]);
+    expect(seen.at(-1)).toEqual([undefined, undefined]);
+
+    await commit({ data: { responseId: "r_bob" }, type: "response.admitted" });
+    expect(seen.at(-1)).toEqual(["approve", "U_BOB"]);
+    expect(JSON.stringify(calls("chat.update")[0]?.body)).toContain("<@U_BOB>");
+  });
+
+  it("brings a direct-message card's routed controls back when its answer is refused", async () => {
+    const { answer, ask, calls, commit } = harness({ approvalChannel: () => "direct-message" });
+    await ask(approval("a_deploy", "deploy"));
+    await answer("a_deploy", { optionId: "approve" });
+
+    await commit({
+      data: { outcome: "refused", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    const reopened = calls("chat.update").at(-1);
+    expect(reopened?.body.channel).toBe("D_ALICE");
+    const ids = eveActionIds(reopened?.body);
+    expect(ids).toHaveLength(2);
+    for (const id of ids) expect(id).toMatch(/^eve_input:route:C1:1\.0:tool-approval:/u);
+  });
+
+  it("forgets a card a renderer never let eve settle once a later commit handles cards", async () => {
+    const { ask, channel, commit } = harness({ skip: ["interaction.settled"] });
+    await ask(approval("a_one", "deploy"));
+    await commit(settled("a_one", "withdrawn"));
+    expect(channel.state.interactionCards).toHaveLength(1);
+
+    await ask(approval("a_two", "migrate"));
+
+    expect(
+      channel.state.interactionCards?.map((record) => record.requests[0]?.interactionId),
+    ).toEqual(["a_two"]);
   });
 });
 

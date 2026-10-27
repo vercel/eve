@@ -85,7 +85,8 @@ export interface SlackCardMessage {
 export interface SlackInteractionCard {
   /**
    * The request, read from the session: `status`, `outcome`, `call` (with `input`), and `answer`.
-   * While open, `answer` is the answer that stands until the request settles, if any.
+   * Once settled, `answer` is the answer that decided it. While open, it is the latest admitted
+   * answer, if any; an answer still being checked, or one that was refused, doesn't count.
    */
   readonly interaction: Interaction;
   /** Where eve posts it, as `approvalChannel` decided. */

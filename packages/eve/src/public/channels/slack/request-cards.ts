@@ -36,6 +36,7 @@ import {
   refusedPayloadError,
 } from "#public/channels/slack/reply-delivery.js";
 import {
+  compactDefault,
   endingOf,
   type RenderedRequestCard,
   renderRequestCard,
@@ -66,6 +67,7 @@ export async function postRequestCards(
   chain: SlackInteractionCardChain,
   approvalChannel: SlackApprovalChannelResolver | undefined,
 ): Promise<void> {
+  forgetSettledCards(ctx);
   const directMessageRequests: Interaction[] = [];
   const threadRequests: Interaction[] = [];
   for (const request of batch.requests) {
@@ -93,7 +95,14 @@ async function postThreadCards(
 ): Promise<void> {
   const { channel } = ctx;
   const channelId = channel.state.channelId;
-  if (requests.length === 0 || channelId === null) return;
+  if (requests.length === 0) return;
+  if (channelId === null) {
+    log.warn("thread input requests not delivered because the session has no Slack channel", {
+      requestIds: requests.map((request) => request.interactionId),
+      sessionId: ctx.session.id,
+    });
+    return;
+  }
   const entries = requests.map((request): CardEntry => ({
     interactionId: request.interactionId,
     ...renderRequestCard(chain, cardOf(request, "thread", ctx)),
@@ -232,6 +241,7 @@ export async function showAnswerChange(
   ctx: RequestCardContext,
   chain: SlackInteractionCardChain,
 ): Promise<void> {
+  forgetSettledCards(ctx);
   const record = recordOf(ctx.channel.state, interactionId);
   if (record === undefined) return;
   if (sessionTables(ctx.view).interactions[interactionId]?.status !== "open") return;
@@ -251,6 +261,7 @@ export async function settleRequestCard(
   chain: SlackInteractionCardChain,
 ): Promise<void> {
   const { channel } = ctx;
+  forgetSettledCards(ctx);
   const record = recordOf(channel.state, interactionId);
   const tables = sessionTables(ctx.view);
   const settling = (record?.requests ?? []).filter(
@@ -273,10 +284,11 @@ export async function settleRequestCard(
     for (const id of ids) {
       const interaction = interactionOf(tables, id);
       if (interaction === undefined) continue;
-      const by = answeredByOf(tables, interaction, channel.state);
+      const card = cardOf(interaction, current.destination, ctx);
+      const by = card.answeredBy === undefined ? "" : ` by <@${card.answeredBy}>`;
       await callSlack(channel, "chat.update", id, {
         channel: channel.state.channelId,
-        text: `${endingOf(interaction).text}${by === undefined ? "" : ` by <@${by}>`}.`,
+        text: `${endingOf(card.interaction).text}${by}.`,
         ts: current.announcementTs,
       });
     }
@@ -291,15 +303,17 @@ export async function settleRequestCard(
 
 interface RequestChange {
   readonly interactionId: string;
-  /** The rendered controls, or `undefined` to keep the recorded blocks. */
-  readonly rendered: SlackCardMessage | undefined;
-  readonly fallback: SlackCardMessage | undefined;
+  readonly rendered: SlackCardMessage;
+  readonly fallback: SlackCardMessage;
+  readonly compact: SlackCardMessage;
 }
 
 /**
- * Renders `ids` again and updates the message once if their blocks changed, sending eve's
- * defaults once more when Slack refuses the rendered content. Returns the record as Slack now
- * shows it.
+ * Renders `ids` again and updates the message once if their blocks changed. The message must
+ * stay within Slack's 50 blocks, so eve uses the renderers' output if it fits, else eve's
+ * defaults, else the defaults at their smallest, which always fit, since every request held at
+ * least one block when posted. When Slack refuses the content, eve sends the next of those once
+ * more. Returns the record as Slack now shows it.
  */
 async function writeRequests(
   ctx: RequestCardContext,
@@ -310,74 +324,62 @@ async function writeRequests(
   const tables = sessionTables(ctx.view);
   const changes = ids.flatMap((id): RequestChange[] => {
     const interaction = interactionOf(tables, id);
-    const recorded = record.requests.find((request) => request.interactionId === id);
-    if (interaction === undefined || recorded === undefined) return [];
+    if (interaction === undefined) return [];
     const card = renderRequestCard(
       chain,
       cardOf(interaction, record.destination, ctx),
       record.route,
     );
+    const fallback = card.fallback.controls;
     return [
       {
-        fallback: withinCount(card.fallback.controls, card.fallback.controls, recorded),
+        compact: compactDefault(fallback),
+        fallback,
         interactionId: id,
-        rendered: withinCount(card.parts.controls, card.fallback.controls, recorded),
+        rendered: card.parts.controls,
       },
     ];
   });
-  const compose = (pick: (change: RequestChange) => SlackCardMessage | undefined) => {
-    const texts: string[] = [];
-    const requests = record.requests.map((request) => {
-      const change = changes.find((candidate) => candidate.interactionId === request.interactionId);
-      const message = change === undefined ? undefined : pick(change);
-      if (message === undefined) return request;
-      texts.push(message.text);
-      return { ...request, blocks: message.blocks };
-    });
-    return { requests, text: truncateMessageText(texts.join("\n")) };
-  };
   const blocksOf = (requests: readonly SlackInteractionCardRequest[]) =>
     requests.flatMap((request) => request.blocks);
-
-  const rendered = compose((change) => change.rendered);
-  if (sameJson(blocksOf(rendered.requests), blocksOf(record.requests))) return record;
-  const update = async (message: typeof rendered) =>
+  const candidates = (["rendered", "fallback", "compact"] as const)
+    .map((kind) => {
+      const texts: string[] = [];
+      const requests = record.requests.map((request) => {
+        const change = changes.find(
+          (candidate) => candidate.interactionId === request.interactionId,
+        );
+        if (change === undefined) return request;
+        texts.push(change[kind].text);
+        return { ...request, blocks: change[kind].blocks };
+      });
+      return { kind, requests, text: truncateMessageText(texts.join("\n")) };
+    })
+    .filter((candidate) => blocksOf(candidate.requests).length <= SLACK_MAX_BLOCKS_PER_MESSAGE);
+  const [first, ...rest] = candidates;
+  if (first === undefined) return record;
+  if (first.kind !== "rendered") {
+    log.warn("input request card would pass Slack's 50 blocks; using eve's default", {
+      fallback: first.kind,
+      requestIds: ids,
+    });
+  }
+  if (sameJson(blocksOf(first.requests), blocksOf(record.requests))) return record;
+  const update = async (message: (typeof candidates)[number]) =>
     await callSlack(ctx.channel, "chat.update", ids.join(","), {
       blocks: blocksOf(message.requests),
       channel: record.channelId,
       text: message.text,
       ts: record.ts,
     });
-  const result = await update(rendered);
-  if (result === "ok") return { ...record, requests: rendered.requests };
-  if (result !== "refused") return record;
-  const fallback = compose((change) => change.fallback);
-  const fallbackBlocks = blocksOf(fallback.requests);
-  if (
-    sameJson(fallbackBlocks, blocksOf(rendered.requests)) ||
-    sameJson(fallbackBlocks, blocksOf(record.requests))
-  ) {
-    return record;
-  }
-  return (await update(fallback)) === "ok" ? { ...record, requests: fallback.requests } : record;
-}
-
-/**
- * A rendering never grows past the blocks the request had when posted, so its message stays
- * under Slack's cap. A larger one falls back to eve's default, which is one block once the
- * request is answered or settled, or keeps the recorded blocks if that is larger too.
- */
-function withinCount(
-  message: SlackCardMessage,
-  fallback: SlackCardMessage,
-  recorded: SlackInteractionCardRequest,
-): SlackCardMessage | undefined {
-  if (message.blocks.length <= recorded.count) return message;
-  log.warn("input request card grew past its posted size; using eve's default", {
-    blocks: message.blocks.length,
-    count: recorded.count,
-  });
-  return fallback.blocks.length <= recorded.count ? fallback : undefined;
+  const result = await update(first);
+  if (result === "ok") return { ...record, requests: first.requests };
+  const retry = rest.find(
+    (candidate) => !sameJson(blocksOf(candidate.requests), blocksOf(first.requests)),
+  );
+  if (result !== "refused" || retry === undefined) return record;
+  if (sameJson(blocksOf(retry.requests), blocksOf(record.requests))) return record;
+  return (await update(retry)) === "ok" ? { ...record, requests: retry.requests } : record;
 }
 
 /** Deletes a details message once every request it covers has written its settled rendering. */
@@ -433,16 +435,21 @@ function cardOf(
   destination: SlackApprovalChannel,
   ctx: RequestCardContext,
 ): SlackInteractionCard {
+  const tables = sessionTables(ctx.view);
+  const standing = standingOf(tables, interaction);
   const card: Mutable<SlackInteractionCard> = {
     audience:
       destination === "direct-message"
         ? "private"
         : normalizeChannelAudience(ctx.channel.state.audience),
     destination,
-    interaction,
+    interaction: standing.interaction,
     view: ctx.view,
   };
-  const answeredBy = answeredByOf(sessionTables(ctx.view), interaction, ctx.channel.state);
+  const answeredBy =
+    standing.responseId === undefined
+      ? undefined
+      : slackUserIdForPrincipal(ctx.channel.state, responderOf(tables, standing.responseId)?.id);
   if (answeredBy !== undefined) card.answeredBy = answeredBy;
   return card;
 }
@@ -452,38 +459,58 @@ function cardRequest(
   blocks: readonly BlockKitBlock[],
   detailsTs: string | undefined,
 ): SlackInteractionCardRequest {
-  const request: Mutable<SlackInteractionCardRequest> = {
-    blocks,
-    count: blocks.length,
-    interactionId,
-  };
+  const request: Mutable<SlackInteractionCardRequest> = { blocks, interactionId };
   if (detailsTs !== undefined) request.detailsTs = detailsTs;
   return request;
 }
 
-/** The Slack user behind the answer that decided the request, or that stands while it's open. */
-function answeredByOf(
+/**
+ * The request as it stands, with the response behind its answer. A settled request keeps the
+ * answer that decided it. While open, only the latest admitted answer stands: a submitted one
+ * may still be refused by a response policy, a check, or a sign-in.
+ */
+function standingOf(
   tables: SessionView,
   interaction: Interaction,
-  state: SlackChannelState,
-): string | undefined {
-  if (interaction.answer === undefined) return undefined;
+): { readonly interaction: Interaction; readonly responseId: string | undefined } {
   const { interactionId } = interaction;
-  const row = tables.interactions[interactionId];
-  const cause = row?.cause;
-  const responseId =
-    row?.status === "settled"
-      ? cause !== undefined && "responseId" in cause
-        ? cause.responseId
-        : undefined
-      : Object.values(tables.responses).findLast(
-          (response) =>
-            response.interactionId === interactionId &&
-            response.status !== "settled" &&
-            response.value !== undefined,
-        )?.responseId;
-  if (responseId === undefined) return undefined;
-  return slackUserIdForPrincipal(state, responderOf(tables, responseId)?.id);
+  if (interaction.status === "settled") {
+    const cause = tables.interactions[interactionId]?.cause;
+    const decided =
+      interaction.answer !== undefined && cause !== undefined && "responseId" in cause;
+    return { interaction, responseId: decided ? cause.responseId : undefined };
+  }
+  const { answer: _latest, ...open } = interaction;
+  const admitted = Object.values(tables.responses).findLast(
+    (response) =>
+      response.interactionId === interactionId &&
+      response.status === "admitted" &&
+      response.value !== undefined,
+  );
+  if (admitted?.value === undefined) return { interaction: open, responseId: undefined };
+  return {
+    interaction: { ...open, answer: { ...admitted.value, interactionId } },
+    responseId: admitted.responseId,
+  };
+}
+
+/**
+ * Forgets messages whose requests all settled in earlier commits, such as ones whose settled
+ * rendering eve never wrote because a renderer's `interaction.settled` skipped `next()`.
+ */
+function forgetSettledCards(ctx: RequestCardContext): void {
+  const { state } = ctx.channel;
+  const records = state.interactionCards;
+  if (records === undefined || records.length === 0) return;
+  const tables = sessionTables(ctx.view);
+  const line = ctx.position.line;
+  const live = records.filter((record) =>
+    record.requests.some((request) => {
+      const row = tables.interactions[request.interactionId];
+      return row !== undefined && (row.status === "open" || (row.closedAt ?? line) >= line);
+    }),
+  );
+  if (live.length !== records.length) state.interactionCards = live;
 }
 
 function recordOf(

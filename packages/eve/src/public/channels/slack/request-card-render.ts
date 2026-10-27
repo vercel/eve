@@ -145,6 +145,15 @@ function isMessage(value: unknown): value is SlackCardMessage {
 }
 
 /**
+ * eve's default at its smallest: only the block holding its controls, which every open default
+ * has exactly one of, or the single block of an answered or settled default.
+ */
+export function compactDefault(fallback: SlackCardMessage): SlackCardMessage {
+  const blocks = fallback.blocks.filter((block) => eveControls(block).length > 0);
+  return blocks.length === 0 ? fallback : { ...fallback, blocks };
+}
+
+/**
  * eve's controls anywhere in `value`, nested blocks included: each action ID with the value or
  * option values a click sends, sorted so order and nesting don't matter.
  */

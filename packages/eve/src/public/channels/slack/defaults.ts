@@ -7,7 +7,7 @@ import { waiting } from "#protocol/session-projection/selectors.js";
 import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, formatErrorHint } from "#internal/logging.js";
+import { createLogger, formatErrorHint, logError } from "#internal/logging.js";
 import {
   reviewingResults,
   waitingOnTasks,
@@ -338,11 +338,19 @@ export function defaultInteractionEvents(
 
     async "response.settled"({ data }, ctx) {
       const view = sessionTables(ctx.view);
-      const refused = refusedAnswerOf(view, data);
-      if (refused !== undefined) await notifyRefusedResponder(refused, ctx.channel);
       const response = view.responses[data.responseId];
+      // The card first: a refused answer brings its controls back, and the turn waits on them.
       if (response !== undefined) {
         await showAnswerChange(response.interactionId, ctx, interactionCard);
+      }
+      const refused = refusedAnswerOf(view, data);
+      if (refused === undefined) return;
+      try {
+        await notifyRefusedResponder(refused, ctx.channel);
+      } catch (error) {
+        logError(log, "failed to tell a refused responder why", error, {
+          interactionId: refused.interactionId,
+        });
       }
     },
 
