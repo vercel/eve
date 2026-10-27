@@ -19,6 +19,8 @@ The experimental [`workflow.modelCallsPerStep`](../agent-config#workflow-checkpo
 
 In local development and a self-deployed `eve start` process, eve uses the SDK's local world by default. It persists workflow runs under `.eve/.workflow-data`. On Vercel, the same workflow code runs on Vercel Workflow, which adds deployment-aware routing and dashboard run metadata.
 
+Nitro hosts eve's HTTP routes and workflow entrypoints, but not the workflow store or the sandbox runtime. Workflow state lives in the active world, and the sandbox comes from `agent/sandbox` or the default sandbox. To choose a world for a self-hosted deployment, see [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state) and [agent.ts](../agent-config#workflow-world).
+
 When a Vercel production deployment changes, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. Static user-role instructions stay in the session history and aren't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
 
 A session whose checkpoint the target deployment can't read stays on its current deployment. An older release can't read a newer checkpoint. After a rollback, a session that already moved to the newer deployment stays there. The target drops state it doesn't define, such as a removed `defineState` key, and its runtime logs name the unknown key. eve doesn't otherwise validate authored session state.
@@ -145,6 +147,15 @@ The timeout is the session's own timer, which keeps running after the upgrade. A
 Ending a root session doesn't immediately cancel its subagent sessions and workflow tool runs. Each is retired when a delivery for it reaches the current deployment, and the runtime logs identify the stranded run. A run that never receives a delivery, such as one in a dormant `eve dev` generation, can stay active. Cancel it in your Workflow world if needed. Cancellation doesn't run authored cleanup or hooks, undo side effects, or stop independent external jobs. Results and approvals don't carry over to a replacement session.
 
 Runs that recorded no eve version are treated as stranded.
+
+#### Sessions from session-driver releases
+
+Some eve releases ran each session as a session driver with separate turn workflows. When such a driver sends its next turn to the current deployment, eve imports the session. The session keeps its ID, history, authored state, usage, limits, and event stream, and later turns use the new deployment's instructions, model, and tools.
+
+- Pending work from the old driver doesn't carry over: tool calls, subagents, input requests, and sign-ins. Start it again if it's still needed. Messages buffered only in the old driver aren't imported.
+- Keep the original deployment available until these sessions end, because their drivers keep the original streams open.
+- A driver started before eve 0.45 can't be imported. Its next message fails with `This session predates eve 0.45 and cannot be continued. Start a new session.`, and its channel starts a fresh session.
+- Rolling back to a session-driver release isn't supported. Retire and restart affected sessions before you roll back.
 
 ## Agent loop and sandbox
 

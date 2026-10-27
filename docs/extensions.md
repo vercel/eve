@@ -353,14 +353,17 @@ Local `eve dev` mounts the bundled self-modification extension by default, witho
 
 eve checks the eve version that built an extension before it loads the extension's code. A built extension needs that eve release or a later one. Build with the oldest release you want to support, and test with newer agents. An agent can't rebuild an installed extension that ships without source.
 
+Sessions saved by eve 0.68 or earlier store extension state per package, not per mount. When such a session moves to a newer deployment, eve gives each value to the one mount that defines it. It drops values that no mount defines.
+
 ### Troubleshooting
 
-| What you see                                                                                 | What to do                                                                                             |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `Extension "<package>" was built with eve <version>.`                                        | Upgrade eve to that version or later, or install an extension built with your eve version.             |
-| `Extension "<package>" requires distribution contract <n>, which this eve does not support.` | Rebuild the extension with your eve version, or install a compatible extension release.                |
-| `Extension "<package>" has no valid compatibility manifest`                                  | Rebuild or reinstall the extension.                                                                    |
-| The agent build stops with an error that names an extension package and its directory        | Fix the reported error, or run `eve extension build` in that package directory to build it on its own. |
+| What you see                                                                                 | What to do                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Extension "<package>" was built with eve <version>.`                                        | Upgrade eve to that version or later, or install an extension built with your eve version.                                                                                                            |
+| `Extension "<package>" requires distribution contract <n>, which this eve does not support.` | Rebuild the extension with your eve version, or install a compatible extension release.                                                                                                               |
+| `Extension "<package>" has no valid compatibility manifest`                                  | Rebuild or reinstall the extension.                                                                                                                                                                   |
+| The agent build stops with an error that names an extension package and its directory        | Fix the reported error, or run `eve extension build` in that package directory to build it on its own.                                                                                                |
+| `Incompatible context state layout for key "<key>".`                                         | Continue the session on its original deployment, or start a new session. The session stays on its deployment because two or more mounts of one package define that state, so eve can't pick an owner. |
 
 ## What to read next
 
