@@ -37,7 +37,7 @@ export class Client {
     this.#baseUrl = options.baseUrl;
     this.#auth = options.auth;
     this.#headers = options.headers;
-    this.#redirect = options.redirect;
+    this.#redirect = options.redirect ?? "error";
     this.sessions = new ClientSessions({
       baseUrl: this.#baseUrl,
       redirect: this.#redirect,
