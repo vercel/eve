@@ -1,5 +1,5 @@
 ---
-issue: "Draft PR discussion (link pending)"
+issue: "https://github.com/vercel/eve/pull/5451"
 status: proposed
 last_updated: "2026-10-27"
 ---
