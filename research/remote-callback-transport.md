@@ -1,6 +1,6 @@
 ---
 issue: "https://github.com/vercel/eve/pull/5449"
-status: proposed
+status: implemented
 last_updated: "2026-10-27"
 ---
 
@@ -8,7 +8,7 @@ last_updated: "2026-10-27"
 
 A remote service needs the reply hook for its message, not the parent's deployment-wide protection secret. Remove automatic automation-bypass query parameters from framework callback URLs.
 
-## Proposed operator configuration
+## Operator configuration
 
 On a Vercel remote deployment:
 
@@ -30,4 +30,4 @@ On a protected parent, configure Vercel Trusted Sources to admit the remote proj
 - Previously protected cross-project integrations need the reciprocal Trusted Sources rule and remote origin configuration before upgrade.
 - Existing callbacks already persisted by an older driver are not rewritten or revoked by changing URL generation. Operators must separately assess rotation of previously shared bypass credentials.
 
-This draft needs deployment validation for protected cross-project callbacks before readiness. Isolated tests cover URL payloads, explicit origin admission, unrelated-origin exclusion, and malformed configuration without contacting Vercel or a remote service.
+Isolated tests cover URL payloads, explicit origin admission, unrelated-origin exclusion, and malformed configuration. This change was not tested against real protected cross-project deployments. Operators must verify their Trusted Sources and exact-origin configuration when rolling out the documented migration.
