@@ -136,11 +136,11 @@ const SLACK_BEATS: Beat[] = [
     kind: "message",
     author: "Coder",
     time: "10:02 AM",
-    body: "Picked up a new issue from GitHub and triaged it: bug, P1, scoped to cart sessions.",
+    body: "Picked up a P1 bug and reproduced it in a sandbox.",
     attachment: (
       <Card
         icon={<CircleDot />}
-        meta="acme/storefront#412 · opened by Dana · bug · P1"
+        meta="acme/storefront#412 · opened by Dana"
         title="Saved carts disappear after sign-in"
       />
     ),
@@ -149,22 +149,10 @@ const SLACK_BEATS: Beat[] = [
   {
     kind: "message",
     author: "Coder",
-    time: "10:09 AM",
-    body: "Reproduced it in a sandbox. Guest cart items are dropped when the session upgrades on sign-in.",
-    attachment: (
-      <code className="mt-1 block truncate font-mono text-copy-13-mono text-gray-900">
-        pnpm vitest cart/session · 1 failed
-      </code>
-    ),
-    delay: 1800,
-  },
-  {
-    kind: "message",
-    author: "Coder",
     time: "10:26 AM",
     body: (
       <>
-        Fixed it and added 3 tests. <Mention>Reviewer</Mention> ready for review.
+        Fixed, with tests. <Mention>Reviewer</Mention> ready for review.
       </>
     ),
     attachment: (
