@@ -1,5 +1,14 @@
-import { SiImessage } from "@icons-pack/react-simple-icons";
 import {
+  SiDiscord,
+  SiGithub,
+  SiGooglechat,
+  SiImessage,
+  SiLinear,
+  SiTelegram,
+  SiWhatsapp,
+} from "@icons-pack/react-simple-icons";
+import {
+  IconAgents,
   IconCheck,
   IconLinked,
   IconMessage,
@@ -11,114 +20,106 @@ import {
   IconWorkflow,
 } from "@vercel/geistdocs/assets/icons";
 import type { JSX, ReactNode } from "react";
-import { type LogoKey, logos } from "@/lib/integrations/logos";
+import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import {
-  FeatureCard,
-  GrayBadge,
-  Label,
-  RuledList,
-  ruledRow,
-  Visual,
-  pct,
-  view,
-} from "./control-visual";
+import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "./control-visual";
 import { HomeSection } from "./section";
 
-const hub = { x: 160, y: 90 };
-const rings = [44, 80];
-
-// Inner ring on the diagonals, outer ring every 60° from the horizontal, so no two chips meet.
-const CHANNELS: {
-  label: string;
-  logo: (className: string) => ReactNode;
-  ring: 0 | 1;
-  angle: number;
-}[] = [
-  ...(
-    [
-      ["slack", "Slack", 0, 225],
-      ["teams", "Microsoft Teams", 0, 315],
-      ["whatsapp", "WhatsApp", 0, 45],
-    ] as [LogoKey, string, 0 | 1, number][]
-  ).map(([key, label, ring, angle]) => ({
-    label,
-    ring,
-    angle,
-    logo: (className: string) => logos[key]({ "aria-hidden": true, className }),
-  })),
-  {
-    label: "iMessage",
-    ring: 0,
-    angle: 135,
-    logo: (className: string) => <SiImessage aria-hidden className={className} />,
-  },
-  ...(
-    [
-      ["discord", "Discord", 1, 180],
-      ["telegram", "Telegram", 1, 240],
-      ["googlechat", "Google Chat", 1, 300],
-      ["github", "GitHub", 1, 0],
-      ["linear", "Linear", 1, 60],
-      ["web", "Web", 1, 120],
-    ] as [LogoKey, string, 0 | 1, number][]
-  ).map(([key, label, ring, angle]) => ({
-    label,
-    ring,
-    angle,
-    logo: (className: string) => logos[key]({ "aria-hidden": true, className }),
-  })),
+// The visibility radar from vercel.com's enterprise page: a guard at the center, dashed rings,
+// and one sweep per ring that fades out at both ends, turned a different way on each. Arc
+// endpoints are that visual's, precomputed from each center angle and sweep (-50° ± 55°,
+// 160° ± 60°, 30° ± 50°).
+const radar = { x: 160, y: 90, guard: 32 };
+const radarRings = [
+  { r: 34, from: { x: 151.2, y: 57.16 }, to: { x: 193.87, y: 92.96 } },
+  { r: 58, from: { x: 149.93, y: 147.12 }, to: { x: 115.57, y: 52.72 } },
+  { r: 82, from: { x: 237.05, y: 61.95 }, to: { x: 174.24, y: 170.75 } },
 ];
 
-function channelPoint(ring: 0 | 1, angle: number) {
-  const radians = (angle * Math.PI) / 180;
-  return { x: hub.x + rings[ring] * Math.cos(radians), y: hub.y + rings[ring] * Math.sin(radians) };
-}
+// Slack and Teams have no single-color simple icon, so their brand marks take the text color;
+// Teams' white letter takes the chip's color so it stays cut out.
+const monochrome = "[&_path]:fill-current [&_path[fill=white]]:fill-background-100";
 
-function ChannelHub() {
+// Middle ring on the diagonals, outer ring kept near the horizontal so chips clear the frame.
+const CHANNELS: { label: string; ring: 1 | 2; angle: number; logo: ReactNode }[] = [
+  { label: "Slack", ring: 1, angle: 240, logo: logos.slack({ className: monochrome }) },
+  { label: "Microsoft Teams", ring: 1, angle: 300, logo: logos.teams({ className: monochrome }) },
+  { label: "WhatsApp", ring: 1, angle: 60, logo: <SiWhatsapp /> },
+  { label: "iMessage", ring: 1, angle: 120, logo: <SiImessage /> },
+  { label: "Discord", ring: 2, angle: 180, logo: <SiDiscord /> },
+  { label: "Telegram", ring: 2, angle: 215, logo: <SiTelegram /> },
+  { label: "Google Chat", ring: 2, angle: 325, logo: <SiGooglechat /> },
+  { label: "GitHub", ring: 2, angle: 0, logo: <SiGithub /> },
+  { label: "Linear", ring: 2, angle: 35, logo: <SiLinear /> },
+  { label: "Web", ring: 2, angle: 145, logo: logos.web({}) },
+];
+
+function ChannelRadar() {
   return (
     <Visual
-      caption={`One agent reached from ${CHANNELS.map((channel) => channel.label).join(", ")}.`}
-      scene={
-        <>
-          {rings.map((r) => (
+      caption={`One agent at the center of radar rings, reached from ${CHANNELS.map((channel) => channel.label).join(", ")}.`}
+      scene={radarRings.map(({ from, r, to }, index) => {
+        const gradient = `channel-radar-${index}`;
+        return (
+          <g key={r}>
             <circle
-              cx={hub.x}
-              cy={hub.y}
-              key={r}
+              cx={radar.x}
+              cy={radar.y}
               r={r}
               stroke="var(--ds-gray-alpha-200)"
               strokeDasharray="2 3"
             />
-          ))}
-          {CHANNELS.map(({ angle, label, ring }) => {
-            const { x, y } = channelPoint(ring, angle);
-            return (
-              <path
-                d={`M${hub.x} ${hub.y}L${x} ${y}`}
-                key={label}
-                stroke="var(--ds-gray-alpha-400)"
-              />
-            );
-          })}
-        </>
-      }
+            <defs>
+              <linearGradient
+                gradientUnits="userSpaceOnUse"
+                id={gradient}
+                x1={from.x}
+                x2={to.x}
+                y1={from.y}
+                y2={to.y}
+              >
+                <stop stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+                <stop offset="0.5" stopColor="var(--ds-gray-1000)" />
+                <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <path
+              d={`M${from.x} ${from.y}A${r} ${r} 0 0 1 ${to.x} ${to.y}`}
+              stroke={`url(#${gradient})`}
+              strokeLinecap="round"
+              strokeWidth="0.75"
+            />
+          </g>
+        );
+      })}
     >
+      <span
+        className="absolute flex -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[45%]"
+        style={{
+          height: pct(radar.guard, view.height),
+          left: pct(radar.x, view.width),
+          top: pct(radar.y, view.height),
+          width: pct(radar.guard, view.width),
+        }}
+      >
+        <IconAgents />
+      </span>
       {CHANNELS.map(({ angle, label, logo, ring }) => {
-        const { x, y } = channelPoint(ring, angle);
+        const radians = (angle * Math.PI) / 180;
+        const { r } = radarRings[ring];
         return (
           <span
-            className="absolute flex size-[7.5cqw] -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)"
+            className="absolute flex size-[6.5cqw] -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[48%]"
             key={label}
-            style={{ left: pct(x, view.width), top: pct(y, view.height) }}
+            style={{
+              left: pct(radar.x + r * Math.cos(radians), view.width),
+              top: pct(radar.y + r * Math.sin(radians), view.height),
+            }}
           >
-            {logo("size-[45%] grayscale")}
+            {logo}
           </span>
         );
       })}
-      <Label x={hub.x} y={hub.y}>
-        Agent
-      </Label>
     </Visual>
   );
 }
@@ -273,7 +274,7 @@ const PRIMARY: {
     text: "Multiplayer and single-player chat across Slack, Teams, iMessage, WhatsApp, and the web. Channels are a framework primitive.",
     href: "/docs/channels/overview",
     icon: <IconMessage aria-hidden size={16} />,
-    visual: <ChannelHub />,
+    visual: <ChannelRadar />,
   },
   {
     title: "Multi-tenant with dynamic capabilities",
