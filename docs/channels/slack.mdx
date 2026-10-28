@@ -308,32 +308,7 @@ email: alice@example.com
 - Profiles are cached per workspace and user for an hour. Each Slack channel keeps its own cache.
 - A failed lookup leaves both fields out, the message is still delivered, and eve retries the lookup after a minute. A missing `users:read` scope is logged with a reinstall hint.
 
-##### Bring your own cache
-
-The built-in cache lives in one process's memory. To share profiles across instances or source them elsewhere, pass a lookup function instead of `true`. eve calls it once per distinct sender, up to 20 per message, and stops caching: the function owns fetching and caching. `fetchSlackSenderProfile` is the uncached `users.info` call eve uses itself:
-
-```ts title="agent/channels/slack.ts"
-import { fetchSlackSenderProfile, slackChannel } from "eve/channels/slack";
-
-import { kv } from "../lib/kv";
-
-export default slackChannel({
-  async senderProfiles({ userId, teamId, slack }) {
-    const key = `slack-profile:${teamId}:${userId}`;
-    const cached = await kv.get(key);
-    if (cached) return JSON.parse(cached);
-
-    const profile = await fetchSlackSenderProfile({ userId, slack });
-    await kv.set(key, JSON.stringify(profile), { ex: 3600 });
-    return profile;
-  },
-});
-```
-
-- `teamId` is the workspace whose app installation received the message. Include it in cache keys.
-- `slack.request` calls the Slack API with the channel's bot token.
-- `fetchSlackSenderProfile` throws when Slack rejects the call, so failures don't end up in your cache.
-- Return `undefined` to omit `name` and `email`. A thrown error is logged and treated the same way; the message is still delivered.
+To use your own cache, pass a function instead of `true`. eve calls it per sender with `{ userId, teamId, slack }` and caches nothing itself; wrap `fetchSlackSenderProfile({ userId, slack })`, the uncached `users.info` call, or return `undefined` to skip a sender.
 
 Either form adds the `users:read` and `users:read.email` scopes to the generated app manifest. If you manage the Slack app yourself, add them and reinstall the app. Sender emails become part of model context, session history, and traces, so leave the option off when the agent doesn't need them.
 
