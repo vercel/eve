@@ -103,23 +103,17 @@ test("the Changesets formatter produces readable Markdown without encoded metada
     if (oldToken === undefined) delete process.env.GITHUB_TOKEN;
     else process.env.GITHUB_TOKEN = oldToken;
   });
-  t.mock.method(
-    globalThis,
-    "fetch",
-    async () =>
-      new Response(
-        JSON.stringify([
-          {
-            number: 10,
-            title: "Edited title without a category",
-            user: { login: "Alice" },
-            merged_at: "2026-01-01",
-            base: { ref: "topic-branch" },
-            merge_commit_sha: commit,
-          },
-        ]),
-      ),
-  );
+  let pulls = [
+    {
+      number: 10,
+      title: "Edited title without a category",
+      user: { login: "Alice" },
+      merged_at: "2026-01-01",
+      base: { ref: "topic-branch" },
+      merge_commit_sha: commit,
+    },
+  ];
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(pulls)));
   const line = await formatter.getReleaseLine({ id: "example", summary: "Add a tool.", commit });
   assert.match(
     line,
@@ -127,6 +121,26 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   );
   assert.match(line, /#### Contributors\n\n- \[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
   assert.doesNotMatch(line, /<!--/u);
+  git("commit", "--allow-empty", "-qm", "fix: Update a tool");
+  const fallbackCommit = git("rev-parse", "HEAD");
+  pulls = [{ number: 11, user: { login: "Bob" }, merged_at: "2026-01-01" }];
+  const fallback = await formatter.getReleaseLine({
+    id: "fallback",
+    summary: "Update a tool.",
+    commit: fallbackCommit,
+  });
+  assert.match(fallback, /- Update a tool\. \[#11\]/u);
+  git("commit", "--allow-empty", "-qm", "fix: Repair a tool");
+  const ambiguousCommit = git("rev-parse", "HEAD");
+  pulls.push({ number: 12, user: { login: "Carol" }, merged_at: "2026-01-01" });
+  await assert.rejects(
+    formatter.getReleaseLine({
+      id: "ambiguous",
+      summary: "Repair a tool.",
+      commit: ambiguousCommit,
+    }),
+    /expected one merged pull request.*found 2/u,
+  );
 });
 
 test("version-packages assembles changesets across bump types and preserves old releases", async (t) => {
