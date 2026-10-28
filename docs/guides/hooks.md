@@ -27,7 +27,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services, cancel the running turn, and send the session a message. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services, cancel the running turn, and send the session a message, which joins the conversation like any other. For instructions the model reads on every call, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -298,7 +298,7 @@ The message is [`MessageContent`](./client/messages). `options` takes `auth`, `c
 
 A person can always stop a hook's messages. A cancel, a clear, or a reset drops every hook message that hasn't run yet, and after a person cancels a turn, `ctx.send()` refuses to start another until a new turn starts. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in, and never answers one: it waits until they act. A hook can `ctx.cancel()` a turn and send a correction from its `turn.settled` handler.
 
-The model is told that a hook sent the message. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. eve doesn't limit how many messages a hook sends, so bound loops yourself, as the example does.
+The model is told the message was sent automatically, not by a person, without naming the hook. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. eve doesn't limit how many messages a hook sends, so bound loops yourself, as the example does.
 
 `ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ sent: true, deliveryId }`, where `deliveryId` is the id the message's `delivery.admitted` will carry, or `{ sent: false, reason: "cancelled" }` after a turn a person cancelled.
 

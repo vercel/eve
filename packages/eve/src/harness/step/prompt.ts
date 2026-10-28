@@ -140,26 +140,26 @@ export function withClientContext(
   ]);
 }
 
-/** Tells the model which messages a hook sent, from their deliveries' source. */
+const HOOK_NOTE = "The next message was sent automatically, not by a person.";
+
+/** Tells the model which messages hooks sent, from their deliveries' source. */
 function withHookNotes(messages: readonly HarnessModelMessage[]): HarnessModelMessage[] {
-  return messages.flatMap((message) => {
-    const hooks = sentByHooksOf(message);
-    if (hooks === undefined) return [message];
-    const names = hooks.map((hook) => `"${hook}"`).join(" and ");
-    const note = `The next message is from the ${names} ${hooks.length === 1 ? "hook" : "hooks"}. No person wrote it.`;
-    return [createFrameworkUserMessage("context.instruction", note), message];
-  });
+  return messages.flatMap((message) =>
+    sentByHooksOf(message) === undefined
+      ? [message]
+      : [createFrameworkUserMessage("context.instruction", HOOK_NOTE), message],
+  );
 }
 
 /**
- * Whether the model reads exactly the durable messages: no client context or hook note is
- * placed among them, so a measured prompt's message count matches history.
+ * How many durable messages a model call read, of the `read` messages it read in all: the note
+ * ahead of each hook's message isn't one. Unknown when client context was placed among them, so a
+ * measured prompt is recorded only with a count that matches history, or compaction's next
+ * estimate would skip messages the model never read past.
  */
-export function readsOnlyHistory(prompt: Prompt): boolean {
-  return (
-    (prompt.clientContext?.messages.length ?? 0) === 0 &&
-    !prompt.messages.some((message) => sentByHooksOf(message) !== undefined)
-  );
+export function durableMessagesRead(prompt: Prompt, read: number): number | undefined {
+  if ((prompt.clientContext?.messages.length ?? 0) > 0) return undefined;
+  return read - prompt.messages.filter((message) => sentByHooksOf(message) !== undefined).length;
 }
 
 /** The prompt as the model reads it: with the client's context and hook notes. */

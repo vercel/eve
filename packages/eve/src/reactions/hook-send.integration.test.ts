@@ -243,7 +243,7 @@ describe("hook ctx.send()", () => {
       "turn:completed",
     ]);
     // The model reads that the hook sent it, and the context it passed.
-    expect(prompts[2]).toContain('from the \\"reviewer\\" hook');
+    expect(prompts[2]).toContain("sent automatically, not by a person");
     expect(prompts[2]).toContain("The summary goes first.");
   }, 90_000);
 

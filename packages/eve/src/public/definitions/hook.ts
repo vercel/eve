@@ -95,7 +95,7 @@ export interface HookContext extends SessionContext, Omit<SessionFrame, "session
    * never steers a turn that waits on its person, and a person's cancel, clear, or reset drops it:
    * a person can always stop a hook's loop. Unlike `session.send()`, it returns synchronously with
    * the delivery's id, and there's no receipt to await: the session admits the message after the
-   * handler returns. The model is told a hook sent it, and it never answers a pending question.
+   * handler returns. The model is told it was sent automatically, not by a person, and it never answers a pending question.
    * Like other hook effects, it's lost if the step is interrupted before it's saved. Throws after
    * the handler has settled.
    */
