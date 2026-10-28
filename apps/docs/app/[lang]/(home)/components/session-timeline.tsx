@@ -564,7 +564,7 @@ function Bubble({
         {continued ? null : <BubbleTail outgoing={outgoing} />}
         {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
             shares the last line when it fits and takes its own line when it doesn't. */}
-        <div className="relative text-pretty px-2 pt-1.5 pb-2">
+        <div className="relative text-pretty px-2 pt-1.5 pb-2 text-copy-14">
           {children}
           <span
             aria-hidden
