@@ -19,7 +19,6 @@ import { cn } from "@/lib/utils";
 import { Frame, FrameHeader, HomeSection, PrefetchLink } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
-const navLogoClassName = "size-4 shrink-0 grayscale";
 
 const FACTORY_STATIONS = [
   { name: "classifier", result: "Feature request, medium scope" },
@@ -283,7 +282,6 @@ interface UseCase {
   /** Template slug, or null to send people to the full gallery. */
   template: string | null;
   cta: string;
-  logo: ReactNode;
   preview: ReactNode;
 }
 
@@ -294,7 +292,6 @@ const USE_CASES: UseCase[] = [
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
     cta: "Use the company brain template",
-    logo: logos.slack({ "aria-hidden": true, className: navLogoClassName }),
     preview: <CompanyBrainPreview />,
   },
   {
@@ -303,7 +300,6 @@ const USE_CASES: UseCase[] = [
     text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
     template: "eve-software-factory-template",
     cta: "Use the software factory template",
-    logo: logos.github({ "aria-hidden": true, className: navLogoClassName }),
     preview: <SoftwareFactoryPreview />,
   },
   {
@@ -312,14 +308,13 @@ const USE_CASES: UseCase[] = [
     text: "Agents inside your product, over web, voice, or iMessage, with memory for every user.",
     template: null,
     cta: "Browse app templates",
-    logo: logos.web({ "aria-hidden": true, className: navLogoClassName }),
     preview: <AgenticAppsPreview />,
   },
 ];
 
 /**
  * vercel.com/ai-gateway's sliding tabs (vercel-marketing's SlidingTabs): a gray pill slides
- * under the selected tab, which turns medium weight without shifting its neighbors.
+ * under the selected tab.
  */
 function UseCaseTabs({
   baseId,
@@ -383,26 +378,14 @@ function UseCaseTabs({
             tabIndex={isSelected ? 0 : -1}
             type="button"
           >
+            {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
             <span
               className={cn(
-                "relative inline-flex items-center rounded-[6px] px-3.5 py-1.5 text-copy-14 transition-colors hover:text-gray-1000",
+                "block px-3.5 py-1.5 transition-colors hover:text-gray-1000",
                 isSelected ? "text-gray-1000" : "text-gray-900",
               )}
             >
-              {/* The medium-weight label reserves the width, so selecting never shifts tabs. */}
-              <span aria-hidden className="invisible flex items-center gap-2 font-medium">
-                {useCase.logo}
-                {useCase.name}
-              </span>
-              <span
-                className={cn(
-                  "absolute inset-0 flex items-center justify-center gap-2",
-                  isSelected && "font-medium",
-                )}
-              >
-                {useCase.logo}
-                {useCase.name}
-              </span>
+              <span className="text-copy-14">{useCase.name}</span>
             </span>
           </button>
         );
@@ -477,11 +460,11 @@ export function AgentTypes(): JSX.Element {
         </div>
         <div
           aria-labelledby={`${baseId}-tab-${selected.id}`}
-          className="px-4 pt-4 pb-10 sm:px-8 sm:pt-6 sm:pb-14"
+          className="px-4 pt-4 pb-10 sm:pt-6 sm:pb-14"
           id={`${baseId}-panel`}
           role="tabpanel"
         >
-          <Frame className="mx-auto flex h-[30rem] w-full max-w-[56rem] flex-col sm:h-[24rem]">
+          <Frame className="flex h-[30rem] w-full max-w-[56rem] flex-col sm:h-[24rem]">
             {selected.preview}
           </Frame>
         </div>
