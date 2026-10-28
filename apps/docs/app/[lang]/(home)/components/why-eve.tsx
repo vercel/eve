@@ -1,4 +1,4 @@
-import { SiNextdotjs, SiNuxt, SiSvelte } from "@icons-pack/react-simple-icons";
+import { SiAnthropic, SiNextdotjs, SiNuxt, SiSvelte } from "@icons-pack/react-simple-icons";
 import {
   IconCheck,
   IconCross,
@@ -13,6 +13,7 @@ import {
   FeatureCard,
   GrayBadge,
   Label,
+  LimitLine,
   RuledList,
   ruledRow,
   Visual,
@@ -117,35 +118,26 @@ function AgentUi() {
   );
 }
 
-// Your runtime as a dashed boundary: credentials, run data, and user access stay inside it with
-// the agent, and the one line out carries tool results to the model.
-const boundary = { x: 16, y: 34, width: 208, height: 128 };
-const agentNode = { x: 150, y: 84, width: 56, height: 24 };
-const modelNode = { x: 254, y: 84, width: 50, height: 24 };
+// Your runtime and the model on either side of a divider: credentials, run data, and user
+// access stay on your side with the agent, and one line crosses to the model.
+const divider = { x: 232, y1: 28, y2: 156 };
+const midY = 92;
+const agentNode = { x: 144, width: 56, height: 24 };
+const modelX = 272;
 // Where the kept items' badges end, right-aligned, and their lines to the agent begin.
-const keptEnd = 122;
+const keptEnd = 118;
 const KEPT = [
-  { name: "credentials", Icon: KeyRound, y: 64 },
-  { name: "run data", Icon: Database, y: 96 },
-  { name: "access", Icon: UserRound, y: 128 },
+  { name: "credentials", Icon: KeyRound, y: midY - 30 },
+  { name: "run data", Icon: Database, y: midY },
+  { name: "access", Icon: UserRound, y: midY + 30 },
 ];
 
 function DataBoundary() {
-  const midY = agentNode.y + agentNode.height / 2;
   return (
     <Visual
-      caption="Your runtime holds the agent with its credentials, run data, and per-user access. Only tool results leave it, for the model outside."
+      caption="On your side of the line: the agent with its credentials, run data, and per-user access. Across it: the model, Anthropic here."
       scene={
         <>
-          <rect
-            height={boundary.height}
-            rx={8}
-            stroke="var(--ds-gray-alpha-600)"
-            strokeDasharray="3 3"
-            width={boundary.width}
-            x={boundary.x}
-            y={boundary.y}
-          />
           {KEPT.map(({ name, y }) => (
             <path
               d={`M${keptEnd + 4} ${y}C${keptEnd + 18} ${y} ${agentNode.x - 14} ${midY} ${agentNode.x} ${midY}`}
@@ -160,22 +152,13 @@ function DataBoundary() {
             stroke="var(--ds-gray-alpha-500)"
             width={agentNode.width}
             x={agentNode.x}
-            y={agentNode.y}
+            y={midY - agentNode.height / 2}
           />
           <path
-            d={`M${agentNode.x + agentNode.width} ${midY}H${modelNode.x}`}
+            d={`M${agentNode.x + agentNode.width} ${midY}H${modelX - 16}`}
             stroke="var(--ds-gray-alpha-600)"
           />
-          <rect
-            fill="var(--ds-background-100)"
-            height={modelNode.height}
-            rx={4}
-            stroke="var(--ds-gray-alpha-500)"
-            strokeDasharray="2 2"
-            width={modelNode.width}
-            x={modelNode.x}
-            y={modelNode.y}
-          />
+          <LimitLine id="why-eve-runtime" x={divider.x} y1={divider.y1} y2={divider.y2} />
         </>
       }
     >
@@ -198,26 +181,13 @@ function DataBoundary() {
         >
           agent
         </span>
-        <span
-          className="absolute -translate-1/2 font-mono text-[0.625em] text-gray-900 leading-none"
-          style={{
-            left: pct(modelNode.x + modelNode.width / 2, view.width),
-            top: pct(midY, view.height),
-          }}
-        >
-          model
-        </span>
-        <span
-          className="absolute -translate-1/2 text-[0.5em] text-gray-900 leading-none"
-          style={{
-            left: pct((boundary.x + boundary.width + modelNode.x) / 2, view.width),
-            top: pct(midY - 8, view.height),
-          }}
-        >
-          results
-        </span>
+        <SiAnthropic
+          aria-hidden
+          className="absolute size-[1.5em] -translate-1/2 text-gray-1000"
+          style={{ left: pct(modelX, view.width), top: pct(midY, view.height) }}
+        />
       </div>
-      <Label x={boundary.x + boundary.width / 2} y={boundary.y}>
+      <Label x={(keptEnd + agentNode.x + agentNode.width) / 2 - 24} y={divider.y1}>
         Your runtime
       </Label>
     </Visual>
