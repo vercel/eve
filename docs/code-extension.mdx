@@ -160,17 +160,21 @@ export default git({
 
 ## Override bundled tools
 
-`apply_patch` from `eve/extensions/code/tools` is the reusable patch tool
-definition. Import it in an extension override to change approval or other tool
-options without copying its implementation:
+`eve/extensions/code/tools` exports the reusable `apply_patch` and `grep` tool
+definitions. Import one in an override to change approval or other tool options
+without copying its implementation. With the file mount above, put the override
+in the agent-root slot named after the qualified tool, `code__apply_patch`:
 
-```ts title="agent/extensions/code/tools/apply_patch.ts"
+```ts title="agent/tools/code__apply_patch.ts"
 import { apply_patch } from "eve/extensions/code/tools";
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 
 export default defineTool({ ...apply_patch, approval: always() });
 ```
+
+`agent/extensions/code/tools/apply_patch.ts` works only when the mount is a
+directory, `agent/extensions/code/extension.ts`.
 
 For a custom GitHub command tool, `eve/extensions/git/sandbox` exports
 `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`.

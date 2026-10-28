@@ -538,15 +538,16 @@ twilioContinuationToken({ from: "+15551234567", to: "+15557654321" }); // "+1555
 
 Built-in channels export token builders from their own `eve/channels/<platform>` entry:
 
-| Builder                     | Address fields                                                                                                          |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `slackContinuationToken`    | `channelId`, `threadTs`                                                                                                 |
-| `twilioContinuationToken`   | `from`, `to`                                                                                                            |
-| `githubContinuationToken`   | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
-| `discordContinuationToken`  | `channelId`, optional `conversationId`                                                                                  |
-| `teamsContinuationToken`    | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
-| `telegramContinuationToken` | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
-| `linearContinuationToken`   | `agentSessionId`                                                                                                        |
+| Builder                             | Address fields                                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `slackContinuationToken`            | `channelId`, `threadTs`                                                                                                 |
+| `slackCodeChannelContinuationToken` | `channelId` (positional argument)                                                                                       |
+| `twilioContinuationToken`           | `from`, optional `to`                                                                                                   |
+| `githubContinuationToken`           | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
+| `discordContinuationToken`          | `channelId`, optional `conversationId`                                                                                  |
+| `teamsContinuationToken`            | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
+| `telegramContinuationToken`         | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
+| `linearContinuationToken`           | `agentSessionId`                                                                                                        |
 
 Pass the resulting channel-local token to that channel's `from(...)` helper.
 Tokens are routing addresses, not credentials or substitutes for authorization.

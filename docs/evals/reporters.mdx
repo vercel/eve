@@ -11,12 +11,24 @@ Reporters attach in two places. Declare them in `evals.config.ts` to observe **e
 
 ## Console
 
-The CLI installs `consoleReporter()` from `eve/evals/reporters` by default.
-When composing a runner or reporter list yourself, use
-`consoleReporter({ color: false, log: (line) => writeLine(line) })` to redirect
-its text output. Both options are optional; the default logger is `console.log`
-and color follows whether stdout is a terminal. Adding another console reporter
-to the CLI's configured reporters duplicates its output.
+The CLI adds `consoleReporter()` from `eve/evals/reporters` unless you pass
+`--json`. There is no public runner API, so reporters compose only through
+`evals.config.ts` and per-eval `reporters`. A custom console reporter mostly
+makes sense with `--json`, for example logging to stderr so stdout stays valid
+JSON:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { consoleReporter } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  reporters: [consoleReporter({ color: false, log: (line) => console.error(line) })],
+});
+```
+
+Both options are optional; the default logger is `console.log` and color
+follows whether stdout is a terminal. Without `--json`, another console reporter
+duplicates the CLI's output.
 
 ## Braintrust
 
