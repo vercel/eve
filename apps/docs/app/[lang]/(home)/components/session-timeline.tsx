@@ -453,7 +453,7 @@ function ThreadMessage({
       )}
     >
       {continued ? <span /> : <Avatar author={author} round={false} />}
-      <div className="min-w-0 text-copy-14 text-gray-1000">
+      <div className="min-w-0 max-w-[20rem] text-copy-14 text-gray-1000">
         {continued ? (
           <span className="sr-only">{author.name}</span>
         ) : (
@@ -518,7 +518,7 @@ function TeamsMessage({
         )}
         <div
           className={cn(
-            "max-w-[min(85%,24rem)] rounded-md px-3 py-2 text-gray-1000",
+            "max-w-[20rem] rounded-md px-3 py-2 text-gray-1000",
             isAgent ? "bg-gray-100" : "bg-gray-200",
           )}
         >
@@ -656,7 +656,7 @@ function Bubble({
       <div
         className={cn(
           "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
-          // The agent's bubbles share one width, so a run of them lines up on both edges.
+          // The agent's bubbles share one width, the reply width the Slack and Teams chats use too.
           outgoing ? "bg-gray-200" : "w-full bg-background-100",
         )}
         style={{ borderRadius: bubbleRadius }}
