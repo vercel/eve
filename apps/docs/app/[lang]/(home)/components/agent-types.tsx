@@ -2,7 +2,7 @@
 
 import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
-import { Brain, ChevronRight, Factory, GitPullRequestDraft } from "lucide-react";
+import { Brain, ChevronRight, Factory, GitMerge, GitPullRequestDraft } from "lucide-react";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type JSX,
@@ -48,33 +48,64 @@ const FACTORY_STATIONS = [
 ];
 
 /**
- * How long each stage of the demo waits before it shows: Sam's report, the foreman working,
- * its reply with the ticket, each station running then finishing, opening the pull request,
- * then its card.
+ * How long each stage of the demo waits before it shows: the user's report, the foreman
+ * working, its reply with the ticket, each station running then finishing, opening the pull
+ * request, its card, the reporter's approval, then the foreman closing the ticket.
  */
-const FACTORY_DEMO = [500, 700, 1200, 1100, 1000, 1100, 1000, 600];
+const FACTORY_DEMO = [500, 700, 1200, 1100, 1000, 1100, 1000, 600, 1400, 1000];
 
-const SAM: Author = { name: "Sam" };
+// The stages that bring the pull request's card, the reporter's approval, and the close.
+const FACTORY_PR = 8;
+const FACTORY_APPROVED = 9;
+const FACTORY_CLOSED = 10;
+
+const FEEDBACK: Author = { name: "User feedback" };
 const FOREMAN: Author = { name: "foreman", icon: Factory };
 
 // The hero's Slack agents are purple; the factory's foreman is one of them.
 const foremanAvatar = "bg-purple-700";
 
 /**
- * A bug a teammate reports in Slack becomes a Linear ticket, which the factory picks up on its
- * own and works through its stations into a draft pull request. In the demo it builds up
- * stage by stage (`stage` counts the stages shown); otherwise it shows in full.
+ * Slack's :ballot_box_with_check:, the reporter's approval, drawn rather than typed so it
+ * looks the same on every platform. On its own layer, like the thumbs-up, so it scales smoothly.
+ */
+function ApprovalEmoji() {
+  return (
+    <svg
+      aria-label=":ballot_box_with_check:"
+      className="size-4 will-change-transform"
+      fill="none"
+      role="img"
+      viewBox="0 0 16 16"
+    >
+      <circle cx="8" cy="8" fill="var(--ds-blue-700)" r="8" />
+      <path
+        d="m4.5 8.25 2.25 2.25 4.75-5"
+        stroke="white"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.75"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A bug a user reports through feedback in Slack becomes a Linear ticket, which the factory
+ * picks up on its own and works through its stations into a draft pull request; once the
+ * reporter approves, it merges and closes the ticket. In the demo it builds up stage by stage
+ * (`stage` counts the stages shown); otherwise it shows in full.
  */
 function SoftwareFactoryPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? FACTORY_DEMO.length;
-  // The last stage brings the pull request's card, and the ticket moves to review.
-  const reviewing = shown >= FACTORY_DEMO.length;
+  const closed = shown >= FACTORY_CLOSED;
+  const status = closed ? "Done" : shown >= FACTORY_PR ? "In review" : "In progress";
   return (
     <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:27.5rem]">
       {shown >= 1 ? (
         <SlackMessage
-          author={SAM}
+          author={FEEDBACK}
           avatarColor={foremanAvatar}
           className={cn(demo && messageIn)}
           continued={false}
@@ -96,10 +127,10 @@ function SoftwareFactoryPreview({ stage }: { stage?: number }) {
           continued={false}
           time="10:02 AM"
         >
-          <p>Filed it and picked it up.</p>
+          <p>Created Linear ticket and picked it up.</p>
           <Card
             icon={logos.linear({ "aria-hidden": true })}
-            meta={`Reported by Sam · ${reviewing ? "In review" : "In progress"}`}
+            meta={`From user feedback · ${status}`}
             title="ENG-142 Saved carts disappear after sign-in"
           />
           <RunSteps
@@ -108,15 +139,33 @@ function SoftwareFactoryPreview({ stage }: { stage?: number }) {
             ran={demo ? shown - 4 : undefined}
             steps={FACTORY_STATIONS}
           />
-          {reviewing ? (
+          {shown >= FACTORY_PR ? (
             <div className={cn(demo && fadeIn)}>
               <Card
-                icon={<GitPullRequestDraft />}
-                meta="acme/storefront#318 · draft, ready for review"
+                icon={closed ? <GitMerge /> : <GitPullRequestDraft />}
+                meta={`acme/storefront#318 · ${closed ? "merged" : "draft, ready for review"}`}
                 title="fix(cart): keep guest items after sign-in"
               />
             </div>
           ) : null}
+        </SlackMessage>
+      ) : null}
+      {shown >= FACTORY_APPROVED ? (
+        <li className="pt-1.5 pl-[2.375rem]">
+          <Reaction count={1} demo={demo} name="ballot_box_with_check">
+            <ApprovalEmoji />
+          </Reaction>
+        </li>
+      ) : null}
+      {shown >= FACTORY_CLOSED ? (
+        <SlackMessage
+          author={FOREMAN}
+          avatarColor={foremanAvatar}
+          className={cn(demo && agentMessageIn)}
+          continued
+          time="10:09 AM"
+        >
+          <p>Merged #318 and closed ENG-142.</p>
         </SlackMessage>
       ) : null}
     </ol>
