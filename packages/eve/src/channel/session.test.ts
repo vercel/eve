@@ -5,6 +5,7 @@ import {
   createAttachSessionFn,
   createSession,
   type Session,
+  type SessionSendOptions,
 } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
@@ -330,7 +331,7 @@ it("preserves an externally assigned followup delivery identity", async () => {
   await createSession("sess_1", runtime, { channelKind: "eve", channelName: "eve" }).send("hello", {
     auth: null,
     deliveryId: "dlv_followup",
-  });
+  } as SessionSendOptions);
   expect(runtime.dispatchSession).toHaveBeenCalledWith(
     expect.objectContaining({
       command: expect.objectContaining({

@@ -644,13 +644,14 @@ describe("reserved session create responses", () => {
       args,
     );
     expect(response.status).toBe(existing ? 200 : 202);
-    expect(await response.json()).toEqual({
+    const expected: Record<string, unknown> = {
       ok: true,
       sessionId,
       status: "accepted",
       deliveryId: "dlv_original",
-      ...(existing ? { existing: true } : {}),
-    });
+    };
+    if (existing) expected.existing = true;
+    expect(await response.json()).toEqual(expected);
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId, deliveryId: "dlv_request" }),
     );
