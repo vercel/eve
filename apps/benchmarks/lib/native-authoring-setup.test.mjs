@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { createJiti } from "jiti";
@@ -7,8 +10,13 @@ import { createJiti } from "jiti";
 import { fixtureNames } from "./experiment-files.mjs";
 
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { JUST_BASH_VERSION, VITEST_VERSION, createNativeAuthoringSetup, setupsFor } =
-  await jiti.import(new URL("./native-authoring-setup.ts", import.meta.url).pathname);
+const {
+  JUST_BASH_VERSION,
+  OPENCODE_GLOBAL_CONFIG,
+  VITEST_VERSION,
+  createNativeAuthoringSetup,
+  setupsFor,
+} = await jiti.import(new URL("./native-authoring-setup.ts", import.meta.url).pathname);
 const { loadAuthoringCase } = await jiti.import(
   new URL("./load-authoring-case.ts", import.meta.url).pathname,
 );
@@ -183,4 +191,45 @@ test("rejects a broken starting workspace before handing it to the model", async
     }),
     /starting workspace validation failed.*missing optional package/su,
   );
+});
+
+test("lets OpenCode reach outside the project, and only OpenCode", async (t) => {
+  const commandsFor = async (harness) => {
+    const commands = [];
+    await createNativeAuthoringSetup({
+      packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
+      revision: "commit",
+      treatment: "guided",
+      harness,
+    })({
+      async readFile() {
+        return JSON.stringify({ startingPoint: "scaffolded", revision: "commit", setupIds: [] });
+      },
+      async writeFiles() {},
+      async runCommand(command, args) {
+        commands.push(args[1]);
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+      getWorkingDirectory: () => "/workspace",
+      setWorkingDirectory() {},
+    });
+    return commands;
+  };
+
+  const permissions = (await commandsFor("OpenCode")).filter((command) =>
+    command.includes("opencode.json"),
+  );
+  assert.equal(permissions.length, 1);
+  assert.equal((await commandsFor("Claude Code")).filter((c) => c.includes("opencode")).length, 0);
+
+  // Run the command as the sandbox would, against a scratch home directory. The sandbox's
+  // `timeout` guard isn't on every host, and isn't what this checks.
+  const home = mkdtempSync(join(tmpdir(), "eve-opencode-home-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  execFileSync("bash", ["-c", permissions[0].replace(/^timeout \d+ /u, "")], {
+    env: { PATH: process.env.PATH, HOME: home },
+  });
+  const written = readFileSync(join(home, ".config/opencode/opencode.json"), "utf8");
+  assert.equal(written, OPENCODE_GLOBAL_CONFIG);
+  assert.deepEqual(JSON.parse(written).permission, { external_directory: "allow" });
 });
