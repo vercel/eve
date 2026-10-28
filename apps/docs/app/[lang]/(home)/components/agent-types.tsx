@@ -482,7 +482,7 @@ function WebAppClient() {
             <span className={`h-2 rounded-full bg-gray-alpha-200 ${width}`} key={width} />
           ))}
         </div>
-        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 rounded-lg border border-gray-alpha-400 bg-background-100 p-2.5 shadow-lg sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
+        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 p-2.5 material-menu sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
           <p className="ml-auto rounded-2xl bg-gray-1000 px-3 py-1 text-copy-13 text-background-100">
             Where's my order #4821?
@@ -499,7 +499,7 @@ function WebAppClient() {
 /** A phone call to a clinic's front desk, with live waveform and call controls. */
 function VoiceClient() {
   return (
-    <div className="flex flex-col gap-3 p-3 material-large">
+    <div className="@container flex flex-col gap-3 p-3 material-large">
       <div className="flex items-center gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gray-alpha-200 text-gray-1000">
           {voiceLogo({ "aria-hidden": true, className: logoClassName })}
@@ -510,7 +510,7 @@ function VoiceClient() {
             Front desk · 00:42
           </span>
         </span>
-        <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] md:flex">
+        <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] @sm:flex">
           {WAVEFORM.map((height, i) => (
             <span
               className="w-[2px] rounded-full bg-gray-alpha-600"
@@ -520,7 +520,7 @@ function VoiceClient() {
             />
           ))}
         </span>
-        <span className="ml-auto hidden shrink-0 rounded-full bg-red-700 px-3 py-1 text-label-12 text-white sm:inline md:ml-3">
+        <span className="ml-auto hidden shrink-0 rounded-full bg-red-700 px-3 py-1 text-label-12 text-white @[16rem]:inline @sm:ml-3">
           End
         </span>
       </div>
@@ -582,7 +582,7 @@ function IMessageClient() {
 
 function AgenticAppsPreview() {
   return (
-    <figure className="grid h-full grid-cols-[minmax(0,1fr)_10.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+    <figure className="grid h-full grid-cols-[minmax(0,1fr)_9.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
       <figcaption className="sr-only">
         The same kind of agent in three clients: customer support chat in a web app, a voice call to
         a clinic's front desk, and a personal planner in iMessage.
