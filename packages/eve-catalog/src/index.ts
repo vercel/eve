@@ -842,6 +842,19 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "shop",
+    name: "Shop",
+    kind: "connection",
+    tagline:
+      "Find products, manage carts, orders and delegated budgets, and approve purchases with saved cards.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Shop: find products, manage carts, orders and delegated budgets, and approve purchases with saved cards.",
+      mcp: { url: "https://mcp.shop.com" },
+    },
+  },
+  {
     slug: "shopify",
     name: "Shopify",
     kind: "connection",

@@ -165,6 +165,19 @@ describe("Sanity connection setup", () => {
   });
 });
 
+describe("Shop connection setup", () => {
+  it("documents a manually registered MCP connector with user OAuth", () => {
+    const integration = getIntegration("shop")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/shop");
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.shop.com"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("shop/shop")');
+    expect(integrationMarkdown(integration)).toContain("vercel connect create shop --name shop");
+    expect(integrationMarkdown(integration)).toContain("https://www.shopify.com/partners");
+  });
+});
+
 describe("Shopify connection setup", () => {
   it("uses hand-authored sections without generating authentication variants", () => {
     const integration = getIntegration("shopify")!;
