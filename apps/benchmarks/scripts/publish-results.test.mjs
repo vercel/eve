@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { parseTranscript } from "@vercel/agent-eval";
 
-import { caseCategories, publishResults } from "./publish-results.mjs";
+import { caseCategories, caseDigests, publishResults } from "./publish-results.mjs";
 
 const plan = {
   sha: "a".repeat(40),
@@ -215,4 +224,41 @@ test("records carry their case's category from CASE.ts", async (t) => {
     .map((line) => JSON.parse(line));
   // Missing runs (claude-fable-5-1 uploaded nothing) carry it too.
   assert.deepEqual(new Set(records.map((record) => record.category)), new Set(["features/tools"]));
+});
+
+test("records carry a digest of their case that changes with its grader", async (t) => {
+  const store = memoryStore();
+  const digests = await caseDigests(plan.cases);
+  const result = await publishResults({
+    plan,
+    artifactsDir: artifactsDirectory(t),
+    githubRunId: "123",
+    runAttempt: 1,
+    digests,
+    store,
+  });
+  const records = store.objects
+    .get(`${result.prefix}/records.jsonl`)
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const [digest] = digests.values();
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.deepEqual(new Set(records.map((record) => record.case_digest)), new Set([digest]));
+
+  // A copy of the case, next to the real lib/ so its imports resolve, digests the same until
+  // its grader changes. Another case digests differently.
+  const appRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const root = mkdtempSync(join(tmpdir(), "eve-authoring-digest-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  symlinkSync(join(appRoot, "lib"), join(root, "lib"));
+  const caseId = "author-001-weather-tool";
+  cpSync(join(appRoot, "evals", caseId), join(root, "evals", caseId), { recursive: true });
+  const copy = async () => (await caseDigests([caseId], join(root, "evals"))).get(caseId);
+  assert.equal(await copy(), digest);
+  appendFileSync(join(root, "evals", caseId, "EVAL.ts"), "\n// a grader change\n");
+  assert.notEqual(await copy(), digest);
+  const other = (await caseDigests(["author-002-new-project"])).get("author-002-new-project");
+  assert.notEqual(other, digest);
 });

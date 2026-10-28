@@ -23,7 +23,9 @@
 //
 // Each record is one run of one case on one model, keyed by (github_run_id,
 // run_attempt, model_id, case, run), and carries its case's `category` from
-// CASE.ts so results can be narrowed to one. Planned runs with no result, including
+// CASE.ts so results can be narrowed to one, and its `case_digest`, which
+// changes whenever the case's prompt, grader, or setup does, so readers only
+// compare runs graded the same way. Planned runs with no result, including
 // every run of a model whose job uploaded nothing, become `missing` records so
 // coverage stays honest. A metric that can't be read is `null`, never zero.
 //
@@ -102,6 +104,7 @@ export function buildRecords({
   runAttempt,
   pullRequest = null,
   categories = new Map(),
+  digests = new Map(),
 }) {
   const records = [];
   for (const { modelId, dir, meta } of artifacts) {
@@ -137,6 +140,7 @@ export function buildRecords({
           runner_os: meta?.runner_os ?? null,
           case: caseId,
           ...(categories.has(caseId) ? { category: categories.get(caseId) } : {}),
+          ...(digests.has(caseId) ? { case_digest: digests.get(caseId) } : {}),
           run,
           ...(result === undefined
             ? { outcome: "missing" }
@@ -186,7 +190,7 @@ function runMetrics(result, benchmark) {
 }
 
 /**
- * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, pullRequest?: number | null, categories?: Map<string, string>, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
+ * @param {{ plan: any, artifactsDir: string, githubRunId: string, runAttempt: number, pullRequest?: number | null, categories?: Map<string, string>, digests?: Map<string, string>, publishedAt: string, store: import("../../../scripts/eval-benchmark/publish.mjs").ImmutableStore }} input
  */
 export async function publishResults({
   plan,
@@ -195,6 +199,7 @@ export async function publishResults({
   runAttempt,
   pullRequest = null,
   categories = new Map(),
+  digests = new Map(),
   publishedAt,
   store,
 }) {
@@ -206,6 +211,7 @@ export async function publishResults({
     runAttempt,
     pullRequest,
     categories,
+    digests,
   });
   const prefix =
     pullRequest === null
@@ -277,6 +283,39 @@ export async function caseCategories(cases, root = evalsRoot) {
   return new Map(entries);
 }
 
+/**
+ * Each planned case's `case_digest`: sha256 over every file in its directory
+ * (CASE.ts, EVAL.ts, and support files) plus the ids of its starting point and
+ * setups. Shared setup code and fixtures live outside the case directory; their
+ * ids are bumped whenever their behavior or fixtures change (lib/authoring-case.ts),
+ * so including the ids covers them without tying every case to every setup.
+ */
+export async function caseDigests(cases, root = evalsRoot) {
+  const entries = await Promise.all(
+    cases.map(async (caseId) => {
+      const dir = join(root, caseId);
+      const authoringCase = await loadAuthoringCase(dir);
+      const hash = createHash("sha256");
+      for (const file of listFiles(dir)
+        .map((path) => relative(dir, path).replaceAll("\\", "/"))
+        .sort()) {
+        hash
+          .update(`file\0${file}\0`)
+          .update(readFileSync(join(dir, file)))
+          .update("\0");
+      }
+      const ids = [
+        `startingPoint\0${authoringCase.startingPoint.id}`,
+        `startingPoint.setup\0${authoringCase.startingPoint.setup?.id ?? ""}`,
+        `setup\0${authoringCase.setup?.id ?? ""}`,
+      ];
+      for (const id of ids) hash.update(`${id}\n`);
+      return [caseId, hash.digest("hex")];
+    }),
+  );
+  return new Map(entries);
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required to publish authoring benchmark results.`);
@@ -315,6 +354,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
     pullRequest,
     categories: await caseCategories(plan.cases),
+    digests: await caseDigests(plan.cases),
     publishedAt: new Date().toISOString(),
     store: await vercelBlobStore(requiredEnv("EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN")),
   });
