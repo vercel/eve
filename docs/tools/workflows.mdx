@@ -81,7 +81,7 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
   step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
   is replayed and must stay deterministic.
-- Import `createHook`, `createWebhook`, `sleep`, `FatalError`, and `getWorkflowMetadata` from
+- Import `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata` from
   `eve/workflow` in the body. Import `start`, `getRun`, `resumeHook`, and `getHookByToken` from
   `eve/workflow/api` in routes or steps, not in replayed bodies. Both entries use eve's bundled
   SDK; no separate `workflow` dependency or ambient tsconfig `types` entry is needed.

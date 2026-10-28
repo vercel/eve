@@ -144,7 +144,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/tools/ask_question`                                                          | Opt-in `askQuestion` tool definition                                                                              |
 | `eve/tools/web_search`                                                            | Provider-managed `webSearch` configuration                                                                        |
 | `eve/tools/workflow`                                                              | Runtime-generated `workflow` tool factory                                                                         |
-| [`eve/workflow`](../tools/workflows#workflow-imports)                             | Durable `createHook`, `createWebhook`, `sleep`, `FatalError`, and `getWorkflowMetadata`                           |
+| [`eve/workflow`](../tools/workflows#workflow-imports)                             | Durable `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata`         |
 | [`eve/workflow/api`](../tools/workflows#workflow-imports)                         | `start`, `getRun`, `resumeHook`, and `getHookByToken` for routes and steps                                        |
 | `eve/tools/sleep`                                                                 | Opt-in durable `sleep` tool                                                                                       |
 | `eve/tools/no_reply`                                                              | Opt-in `noReply` tool definition                                                                                  |

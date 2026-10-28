@@ -18,6 +18,7 @@ import {
   resolvePackageSourceDirectoryPath,
   resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
+  WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
 import {
   prepareEveVersionedCacheDirectory,
@@ -56,22 +57,6 @@ import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
-/**
- * Bare `workflow/*` specifiers that appear in pre-built workflow bundles.
- * Nitro's alias system resolves these at Rollup build time for production,
- * replacing the import-rewriting post-processing that previously ran after
- * each builder invocation.
- */
-const WORKFLOW_ALIAS_SPECIFIERS = [
-  "eve/workflow",
-  "eve/workflow/api",
-  "workflow",
-  "workflow/api",
-  "workflow/errors",
-  "workflow/internal/builtins",
-  "workflow/internal/private",
-  "workflow/runtime",
-] as const;
 const INSTRUMENTATION_ALIAS_PATHS = {
   "eve/instrumentation": "src/public/instrumentation/index.ts",
   "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
@@ -91,7 +76,7 @@ const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
 
 function resolveWorkflowAliases(): Record<string, string> {
   const aliases: Record<string, string> = {};
-  for (const specifier of WORKFLOW_ALIAS_SPECIFIERS) {
+  for (const specifier of WORKFLOW_MODULE_SPECIFIERS) {
     aliases[specifier] = resolveWorkflowModulePath(specifier);
   }
   return aliases;
@@ -260,11 +245,7 @@ function resolveNitroImportPath(
   importSpecifier: string,
   importer?: string,
 ): string | null {
-  if (
-    importSpecifier === "eve/workflow" ||
-    importSpecifier === "eve/workflow/api" ||
-    importSpecifier.startsWith("workflow")
-  ) {
+  if (WORKFLOW_MODULE_SPECIFIERS.includes(importSpecifier)) {
     return resolveWorkflowModulePath(importSpecifier);
   }
 

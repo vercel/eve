@@ -1,1 +1,1 @@
-["FatalError", "createHook", "createWebhook", "getWorkflowMetadata", "sleep"]
+["FatalError", "RetryableError", "createHook", "createWebhook", "getWorkflowMetadata", "sleep"]

@@ -15,8 +15,8 @@ import { createHook, sleep, FatalError } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
 ```
 
-The first entry exposes `createHook`, `createWebhook`, `sleep`, `FatalError`, and
-`getWorkflowMetadata`. The API entry exposes `start`, `getRun`, `resumeHook`, and
+The first entry exposes `createHook`, `createWebhook`, `sleep`, `FatalError`,
+`RetryableError`, and `getWorkflowMetadata`. The API entry exposes `start`, `getRun`, `resumeHook`, and
 `getHookByToken`. The API entry is unavailable inside replayed workflow bodies:
 call it from a route or a `"use step"` function instead.
 
