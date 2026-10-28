@@ -21,7 +21,8 @@ import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { isApprovalRecheck, markApprovalRecheck } from "#harness/approval-recheck.js";
+import { isApprovalRecheck, inheritApprovalContext } from "#approval/evaluation.js";
+import { approvalDecision } from "#approval/status.js";
 import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -31,7 +32,7 @@ import {
 } from "#runtime/connections/tool-result.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
-import { displayProperName, displayTitle } from "#shared/display-name.js";
+import { displayProperName, displayTitle } from "#protocol/session-projection/display-name.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
@@ -317,12 +318,16 @@ function connectionApproval(
       policy,
       withToolAnnotations(context, await toolAnnotations(registry, connection, toolName)),
     );
-  const response = typeof approval === "function" ? undefined : approval.response;
-  if (response === undefined) return request;
+  if (typeof approval === "function") return request;
+  const response = approval.response;
   return {
     request,
-    response: (context: ApprovalResponseContext) =>
-      authorizeApprovalResponse(connection, response, context),
+    prompt: approval.prompt,
+    response:
+      response === undefined
+        ? undefined
+        : (context: ApprovalResponseContext) =>
+            authorizeApprovalResponse(connection, response, context),
   };
 }
 
@@ -336,8 +341,9 @@ async function requestApproval(
   if (isApprovalRecheck(context) && !matchesApprovalPin(context.callId, connection)) {
     markApprovalPinChanged(context.callId);
   }
+  // Preserve result identity for the approval evaluator's private metadata.
   const status = await policy(context);
-  if (!isApprovalRecheck(context) && parksForApproval(status)) {
+  if (!isApprovalRecheck(context) && approvalDecision(status).awaitsPerson === true) {
     pinApprovedInstance(context.callId, connection);
   }
   return status;
@@ -363,16 +369,7 @@ function withToolAnnotations(
   annotations: ConnectionToolAnnotations | undefined,
 ): ApprovalContext {
   if (annotations === undefined) return context;
-  const annotated = { ...context, toolAnnotations: annotations };
-  return isApprovalRecheck(context) ? markApprovalRecheck(annotated) : annotated;
-}
-
-function parksForApproval(status: ApprovalStatus): boolean {
-  return (
-    status === true ||
-    status === "user-approval" ||
-    (typeof status === "object" && status.type === "user-approval")
-  );
+  return inheritApprovalContext(context, { ...context, toolAnnotations: annotations });
 }
 
 async function authorizeApprovalResponse(

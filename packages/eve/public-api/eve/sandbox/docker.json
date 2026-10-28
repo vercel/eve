@@ -1,0 +1,8 @@
+[
+  "DockerSandbox",
+  "DockerSandboxEnvironmentOptions",
+  "DockerSandboxNetworkPolicy",
+  "DockerSandboxPullPolicy",
+  "DockerSandboxRuntimeOptions",
+  "DockerSandboxSession"
+]

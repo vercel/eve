@@ -14,7 +14,7 @@ import {
 } from "./remote/config.js";
 
 const VERCEL_SANDBOX_REQUIRED_MESSAGE =
-  "Deployed self-modification requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Deploy this agent to Vercel, or remove the eve/self-modification/remote extension mount from self-hosted deployments.";
+  "Deployed self-modification requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Deploy this agent to Vercel, or remove the eve/extensions/self-modification/remote extension mount from self-hosted deployments.";
 
 /**
  * Defines the deployed child's sandbox. During `eve dev` the deployed child is never

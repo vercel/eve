@@ -9,17 +9,17 @@ For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire
 
 ## Create a client
 
-A `Client` binds one host, auth policy, and header policy:
+A `Client` binds one base URL, auth policy, and header policy:
 
 ```ts
 import { Client } from "eve/client";
 
 const client = new Client({
-  host: "http://127.0.0.1:2000",
+  baseUrl: "http://127.0.0.1:2000",
 });
 ```
 
-`host` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `host` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
+`baseUrl` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `baseUrl` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
 
 ## Check health
 
@@ -51,7 +51,7 @@ Pass `auth` when the [eve channel](../../channels/eve) route requires credential
 
 ```ts
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   auth: {
     bearer: async () => await getAccessToken(),
   },
@@ -62,7 +62,7 @@ Bearer values and Basic auth passwords can be strings or functions. Functions ru
 
 ```ts
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   auth: {
     basic: {
       username: "agent-client",
@@ -78,7 +78,7 @@ For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves th
 import { getVercelOidcToken } from "@vercel/oidc";
 
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   auth: {
     vercelOidc: {
       token: async () => await getVercelOidcToken(),
@@ -91,7 +91,7 @@ Use `headers` for route-specific credentials such as bypass tokens or tenant hin
 
 ```ts
 const client = new Client({
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   headers: async () => ({
     "x-vercel-protection-bypass": await getBypassToken(),
   }),
@@ -99,7 +99,7 @@ const client = new Client({
 });
 ```
 
-Set `redirect` to `"manual"` or `"error"` on credential-bearing clients so fetch cannot forward custom authorization headers to another origin. The policy applies to inspection requests, custom fetches, session creation, and event streams.
+Clients reject redirects by default (`redirect: "error"`) so fetch cannot forward custom credentials to a redirected destination. Use `redirect: "manual"` to stop at a redirect without following it. Node.js exposes the response status and headers; browsers return an opaque redirect response with no readable status, headers, or body. The policy applies to inspection requests, custom fetches, session creation, and event streams, and overrides per-request redirect settings. Only opt into `redirect: "follow"` when you trust every possible redirect destination to receive your custom headers and request data.
 
 Per-request headers can be attached to an individual turn:
 
@@ -112,6 +112,28 @@ await response.result();
 ```
 
 Per-request headers override client-level values with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` continues to send the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
+
+## Reusing a session inbox
+
+Keep the complete `session.state` when saving and restoring a conversation. It can include an
+opaque `inbox` handle returned by the server. The client sends this handle with later messages
+to avoid another hook lookup. Treat it as transport state: do not inspect or edit it.
+
+Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret (at least 32 characters)
+on the deployments that share sessions. Without this key, handles are neither issued nor used.
+The signature authenticates all routing and encryption fields before use. Rotation falls back
+to ordinary token resolution.
+
+Reuse also requires a Workflow SDK with `parseHookResumeHandle`, an adapter that declares
+`resolvedHookResume`, and a backend with the guarded resolved-hook endpoint.
+Older SDKs do not issue or use handles, even when the secret
+is configured. This change keeps the released SDK dependencies; adopting the SDK update
+enables the optimization. Handles exclude user metadata, live capabilities, and trace carriers,
+which may contain private server baggage. The signature authenticates a handle; it does not hide its contents.
+
+The server checks that the handle addresses the requested inbox. Workflow still validates the
+hook, persists the message, and wakes the workflow. A definite stale-owner rejection resolves
+the current inbox again. An uncertain write is surfaced without submitting a second delivery.
 
 ## Sessions
 
@@ -132,8 +154,8 @@ same bounded startup retries as other follow-ups.
 To create the session and start its first turn in one request, include the message:
 
 ```ts
-const { session, response } = await client.sessions.create({ message: "Summarize account A." });
-await response.result();
+const { session, delivery } = await client.sessions.create({ message: "Summarize account A." });
+await delivery.result();
 
 await (await session.send("Now list the risks.")).result();
 await session.compact();
@@ -163,19 +185,19 @@ for await (const event of session.stream({ follow: false })) {
 await session.reset({ reason: "User requested a fresh session" });
 ```
 
-`client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
+`client.sessions` stores the session ID, stream cursor, and optional opaque inbox handle. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
 
 A client can own many independent fixed sessions at once:
 
 ```ts
-const { session: alice, response: aliceResponse } = await client.sessions.create({
+const { session: alice, delivery: aliceDelivery } = await client.sessions.create({
   message: "Summarize account A.",
 });
-const { session: bob, response: bobResponse } = await client.sessions.create({
+const { session: bob, delivery: bobDelivery } = await client.sessions.create({
   message: "Summarize account B.",
 });
 
-await Promise.all([aliceResponse.result(), bobResponse.result()]);
+await Promise.all([aliceDelivery.result(), bobDelivery.result()]);
 ```
 
 The next pages cover the session lifecycle:

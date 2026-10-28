@@ -1,4 +1,4 @@
-import type { EveMessageData } from "eve/vue";
+import type { ConversationState } from "eve/vue";
 import type { MaybeRefOrGetter } from "vue";
 import { computed, toValue } from "vue";
 import type { AgentInputResponse } from "~/components/AgentInputRequest.vue";
@@ -6,7 +6,7 @@ import type { ChatSession, ChatSessionOptions } from "~/composables/chat/types";
 import { toUIMessages } from "./adapter";
 import { getOrCreateEveAgent } from "./init";
 
-function lastUserMessageText(data: EveMessageData) {
+function lastUserMessageText(data: Pick<ConversationState, "messages">) {
   for (let index = data.messages.length - 1; index >= 0; index -= 1) {
     const message = data.messages[index];
     if (message?.role !== "user") continue;
@@ -34,14 +34,18 @@ export function createEveChatSession(
     }),
   );
 
-  const messages = computed(() => toUIMessages(agent.value.data.value.messages));
+  const messages = computed(() => toUIMessages(agent.value.messages.value));
 
   const status = computed(() =>
-    agent.value.status.value === "resuming" ? "streaming" : agent.value.status.value,
+    agent.value.error.value !== undefined
+      ? "error"
+      : agent.value.status.value === "idle"
+        ? "ready"
+        : "streaming",
   );
   const error = computed(() => agent.value.error.value);
 
-  const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+  const isBusy = computed(() => status.value === "streaming");
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
@@ -58,13 +62,13 @@ export function createEveChatSession(
   }
 
   function reset() {
-    agent.value.reset();
+    agent.value.newSession();
   }
 
   async function retry() {
     if (isBusy.value) return;
 
-    const text = lastUserMessageText(agent.value.data.value);
+    const text = lastUserMessageText({ messages: agent.value.messages.value });
     if (!text) return;
 
     await agent.value.send(text);

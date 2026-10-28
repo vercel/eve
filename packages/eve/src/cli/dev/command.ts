@@ -99,8 +99,8 @@ export function registerRemoteCommands(input: {
     );
 
   program
-    .command("connect")
-    .description("Open the terminal UI for an existing eve agent.")
+    .command("connect [prompt]")
+    .description("Open the terminal UI for an existing eve agent, or print one response.")
     .requiredOption("-u, --url <url>", "Existing eve agent URL", parseDevelopmentServerUrl)
     .option(
       "-H, --header <header>",
@@ -109,6 +109,7 @@ export function registerRemoteCommands(input: {
     )
     .option("--name <name>", "Title shown in the terminal UI")
     .option("--input <text>", "Pre-fill the prompt input")
+    .option("--print", "Send a prompt, print the final assistant text, and exit")
     .option(
       "--tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",
@@ -140,33 +141,72 @@ export function registerRemoteCommands(input: {
       parseContextSizeOption,
     )
     .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode)
-    .action(async (options: DevelopmentCliOptions & { url: string }) => {
-      const remoteTarget = resolveDevelopmentUrlTarget(options, undefined)!;
-      const mode = resolveDevUiMode({ options, interactive: hasInteractiveTerminal() });
-      if (mode === "headless") {
-        throw new InvalidArgumentError("eve remote connect requires an interactive terminal.");
-      }
-      telemetry.trackDevContext({ target: "remote", ui: mode });
-      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-      await loadDevelopmentEnvironmentFiles(applicationContext.root);
-      logger.log(`↗ remote agent ${theme.info(new URL(remoteTarget.serverUrl).host)}`);
-      logger.log("");
-      const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
-      try {
-        await runInteractiveDevelopmentUi({
-          applicationRoot: applicationContext.root,
-          lifecycle,
-          onOnboardingStep: telemetry.trackSetupStep,
-          onOnboardingTerminal: telemetry.trackSetupTerminal,
-          options,
-          remoteTarget,
-          runDevelopmentTui: runtime.runDevelopmentTui,
-          server: { serverUrl: remoteTarget.serverUrl },
-        });
-      } finally {
-        lifecycle.dispose();
-      }
-    });
+    .action(
+      async (
+        prompt: string | undefined,
+        options: DevelopmentCliOptions & { print?: boolean; url: string },
+      ) => {
+        const remoteTarget = resolveDevelopmentUrlTarget(options, undefined)!;
+        if (options.print === true) {
+          if (options.input !== undefined) {
+            throw new InvalidArgumentError(
+              "--input pre-fills the terminal UI and cannot be used with --print.",
+            );
+          }
+          if (prompt === undefined || prompt.trim().length === 0) {
+            throw new InvalidArgumentError("--print requires a prompt.");
+          }
+          const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+          const { runRemotePrint } = await import("#cli/dev/remote-print.js");
+          const { findEveProjectContext } = await import("#internal/project-context.js");
+          await loadDevelopmentEnvironmentFiles(applicationContext.root);
+          const projectContext = await findEveProjectContext(applicationContext.root);
+          const lifecycle = installShutdownSignal();
+          try {
+            const reply = await runRemotePrint({
+              headers: remoteTarget.headers,
+              prompt,
+              serverUrl: remoteTarget.serverUrl,
+              signal: lifecycle.signal,
+              workspaceRoot: projectContext?.environmentRoot ?? applicationContext.root,
+            });
+            logger.log(reply);
+          } finally {
+            lifecycle.dispose();
+          }
+          return;
+        }
+        if (prompt !== undefined) {
+          throw new InvalidArgumentError(
+            "A prompt requires --print; use --input to pre-fill the terminal UI.",
+          );
+        }
+        const mode = resolveDevUiMode({ options, interactive: hasInteractiveTerminal() });
+        if (mode === "headless") {
+          throw new InvalidArgumentError("eve remote connect requires an interactive terminal.");
+        }
+        telemetry.trackDevContext({ target: "remote", ui: mode });
+        const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+        await loadDevelopmentEnvironmentFiles(applicationContext.root);
+        logger.log(`↗ remote agent ${theme.info(new URL(remoteTarget.serverUrl).host)}`);
+        logger.log("");
+        const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
+        try {
+          await runInteractiveDevelopmentUi({
+            applicationRoot: applicationContext.root,
+            lifecycle,
+            onOnboardingStep: telemetry.trackSetupStep,
+            onOnboardingTerminal: telemetry.trackSetupTerminal,
+            options,
+            remoteTarget,
+            runDevelopmentTui: runtime.runDevelopmentTui,
+            server: { serverUrl: remoteTarget.serverUrl },
+          });
+        } finally {
+          lifecycle.dispose();
+        }
+      },
+    );
 }
 
 /** Registers the local development server command. */

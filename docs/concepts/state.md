@@ -81,7 +81,7 @@ automatically.
 
 ## What to read next
 
-- Read state inside dynamic resolvers → [Dynamic capabilities](../guides/dynamic-capabilities)
+- Vary capabilities per session → [Dynamic capabilities](../guides/dynamic-capabilities)
 - How step durability works → [Execution model & durability](../concepts/execution-model-and-durability)
 - The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api)
 - Tenant-scoped long-term memory with any provider → [Multi-tenant memory](../patterns/multi-tenant-memory)

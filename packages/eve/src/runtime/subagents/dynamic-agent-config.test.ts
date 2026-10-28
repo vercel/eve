@@ -6,6 +6,7 @@ describe("normalizeDynamicSubagentAgentConfig", () => {
   it("rejects a selected limits.sessionUsage", async () => {
     await expect(
       normalizeDynamicSubagentAgentConfig({
+        modelMetadata: undefined as never,
         name: "researcher",
         state: {} as never,
         value: {

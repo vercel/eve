@@ -278,9 +278,11 @@ describe("ensureChannel", () => {
       "if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId)",
     );
     expect(agentChatSource).toContain(
-      '!isResuming && agent.data.inputs[requestId]?.status === "open"',
+      '!isResuming && !sessionEnded && interaction(agent.view, interactionId)?.status === "open"',
     );
-    expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
+    await expect(readFile(join(projectRoot, "components/ui/trace.tsx"), "utf8")).resolves.toMatch(
+      /export\s*\{[^}]*\bTraceLine\b/s,
+    );
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
       'viewBox="0 0 102 102"',
@@ -563,9 +565,9 @@ describe("ensureChannel", () => {
       "utf8",
     );
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
-    expect(agentMessageSource).toContain("questionsFor(part.toolCallId)");
+    expect(agentMessageSource).toContain("questionsFor(part.callId)");
     expect(agentMessageSource).toContain("<QuestionRequest");
-    expect(agentMessageSource).toContain("onInputResponses");
+    expect(agentMessageSource).toContain("onAnswers");
     expect(questionnaireSource).toContain('from "@shadcn/react/questionnaire"');
     expect(packageJson.dependencies).toHaveProperty("@shadcn/react");
     await expect(

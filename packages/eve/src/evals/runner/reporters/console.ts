@@ -31,7 +31,7 @@ export interface ConsoleReporterConfig {
 /**
  * Creates a {@link ConsoleReporter}.
  */
-export function Console(config: ConsoleReporterConfig = {}): EvalReporter {
+export function consoleReporter(config: ConsoleReporterConfig = {}): EvalReporter {
   return new ConsoleReporter(config);
 }
 

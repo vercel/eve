@@ -62,7 +62,7 @@ export default defineSandbox(() => environment.open());
 | `prepare`  | Any provider          | Setup captured in the prepared environment. Replaces a `prepare` set inside the provider options.                                   |
 | `docker`   | Docker is selected    | The options of [`DockerSandbox.environment()`](/docs/sandbox/docker#environment-options), such as `image`, `env`, and `pullPolicy`. |
 | `vercel`   | Vercel is selected    | The options of [`VercelSandbox.environment()`](/docs/sandbox/vercel), such as `region`, `resources`, and credentials.               |
-| `justBash` | just-bash is selected | The options of [`JustBashSandbox.environment()`](/docs/sandbox/just-bash), such as `autoInstall` and `customCommands`.              |
+| `justBash` | just-bash is selected | `autoInstall` and `prepare`. Use [`JustBashSandbox.environment()`](/docs/sandbox/just-bash) for `customCommands` or `filesystem`.   |
 
 Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. just-bash runs no native binaries, so commands such as `apt-get` fail there during `eve dev`.
 

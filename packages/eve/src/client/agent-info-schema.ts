@@ -64,12 +64,7 @@ type ParsedAgentInfoSource = z.output<typeof source>;
 
 const entry = source.extend({ name: z.string() }).strict();
 
-const dynamicResolver = source
-  .extend({
-    eventNames: z.array(z.string()),
-    slug: z.string(),
-  })
-  .strict();
+const dynamicResolver = source.extend({ slug: z.string() }).strict();
 
 const modelRouting = z.discriminatedUnion("kind", [
   z
@@ -214,7 +209,6 @@ const memory = source
   .extend({
     description: z.string().optional(),
     slot: z.string(),
-    visibility: z.enum(["scope", "session"]),
   })
   .strict();
 
@@ -471,27 +465,23 @@ function normalizeRoutePattern(path: string): string {
     .join("/");
 }
 
-type ReadonlyDeep<T> = T extends readonly (infer Item)[]
-  ? readonly ReadonlyDeep<Item>[]
-  : T extends object
-    ? { readonly [Key in keyof T]: ReadonlyDeep<T[Key]> }
-    : T;
-
-export type AgentInfoResult = ReadonlyDeep<z.output<typeof AgentInfoResultSchema>>;
-export type AgentInfoSource = ReadonlyDeep<z.output<typeof source>>;
-export type AgentInfoEntry = ReadonlyDeep<z.output<typeof entry>>;
-export type AgentInfoToolEntry = ReadonlyDeep<z.output<typeof tool>>;
-export type AgentInfoDynamicResolverEntry = ReadonlyDeep<z.output<typeof dynamicResolver>>;
-export type AgentInfoTools = AgentInfoResult["tools"];
-export type AgentInfoSkillEntry = ReadonlyDeep<z.output<typeof skill>>;
-export type AgentInfoInstructionsEntry = ReadonlyDeep<z.output<typeof instructions>>;
-export type AgentInfoInstructions = AgentInfoResult["instructions"];
-export type AgentInfoScheduleEntry = ReadonlyDeep<z.output<typeof schedule>>;
-export type AgentInfoSubagentEntry = ReadonlyDeep<z.output<typeof subagent>>;
-export type AgentInfoRemoteAgentEntry = ReadonlyDeep<z.output<typeof remoteAgent>>;
-export type AgentInfoChannelEntry = ReadonlyDeep<z.output<typeof channelRoute>>;
-export type AgentInfoChannels = AgentInfoResult["channels"];
-export type AgentInfoConnectionEntry = ReadonlyDeep<z.output<typeof connection>>;
-export type AgentInfoHookEntry = ReadonlyDeep<z.output<typeof hook>>;
-export type AgentInfoMemoryEntry = ReadonlyDeep<z.output<typeof memory>>;
-export type AgentInfoSandboxEntry = ReadonlyDeep<z.output<typeof sandbox>>;
+export type {
+  AgentInfoResult,
+  AgentInfoSource,
+  AgentInfoEntry,
+  AgentInfoToolEntry,
+  AgentInfoDynamicResolverEntry,
+  AgentInfoTools,
+  AgentInfoSkillEntry,
+  AgentInfoInstructionsEntry,
+  AgentInfoInstructions,
+  AgentInfoScheduleEntry,
+  AgentInfoSubagentEntry,
+  AgentInfoRemoteAgentEntry,
+  AgentInfoChannelEntry,
+  AgentInfoChannels,
+  AgentInfoConnectionEntry,
+  AgentInfoHookEntry,
+  AgentInfoMemoryEntry,
+  AgentInfoSandboxEntry,
+} from "./agent-info-types.js";

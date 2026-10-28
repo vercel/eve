@@ -1,5 +1,6 @@
 import { appendTaskContext } from "#execution/tasks/model-step.js";
 import {
+  anchorToTurn,
   createFrameworkUserMessage,
   followsToolResults,
   type HarnessModelMessage,
@@ -46,12 +47,17 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
-      projectHistory: step.projectHistory,
       session: step.session,
       tools: step.config.tools,
     });
     step.session = taskContext.session;
-    messages.push(...taskContext.messages);
+    // A turn a task's result starts brings no input of its own: what eve adds for the turn
+    // sits ahead of the results instead.
+    messages.push(
+      ...taskContext.messages.map((message) =>
+        message.role === "user" ? anchorToTurn(message, turn.turnId) : message,
+      ),
+    );
   }
 
   const placed = placeTurnInput(step, messages, turn);
@@ -62,9 +68,8 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
 }
 
 /**
- * The prompt a step starts on while approved calls wait to run: history and the turn's input,
- * without the task results and the client context's position a prompt settles, which wait for
- * the prompt the model reads once the calls have run.
+ * The prompt the session's dynamic values are evaluated with: history and the turn's input,
+ * without the task results and the client context's position a prompt settles.
  */
 export function previewPrompt(step: Step, turn: TurnInput): Prompt {
   const messages = validateHarnessModelMessages([...step.session.history]);
@@ -129,11 +134,9 @@ export function withClientContext(
   ];
 }
 
-/** The prompt as the model reads it: with the client's context, projected for its history view. */
-export function projectPrompt(step: Step, prompt: Prompt): HarnessModelMessage[] {
-  return validateHarnessModelMessages(
-    normalizeModelMessages(step.projectHistory(withClientContext(prompt))),
-  );
+/** The prompt as the model reads it: with the client's context. */
+export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {
+  return validateHarnessModelMessages(normalizeModelMessages(withClientContext(prompt)));
 }
 
 /**

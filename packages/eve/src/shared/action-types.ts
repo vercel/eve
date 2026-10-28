@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
+import { clearedBySchema } from "#protocol/session-events/families/call.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -150,6 +151,7 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
+    clearedBy: clearedBySchema.optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,

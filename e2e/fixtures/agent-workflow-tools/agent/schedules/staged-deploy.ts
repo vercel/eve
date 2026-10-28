@@ -7,5 +7,5 @@ import { defineSchedule } from "eve/schedules";
  */
 export default defineSchedule({
   cron: "0 0 * * *",
-  markdown: "WORKFLOW-STAGE-HOLD Stage the nightly api deploy and report its digest.",
+  content: "WORKFLOW-STAGE-HOLD Stage the nightly api deploy and report its digest.",
 });

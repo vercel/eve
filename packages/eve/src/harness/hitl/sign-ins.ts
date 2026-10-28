@@ -1,12 +1,16 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { SessionAuthorization, SessionProjection } from "#protocol/session-projection.js";
-import type { ConnectionPrincipal } from "#shared/connection-types.js";
+import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
+import { activeTurnIdOf, type SessionProjection } from "#protocol/session-projection.js";
+import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import type { InteractionRow } from "#protocol/session-projection/tables.js";
 
 // Which sign-in attempts replace which. Pure: the session state that holds them is
 // `requests.ts`'s.
 
 /** What makes two sign-in attempts the same one. */
-type SignInIdentity = Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">;
+interface SignInIdentity extends Pick<AuthorizationChallenge, "candidateId" | "grant" | "name"> {
+  readonly principal?: SignInChallenge["principal"];
+}
 
 /** The pending sign-ins once `challenges` are asked for: each replaces the attempt it supersedes. */
 export function withSignIns(
@@ -46,14 +50,29 @@ export function supersededChallenges(
 export function terminalSignInFailure(
   projection: SessionProjection,
   challenge: SignInIdentity,
-): SessionAuthorization | undefined {
-  return Object.values(projection.authorizations).find(
-    (attempt) =>
-      attempt.status === "failed" &&
-      attempt.retryable === false &&
-      attempt.turnId === projection.activeTurnId &&
-      sameSignIn(attempt, challenge),
-  );
+): InteractionRow | undefined {
+  const turnId = activeTurnIdOf(projection);
+  if (turnId === undefined) return undefined;
+  const view = projection.view;
+  return Object.values(view.interactions).find((row) => {
+    const signIn = row.request.signIn;
+    return (
+      signIn !== undefined &&
+      row.outcome === "failed" &&
+      row.response?.retryable === false &&
+      interactionOwner(view, row).turnId === turnId &&
+      sameSignIn(
+        {
+          // A responder's sign-in is about their answer: the approval candidate it settles.
+          candidateId: "responseId" in row.subject ? row.subject.responseId : undefined,
+          grant: signIn.grant,
+          name: signIn.name,
+          principal: signIn.principal,
+        },
+        challenge,
+      )
+    );
+  });
 }
 
 /**
@@ -70,12 +89,11 @@ function sameSignIn(left: SignInIdentity, right: SignInIdentity): boolean {
 }
 
 function samePrincipal(
-  left: ConnectionPrincipal | undefined,
-  right: ConnectionPrincipal | undefined,
+  left: SignInIdentity["principal"],
+  right: SignInIdentity["principal"],
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
-  if (left.type === "app" || right.type === "app") return left.type === right.type;
-  return left.id === right.id && left.issuer === right.issuer;
+  return left.type === right.type && left.id === right.id && left.issuer === right.issuer;
 }
 
 /** The key a sign-in callback names its attempt by. */

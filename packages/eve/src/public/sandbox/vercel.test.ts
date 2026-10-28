@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { Drive } from "#compiled/@vercel/sandbox/index.js";
 import type { SessionContext } from "#context/session-context.js";
-import type { RuntimeSandboxSessionFor } from "#public/definitions/sandbox.js";
+import type { RuntimeSandboxSession } from "#public/definitions/sandbox.js";
 import {
   VercelSandbox,
   type VercelSandboxMount,
@@ -28,7 +28,7 @@ describe("VercelSandbox", () => {
     const environment = VercelSandbox.environment({});
     const assertTypes = (ctx: SessionContext) => {
       expectTypeOf(ctx.getSandbox(environment)).toEqualTypeOf<
-        Promise<RuntimeSandboxSessionFor<VercelSandboxSession>>
+        Promise<RuntimeSandboxSession<VercelSandboxSession>>
       >();
     };
 

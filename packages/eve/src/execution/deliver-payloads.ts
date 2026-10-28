@@ -5,7 +5,7 @@ import type { StepInput } from "#harness/types.js";
 const COALESCED_DELIVER_FIELDS = [
   "context",
   "history",
-  "inputResponses",
+  "answers",
   "message",
   "outputSchema",
 ] as const;

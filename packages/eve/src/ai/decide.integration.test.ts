@@ -53,7 +53,9 @@ describe("decide", () => {
     expectTypeOf(result.answers.urgent.probability).toEqualTypeOf<number>();
     expectTypeOf(result.answers.priority.score).toEqualTypeOf<number>();
     expect(result.usage).toEqual({ inputTokens: 42, outputTokens: 3, totalTokens: 45 });
-    expect(result.providerMetadata).toEqual({ fixture: { requestId: "request-1" } });
+    expect(Object.keys(result).sort()).toEqual(["answers", "usage"]);
+    expectTypeOf<Parameters<typeof decide>[0]>().not.toHaveProperty("_internal");
+    expectTypeOf<Parameters<typeof decide>[0]>().not.toHaveProperty("telemetry");
   });
 
   it("resolves an explicit model ID through the local connection", async () => {
@@ -75,16 +77,14 @@ describe("decide", () => {
     expect(localDecisionModel).not.toHaveBeenCalled();
   });
 
-  it("passes explicit model instances and request options through unchanged", async () => {
+  it("translates stable request options for explicit provider model instances", async () => {
     const decider = decisionModel();
     const abortSignal = new AbortController().signal;
     await decide({
       model: decider.model,
       state,
       questions,
-      abortSignal,
-      headers: { "x-request-id": "request-1" },
-      providerOptions: { fixture: { mode: "fast" } },
+      signal: abortSignal,
       maxRetries: 0,
     });
 
@@ -94,10 +94,23 @@ describe("decide", () => {
         state: [{ type: "json", value: state }],
         questions,
         abortSignal,
-        headers: expect.objectContaining({ "x-request-id": "request-1" }),
-        providerOptions: { fixture: { mode: "fast" } },
       }),
     );
+  });
+
+  it("rejects identity-only objects and unsupported model versions before provider I/O", async () => {
+    await expect(
+      decide({
+        // @ts-expect-error Identity alone is not a provider implementation.
+        model: { provider: "fixture", modelId: "missing", specificationVersion: "v4" },
+        state,
+        questions,
+      }),
+    ).rejects.toThrow("not just its identity");
+    const decider = decisionModel();
+    const newerModel = { ...decider.model, specificationVersion: "v-next" };
+    await expect(decide({ model: newerModel, state, questions })).rejects.toThrow(/version/i);
+    expect(decider.doDecide).not.toHaveBeenCalled();
   });
 
   it("preserves input and answer validation", async () => {
@@ -128,7 +141,7 @@ describe("decide", () => {
         model: decider.model,
         state,
         questions,
-        abortSignal: AbortSignal.abort(error),
+        signal: AbortSignal.abort(error),
       }),
     ).rejects.toBe(error);
     expect(decider.doDecide).not.toHaveBeenCalled();

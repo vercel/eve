@@ -11,13 +11,7 @@ export function withoutInstrumentationContent(event: InstrumentationEvent): Inst
   });
 }
 
-/**
- * Projects lifecycle content by direction.
- *
- * Inputs are data entering the agent: delivery/action/tool/model starts and a
- * resolved user's response. Outputs are data produced by the agent: requests
- * for user input, action/tool/model terminals, provider metadata, and errors.
- */
+/** Inputs enter the agent; responses, requests for a person, metadata and errors leave it. */
 export function withInstrumentationDecision(
   event: InstrumentationEvent,
   decision: Extract<InstrumentationDecision, { action: "record" }>,
@@ -25,44 +19,50 @@ export function withInstrumentationDecision(
   switch (event.type) {
     case "session.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, title: undefined });
-    case "channel.delivery.started":
-      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "input.requested":
-      return decision.recordOutputs ? event : Object.freeze({ ...event, request: undefined });
-    case "input.resolved":
-      return decision.recordInputs && decision.recordOutputs
+    case "call.requested":
+      return decision.recordInputs
         ? event
         : Object.freeze({
             ...event,
-            error: decision.recordOutputs ? event.error : undefined,
-            response: decision.recordInputs ? event.response : undefined,
+            input: undefined,
+            capability: Object.freeze({ ...event.capability, label: undefined }),
           });
-    case "tool.call.started":
-      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "tool.call.completed":
-      return decision.recordOutputs
-        ? event
-        : Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
+    case "delivery.consumed":
     case "model.call.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "model.call.completed":
-      return decision.recordOutputs ? event : Object.freeze({ ...event, content: undefined });
-    case "memory.operation.completed":
-      return decision.recordInputs ? event : Object.freeze({ ...event, outputRecords: undefined });
-    case "step.attempt.metadata":
+    case "interaction.opened":
+      return decision.recordOutputs ? event : Object.freeze({ ...event, request: undefined });
+    case "interaction.settled":
+      return Object.freeze({
+        ...event,
+        error: decision.recordOutputs ? event.error : undefined,
+        answer: decision.recordInputs ? event.answer : undefined,
+      });
+    case "call.settled":
+      return decision.recordOutputs
+        ? event
+        : Object.freeze({ ...event, error: undefined, output: undefined });
+    case "model.call.settled":
+      if (event.outcome === "failed")
+        return decision.recordOutputs ? event : Object.freeze({ ...event, error: undefined });
       return decision.recordOutputs
         ? event
         : Object.freeze({
             ...event,
-            providerMetadata: structuralProviderMetadata(event.providerMetadata),
+            content: undefined,
+            providerMetadata:
+              event.providerMetadata === undefined
+                ? undefined
+                : structuralProviderMetadata(event.providerMetadata),
           });
-    case "model.call.failed":
-    case "memory.operation.failed":
-    case "session.failed":
-    case "step.attempt.failed":
-    case "tool.call.failed":
-    case "turn.failed":
-    case "channel.delivery.failed":
+    case "memory.operation.settled":
+      if (event.outcome === "failed")
+        return decision.recordOutputs ? event : Object.freeze({ ...event, error: undefined });
+      return decision.recordInputs ? event : Object.freeze({ ...event, outputRecords: undefined });
+    case "model.retried":
+    case "model.settled":
+    case "session.ended":
+    case "turn.settled":
       return decision.recordOutputs ? event : Object.freeze({ ...event, error: undefined });
     default:
       return event;
@@ -74,9 +74,8 @@ export function structuralProviderMetadata(
   metadata: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
   const gateway = metadata["gateway"];
-  if (typeof gateway !== "object" || gateway === null || Array.isArray(gateway)) {
+  if (typeof gateway !== "object" || gateway === null || Array.isArray(gateway))
     return Object.freeze({});
-  }
   const source = gateway as Readonly<Record<string, unknown>>;
   const structural: Record<string, unknown> = {};
   for (const key of ["cost", "generationId"] as const) {

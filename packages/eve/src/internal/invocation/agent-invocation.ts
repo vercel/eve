@@ -1,15 +1,19 @@
-import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonValue } from "#shared/json.js";
+import type { RequestStatus } from "#protocol/session-projection/request-status.js";
 
-export interface AgentInvocationAuthorizationRequest {
-  readonly authorization?: ConnectionAuthorizationChallenge;
-  readonly description: string;
-  readonly name: string;
-  readonly webhookUrl?: string;
-}
+/** An interaction projected for JSON, without a sign-in's private callback URL. */
+export type AgentInvocationInteraction = Omit<Interaction, "request"> & {
+  readonly request: Omit<Interaction["request"], "signIn"> & {
+    readonly signIn?: Omit<NonNullable<Interaction["request"]["signIn"]>, "callbackUrl">;
+  };
+};
+
+/** Open interactions by `interactionId`. */
+export type AgentInvocationInteractions = Readonly<Record<string, AgentInvocationInteraction>>;
 
 interface AgentInvocationBase {
+  readonly sessionEnded: boolean;
   readonly invocationId: string;
   readonly createdAt: string;
   readonly expiresAt?: string;
@@ -22,17 +26,10 @@ export type AgentInvocation =
       readonly result?: JsonValue;
     })
   | (AgentInvocationBase & {
-      readonly status: "input_required";
-      readonly inputRequests: Readonly<Record<string, InputRequest>>;
-      readonly result?: JsonValue;
-    })
-  | (AgentInvocationBase & {
-      readonly status: "authorization_required";
-      readonly authorizations: readonly [
-        AgentInvocationAuthorizationRequest,
-        ...AgentInvocationAuthorizationRequest[],
-      ];
-      readonly pollAfterMs: number;
+      readonly status: "awaiting-input";
+      readonly interactions: AgentInvocationInteractions;
+      /** Sign-ins complete elsewhere; polling observes their settlement. */
+      readonly pollAfterMs?: number;
       readonly result?: JsonValue;
     })
   | (AgentInvocationBase & { readonly status: "completed"; readonly result?: JsonValue })
@@ -46,7 +43,7 @@ export type AgentInvocation =
     })
   | (AgentInvocationBase & { readonly status: "cancelled" });
 
-export type AgentInvocationStatus = AgentInvocation["status"];
+export type AgentInvocationStatus = RequestStatus | "working";
 
 export type AgentInvocationMutationResult =
   | { readonly type: "success"; readonly invocation: AgentInvocation }

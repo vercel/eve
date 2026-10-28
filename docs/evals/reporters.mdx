@@ -11,15 +11,15 @@ Reporters attach in two places. Declare them in `evals.config.ts` to observe **e
 
 ## Braintrust
 
-`Braintrust(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
+`braintrustReporter(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
   judge: { model: "typesafe-ai/jev" },
-  reporters: [Braintrust({ projectName: "weather-agent" })],
+  reporters: [braintrustReporter({ projectName: "weather-agent" })],
 });
 ```
 
@@ -27,10 +27,10 @@ Need a destination for only some evals? Attach it per eval instead:
 
 ```ts title="evals/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEval({
-  reporters: [Braintrust({ projectName: "weather-agent" })],
+  reporters: [braintrustReporter({ projectName: "weather-agent" })],
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
     t.succeeded();
@@ -46,14 +46,14 @@ Braintrust needs its SDK installed in the app and credentials in the environment
 
 ## Datadog
 
-`Datadog(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
+`datadogReporter(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Datadog } from "eve/evals/reporters";
+import { datadogReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
-  reporters: [Datadog({ projectName: "weather-agent" })],
+  reporters: [datadogReporter({ projectName: "weather-agent" })],
 });
 ```
 
@@ -69,7 +69,7 @@ Datadog needs `dd-trace` installed in the app and Datadog credentials in the env
 
 ## JUnit
 
-`JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
+`junitReporter({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
 
 ```bash
 eve eval --strict --junit .eve/junit.xml
@@ -101,9 +101,13 @@ Each entry in `result.assertions` is an `AssertionResult`. `name` is the display
 
 An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onSessionStart` does not fire and the completed trace list is empty.
 
-`result.result.derived` holds the facts the runner derived from the eval's sessions, such as tool calls and `models`: the distinct ids of the models the steps started with, in session order. Each entry in `result.result.sessions` holds the same facts for one session, in first-use order, so a reporter can tell the primary session's models from those of the other sessions the eval created or attached. A delegated subagent runs in its own session, so its models appear only when the eval attaches that session with `t.target.attachSession`. Compaction and `auto` routing calls are not included.
+`result.result.derived` holds the facts the runner derived from the eval's sessions, such as tool calls and `models`: the distinct ids of the models the steps started with, in session order. Each entry in `result.result.sessions` holds the same facts for one session, in first-use order, so a reporter can tell the primary session's models from those of the other sessions the eval created or attached. A delegated subagent runs in its own session, so its models appear only when the eval attaches and reads that session with `t.target.attach(...).nextTurn()` or `watch()`. Compaction summaries are included; provider-internal routing without an eve model lifecycle is not.
 
-`derived.usage` is the token usage and cost from each session's latest `session.waiting`, `turn.waiting`, `session.failed`, or `session.completed`, including what its delegated agents spent; on a turn, it is the session's total so far. The eval's `usage` counts each captured session once, by its latest usage in time (an eval can capture a session again with an earlier snapshot), and leaves out sessions another captured session opened, because that session already counts their spend. It is absent when a counted session reported no usage, and its `costUsd` is absent when a counted session reported no cost, so a partial sum never reads as the eval's cost. Compaction summary calls are included. It leaves out the turns an eval sends directly to a child session it attached, and delegated spend counted after a session's last such event.
+`result.result.reply` is the last observed turn's text; `data` is its structured output, without a text fallback. Its `status` describes the request, while `sessionEnded` and the optional `view` describe that turn's session. The top-level `sessionId` still identifies the primary captured session; inspect `sessions` for each session's events and view. When selecting one value for a reporter, fall back to `reply` only when `data === undefined`, so structured `null` remains an output.
+
+Braintrust and Datadog metadata use `eveStatus`, `eveAwaitingInput`, and `eveSessionEnded`. Update saved filters that used `eveParked` to use `eveAwaitingInput`, and use `eveSessionEnded` to distinguish request completion from session retirement. Existing records are not rewritten.
+
+`derived.usage` is the token usage and cost a session recorded, summed from its `usage.recorded` facts, including what its delegated agents spent; on a turn, it is the session's total so far. The eval's `usage` counts each captured session once, using the snapshot with the latest recorded session activity rather than the last capture order, and leaves out sessions another captured session opened, because that session already counts their spend. It is absent when a counted session recorded no usage. It includes compaction summaries.
 
 Reporter callbacks for an eval stay ordered—eval start, traced session starts, then completion—even when several evals run concurrently. Reach for a custom reporter only when a destination isn't covered. The per-run artifacts under `.eve/evals/` retain the trace contexts alongside the result for ad-hoc inspection.
 

@@ -1,9 +1,5 @@
-import {
-  ParentSessionKey,
-  SessionDynamicSubagentSelectionsKey,
-  TurnDynamicSubagentSelectionsKey,
-  type DurableDynamicSubagentSelection,
-} from "#context/keys.js";
+import { ParentSessionKey } from "#context/keys.js";
+import { readDynamicSubagentSelections } from "#reactions/kinds/subagent.js";
 import type { ContextReader } from "#context/key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
@@ -28,9 +24,7 @@ export function resolveWorkflowAgentMetadata(
     if (description !== undefined) agents.set(name, { description });
   }
 
-  const selections = effectiveDynamicSelections(ctx);
-  for (const selection of Object.values(selections)) {
-    if (selection === null) continue;
+  for (const selection of Object.values(readDynamicSubagentSelections(ctx))) {
     agents.set(selection.prepared.name, {
       description:
         selection.kind === "subagent"
@@ -40,13 +34,4 @@ export function resolveWorkflowAgentMetadata(
   }
 
   return Object.fromEntries(agents);
-}
-
-function effectiveDynamicSelections(
-  ctx: ContextReader,
-): Readonly<Record<string, DurableDynamicSubagentSelection>> {
-  return {
-    ...ctx.get(SessionDynamicSubagentSelectionsKey),
-    ...ctx.get(TurnDynamicSubagentSelectionsKey),
-  };
 }

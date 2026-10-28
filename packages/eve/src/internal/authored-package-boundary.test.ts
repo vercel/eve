@@ -38,8 +38,8 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     ).resolves.toEqual({ external: true, id: "eve/tools" });
     for (const specifier of [
       "eve/self-modification",
-      "eve/self-modification/local",
-      "eve/self-modification/remote",
+      "eve/extensions/self-modification/local",
+      "eve/extensions/self-modification/remote",
     ]) {
       await expect(
         resolveId.call(context, specifier, join(PACKAGE_ROOT, "agent/extensions/edit.ts"), {

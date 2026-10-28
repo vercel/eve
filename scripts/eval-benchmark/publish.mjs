@@ -12,6 +12,10 @@
 // The manifest lists both record files and carries the metric catalog (unit,
 // direction, and scope of every metric), so ingest reads scopes from the run.
 //
+// A release backfill (a plan with a `source`, see release.mjs) publishes
+// under imports/metrics-v<METRICS_VERSION>/runs/ instead of runs/, with the
+// plan's source in its manifest: it is not a run of main.
+//
 // Usage: node scripts/eval-benchmark/publish.mjs <plan.json> <legs-dir> <records.jsonl> <dev-startup-dir> <framework-records.jsonl>
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT.
 import { createHash } from "node:crypto";
@@ -37,11 +41,21 @@ const UPLOAD_CONCURRENCY = 8;
  * @typedef {{
  *   put: (pathname: string, body: Buffer, contentType: string) => Promise<void>,
  *   read: (pathname: string) => Promise<Buffer | null>,
+ *   list?: (prefix: string) => Promise<string[]>,
  * }} ImmutableStore `put` must reject with an "already exists" error rather than overwrite.
  */
 
+/** Where a plan's run is published: main's runs, or the import root for a backfill. */
+export function publishRoot(plan) {
+  return plan.source === undefined ? "runs" : `imports/metrics-v${METRICS_VERSION}/runs`;
+}
+
 /**
- * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, frameworkRecordsJsonl: string, devStartupDir?: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore }} input
+ * `root` and `source` let an importer publish runs it did not execute (see
+ * import-stress-artifacts.mjs) outside `runs/`, saying where they came from.
+ * They default to the plan's: a release backfill's plan has a `source`.
+ *
+ * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, frameworkRecordsJsonl: string, devStartupDir?: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore, root?: string, source?: object }} input
  */
 export async function publishRun({
   plan,
@@ -53,6 +67,8 @@ export async function publishRun({
   runAttempt,
   eveVersion,
   store,
+  root = publishRoot(plan),
+  source = plan.source,
 }) {
   const parse = (jsonl) =>
     jsonl
@@ -68,7 +84,7 @@ export async function publishRun({
       );
   }
 
-  const prefix = `runs/${githubRunId}/${runAttempt}`;
+  const prefix = `${root}/${githubRunId}/${runAttempt}`;
   const tree = (dir, artifactPath) =>
     listFiles(dir).map((path) => ({
       pathname: `${prefix}/${artifactPath}/${relative(dir, path).replaceAll("\\", "/")}`,
@@ -101,6 +117,7 @@ export async function publishRun({
     sha: plan.sha,
     eve_version: eveVersion,
     planned_at: plan.planned_at,
+    ...(source === undefined ? {} : { source }),
     registry: plan.registry,
     legs: legs.map(({ leg, dir }) => ({ ...leg, uploaded: dir !== undefined })),
     record_count: records.length,
@@ -140,7 +157,7 @@ export async function publishRun({
   };
 }
 
-async function putImmutable(store, pathname, body, contentType) {
+export async function putImmutable(store, pathname, body, contentType) {
   try {
     await store.put(pathname, body, contentType);
   } catch (error) {
@@ -155,20 +172,20 @@ async function putImmutable(store, pathname, body, contentType) {
   }
 }
 
-function listFiles(dir) {
+export function listFiles(dir) {
   return readdirSync(dir, { withFileTypes: true, recursive: true })
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name))
     .sort();
 }
 
-function contentTypeOf(path) {
+export function contentTypeOf(path) {
   if (path.endsWith(".json")) return "application/json";
   if (path.endsWith(".ndjson") || path.endsWith(".jsonl")) return "application/x-ndjson";
   return "application/octet-stream";
 }
 
-async function mapLimit(items, limit, task) {
+export async function mapLimit(items, limit, task) {
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (next < items.length) await task(items[next++]);
@@ -178,7 +195,7 @@ async function mapLimit(items, limit, task) {
 
 /** Private, immutable Blob store backed by @vercel/blob. */
 export async function vercelBlobStore(token) {
-  const { get, put } = await import("@vercel/blob");
+  const { get, list, put } = await import("@vercel/blob");
   return {
     async put(pathname, body, contentType) {
       await put(pathname, body, {
@@ -193,6 +210,17 @@ export async function vercelBlobStore(token) {
     async read(pathname) {
       const result = await get(pathname, { token, access: "private", useCache: false });
       return result === null ? null : Buffer.from(await new Response(result.stream).arrayBuffer());
+    },
+    async list(prefix) {
+      const pathnames = [];
+      let cursor;
+      for (let page = 0; page < 100; page += 1) {
+        const result = await list({ token, prefix, cursor, limit: 1000 });
+        pathnames.push(...result.blobs.map((blob) => blob.pathname));
+        if (!result.hasMore) return pathnames;
+        cursor = result.cursor;
+      }
+      throw new Error(`More than 100 pages of blobs under ${prefix}.`);
     },
   };
 }
@@ -223,7 +251,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     devStartupDir,
     githubRunId,
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
-    eveVersion: JSON.parse(readFileSync("packages/eve/package.json", "utf8")).version,
+    // The code under test's version, which a backfill's harness does not share.
+    eveVersion: plan.eve_version,
     store: await vercelBlobStore(token),
   });
   console.error(

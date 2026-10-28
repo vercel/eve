@@ -8,6 +8,7 @@ import {
   githubLogo,
   linearLogo,
   linkLogo,
+  logos,
   linqLogo,
   muxLogo,
   motherduckLogo,
@@ -27,6 +28,7 @@ import type { TemplateIntegration } from "@/lib/templates/data";
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
 export const integrationIcons: Record<TemplateIntegration, IconComponent> = {
+  Browserbase: logos.browserbase,
   Contentful: contentfulLogo,
   Datadog: datadogLogo,
   Discord: discordLogo,

@@ -115,35 +115,22 @@ pnpm docs:check    # docs frontmatter and nav validation
 
 All of these run in CI, so running them locally before pushing saves a round trip.
 
-### Extension capability contracts
+### Extension distribution compatibility
 
-The extension capabilities in
-[`extension-compatibility.ts`](./packages/eve/src/compiler/extension-compatibility.ts)
-have immutable API reports keyed by epoch. If an extension-facing type or
-signature changes, CI fails with the affected capability. Classify whether the
-new consumer retains the previous epoch while bumping it automatically:
+`eve extension build` records its exact eve build version and a distribution
+contract generation in `_manifest.json`. Build against the oldest eve release
+your extension intends to support, then test that same distribution against
+newer releases. A consumer rejects distributions built by a newer eve release
+or against an unsupported distribution generation before executing extension
+code. The first release of this manifest format rejects older epoch-based
+distributions. If the release candidate's distribution contract remains
+compatible, 1.0 continues to support its generation without a rebuild; a
+breaking change requires an explicit generation change and rebuild guidance.
 
-```bash
-pnpm update:extension-contracts --update hook
-```
-
-The command bumps changes it can prove structurally backward compatible,
-retains the previous epoch, and scaffolds the required fixture under
-`packages/eve/extension-contracts/compatibility/`. Replace the scaffold with a
-representative example of the retained authoring contract, then rerun
-`pnpm update:extension-contracts` to generate the new epoch report. If the
-change cannot be classified automatically, pass `--retain` after verifying
-runtime compatibility. To stop accepting the previous epoch, pass
-`--drop "why the old contract cannot run"`; this bumps the capability and
-records the reason.
-
-Every historical epoch must be classified exactly once as supported or dropped.
-Supported historical epochs require compiling fixtures. Each epoch also retains
-a readable `vN.api.md` declaration report and compact `vN.json` metadata; do not
-edit or delete either file after merge. The invariant guard verifies the support
-history, fixtures, report integrity, and assignment of every public authoring
-export to a capability. Reports and fixtures cover structural compatibility;
-behavior changes still need focused compatibility tests.
+Review changes to extension-facing APIs and runtime behavior for backwards
+compatibility within a supported generation. An API change does not require an
+epoch bump; a TypeScript-compatible signature alone does not prove an older
+prebuilt distribution still runs.
 
 ## Adding an integration to the registry
 

@@ -270,7 +270,7 @@ describe("runDeployCommand", () => {
           new Error("Vercel API unavailable"),
         );
       }
-      const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
       vi.stubGlobal("fetch", fetchMock);
       const deployDeps = createDeployProjectDeps();
 
@@ -299,7 +299,10 @@ describe("runDeployCommand", () => {
           expect.objectContaining({ method: "PUT" }),
         );
       } else {
-        expect(fetchMock).not.toHaveBeenCalled();
+        // The local compile still reads the AI Gateway model catalog for its snapshot.
+        expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContainEqual(
+          expect.stringContaining("api.vercel.com"),
+        );
       }
       if (traceSampling === false) {
         expect(linkDeps.resolveProjectByNameOrId).not.toHaveBeenCalled();

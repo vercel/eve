@@ -4,6 +4,7 @@ import { imessageSetup } from "../../lib/setups/imessage.js";
 const PHONE_NUMBER = "+15551234567";
 
 export default defineAuthoringCase({
+  category: "features/channels",
   startingPoint: simpleProject,
   setup: imessageSetup,
   async interact({ send }) {

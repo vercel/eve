@@ -11,3 +11,13 @@ const config: StandardSchemaV1<DeployedSelfModificationConfig> =
 
 /** Deployed self-modification mount; independent of the local development extension. */
 export default defineExtension({ config });
+
+export type {
+  DeployedSelfModificationConfig,
+  SelfModificationAuthorization,
+  SelfModificationAuthorizationContext,
+  GitHubCredentialProvider,
+  GitHubCredentialRequest,
+  GitHubCredentialCapability,
+  GitHubRepository,
+} from "./config.js";

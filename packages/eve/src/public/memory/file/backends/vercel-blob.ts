@@ -32,7 +32,7 @@ export function vercelBlob(options: VercelBlobBackendOptions = {}): MemoryDocume
   const read = async (input: MemoryDocumentReadInput): Promise<MemoryDocument | null> => {
     const result = await get(pathname(prefix, input.key), {
       ...credentials,
-      abortSignal: input.signal,
+      abortSignal: input.abortSignal,
       access: "private",
       headers: { "accept-encoding": "identity" },
       useCache: false,
@@ -50,7 +50,7 @@ export function vercelBlob(options: VercelBlobBackendOptions = {}): MemoryDocume
       try {
         const result = await put(pathname(prefix, input.key), input.content, {
           ...credentials,
-          abortSignal: input.signal,
+          abortSignal: input.abortSignal,
           access: "private",
           addRandomSuffix: false,
           allowOverwrite: input.expectedVersion !== null,

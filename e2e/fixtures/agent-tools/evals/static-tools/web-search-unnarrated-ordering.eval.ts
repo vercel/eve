@@ -16,7 +16,7 @@ export default defineEval({
 
     turn.expectOk();
     turn.calledTool(WEB_SEARCH_TOOL_NAME, { count: 1 });
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.eventsSatisfy("provider request and result stay ordered without narration", (events) =>
       unNarratedWebSearchOrder(events),
     );

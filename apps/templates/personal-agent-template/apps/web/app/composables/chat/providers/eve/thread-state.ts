@@ -1,4 +1,4 @@
-import type { EveMessageData, UseEveAgentSnapshot } from "eve/vue";
+import type { UseEveAgentSnapshot } from "eve/vue";
 import type { ThreadRecord, ThreadState } from "#eve/types/thread";
 import type { ChatSessionOptions, EveStreamEvent } from "~/composables/chat/types";
 import { refreshThreadList } from "~/composables/chat/navigation";
@@ -15,7 +15,7 @@ export function resumeOptionsFromThread(thread: ThreadRecord): ChatSessionOption
     initialSession: session?.sessionId
       ? {
           sessionId: session.sessionId,
-          streamIndex: Math.max(session.streamIndex ?? 0, events.length),
+          streamIndex: session.streamIndex ?? 0,
         }
       : undefined,
     initialEvents: events as readonly EveStreamEvent[],
@@ -24,7 +24,7 @@ export function resumeOptionsFromThread(thread: ThreadRecord): ChatSessionOption
 
 export async function persistThreadState(
   threadId: string,
-  snapshot: UseEveAgentSnapshot<EveMessageData>,
+  snapshot: Pick<UseEveAgentSnapshot, "events" | "session">,
 ) {
   if (!snapshot.events.length || !snapshot.session) {
     return;

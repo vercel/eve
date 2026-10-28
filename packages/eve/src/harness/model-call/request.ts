@@ -1,7 +1,9 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
-import { DynamicSkillManifestKey, HistoryStateKey } from "#context/keys.js";
+import { HistoryStateKey } from "#context/keys.js";
+import { dynamicInstructionMessages } from "#reactions/kinds/instructions.js";
+import { memoryRecallContents } from "#reactions/kinds/memory.js";
+import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
@@ -28,7 +30,6 @@ export function requestMessages(
     readonly projectedMessages: readonly HarnessModelMessage[];
     readonly turnMessages: readonly HarnessModelMessage[];
     readonly catalog: StepCatalog;
-    readonly hidesHeldText: boolean;
     readonly pendingApprovalsNote: string | undefined;
   },
 ): RequestMessages {
@@ -38,18 +39,18 @@ export function requestMessages(
     currentTurnMessages: input.turnMessages,
     projectedMessages: input.projectedMessages,
   });
-  if (ctx !== undefined) messages.addSystem(buildDynamicInstructionMessages(ctx));
-  messages.addSystem(
-    taskSystemMessages(input.catalog.offersTasks, { finalReplyOnly: input.hidesHeldText }),
-  );
+  messages.addSystem(dynamicInstructionMessages(ctx));
+  messages.addSystem(taskSystemMessages(input.catalog.offersTasks, step.finalReplyOnly));
   const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
     ...catalogAnnouncements(input.catalog, announced),
-    ...dynamicSkillAnnouncements(ctx?.get(DynamicSkillManifestKey), announced),
+    ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
   });
   if (input.pendingApprovalsNote !== undefined) {
     messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
   }
+  // Last, so nothing lands between a turn's recall and that turn's input.
+  messages.addAnchored(memoryRecallContents(ctx), "memory.load");
   return messages;
 }
 

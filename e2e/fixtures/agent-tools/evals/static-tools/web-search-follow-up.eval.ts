@@ -29,7 +29,7 @@ export default defineEval({
     );
     second.expectOk();
     second.calledTool(WEB_SEARCH_TOOL_NAME, { count: (count) => count >= 1 });
-    second.noFailedActions();
+    second.noFailedCalls();
     second.messageIncludes(/Brunson/iu);
 
     t.succeeded();

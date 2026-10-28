@@ -4,7 +4,7 @@ import {
   GH_SIGNED_COMMIT_SOURCE,
   GH_SIGNED_COMMIT_VERSION,
   GITHUB_TOOLING_PATHS,
-} from "eve/extensions/git/sandbox";
+} from "eve/internal/git";
 import { shellQuote } from "./shell.ts";
 
 export { GH_SIGNED_COMMIT_SOURCE, GH_SIGNED_COMMIT_VERSION };

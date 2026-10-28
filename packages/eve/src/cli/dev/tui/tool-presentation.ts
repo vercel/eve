@@ -1,6 +1,6 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
-import { displayName, displayTitle } from "#shared/display-name.js";
+import { displayName, displayTitle } from "#protocol/session-projection/display-name.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 

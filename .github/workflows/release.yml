@@ -47,16 +47,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Prepare image tags
+      - name: Resolve sandbox image tag
         if: github.ref == 'refs/heads/main'
         id: image-tags
         run: |
           set -euo pipefail
 
-          version="$(jq -er '.version | select(type == "string" and length > 0)' packages/eve/package.json)"
-          echo "version=${version}" >>"$GITHUB_OUTPUT"
-          echo "ghcr-tag=${GHCR_IMAGE}:${version}" >>"$GITHUB_OUTPUT"
-          echo "vcr-tag=${VCR_IMAGE}:${version}" >>"$GITHUB_OUTPUT"
+          node scripts/sandbox-image-tag.mjs --check
+          tag="$(node scripts/sandbox-image-tag.mjs)"
+          echo "tag=${tag}" >>"$GITHUB_OUTPUT"
+          echo "ghcr-tag=${GHCR_IMAGE}:${tag}" >>"$GITHUB_OUTPUT"
+          echo "vcr-tag=${VCR_IMAGE}:${tag}" >>"$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         if: github.ref == 'refs/heads/main'
@@ -81,83 +82,76 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check whether the VCR image version is already published
+      # Content tags are immutable: an existing tag is never rebuilt, so every
+      # registry serves the bytes the first build produced.
+      - name: Check which registries already have the sandbox image
         if: github.ref == 'refs/heads/main'
-        id: vcr-image
+        id: image-state
         env:
-          IMAGE_TAG: ${{ steps.image-tags.outputs.vcr-tag }}
+          GHCR_TAG: ${{ steps.image-tags.outputs.ghcr-tag }}
+          VCR_TAG: ${{ steps.image-tags.outputs.vcr-tag }}
         run: |
           set -euo pipefail
 
-          if inspect_output="$(docker buildx imagetools inspect --raw "$IMAGE_TAG" 2>&1)"; then
-            echo "publish=false" >>"$GITHUB_OUTPUT"
-            echo "$IMAGE_TAG is already published; skipping the image build."
-          elif grep -Eq ': not found|manifest unknown' <<<"$inspect_output"; then
-            echo "publish=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "$inspect_output" >&2
+          published() {
+            local inspect_output
+            if inspect_output="$(docker buildx imagetools inspect --raw "$1" 2>&1)"; then
+              echo true
+            elif grep -Eq ': not found|manifest unknown' <<<"$inspect_output"; then
+              echo false
+            else
+              echo "$inspect_output" >&2
+              exit 1
+            fi
+          }
+
+          ghcr="$(published "$GHCR_TAG")"
+          vcr="$(published "$VCR_TAG")"
+          if [[ "$ghcr" == false && "$vcr" == true ]]; then
+            echo "::error::$VCR_TAG exists but $GHCR_TAG does not. GHCR is published first and holds the arm64 variant, so it cannot be restored from VCR; delete $VCR_TAG and rerun." >&2
             exit 1
           fi
+          echo "build=$([[ "$ghcr" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+          echo "copy-to-vcr=$([[ "$vcr" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
 
-      - name: Check whether the GHCR image version is already published
-        if: github.ref == 'refs/heads/main'
-        id: ghcr-image
-        env:
-          IMAGE_TAG: ${{ steps.image-tags.outputs.ghcr-tag }}
-        run: |
-          set -euo pipefail
-
-          if inspect_output="$(docker buildx imagetools inspect --raw "$IMAGE_TAG" 2>&1)"; then
-            echo "publish=false" >>"$GITHUB_OUTPUT"
-            echo "$IMAGE_TAG is already published; skipping the image build."
-          elif grep -Eq ': not found|manifest unknown' <<<"$inspect_output"; then
-            echo "publish=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "$inspect_output" >&2
-            exit 1
-          fi
-
-      - name: Publish eve image to Vercel Container Registry
-        if: github.ref == 'refs/heads/main' && steps.vcr-image.outputs.publish == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: ./packages/eve
-          file: ./packages/eve/Dockerfile
-          platforms: linux/amd64
-          provenance: false
-          tags: |
-            ${{ steps.image-tags.outputs.vcr-tag }}
-            ${{ env.VCR_IMAGE }}:latest
-          labels: |
-            org.opencontainers.image.title=eve Sandbox
-            org.opencontainers.image.description=Sandbox base image for eve agents.
-            org.opencontainers.image.source=https://github.com/vercel/eve
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.image-tags.outputs.version }}
-          outputs: type=image,push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Publish eve image to GitHub Container Registry
-        if: github.ref == 'refs/heads/main' && steps.ghcr-image.outputs.publish == 'true'
+      # These build settings are not part of the content tag. Changing them
+      # republishes nothing until the Dockerfile also changes.
+      - name: Build and publish the sandbox image to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' && steps.image-state.outputs.build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./packages/eve
           file: ./packages/eve/Dockerfile
           platforms: linux/amd64,linux/arm64
           provenance: false
-          tags: |
-            ${{ steps.image-tags.outputs.ghcr-tag }}
-            ${{ env.GHCR_IMAGE }}:latest
+          tags: ${{ steps.image-tags.outputs.ghcr-tag }}
           labels: |
             org.opencontainers.image.title=eve Sandbox
             org.opencontainers.image.description=Sandbox base image for eve agents.
             org.opencontainers.image.source=https://github.com/vercel/eve
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.image-tags.outputs.version }}
+            org.opencontainers.image.version=${{ steps.image-tags.outputs.tag }}
           outputs: type=image,push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Vercel Sandbox runs amd64 and VCR has always received a single-platform
+      # manifest. Copying the GHCR amd64 manifest by digest keeps that shape
+      # and guarantees both registries serve identical bytes. skopeo reads the
+      # credentials `docker login` wrote for both registries.
+      - name: Copy the amd64 sandbox image to Vercel Container Registry
+        if: github.ref == 'refs/heads/main' && steps.image-state.outputs.copy-to-vcr == 'true'
+        env:
+          GHCR_TAG: ${{ steps.image-tags.outputs.ghcr-tag }}
+          VCR_TAG: ${{ steps.image-tags.outputs.vcr-tag }}
+        run: |
+          set -euo pipefail
+
+          amd64_digest="$(docker buildx imagetools inspect --raw "$GHCR_TAG" \
+            | jq -er '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')"
+          skopeo copy --preserve-digests \
+            "docker://${GHCR_IMAGE}@${amd64_digest}" \
+            "docker://${VCR_TAG}"
 
       # `commitMode: github-api` commits through @changesets/ghcommit, which
       # reads the repo with isomorphic-git. Unlike git itself, isomorphic-git
@@ -187,3 +181,51 @@ jobs:
           if [[ -n "$version" ]]; then
             gh release edit "eve@$version" --latest
           fi
+
+      # `latest` serves authors who reference the image directly; eve pins its
+      # own tag. The tag comes from the published eve package, not this commit,
+      # so `latest` never points at an unreleased image. Every main run
+      # converges, so a failed move heals on the next push.
+      - name: Point latest sandbox image tags at the released eve image
+        if: github.ref == 'refs/heads/main'
+        env:
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.published-packages }}
+        run: |
+          set -euo pipefail
+
+          version="$(jq -r '.[]? | select(.name == "eve") | .version' <<<"${PUBLISHED_PACKAGES:-[]}")"
+          if [[ -z "$version" ]]; then
+            version="$(npm view eve version)"
+          fi
+          # A version published moments ago can take a short time to appear.
+          for attempt in $(seq 1 12); do
+            if tarball="$(npm view "eve@${version}" dist.tarball 2>/dev/null)" && [[ -n "$tarball" ]]; then
+              break
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              echo "::error::eve@${version} is not visible on npm; rerun this job to move the latest sandbox image tags." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          tag="$(curl -fsSL "$tarball" | tar -xzO --wildcards 'package/dist/*.js' | { grep -aoE 'dockerfile-[0-9a-f]{12}' || true; } | sort -u)"
+          if [[ -z "$tag" ]]; then
+            echo "eve@${version} predates content-tagged sandbox images; leaving latest unchanged."
+            exit 0
+          fi
+          if [[ "$tag" == *$'\n'* ]]; then
+            echo "::error::eve@${version} contains more than one sandbox image tag: ${tag//$'\n'/, }" >&2
+            exit 1
+          fi
+
+          for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
+            wanted="$(docker buildx imagetools inspect --raw "${image}:${tag}" | sha256sum)"
+            current="$(docker buildx imagetools inspect --raw "${image}:latest" 2>/dev/null | sha256sum || true)"
+            if [[ "$wanted" == "$current" ]]; then
+              echo "${image}:latest already serves ${tag}."
+            else
+              skopeo copy --all --preserve-digests "docker://${image}:${tag}" "docker://${image}:latest"
+              echo "Moved ${image}:latest to ${tag} (eve@${version})."
+            fi
+          done
