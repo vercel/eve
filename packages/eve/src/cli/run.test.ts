@@ -627,6 +627,51 @@ describe("eve dev --input", () => {
     },
   );
 
+  it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
+    "passes --show-* display flags through %s",
+    async (...command) => {
+      const startHost = vi.fn(() => ({
+        start: async () => ({
+          kind: "existing" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:4321/",
+        }),
+        close: async () => {},
+      }));
+      const runDevelopmentTui = await runInteractiveDev(
+        [
+          ...command,
+          "--show-tools",
+          "hidden",
+          "--show-reasoning",
+          "collapsed",
+          "--show-subagents",
+          "full",
+          "--show-connection-auth",
+          "hidden",
+          "--assistant-response-stats",
+          "tokens",
+          "--context-size",
+          "200000",
+          "--logs",
+          "warn",
+        ],
+        { startHost },
+      );
+      expect(runDevelopmentTui).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: "hidden",
+          reasoning: "collapsed",
+          subagents: "full",
+          connectionAuth: "hidden",
+          assistantResponseStats: "tokens",
+          contextSize: 200000,
+          logs: "warn",
+        }),
+      );
+    },
+  );
+
   it("passes the default extension opt-out to the local server", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({
@@ -1362,37 +1407,15 @@ describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "error",
-      // Collapsed reasoning is the fixed thinking line; `--reasoning full`
+      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
       // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });
   });
 
-  it("passes through every provided display dimension", () => {
-    expect(
-      resolveTuiDisplayOptions({
-        tools: "hidden",
-        reasoning: "collapsed",
-        subagents: "collapsed",
-        connectionAuth: "full",
-        assistantResponseStats: "tokens",
-        contextSize: 200_000,
-        logs: "error",
-      }),
-    ).toEqual({
-      tools: "hidden",
-      reasoning: "collapsed",
-      subagents: "collapsed",
-      connectionAuth: "full",
-      assistantResponseStats: "tokens",
-      contextSize: 200_000,
-      logs: "error",
-    });
-  });
-
   it("omits optional display dimensions that were not provided", () => {
-    const resolved = resolveTuiDisplayOptions({ tools: "full" });
+    const resolved = resolveTuiDisplayOptions({ showTools: "full" });
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("error");

@@ -297,7 +297,7 @@ export class ConversationTranscript {
 
   /**
    * Updates the working tasks and returns the blocks that appeared since the last projection:
-   * `--subagents full` rows as an agent finishes each, and end lines as tasks end.
+   * `--show-subagents full` rows as an agent finishes each, and end lines as tasks end.
    */
   #taskActivity(
     view: AgentTUIConversationView,
