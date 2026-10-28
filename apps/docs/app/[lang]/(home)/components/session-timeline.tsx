@@ -15,24 +15,15 @@ import {
 import { IconBox, IconCheck } from "@vercel/geistdocs/assets/icons";
 import { LogoIconMicrosoftTeamsSvg } from "@vercel/geistdocs/assets/logos/logo-icon-microsoft-teams-svg";
 import { Button } from "@vercel/geistdocs/components/button";
-import {
-  type ComponentType,
-  type JSX,
-  type ReactNode,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type JSX, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SiWhatsapp } from "@icons-pack/react-simple-icons";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
+import { AgentBadge, type Author, ChatAvatar, SlackMessage } from "./chat";
 import { monochromeLogo } from "./control-visual";
+import { AppWindow } from "./section";
 
 type Platform = "slack" | "teams" | "whatsapp";
-
-/** Agents get an icon avatar and an "Agent" badge; people get their initial. */
-type Author = { name: string; icon?: ComponentType<{ className?: string }> };
 
 const AUTHORS = {
   Coder: { name: "Coder", icon: CodeXml },
@@ -449,29 +440,9 @@ function authorOf(beat: Beat | undefined): AuthorKey | undefined {
 
 // Agent avatars take each platform's accent: Slack's aubergine purple, Teams' blue-violet.
 const AGENT_AVATAR = {
-  slack: "border-transparent bg-purple-700 text-white",
-  teams: "border-transparent bg-blue-700 text-white",
+  slack: "bg-purple-700",
+  teams: "bg-blue-700",
 };
-
-function Avatar({ author, platform }: { author: Author; platform: keyof typeof AGENT_AVATAR }) {
-  const Icon = author.icon;
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium",
-        Icon ? AGENT_AVATAR[platform] : "bg-background-100 text-gray-1000",
-      )}
-    >
-      {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
-      {Icon ? (
-        <Icon className="size-3.5" />
-      ) : (
-        <span className="text-label-12">{author.name[0]}</span>
-      )}
-    </span>
-  );
-}
 
 /**
  * A message's card or buttons fade in a beat after its bubble, like vercel.com/sandbox's agent
@@ -493,47 +464,6 @@ function Attachment({ children }: { children: ReactNode }) {
 // The agent's replies are wider and taller than people's short messages, so they start closer
 // to full size to travel about as far as they scale in.
 const agentEntrance = "[--bubble-from:0.9]";
-
-/** Slack: avatar, name, Agent badge, time; consecutive messages fold under the first. */
-function ThreadMessage({
-  author,
-  time,
-  continued,
-  children,
-}: {
-  author: Author;
-  time: string;
-  continued: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <li
-      className={cn(
-        "grid origin-top-left grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
-        author.icon && agentEntrance,
-        continued ? "pt-2" : "pt-4",
-      )}
-    >
-      {continued ? <span /> : <Avatar author={author} platform="slack" />}
-      <div className="min-w-0 max-w-[20rem] text-copy-14 text-gray-1000">
-        {continued ? (
-          <span className="sr-only">{author.name}</span>
-        ) : (
-          <p className="flex items-baseline gap-1.5">
-            <span className="font-medium">{author.name}</span>
-            {author.icon ? (
-              <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
-                Agent
-              </span>
-            ) : null}
-            <span className="text-copy-13 text-gray-900 tabular-nums">{time}</span>
-          </p>
-        )}
-        {children}
-      </div>
-    </li>
-  );
-}
 
 /**
  * Teams chat with an agent: the agent on the left, its rounded-square app icon, name, Agent badge,
@@ -562,16 +492,20 @@ function TeamsMessage({
         continued ? "pt-1" : "pt-4",
       )}
     >
-      {isAgent ? continued ? <span /> : <Avatar author={author} platform="teams" /> : null}
+      {isAgent ? (
+        continued ? (
+          <span />
+        ) : (
+          <ChatAvatar author={author} color={AGENT_AVATAR.teams} />
+        )
+      ) : null}
       <div className={cn("min-w-0", isAgent ? "flex flex-col items-start" : "contents")}>
         {continued ? (
           <span className="sr-only">{author.name}</span>
         ) : isAgent ? (
           <p className="mb-1 flex items-baseline gap-1.5 text-copy-13 text-gray-900">
             <span className="font-medium text-gray-1000">{author.name}</span>
-            <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
-              Agent
-            </span>
+            <AgentBadge />
             <span className="tabular-nums">{time}</span>
           </p>
         ) : (
@@ -993,15 +927,7 @@ export function SessionTimeline(): JSX.Element {
       aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
       className="relative m-0 mb-16 ml-auto w-full max-w-[30rem]"
     >
-      <div className="flex flex-col overflow-hidden material-large">
-        <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
-          <span aria-hidden className="absolute left-3 flex gap-1">
-            <span className="size-2 rounded-full bg-[#EE6D5E]" />
-            <span className="size-2 rounded-full bg-[#F3BF4A]" />
-            <span className="size-2 rounded-full bg-[#5DC753]" />
-          </span>
-          <span className="text-gray-800 text-label-13">{conversation.label}</span>
-        </header>
+      <AppWindow title={conversation.label}>
         {/* The conversation fades out over the outer 40px of an edge with messages scrolled past
             it. In full it opens at its start; a replay fills from the bottom like a chat. */}
         <div className="relative overflow-hidden" ref={bodyRef}>
@@ -1055,7 +981,7 @@ export function SessionTimeline(): JSX.Element {
                     </li>
                   );
                 }
-                const author = AUTHORS[beat.author];
+                const author: Author = AUTHORS[beat.author];
                 if (platform === "whatsapp") {
                   return (
                     <Bubble
@@ -1080,10 +1006,20 @@ export function SessionTimeline(): JSX.Element {
                   );
                 }
                 return (
-                  <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
+                  <SlackMessage
+                    author={author}
+                    avatarColor={AGENT_AVATAR.slack}
+                    className={cn(
+                      "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+                      author.icon && agentEntrance,
+                    )}
+                    continued={continued}
+                    key={i}
+                    time={beat.time}
+                  >
                     <p className="text-gray-1000">{beat.body}</p>
                     <Attachment>{beat.attachment}</Attachment>
-                  </ThreadMessage>
+                  </SlackMessage>
                 );
               })}
               {/* During a replay the typing indicator keeps a reserved row and only fades, so its
@@ -1103,7 +1039,7 @@ export function SessionTimeline(): JSX.Element {
             </ol>
           </div>
         </div>
-      </div>
+      </AppWindow>
       {/* The channel picker stays open, so every conversation is one click away. */}
       <div
         aria-label="Channel"

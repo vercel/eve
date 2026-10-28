@@ -42,29 +42,29 @@ export function HomeSection({
   );
 }
 
-/** The one bordered surface the homepage uses, reserved for figures. */
-export function Frame({
+/**
+ * A desktop window like vercel.com/sandbox's: the material surface, traffic lights, and a
+ * centered title over the content.
+ */
+export function AppWindow({
+  title,
   children,
   className,
 }: {
+  title: ReactNode;
   children: ReactNode;
   className?: string;
 }): JSX.Element {
   return (
-    <div
-      className={cn(
-        "min-w-0 overflow-hidden rounded-xl border border-gray-alpha-400 bg-background-100",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-export function FrameHeader({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-gray-alpha-400 border-b px-4 text-copy-13 text-gray-900">
+    <div className={cn("flex min-w-0 flex-col overflow-hidden material-large", className)}>
+      <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
+        <span aria-hidden className="absolute left-3 flex gap-1">
+          <span className="size-2 rounded-full bg-[#EE6D5E]" />
+          <span className="size-2 rounded-full bg-[#F3BF4A]" />
+          <span className="size-2 rounded-full bg-[#5DC753]" />
+        </span>
+        <span className="text-gray-800 text-label-13">{title}</span>
+      </header>
       {children}
     </div>
   );

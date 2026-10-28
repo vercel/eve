@@ -2,6 +2,7 @@
 
 import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
+import { Brain } from "lucide-react";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type JSX,
@@ -16,7 +17,8 @@ import { analyticsEvents } from "@/lib/analytics/events";
 import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { Frame, FrameHeader, HomeSection, PrefetchLink } from "./section";
+import { type Author, SlackMessage } from "./chat";
+import { AppWindow, HomeSection, PrefetchLink } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
 
@@ -29,47 +31,43 @@ const FACTORY_STATIONS = [
 
 function SoftwareFactoryPreview() {
   return (
-    <>
-      <FrameHeader>
-        {logos.github({ "aria-hidden": true, className: logoClassName })}
-        <span className="text-gray-1000">acme/storefront</span>
-        <span className="ml-auto">Example run</span>
-      </FrameHeader>
-      <div className="flex flex-col gap-3 p-5 sm:p-6">
-        <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-400 bg-background-200 px-4 py-3">
-          {logos.linear({ "aria-hidden": true, className: logoClassName })}
-          <span className="font-mono text-copy-13-mono text-gray-900">ENG-142</span>
-          <span className="truncate text-copy-14 text-gray-1000">Add saved carts to checkout</span>
-        </div>
-        <ol className="flex list-none flex-col p-0">
-          {FACTORY_STATIONS.map((station) => (
-            <li
-              className="grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 sm:grid-cols-[1rem_11rem_minmax(0,1fr)]"
-              key={station.name}
-            >
-              <span aria-hidden className="relative flex justify-center">
-                <span className="absolute inset-y-0 w-px bg-gray-alpha-400" />
-                <span className="relative mt-[1.1rem] size-2 rounded-full bg-gray-1000" />
-              </span>
-              <code className="pt-3 font-mono text-copy-13-mono text-gray-1000">
-                subagents/{station.name}
-              </code>
-              <span className="col-start-2 pb-1 text-copy-14 text-gray-900 sm:col-start-3 sm:pt-3 sm:pb-0">
-                {station.result}
-              </span>
-            </li>
-          ))}
-        </ol>
-        <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-600 px-4 py-3">
-          {logos.github({ "aria-hidden": true, className: logoClassName })}
-          <span className="truncate text-copy-14 text-gray-1000">
-            Draft #318 is ready for your review
-          </span>
-        </div>
+    <div className="flex flex-col gap-3 p-5 sm:p-6">
+      <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-400 bg-background-200 px-4 py-3">
+        {logos.linear({ "aria-hidden": true, className: logoClassName })}
+        <span className="font-mono text-copy-13-mono text-gray-900">ENG-142</span>
+        <span className="truncate text-copy-14 text-gray-1000">Add saved carts to checkout</span>
       </div>
-    </>
+      <ol className="flex list-none flex-col p-0">
+        {FACTORY_STATIONS.map((station) => (
+          <li
+            className="grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 sm:grid-cols-[1rem_11rem_minmax(0,1fr)]"
+            key={station.name}
+          >
+            <span aria-hidden className="relative flex justify-center">
+              <span className="absolute inset-y-0 w-px bg-gray-alpha-400" />
+              <span className="relative mt-[1.1rem] size-2 rounded-full bg-gray-1000" />
+            </span>
+            <code className="pt-3 font-mono text-copy-13-mono text-gray-1000">
+              subagents/{station.name}
+            </code>
+            <span className="col-start-2 pb-1 text-copy-14 text-gray-900 sm:col-start-3 sm:pt-3 sm:pb-0">
+              {station.result}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-600 px-4 py-3">
+        {logos.github({ "aria-hidden": true, className: logoClassName })}
+        <span className="truncate text-copy-14 text-gray-1000">
+          Draft #318 is ready for your review
+        </span>
+      </div>
+    </div>
   );
 }
+
+// The hero gives Slack agents purple and Teams agents blue; the brain takes teal.
+const brainAvatar = "bg-teal-700";
 
 const BRAIN_STEPS = [
   { tool: "list_models", result: "Found customers, orders, and payments" },
@@ -83,19 +81,18 @@ const BRAIN_ROWS = [
   { month: "October", orders: 498, repeat: "44%" },
 ];
 
+const DANA: Author = { name: "Dana" };
+const BRAIN: Author = { name: "Brain", icon: Brain };
+
+/** The hero's Slack thread, with the company brain on its own avatar color. */
 function CompanyBrainPreview() {
   return (
-    <>
-      <FrameHeader>
-        {logos.slack({ "aria-hidden": true, className: logoClassName })}
-        <span className="text-gray-1000">#analytics</span>
-        <span className="ml-auto">Example run</span>
-      </FrameHeader>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-5 sm:p-6">
-        <p className="ml-auto w-fit rounded-xl bg-gray-alpha-200 px-3 py-1 text-copy-13 text-gray-1000">
-          How are repeat orders trending this quarter?
-        </p>
-        <ul className="flex list-none flex-col gap-1 p-0">
+    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:34rem]">
+      <SlackMessage author={DANA} avatarColor={brainAvatar} continued={false} time="9:41 AM">
+        <p>How are repeat orders trending this quarter?</p>
+      </SlackMessage>
+      <SlackMessage author={BRAIN} avatarColor={brainAvatar} continued={false} time="9:41 AM">
+        <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
           {BRAIN_STEPS.map((step) => (
             <li className="flex items-baseline gap-3 text-copy-13" key={step.tool}>
               <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
@@ -105,37 +102,39 @@ function CompanyBrainPreview() {
             </li>
           ))}
         </ul>
-        <p className="text-copy-14 text-gray-1000">
+        <p className="mt-2">
           Repeat customers placed 44% of orders in October, up from 38% in August.
         </p>
-        <table className="w-full max-w-[26rem] border-collapse rounded-lg text-left text-copy-13 tabular-nums">
-          <thead className="text-gray-900">
-            <tr className="border-gray-alpha-400 border-b">
-              <th className="py-1.5 pr-3 font-normal" scope="col">
-                Month
-              </th>
-              <th className="py-1.5 pr-3 text-right font-normal" scope="col">
-                Orders
-              </th>
-              <th className="py-1.5 text-right font-normal" scope="col">
-                Repeat
-              </th>
-            </tr>
-          </thead>
-          <tbody className="text-gray-1000">
-            {BRAIN_ROWS.map((row) => (
-              <tr className="border-gray-alpha-400 border-b last:border-b-0" key={row.month}>
-                <th className="py-1.5 pr-3 font-normal" scope="row">
-                  {row.month}
+        <div className="mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1">
+          <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
+            <thead className="text-gray-900">
+              <tr className="border-gray-alpha-400 border-b">
+                <th className="py-1.5 pr-3 font-normal" scope="col">
+                  Month
                 </th>
-                <td className="py-1.5 pr-3 text-right">{row.orders}</td>
-                <td className="py-1.5 text-right">{row.repeat}</td>
+                <th className="py-1.5 pr-3 text-right font-normal" scope="col">
+                  Orders
+                </th>
+                <th className="py-1.5 text-right font-normal" scope="col">
+                  Repeat
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+            </thead>
+            <tbody className="text-gray-1000">
+              {BRAIN_ROWS.map((row) => (
+                <tr className="border-gray-alpha-400 border-b last:border-b-0" key={row.month}>
+                  <th className="py-1.5 pr-3 font-normal" scope="row">
+                    {row.month}
+                  </th>
+                  <td className="py-1.5 pr-3 text-right">{row.orders}</td>
+                  <td className="py-1.5 text-right">{row.repeat}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SlackMessage>
+    </ol>
   );
 }
 
@@ -282,6 +281,8 @@ interface UseCase {
   /** Template slug, or null to send people to the full gallery. */
   template: string | null;
   cta: string;
+  /** The example window's title. */
+  window: string;
   /** What the agent does, a short title and line each. */
   features: { title: string; text: string }[];
   preview: ReactNode;
@@ -294,6 +295,7 @@ const USE_CASES: UseCase[] = [
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
     cta: "Use the company brain template",
+    window: "#analytics",
     features: [
       { title: "Answers in Slack", text: "Only for the people and channels you allow." },
       { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
@@ -307,6 +309,7 @@ const USE_CASES: UseCase[] = [
     text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
     template: "eve-software-factory-template",
     cta: "Use the software factory template",
+    window: "acme/storefront",
     features: [
       { title: "GitHub and Linear", text: "Picks up tasks where your team already files them." },
       {
@@ -326,6 +329,7 @@ const USE_CASES: UseCase[] = [
     text: "Agents inside your product, over web, voice, or iMessage, with memory for every user.",
     template: null,
     cta: "Browse app templates",
+    window: "Web, voice, and iMessage",
     features: [
       { title: "Web chat", text: "Inside your app, with long-term memory for each user." },
       { title: "Voice", text: "Calls that run tools and ask for approval." },
@@ -489,7 +493,9 @@ export function AgentTypes(): JSX.Element {
             id={`${baseId}-panel`}
             role="tabpanel"
           >
-            <Frame className="flex h-[30rem] flex-col sm:h-[24rem]">{selected.preview}</Frame>
+            <AppWindow className="h-[30rem] sm:h-[26rem]" title={selected.window}>
+              {selected.preview}
+            </AppWindow>
           </div>
         </div>
       </div>
