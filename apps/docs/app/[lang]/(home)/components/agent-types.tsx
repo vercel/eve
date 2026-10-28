@@ -428,23 +428,16 @@ export function AgentTypes(): JSX.Element {
       lede="Start from a working template, or build your own from scratch."
       title="Agents that run your company, power your product, or are personal"
     >
-      {/* vercel.com/ai-gateway's routing panel: a gradient border that dissolves toward the
-          bottom, the tabs at its top, the example below. */}
-      <div
-        className={cn(
-          "relative isolate overflow-hidden rounded-xs bg-background-200",
-          "before:pointer-events-none before:absolute before:inset-0 before:z-10 before:rounded-[inherit] before:p-px before:content-['']",
-          "before:[background:linear-gradient(to_bottom,var(--ds-gray-400),var(--ds-background-200))]",
-          // Longhand mask properties, since the shorthand would reset mask-composite.
-          "before:[mask-image:linear-gradient(#000_0_0),linear-gradient(#000_0_0)]",
-          "before:[mask-clip:content-box,border-box] before:[mask-composite:exclude]",
-        )}
-      >
-        <div className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
+      <div className="flex flex-col gap-6">
+        {/* Pulled out by the list's padding, so the selected pill lines up with the window. */}
+        <div className="-ml-1">
           <UseCaseTabs baseId={baseId} onSelect={setSelectedIndex} selectedIndex={selectedIndex} />
-          {/* Every description shares one grid cell, so the row keeps the tallest one's
-              height and switching tabs never shifts the layout. */}
-          <div className="grid px-1 lg:max-w-[44ch] lg:px-0">
+        </div>
+        <div className="grid gap-4 lg:grid-cols-12 lg:gap-x-6">
+          {/* Every description shares one grid cell, so it keeps the tallest one's height and
+              switching tabs never shifts the layout. Beside the window, from its top, on wide
+              screens; above it when stacked. */}
+          <div className="grid lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:max-w-[44ch]">
             {USE_CASES.map((useCase) => (
               <p
                 className={cn(
@@ -457,16 +450,14 @@ export function AgentTypes(): JSX.Element {
               </p>
             ))}
           </div>
-        </div>
-        <div
-          aria-labelledby={`${baseId}-tab-${selected.id}`}
-          className="px-4 pt-4 pb-10 sm:pt-6 sm:pb-14"
-          id={`${baseId}-panel`}
-          role="tabpanel"
-        >
-          <Frame className="flex h-[30rem] w-full max-w-[56rem] flex-col sm:h-[24rem]">
-            {selected.preview}
-          </Frame>
+          <div
+            aria-labelledby={`${baseId}-tab-${selected.id}`}
+            className="min-w-0 lg:col-span-8 lg:row-start-1"
+            id={`${baseId}-panel`}
+            role="tabpanel"
+          >
+            <Frame className="flex h-[30rem] flex-col sm:h-[24rem]">{selected.preview}</Frame>
+          </div>
         </div>
       </div>
     </HomeSection>
