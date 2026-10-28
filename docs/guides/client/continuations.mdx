@@ -27,6 +27,8 @@ The state is deliberately small:
 interface ClientSessionState {
   sessionId: string;
   streamIndex: number;
+  /** Opaque; persist it and pass it back unchanged. */
+  resume?: string;
 }
 ```
 
@@ -41,15 +43,14 @@ Attach a fixed handle to the saved ID and restore its cursor:
 import type { ClientSessionState } from "eve/client";
 
 const saved = (await loadSessionState()) as ClientSessionState;
-const session = client.sessions.attach(saved.sessionId, {
-  streamIndex: saved.streamIndex,
-});
+const session = client.sessions.attach(saved.sessionId, saved);
 
 const response = await session.send("Now shorten it.");
 console.log((await response.result()).message);
 ```
 
-`attach()` performs no request. Every later operation targets exactly
+Pass the whole saved state so its optional [`resume`](./overview#faster-sends-with-resume) value
+reaches later sends. `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId`; it never follows or creates a replacement.
 
 `send()` correlates its response with the message accepted by the server. If the
@@ -105,9 +106,7 @@ The shared `Client` owns the base URL, auth, headers, and redirect policy. Each
 read:
 
 ```ts
-const session = client.sessions.attach(saved.sessionId, {
-  streamIndex: saved.streamIndex,
-});
+const session = client.sessions.attach(saved.sessionId, saved);
 
 for await (const event of session.stream()) {
   console.log(event.type);

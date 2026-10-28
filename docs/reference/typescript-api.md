@@ -180,8 +180,8 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                            |
 | `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                     |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
-| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, response errors                                         |
-| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, authenticated `Session`, and `SessionNotActiveError` |
+| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and every error the client throws            |
+| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
 | [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Facts, opaque `SessionView`, immutable observations, and query/fold functions                                     |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |
 

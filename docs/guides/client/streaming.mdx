@@ -270,8 +270,9 @@ continue. `snapshot()` always reads from line `0`; use a bounded stream directly
 when you only need the unread suffix from an existing cursor.
 
 Unlike `stream()`, `snapshot()` does not advance the originating
-`ClientSession`. Its returned cursor contains the fixed session ID and the exact
-line after the captured prefix.
+`ClientSession`. Its returned `session` is the handle's full `ClientSessionState`, including the
+opaque `resume` value, with `streamIndex` set to the exact line after the captured prefix. Persist
+it as is to restore the conversation later.
 
 ## Follow a subagent
 

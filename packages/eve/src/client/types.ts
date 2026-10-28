@@ -240,8 +240,12 @@ export type { Delivery, DeliveryResult } from "#shared/delivery.js";
  * Serializable cursor for one fixed, ID-addressed client session.
  */
 export interface ClientSessionState {
-  /** Opaque delivery routing hint; preserve it when saving and restoring a session. */
-  readonly inbox?: string;
+  /**
+   * Opaque value the server issues so later sends reach the session faster. Persist it with the
+   * rest of the state and pass it back unchanged; eve may change its contents in any release.
+   * A missing, stale, or rejected value only costs a slower lookup.
+   */
+  readonly resume?: string;
   readonly sessionId: string;
   readonly streamIndex: number;
 }

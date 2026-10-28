@@ -36,7 +36,7 @@ export function sessionCommandErrorResponse(error: unknown): Response | undefine
     return Response.json(
       {
         ok: false,
-        code: error.retryable ? "session_not_ready" : "session_not_active",
+        code: error.code,
         error: error.retryable
           ? "The session is not ready to accept messages yet."
           : "The session is no longer active.",
@@ -60,7 +60,8 @@ export function deliveryResponse(receipt: DeliveryReceipt): Response {
       ok: true,
       sessionId: receipt.sessionId,
       deliveryId: receipt.deliveryId,
-      inbox: receipt.inbox,
+      // The wire keeps the runtime's name for the client's opaque `resume` value.
+      inbox: receipt.resume,
     },
     {
       headers: { "cache-control": "no-store", [EVE_SESSION_ID_HEADER]: receipt.sessionId },
