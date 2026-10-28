@@ -86,6 +86,7 @@ export type {
   RespondTurnOptions,
   SendTurnInput,
   SendTurnOptions,
+  SendTurnPayload,
   SessionSnapshot,
   ClientSessionState,
   ReconnectOptions,

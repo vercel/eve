@@ -42,7 +42,7 @@ export interface GitHubChannelState extends PromptQueueState {
   reviewThreadRootCommentId: number | null;
   triggeringCommentId: number | null;
   triggeringUserLogin: string | null;
-  /** The sign-ins the default flow posted a status for, by connection name. */
+  /** @internal The sign-ins the default flow posted a status for, by connection name. */
   pendingSignIns?: Record<string, string>;
 }
 

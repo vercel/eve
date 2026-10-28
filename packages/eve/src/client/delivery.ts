@@ -22,6 +22,7 @@ interface DeliveryInput {
   readonly inbox?: string;
   readonly createStream: (options?: DeliveryReadOptions) => AsyncIterable<SessionStreamEvent>;
   readonly deliveryId: string;
+  /** @internal */
   readonly receipt?: ClientSendReceipt;
   readonly sessionId: string;
 }
@@ -37,7 +38,7 @@ export class StreamDelivery<TOutput = unknown> implements Delivery<TOutput> {
   readonly #createStream: DeliveryInput["createStream"];
   #result: DeliveryResult<TOutput> | undefined;
 
-  /** @internal */
+  /** Built by the eve client for each command the server accepts. */
   constructor(input: DeliveryInput) {
     this.sessionId = input.sessionId;
     this.inbox = input.inbox;
