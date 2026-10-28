@@ -15,6 +15,8 @@ You are a concise assistant. Use tools when they are available.
 
 Keep this file to stable behavior such as identity, tone, and standing rules.
 
+Root-level `system.md` and `system.{ts,cts,mts,js,cjs,mjs}` instruction files are no longer supported, including in local subagents. Rename them to `instructions.md` or the matching `instructions.*` module. If you already have instructions, merge the content into them and remove the old file; leaving both is a discovery error. Files inside `instructions/` can still be named `system.md` or `system.ts`.
+
 ## Markdown vs TypeScript
 
 A static system prompt belongs in markdown (`agent/instructions.md`). Switch to a TypeScript module (`agent/instructions.ts`) when you need typed composition, `lib/` code, build-time values, or a user-role message.
