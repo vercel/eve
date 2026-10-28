@@ -565,6 +565,8 @@ When the model replies while its tasks keep working, including text it writes be
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `ctx.channel.thread.mentionUser(userId)` in a renderer.
 
+Approval and question cards show their prompt, tool input, and answer as literal text. eve escapes `&`, `<`, and `>` there, so `<!channel>` or `<url|label>` in a model-written prompt or tool input shows as typed instead of notifying the channel or hiding a link's destination. `Card(...)` text, fields, and subtitles still pass through as Slack mrkdwn, so mentions and links you write in them render. Escape untrusted values you put in a card yourself: replace `&` with `&amp;`, `<` with `&lt;`, and `>` with `&gt;`.
+
 ### Task card
 
 When a turn starts its first task, eve posts a task card in the thread and keeps it current until the turn and its tasks finish. One task renders as a Slack `task_card` block; two or more render as a `plan` block with one row per task the turn started. What an agent task does on its own, including the tasks it starts, stays inside that task and does not add rows. The card needs no configuration beyond the `chat:write` scope the channel already uses.

@@ -5,6 +5,7 @@
  */
 
 import type { Interaction } from "#channel/interaction-prompts.js";
+import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import {
@@ -71,7 +72,7 @@ export function endingOf(interaction: Interaction): {
   if (answer !== undefined) {
     const option = request.options?.find((candidate) => candidate.id === answer.optionId);
     const label = option?.label ?? answer.text ?? answer.optionId ?? "Answered";
-    return { label, text: `Answered: ${label}` };
+    return { label, text: `Answered: ${escapeSlackText(label)}` };
   }
   const label =
     outcome === "accepted" ? "Accepted" : outcome === "declined" ? "Declined" : "No longer needed";
@@ -80,8 +81,8 @@ export function endingOf(interaction: Interaction): {
 
 function answeredSection(prompt: string, label: string, userId?: string): BlockKitBlock {
   const by = userId === undefined ? "" : ` by <@${userId}>`;
-  const line = `:white_check_mark: *${truncate(label, ANSWER_LABEL_MAX_LENGTH)}*${by}`;
-  const text = `${truncate(prompt, SLACK_SECTION_TEXT_MAX_LENGTH - line.length - 1)}\n${line}`;
+  const line = `:white_check_mark: *${truncate(escapeSlackText(label), ANSWER_LABEL_MAX_LENGTH)}*${by}`;
+  const text = `${truncate(escapeSlackText(prompt), SLACK_SECTION_TEXT_MAX_LENGTH - line.length - 1)}\n${line}`;
   return { text: { text, type: "mrkdwn" }, type: "section" };
 }
 
