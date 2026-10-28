@@ -37,7 +37,6 @@ export function authoringExperiment(options: {
       packageSpec: options.packageSpec,
       revision: options.revision,
       treatment: options.treatment,
-      harness: options.benchmark.harness,
     }),
     onRunComplete: recordGraderChecks,
     agentOptions: {

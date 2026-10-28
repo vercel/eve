@@ -35,7 +35,8 @@ export const VITEST_VERSION = "5.0.2";
  * answer: the request is rejected and the session ends. agent-eval's project `opencode.json`
  * allows writes, edits, and commands but not that, so an agent that so much as reads
  * `/usr/local/bin/eve-benchmark-build` stopped there. OpenCode merges its global config under
- * the project's, so this adds the permission without replacing agent-eval's file.
+ * the project's, so this adds the permission without replacing agent-eval's file. Other
+ * harnesses never read it, so every run gets it.
  */
 export const OPENCODE_GLOBAL_CONFIG = `${JSON.stringify({
   $schema: "https://opencode.ai/config.json",
@@ -46,7 +47,6 @@ export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
   readonly revision: string;
   readonly treatment: "baseline" | "guided";
-  readonly harness?: "OpenCode" | "Claude Code" | "Codex";
 }) {
   return async (sandbox: Sandbox): Promise<void> => {
     const bootstrap = JSON.parse(
@@ -115,13 +115,11 @@ export function createNativeAuthoringSetup(options: {
     if (bootstrap.startingPoint === "scaffolded") {
       await run(sandbox, "npm run typecheck && npm run build", "starting workspace validation");
     }
-    if (options.harness === "OpenCode") {
-      await run(
-        sandbox,
-        `dir="\${XDG_CONFIG_HOME:-$HOME/.config}/opencode" && mkdir -p "$dir" && printf '%s' ${shellQuote(OPENCODE_GLOBAL_CONFIG)} > "$dir/opencode.json"`,
-        "OpenCode permissions",
-      );
-    }
+    await run(
+      sandbox,
+      `dir="\${XDG_CONFIG_HOME:-$HOME/.config}/opencode" && mkdir -p "$dir" && printf '%s' ${shellQuote(OPENCODE_GLOBAL_CONFIG)} > "$dir/opencode.json"`,
+      "OpenCode permissions",
+    );
     await run(sandbox, "git add . && git commit --amend --no-edit --quiet");
   };
 }

@@ -73,7 +73,8 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(commands[4].args[1], /mkdir -p agent\/lib/u);
   assert.match(commands[5].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
   assert.match(commands[6].args[1], /npm run typecheck && npm run build/u);
-  assert.match(commands[7].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
+  assert.match(commands[7].args[1], /opencode\.json/u);
+  assert.match(commands[8].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
   assert.deepEqual(Object.keys(writes[1]), ["/workspace/agent/lib/inventory-openapi.ts"]);
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
 });
@@ -193,34 +194,26 @@ test("rejects a broken starting workspace before handing it to the model", async
   );
 });
 
-test("lets OpenCode reach outside the project, and only OpenCode", async (t) => {
-  const commandsFor = async (harness) => {
-    const commands = [];
-    await createNativeAuthoringSetup({
-      packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
-      revision: "commit",
-      treatment: "guided",
-      harness,
-    })({
-      async readFile() {
-        return JSON.stringify({ startingPoint: "scaffolded", revision: "commit", setupIds: [] });
-      },
-      async writeFiles() {},
-      async runCommand(command, args) {
-        commands.push(args[1]);
-        return { stdout: "", stderr: "", exitCode: 0 };
-      },
-      getWorkingDirectory: () => "/workspace",
-      setWorkingDirectory() {},
-    });
-    return commands;
-  };
-
-  const permissions = (await commandsFor("OpenCode")).filter((command) =>
-    command.includes("opencode.json"),
-  );
+test("lets OpenCode reach outside the project", async (t) => {
+  const commands = [];
+  await createNativeAuthoringSetup({
+    packageSpec: "https://pkg.eve.dev/commit/eve.tgz",
+    revision: "commit",
+    treatment: "guided",
+  })({
+    async readFile() {
+      return JSON.stringify({ startingPoint: "scaffolded", revision: "commit", setupIds: [] });
+    },
+    async writeFiles() {},
+    async runCommand(command, args) {
+      commands.push(args[1]);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    getWorkingDirectory: () => "/workspace",
+    setWorkingDirectory() {},
+  });
+  const permissions = commands.filter((command) => command.includes("opencode.json"));
   assert.equal(permissions.length, 1);
-  assert.equal((await commandsFor("Claude Code")).filter((c) => c.includes("opencode")).length, 0);
 
   // Run the command as the sandbox would, against a scratch home directory. The sandbox's
   // `timeout` guard isn't on every host, and isn't what this checks.
