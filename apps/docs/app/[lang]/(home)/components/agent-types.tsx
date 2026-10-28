@@ -481,7 +481,7 @@ function WebAppClient() {
             figures, gray bars for everything else. The KPI cards only show once the window is
             wide enough to keep them clear of the chat. */}
         <div aria-hidden className="hidden select-none flex-col gap-2 sm:flex">
-          <span className="font-medium text-copy-14 text-gray-1000">Orders</span>
+          <span className="font-medium text-copy-14 text-gray-1000">Past orders</span>
           <span className="mt-1 hidden grid-cols-3 gap-2 @[20rem]:grid">
             {["1,284", "$48.2k", "96%"].map((metric) => (
               <span
@@ -523,6 +523,46 @@ function WebAppClient() {
   );
 }
 
+/**
+ * The call's waveform plays back on click, filling in bar by bar like a voice message, then
+ * holds full for a moment and resets. A second click stops it.
+ */
+function Waveform() {
+  // How many bars have played, or null when stopped.
+  const [played, setPlayed] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (played === null) return;
+    const done = played === WAVEFORM.length;
+    const timer = setTimeout(() => setPlayed(done ? null : played + 1), done ? 600 : 110);
+    return () => clearTimeout(timer);
+  }, [played]);
+
+  return (
+    <button
+      aria-label={played === null ? "Play the call" : "Stop the call"}
+      aria-pressed={played !== null}
+      className="group ml-auto hidden h-6 cursor-pointer items-center gap-[3px] rounded-[4px] focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @sm:flex"
+      onClick={() => setPlayed(played === null ? 0 : null)}
+      type="button"
+    >
+      {WAVEFORM.map((height, i) => (
+        <span
+          className={cn(
+            "w-[2px] rounded-full transition-colors duration-150",
+            played !== null && i < played
+              ? "bg-gray-1000"
+              : "bg-gray-alpha-600 group-hover:bg-gray-alpha-700",
+          )}
+          // Bars are positional; the array never reorders.
+          key={i}
+          style={{ height: `${height}px` }}
+        />
+      ))}
+    </button>
+  );
+}
+
 /** A phone call to a clinic's front desk, with live waveform and call controls. */
 function VoiceClient() {
   return (
@@ -537,16 +577,7 @@ function VoiceClient() {
             Front desk · 00:42
           </span>
         </span>
-        <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] @sm:flex">
-          {WAVEFORM.map((height, i) => (
-            <span
-              className="w-[2px] rounded-full bg-gray-alpha-600"
-              // Bars are positional; the array never reorders.
-              key={i}
-              style={{ height: `${height}px` }}
-            />
-          ))}
-        </span>
+        <Waveform />
         <span className="ml-auto hidden shrink-0 rounded-full bg-red-700 px-3 py-1 text-label-12 text-white @[16rem]:inline @sm:ml-3">
           End
         </span>
