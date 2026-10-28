@@ -58,9 +58,7 @@ type Beat =
     };
 
 function Mention({ children }: { children: string }) {
-  return (
-    <span className="rounded bg-gray-alpha-200 px-0.5 text-gray-1000">@{children}</span>
-  );
+  return <span className="rounded bg-gray-alpha-200 px-0.5 text-gray-1000">@{children}</span>;
 }
 
 function Card({
@@ -691,10 +689,11 @@ function TypingIndicator({ author }: { author: Author | undefined }) {
     <p aria-hidden className="flex h-5 items-center gap-1.5 px-1 text-copy-13 text-gray-900">
       {author ? (
         <>
-          <span className="flex gap-0.5">
-            {[0, 150, 300].map((delay) => (
+          {/* geistcn's LoadingDots (size lg): three blinking dots, staggered 0.2s apart. */}
+          <span className="inline-flex items-center">
+            {[0, 200, 400].map((delay) => (
               <span
-                className="size-1 rounded-full bg-gray-900 motion-safe:animate-bounce"
+                className="mx-px inline-block size-1 rounded-full bg-gray-900 motion-safe:animate-blink"
                 key={delay}
                 style={{ animationDelay: `${delay}ms` }}
               />

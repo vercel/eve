@@ -29,6 +29,23 @@ body:has([data-nights-route]) {
   color-scheme: dark;
 }
 
+/* geistcn's loading-dots blink (packages/geistcn/src/styles/animations.css). */
+@theme {
+  --animate-blink: blink 1.4s infinite both;
+
+  @keyframes blink {
+    0% {
+      opacity: 0.2;
+    }
+    20% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.2;
+    }
+  }
+}
+
 @keyframes eve-nights-rise {
   from {
     opacity: 0;
