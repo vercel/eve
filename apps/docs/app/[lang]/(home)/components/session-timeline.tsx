@@ -548,7 +548,7 @@ function IconCoins() {
 function ReplyButtons({ buttons }: { buttons: { label: string; icon: ReactNode }[] }) {
   return buttons.map(({ icon, label }) => (
     <span
-      className="flex h-10 items-center justify-center gap-1.5 border-gray-alpha-300 border-t font-medium text-copy-14 text-gray-1000"
+      className="flex h-10 items-center justify-center gap-1.5 border-gray-alpha-300 border-t text-copy-14 text-gray-1000"
       key={label}
     >
       {icon}
