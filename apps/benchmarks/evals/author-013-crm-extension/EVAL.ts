@@ -57,7 +57,7 @@ test("the project typechecks and builds", { timeout: 600_000 }, () => {
   }
 });
 
-test("gives the agent both tools and the extension's instructions", () => {
+test("gives the agent both tools and has it look customers up before notes", async () => {
   const info = eveInfo();
   expect(info.status).toBe("ready");
   expect(info.tools).toEqual(
@@ -65,7 +65,9 @@ test("gives the agent both tools and the extension's instructions", () => {
   );
   expect(info.tools).not.toContain("lookup_customer");
   expect(info.tools).not.toContain("add_note");
-  // The extension contributes its own fragment beside the agent's instructions.
+  // Either add_note looks the customer up itself, so a note can't land on the wrong record,
+  // or the extension contributes its own instructions fragment telling agents to.
+  if (await addNoteLooksUpFirst()) return;
   expect(info.instructions).toMatch(new RegExp(`instructions/${mount().namespace}(?:__|\\.)`));
   expect(extensionInstructions()).toMatch(/look\w*\s+(?:\w+\s+){0,3}up|lookup|look-up/i);
   expect(extensionInstructions()).toMatch(/note/i);
@@ -153,6 +155,28 @@ async function lookUpThenAddNote(): Promise<void> {
   await runTool(await loadTool("lookup_customer"), { email: customer.email }, session);
   const input = { customerId: customer.id, email: customer.email, note: "Prefers email." };
   await runTool(await loadTool("add_note"), input, session);
+}
+
+/**
+ * Whether add_note, given only an email, looks the customer up by it before it writes the note.
+ * Binds the configuration through the extension's handle rather than the agent's mount: the
+ * mount binds once, and later tests rely on it binding after the handle tests.
+ */
+async function addNoteLooksUpFirst(): Promise<boolean> {
+  const fetch = stubFetch();
+  try {
+    (await loadExtension())({ apiKey: "test-crm-key" });
+    await runTool(await loadTool("add_note"), { email: customer.email, note: "Prefers email." });
+  } catch {
+    return false;
+  }
+  const calls = await requests(fetch);
+  const lookup = calls.findIndex(
+    (call) =>
+      call.method === "GET" && new URL(call.url).searchParams.get("email") === customer.email,
+  );
+  const post = calls.findIndex((call) => call.method === "POST");
+  return lookup !== -1 && post > lookup;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded files are untyped.
@@ -265,6 +289,19 @@ function stubFetch() {
   return fetch;
 }
 
+/** The person who approves calls in the grader, as eve hands them to an approved call. */
+const graderApprover = {
+  authenticator: "grader",
+  issuer: "grader",
+  principalId: "approver-1",
+  principalType: "user",
+  subject: "approver-1",
+  attributes: {},
+  getToken: async () => {
+    throw new Error("The grader has no provider tokens.");
+  },
+};
+
 /** The session eve hands tools and approval policies: one conversation, in its first turn. */
 const graderSession = {
   id: "session-1",
@@ -287,6 +324,9 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     channel: { kind: "eve" },
     // eve passes the session with every call; a tool may read its ID or the current turn.
     session: graderSession,
+    // eve only runs a tool that asks for approval once a person approves, and tells the call who
+    // did. A tool may check it as a second guard.
+    ...(tool.approval === undefined ? {} : { approval: { responder: graderApprover } }),
   };
   return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }

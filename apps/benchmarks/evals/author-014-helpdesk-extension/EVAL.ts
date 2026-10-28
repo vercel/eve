@@ -261,6 +261,19 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   return output;
 }
 
+/** The person who approves calls in the grader, as eve hands them to an approved call. */
+const graderApprover = {
+  authenticator: "grader",
+  issuer: "grader",
+  principalId: "approver-1",
+  principalType: "user",
+  subject: "approver-1",
+  attributes: {},
+  getToken: async () => {
+    throw new Error("The grader has no provider tokens.");
+  },
+};
+
 /** The session eve hands tools, hooks, and approval policies: one conversation, in its first turn. */
 const graderSession = {
   id: "session-1",
@@ -283,6 +296,9 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     channel: { kind: "eve" },
     // eve passes the session with every call; a tool may read its ID or the current turn.
     session: graderSession,
+    // eve only runs a tool that asks for approval once a person approves, and tells the call who
+    // did. A tool may check it as a second guard.
+    ...(tool.approval === undefined ? {} : { approval: { responder: graderApprover } }),
   };
   return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }
