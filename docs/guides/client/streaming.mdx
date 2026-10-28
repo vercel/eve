@@ -201,6 +201,8 @@ const response = await session.send("Run the long operation.", {
 
 `maxAttempts` defaults to `12` for each connection open. It also bounds consecutive transport failures during a bounded read (`follow: false`). Following reads continue reconnecting until stopped. `baseDelayMs` and `maxDelayMs` tune retries when opening a connection; reconnects after an interrupted response body retain their default backoff.
 
+`retryableStatuses` replaces the default list (`404`, `409`, `425`, `500`, `502`, `503`, `504`) rather than extending it, so include any defaults you still want retried.
+
 ## Open a stream manually
 
 Use `session.stream()` when you already have a session cursor and only need to attach to the existing stream:

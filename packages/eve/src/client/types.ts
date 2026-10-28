@@ -196,7 +196,10 @@ export interface ReconnectOptions {
   /** Maximum delay between connection-open retries, in milliseconds (default: 5000). */
   readonly maxDelayMs?: number;
 
-  /** HTTP response statuses to retry (default: 404, 409, 425, 500, 502, 503, 504). */
+  /**
+   * HTTP response statuses to retry; replaces the default list
+   * (404, 409, 425, 500, 502, 503, 504).
+   */
   readonly retryableStatuses?: readonly number[];
 }
 
