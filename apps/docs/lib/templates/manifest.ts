@@ -89,6 +89,26 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-expo-chat-template",
+    title: "Expo Chat Agent",
+    setupPrompt:
+      "Set up the eve Expo Chat Template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-expo-chat-template as the source. Copy the entire template, including its local packages and pnpm-lock.yaml, and preserve any existing project. Follow its README and setup guide. Confirm the intended Vercel project before running ./scripts/setup.sh, which provisions Sandbox/Drive SQLite storage, a browser image, and credentials; the project needs Sandbox and Drives access. Deploy with pnpm deploy, open the deployment's /start dashboard, choose Open on mobile, and scan the QR with Expo Go to load the mobile app from the deployment and pair with the agent. Explain the shared-agent and preview-storage limitations, and that native builds and push require the user's own Expo/EAS project.",
+    description:
+      "A shared personal agent with web and Expo chat, a persistent cloud browser, and Drive-backed SQLite in a Vercel Sandbox, all provisioned in your own Vercel project.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-expo-chat-template",
+    category: "Chat",
+    model: "anthropic/claude-sonnet-5.5",
+    integrations: ["Web chat", "Vercel"],
+    source: "GitHub",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-expo-chat-template",
+    },
+    files: ["agent/agent.ts", "agent/extensions/start.ts", "agent/instructions.md"],
+  },
+  {
     slug: "eve-agent-with-python",
     title: "Full Stack Agent with Python Backend",
     setupPrompt:

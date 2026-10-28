@@ -1,0 +1,11 @@
+packages:
+  - "."
+  - "apps/mobile"
+
+allowBuilds:
+  agent-browser: true
+  esbuild: true
+
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - "node-liblzma"

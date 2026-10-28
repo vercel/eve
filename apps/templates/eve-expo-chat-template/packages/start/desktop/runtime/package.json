@@ -1,0 +1,12 @@
+{
+  "name": "@eve-start/browser-runtime-image",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@novnc/novnc": "^1.7.0",
+    "agent-browser": "0.39.2",
+    "playwright-core": "^1.56.0",
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  }
+}

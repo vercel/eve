@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>eve Remote Desktop</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <style>
+      @font-face {
+        font-family: Geist;
+        src: url("/assets/geist.woff2");
+      }
+      @font-face {
+        font-family: "Geist Mono";
+        src: url("/assets/geist-mono.woff2");
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a0a0a;
+        color: #ededed;
+        font:
+          12px Geist,
+          system-ui;
+      }
+      header {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        box-sizing: border-box;
+        border-bottom: 1px solid #292929;
+      }
+      strong {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        font-size: 12px;
+        font-weight: 400;
+      }
+      strong img {
+        width: 52px;
+        height: 16px;
+      }
+      strong span {
+        font: 9px "Geist Mono";
+        color: #777;
+      }
+      #screen {
+        height: calc(100% - 48px);
+        background: #000;
+      }
+      button {
+        background: #161616;
+        border: 1px solid #333;
+        border-radius: 5px;
+        padding: 7px 12px;
+        color: #aaa;
+        font: 9px "Geist Mono";
+      }
+      #status {
+        font: 9px "Geist Mono";
+        color: #888;
+      }
+      .preview header {
+        display: none;
+      }
+      .preview #screen {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong><img src="/assets/eve-logo.svg" alt="eve" /><span>/ cloud browser</span></strong
+      ><span id="status">Connecting…</span><button id="fullscreen">Full screen</button>
+    </header>
+    <main id="screen"></main>
+    <script type="module">
+      import RFB from "/novnc/core/rfb.js";
+      const preview = new URLSearchParams(location.search).has("preview");
+      if (preview) document.documentElement.classList.add("preview");
+      const status = document.querySelector("#status");
+      const rfb = new RFB(document.querySelector("#screen"), `wss://${location.host}/websockify`);
+      rfb.viewOnly = preview;
+      rfb.scaleViewport = true;
+      rfb.resizeSession = false;
+      rfb.focusOnClick = true;
+      rfb.addEventListener("connect", () => (status.textContent = "Connected"));
+      rfb.addEventListener("disconnect", () => {
+        status.textContent = "Disconnected · reopen the desktop from eve";
+        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: "desktop-disconnected" }));
+      });
+      rfb.addEventListener(
+        "credentialsrequired",
+        () => (status.textContent = "Desktop authentication failed. Reopen it from eve."),
+      );
+      document.querySelector("#fullscreen").onclick = () =>
+        document.documentElement.requestFullscreen?.();
+    </script>
+  </body>
+</html>

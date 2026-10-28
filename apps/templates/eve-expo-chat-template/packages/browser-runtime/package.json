@@ -1,0 +1,23 @@
+{
+  "name": "@eve-start/browser-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "src",
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "agent-browser": "0.39.2"
+  },
+  "engines": {
+    "node": ">=24.3"
+  }
+}
