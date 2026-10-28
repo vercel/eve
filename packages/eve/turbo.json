@@ -89,7 +89,8 @@
     },
     "test:webchat": {
       "cache": false,
-      "dependsOn": ["build:js"]
+      "dependsOn": ["build:js"],
+      "env": ["PLAYWRIGHT_BROWSERS_PATH"]
     },
     "test:framework-fixtures": {
       "cache": false,

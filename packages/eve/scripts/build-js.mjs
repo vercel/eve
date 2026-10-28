@@ -10,6 +10,7 @@ import { copyRuntimeAssets } from "./copy-runtime-assets.mjs";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const require = createRequire(import.meta.url);
 
+await run(["./scripts/vendor-compiled.mjs"]);
 await rm(new URL("../dist", import.meta.url), { recursive: true, force: true });
 // Declarations and JavaScript have disjoint outputs. Drain both before packaging.
 const results = await Promise.allSettled([
