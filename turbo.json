@@ -56,8 +56,23 @@
       ],
       "outputs": []
     },
+    "e2e:dependencies": {
+      "cache": false,
+      "dependsOn": ["^build"]
+    },
     "test:e2e": {
       "cache": false,
+      "dependsOn": ["e2e:dependencies"],
+      "env": [
+        "AI_GATEWAY_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "EVE_E2E_DUMP_CONTEXT",
+        "EVE_E2E_MODEL",
+        "EVE_E2E_WORKFLOW_WORLD",
+        "EVE_SANDBOX_IMAGE_TAG",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "OPENAI_API_KEY"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -86,6 +101,7 @@
     },
     "test:scenario": {
       "cache": false,
+      "dependsOn": ["^build"],
       "env": ["EVE_SANDBOX_IMAGE_TAG"],
       "inputs": [
         "$TURBO_DEFAULT$",
