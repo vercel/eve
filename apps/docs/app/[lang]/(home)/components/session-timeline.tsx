@@ -433,20 +433,25 @@ function Avatar({ author, round }: { author: Author; round: boolean }) {
   );
 }
 
-/** Slack and Teams: avatar, name, time; consecutive messages fold under the first. */
+/**
+ * Slack and Teams: avatar, name, time; consecutive messages fold under the first. Slack marks
+ * agents with a badge and squares every avatar; Teams shows agents as rounded-square app icons
+ * beside round photos of people, with its "AI generated" label instead of a badge.
+ */
 function ThreadMessage({
   author,
   time,
   continued,
-  round,
+  platform,
   children,
 }: {
   author: Author;
   time: string;
   continued: boolean;
-  round: boolean;
+  platform: "slack" | "teams";
   children: ReactNode;
 }) {
+  const isAgent = Boolean(author.icon);
   return (
     <li
       className={cn(
@@ -454,19 +459,22 @@ function ThreadMessage({
         continued ? "pt-2" : "pt-4",
       )}
     >
-      {continued ? <span /> : <Avatar author={author} round={round} />}
+      {continued ? <span /> : <Avatar author={author} round={platform === "teams" && !isAgent} />}
       <div className="min-w-0 text-copy-14 text-gray-1000">
         {continued ? (
           <span className="sr-only">{author.name}</span>
         ) : (
           <p className="flex items-baseline gap-1.5">
             <span className="font-medium">{author.name}</span>
-            {author.icon ? (
+            {isAgent && platform === "slack" ? (
               <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
                 Agent
               </span>
             ) : null}
             <span className="text-copy-13 text-gray-900 tabular-nums">{time}</span>
+            {isAgent && platform === "teams" ? (
+              <span className="text-copy-13 text-gray-900">AI generated</span>
+            ) : null}
           </p>
         )}
         {children}
@@ -814,7 +822,7 @@ export function SessionTimeline(): JSX.Element {
               author={author}
               continued={continued}
               key={i}
-              round={platform === "teams"}
+              platform={platform === "teams" ? "teams" : "slack"}
               time={beat.time}
             >
               <p className="text-gray-1000">{beat.body}</p>
