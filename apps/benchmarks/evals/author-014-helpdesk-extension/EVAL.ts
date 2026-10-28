@@ -288,7 +288,7 @@ const graderSession = {
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function runTool(tool: any, input: unknown, session = new SessionState()): Promise<unknown> {
   const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
-  const call = {
+  const call: Record<string, unknown> = {
     abortSignal: new AbortController().signal,
     callId: `call-${Math.random().toString(36).slice(2)}`,
     toolName: "graded",
@@ -296,10 +296,10 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     channel: { kind: "eve" },
     // eve passes the session with every call; a tool may read its ID or the current turn.
     session: graderSession,
-    // eve only runs a tool that asks for approval once a person approves, and tells the call who
-    // did. A tool may check it as a second guard.
-    ...(tool.approval === undefined ? {} : { approval: { responder: graderApprover } }),
   };
+  // eve only runs a tool that asks for approval once a person approves, and tells the call who
+  // did. A tool may check it as a second guard.
+  if (tool.approval !== undefined) call.approval = { responder: graderApprover };
   return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }
 
