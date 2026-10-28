@@ -719,10 +719,11 @@ function VoiceClient() {
         </span>
         {/* A new call gets a fresh waveform, recorded from its start. */}
         <Waveform from={(call.seconds * 1000) / BAR_MS} key={call.id} live={call.live} />
-        {/* Not through cn: tailwind-merge reads text-label-12 and text-white as one conflict. */}
+        {/* Not through cn: tailwind-merge reads text-label-12 and a text color as one conflict.
+            Record is black on light and white on dark, so its text takes the background. */}
         <button
-          className={`ml-auto hidden shrink-0 cursor-pointer rounded-full px-3 py-1 text-label-12 text-white focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @[16rem]:inline @sm:ml-0 ${
-            call.live ? "bg-red-700" : "bg-green-700"
+          className={`ml-auto hidden shrink-0 cursor-pointer rounded-full px-3 py-1 text-label-12 focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @[16rem]:inline @sm:ml-0 ${
+            call.live ? "bg-red-700 text-white" : "bg-gray-1000 text-background-100"
           }`}
           onClick={() =>
             setCall(
