@@ -171,11 +171,18 @@ async function addNoteLooksUpFirst(): Promise<boolean> {
     return false;
   }
   const calls = await requests(fetch);
-  const lookup = calls.findIndex(
+  const lookup = calls.findIndex((call) => {
+    const url = new URL(call.url);
+    return (
+      call.method === "GET" &&
+      url.pathname === "/v1/customers" &&
+      url.searchParams.get("email") === customer.email
+    );
+  });
+  const post = calls.findIndex(
     (call) =>
-      call.method === "GET" && new URL(call.url).searchParams.get("email") === customer.email,
+      call.method === "POST" && new URL(call.url).pathname === `/v1/customers/${customer.id}/notes`,
   );
-  const post = calls.findIndex((call) => call.method === "POST");
   return lookup !== -1 && post > lookup;
 }
 
