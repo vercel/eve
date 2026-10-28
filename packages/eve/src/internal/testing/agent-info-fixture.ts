@@ -2,21 +2,28 @@ import type { AgentInfoResult } from "#client/types.js";
 
 export function createTestAgentInfoResult(
   input: {
+    readonly agentRoot?: string;
+    readonly appRoot?: string;
     readonly modelId?: string;
     readonly name?: string;
   } = {},
 ): AgentInfoResult {
+  const agentRoot = input.agentRoot ?? "/tmp/test-agent/agent";
+  const appRoot = input.appRoot ?? "/tmp/test-agent";
   const owner = { kind: "application" as const };
   const configBinding = {
     backing: {
       externalDependencies: [],
       kind: "filesystem" as const,
+      sourcePath: `${agentRoot}/agent.ts`,
     },
     logicalPath: "agent.ts",
     owner,
   };
   return {
     agent: {
+      agentRoot,
+      appRoot,
       config: {
         binding: configBinding,
         logicalPath: "agent.ts",
@@ -48,6 +55,7 @@ export function createTestAgentInfoResult(
         backing: {
           externalDependencies: [],
           kind: "filesystem",
+          sourcePath: `${agentRoot}/sandbox.ts`,
         },
         logicalPath: "sandbox.ts",
         owner,
@@ -63,7 +71,7 @@ export function createTestAgentInfoResult(
     skills: { dynamic: [], static: [] },
     subagents: { local: [], total: 0 },
     tools: { dynamic: [], static: [] },
-    version: 6,
+    version: 5,
     workspace: { resourceRoot: null, rootEntries: [] },
   };
 }

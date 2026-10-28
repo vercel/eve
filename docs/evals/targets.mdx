@@ -51,6 +51,8 @@ After verification, eve sends the available Vercel credentials:
 
 `EVE_EVAL_AUTH_TOKEN` is an explicit bearer override for targets whose auth is not Vercel OIDC. Credential-bearing clients do not follow redirects, so those headers cannot be forwarded to another origin.
 
+`/eve/v1/info` serves only operator principals, so the credential must authenticate as a service principal, for example through Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`. When the target answers `403`, the run fails before any eval starts and names the credential it needs.
+
 `t.target.fetch(path, init)` carries these same credentials, so channel and webhook ingress you exercise through it authenticates the same way the session protocol does.
 
 ## What to read next

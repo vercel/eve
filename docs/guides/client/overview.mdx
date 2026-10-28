@@ -34,7 +34,7 @@ The client requires the successful response to match `{ ok: true, status: "ready
 
 ## Inspect an agent
 
-Use `info()` to inspect an agent. The client requires a complete agent-info version 6 response before returning it:
+Use `info()` to inspect an agent. The client requires a complete agent-info version 5 response before returning it:
 
 ```ts
 const info = await client.info();
@@ -43,7 +43,7 @@ console.log(info.agent.name, info.agent.model.id);
 
 Pass `info({ signal })` to cancel the HTTP request. The signal is checked only after custom header and credential callbacks resolve; it does not limit how long those callbacks or the complete `info()` call can take.
 
-The response separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. It omits authored text and server paths because end users can reach the route: sources report only logical paths, instruction `content` and the ChatGPT `accountLabel` are present only when `info.mode` is `"development"`, and skill or schedule markdown and the app and agent roots are not included.
+The response separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. It includes authored instruction content, skill and schedule markdown, and server paths, so the server answers only operator principals (`service`, `runtime`, or `local-dev`). Authenticate the client with an operator credential, such as Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`; any other principal gets a `ClientError` with `status` `403` and `code` `"info_forbidden"`.
 
 The version changes only for breaking reshapes; a server adds fields and enum values within a version. The client ignores fields it does not know, and enum-like fields holding a string it cannot interpret (such as `mode`, `sourceKind`, or a channel `method`) read as `"unrecognized"`, so handle that value when you switch on them. A missing or non-string value still throws `AgentInfoResponseError`.
 

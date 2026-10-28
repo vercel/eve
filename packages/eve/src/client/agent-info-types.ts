@@ -9,13 +9,13 @@ type Owner =
       readonly packageName: string;
     };
 
-/** Where a bound module comes from. Filesystem backings omit server paths. */
 type ModuleBacking =
   | {
       readonly kind: "filesystem";
       readonly externalDependencies: readonly string[];
-      readonly extensionScope?: { readonly namespace: string };
+      readonly extensionScope?: { readonly namespace: string; readonly sourceRoot: string };
       readonly mountId?: string;
+      readonly sourcePath: string;
     }
   | {
       readonly kind: "programmatic";
@@ -67,18 +67,19 @@ export interface AgentInfoToolEntry extends AgentInfoEntry {
 export interface AgentInfoSkillEntry extends AgentInfoEntry {
   readonly description: string;
   readonly license?: string;
+  readonly markdown: string;
   readonly metadata?: Readonly<Record<string, string>>;
 }
 /** An inspected static instruction. */
 export interface AgentInfoInstructionsEntry extends AgentInfoEntry {
-  /** Instruction text, served only by development servers. */
-  readonly content?: string;
+  readonly content: string;
   readonly role: "system" | "user" | "unrecognized";
 }
 /** An inspected schedule. */
 export interface AgentInfoScheduleEntry extends AgentInfoEntry {
   readonly cron: string;
   readonly hasRun: boolean;
+  readonly markdown?: string;
 }
 
 type ChannelMethod =
@@ -99,7 +100,7 @@ export interface AgentInfoChannelEntry extends AgentInfoEntry {
 }
 
 type SourceDescriptor = {
-  readonly backing: ModuleBacking | { readonly kind: "resource" };
+  readonly backing: ModuleBacking | { readonly kind: "resource"; readonly sourcePath: string };
   readonly form: "derived" | "direct" | "unrecognized";
   readonly layer:
     | "framework-default"
@@ -152,8 +153,10 @@ export interface AgentInfoSandboxEntry extends AgentInfoSource {
 export interface AgentInfoSubagentEntry extends AgentInfoEntry {
   readonly configResolver?: AgentInfoDynamicResolverEntry;
   readonly description?: string;
+  readonly entryPath: string;
   readonly nodeId: string;
   readonly parentNodeId: string;
+  readonly rootPath: string;
   readonly summary: {
     readonly channels: number;
     readonly connections: number;
@@ -195,7 +198,6 @@ type ModelEndpoint =
         | "reauth-required"
         | "unavailable"
         | "unrecognized";
-      /** Signed-in account, served only by development servers. */
       readonly accountLabel?: string;
     }
   | {
@@ -243,11 +245,13 @@ type CompositionDiagnostic = {
 };
 
 /**
- * Authoritative `/eve/v1/info` v6 response, independent of its runtime validator.
+ * Authoritative `/eve/v1/info` v5 response, independent of its runtime validator.
  * Enum-like fields include `"unrecognized"` for values added by a newer server.
  */
 export interface AgentInfoResult {
   readonly agent: {
+    readonly agentRoot: string;
+    readonly appRoot: string;
     readonly config: AgentInfoSource & { readonly binding: Binding };
     readonly description?: string;
     readonly model: AgentModel;
@@ -287,6 +291,6 @@ export interface AgentInfoResult {
   };
   readonly subagents: { readonly local: readonly AgentInfoSubagentEntry[]; readonly total: number };
   readonly tools: AgentInfoTools;
-  readonly version: 6;
+  readonly version: 5;
   readonly workspace: { readonly resourceRoot: unknown; readonly rootEntries: readonly string[] };
 }

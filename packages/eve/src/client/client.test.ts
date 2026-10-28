@@ -11,7 +11,11 @@ import { createDevelopmentCredentialGate } from "#services/dev-client/credential
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
 
-const AGENT_INFO = createTestAgentInfoResult({ name: "Weather Agent" });
+const AGENT_INFO = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  name: "Weather Agent",
+});
 
 function testBinding(
   logicalPath: string,
@@ -23,6 +27,7 @@ function testBinding(
     backing: {
       externalDependencies: [],
       kind: "filesystem" as const,
+      sourcePath: `/tmp/weather-agent/agent/${logicalPath}`,
     },
     logicalPath,
     owner,
@@ -371,6 +376,7 @@ describe("Client request policy", () => {
       binding: {
         backing: {
           kind: "filesystem",
+          sourcePath: `/app/tools/${index}.ts`,
           externalDependencies: [],
           mountId,
         },
@@ -565,8 +571,8 @@ describe("Client request policy", () => {
   });
 
   it.each([
-    [5, "Upgrade eve in the agent and redeploy it."],
-    [7, "Upgrade the eve package this client runs from."],
+    [4, "Upgrade eve in the agent and redeploy it."],
+    [6, "Upgrade the eve package this client runs from."],
   ])(
     "names the side to upgrade when the server sends agent-info version %i",
     async (version, hint) => {
@@ -577,7 +583,7 @@ describe("Client request policy", () => {
 
       expect(error).toBeInstanceOf(AgentInfoResponseError);
       expect((error as AgentInfoResponseError).issues).toEqual([
-        `version: the server sent agent-info version ${version}, but this client reads version 6. ${hint}`,
+        `version: the server sent agent-info version ${version}, but this client reads version 5. ${hint}`,
       ]);
     },
   );
@@ -701,7 +707,7 @@ describe("Client request policy", () => {
         },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
-        version: 6,
+        version: 5,
       }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });
@@ -720,7 +726,7 @@ describe("Client request policy", () => {
         },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
-        version: 6,
+        version: 5,
       }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });

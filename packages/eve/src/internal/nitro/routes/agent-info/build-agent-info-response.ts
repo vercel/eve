@@ -7,12 +7,7 @@ import type {
   CompiledDynamicToolDefinition,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import type {
-  AgentModuleBacking,
-  AgentSourceBacking,
-  AgentSourceOwner,
-  CompiledModuleBinding,
-} from "#compiler/source-graph.js";
+import type { AgentSourceOwner, CompiledModuleBinding } from "#compiler/source-graph.js";
 import type { AgentInfoResult, AgentInfoSource } from "#client/agent-info-schema.js";
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import {
@@ -23,28 +18,17 @@ import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broke
 import type { JsonObject } from "#shared/json.js";
 
 export type AgentInfoResponse = AgentInfoResult;
-type AgentInfoModuleBacking = NonNullable<AgentInfoSource["binding"]>["backing"];
-type AgentInfoSourceBacking = AgentInfoResult["channels"]["shadowed"][number]["source"]["backing"];
 
-// The account label can be an email address, so only the developer's own server sends it.
-function toChatGptEndpoint(
-  state: ChatGptAuthState | undefined,
-  mode: "development" | "production",
-) {
+function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   if (state === undefined) return undefined;
   const endpoint = { state: state.kind };
-  if (mode === "development" && state.kind === "ready" && state.accountLabel !== undefined) {
+  if (state.kind === "ready" && state.accountLabel !== undefined) {
     return { ...endpoint, accountLabel: state.accountLabel };
   }
   return endpoint;
 }
 
-/**
- * Projects agent info exclusively from the effective compiled graph. End users
- * can read this route when the eve channel admits them, so it omits authored
- * text and server paths; instruction text and the ChatGPT account label are
- * kept for the development TUI only.
- */
+/** Projects agent info exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
@@ -63,6 +47,8 @@ export function buildAgentInfoResponse(
 
   return {
     agent: {
+      agentRoot: manifest.agentRoot,
+      appRoot: manifest.appRoot,
       config: { ...configSource, binding: configSource.binding },
       description: manifest.config.description,
       model:
@@ -72,7 +58,7 @@ export function buildAgentInfoResponse(
               endpoint: resolveModelEndpointStatus(
                 manifest.config.model.routing,
                 input.gatewayCredentials,
-                toChatGptEndpoint(input.chatgptAuth, input.mode),
+                toChatGptEndpoint(input.chatgptAuth),
               ),
               id: manifest.config.model.id,
               providerOptions: projectProviderOptionsForInfo(manifest.config.model.providerOptions),
@@ -105,19 +91,7 @@ export function buildAgentInfoResponse(
         name: route.name,
         urlPath: route.urlPath,
       })),
-      shadowed: manifest.channelRoutes.shadowed.map((route) => ({
-        method: route.method,
-        source: {
-          backing: projectBacking(route.source.backing),
-          form: route.source.form,
-          layer: route.source.layer,
-          logicalPath: route.source.logicalPath,
-          owner: route.source.owner,
-          sourceId: route.source.sourceId,
-        },
-        urlPath: route.urlPath,
-        winnerSourceId: route.winnerSourceId,
-      })),
+      shadowed: [...manifest.channelRoutes.shadowed],
     },
     composition,
     connections: manifest.connections.map((connection) => ({
@@ -145,7 +119,7 @@ export function buildAgentInfoResponse(
       ),
       static: manifest.instructions.map((definition) => ({
         ...toOwnedSource(manifest, definition),
-        ...(input.mode === "development" ? { content: definition.content } : {}),
+        content: definition.content,
         name: definition.name,
         role: definition.role,
       })),
@@ -172,6 +146,7 @@ export function buildAgentInfoResponse(
       ...toOwnedSource(manifest, schedule),
       cron: schedule.cron,
       hasRun: schedule.hasRun,
+      markdown: schedule.markdown,
       name: schedule.name,
     })),
     skills: {
@@ -180,6 +155,7 @@ export function buildAgentInfoResponse(
         ...toOwnedSource(manifest, skill),
         description: skill.description,
         license: skill.license,
+        markdown: skill.content,
         metadata: skill.metadata,
         name: skill.name,
       })),
@@ -189,9 +165,11 @@ export function buildAgentInfoResponse(
         const projected = {
           ...toOwnedSource(manifest, subagent),
           description: subagent.description,
+          entryPath: subagent.entryPath,
           name: subagent.name,
           nodeId: subagent.nodeId,
           parentNodeId: subagent.parentNodeId,
+          rootPath: subagent.rootPath,
           summary: summarizeNode(subagent.agent),
         };
         if (subagent.configResolver === undefined) return projected;
@@ -220,7 +198,7 @@ export function buildAgentInfoResponse(
         requiresApproval: tool.requiresApproval,
       })),
     },
-    version: 6,
+    version: 5,
     workspace: {
       resourceRoot: manifest.workspaceResourceRoot,
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],
@@ -290,7 +268,7 @@ function sourceProjection(
     binding === undefined
       ? undefined
       : {
-          backing: projectBacking(binding.backing),
+          backing: binding.backing,
           logicalPath: binding.logicalPath,
           owner: binding.owner,
         };
@@ -300,30 +278,6 @@ function sourceProjection(
   if (binding !== undefined) return { ...projected, binding: publicBinding! };
   if (source.exportName !== undefined) return { ...projected, exportName: source.exportName };
   return projected;
-}
-
-/**
- * Keeps a backing's provenance but drops filesystem locations, which are
- * server paths; the source's logical path already says which file it is.
- */
-function projectBacking(backing: AgentModuleBacking): AgentInfoModuleBacking;
-function projectBacking(backing: AgentSourceBacking): AgentInfoSourceBacking;
-function projectBacking(backing: AgentSourceBacking): AgentInfoSourceBacking {
-  switch (backing.kind) {
-    case "filesystem":
-      return {
-        externalDependencies: [...backing.externalDependencies],
-        ...(backing.extensionScope === undefined
-          ? {}
-          : { extensionScope: { namespace: backing.extensionScope.namespace } }),
-        kind: "filesystem",
-        ...(backing.mountId === undefined ? {} : { mountId: backing.mountId }),
-      };
-    case "programmatic":
-      return backing;
-    case "resource":
-      return { kind: "resource" };
-  }
 }
 
 function toAgentInfoSourceKind(sourceKind: string): AgentInfoSource["sourceKind"] {

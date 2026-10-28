@@ -4,6 +4,11 @@ import {
   isVercelAuthChallenge,
   vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
+import { AGENT_INFO_FORBIDDEN_CODE } from "#protocol/routes.js";
+import {
+  formatAgentInfoForbiddenMessage,
+  isAgentInfoForbidden,
+} from "#shared/agent-info-access.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 
@@ -44,6 +49,15 @@ export function classifyRemoteError(error: unknown, phase: RemoteProbePhase): Re
     return {
       state: "auth-required",
       challenge: { kind: "eve-oidc" },
+    };
+  }
+  if (isAgentInfoForbidden(error)) {
+    return {
+      state: "unavailable",
+      failure: {
+        code: AGENT_INFO_FORBIDDEN_CODE,
+        message: formatAgentInfoForbiddenMessage("The remote agent"),
+      },
     };
   }
   if (error instanceof ClientError) {

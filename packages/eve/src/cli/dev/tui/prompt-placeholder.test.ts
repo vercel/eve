@@ -52,6 +52,8 @@ function scaffold(): AgentInfoResult {
             packageName: "eve",
           },
           name: "self-modification__agent",
+          entryPath: "subagents/agent/agent.ts",
+          rootPath: "/eve/self-modification",
           nodeId: "self-modification__agent",
           parentNodeId: "__root__",
           summary: {
@@ -84,6 +86,7 @@ describe("initialPromptPlaceholder", () => {
                 ...info.subagents.local[0]!,
                 name: "self-modification__trace_analysis",
                 description: "Inspect traces",
+                markdown: "Inspect traces",
               },
             ],
           },

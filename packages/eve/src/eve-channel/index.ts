@@ -22,6 +22,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
+  AGENT_INFO_FORBIDDEN_CODE,
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
@@ -51,7 +52,7 @@ import {
   formatTraceContentCeiling,
 } from "#shared/forwarded-trace-policy.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
-import { routeAuth } from "#public/channels/auth.js";
+import { localDev, routeAuth } from "#public/channels/auth.js";
 import { defaultEveAudience } from "#eve-channel/audience.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
@@ -92,6 +93,25 @@ import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel
 export * from "#eve-channel/types.js";
 
 const log = createLogger("eve.channel");
+
+/** Principals that may read `GET /eve/v1/info`; `"local-dev"` is what `localDev()` admits. */
+const AGENT_INFO_PRINCIPAL_TYPES: ReadonlySet<string> = new Set([
+  "service",
+  "runtime",
+  "local-dev",
+]);
+const localDevelopmentCaller = localDev();
+
+/**
+ * Agent info carries authored text and server paths, so only operators read it.
+ * A caller `localDev()` would admit is the developer at their own server even
+ * when an earlier strategy resolved them first, such as the TUI's development
+ * Vercel OIDC token resolving to a `user`.
+ */
+async function isAgentInfoOperator(request: Request, principalType: string): Promise<boolean> {
+  if (AGENT_INFO_PRINCIPAL_TYPES.has(principalType)) return true;
+  return Boolean(await localDevelopmentCaller(request));
+}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
@@ -135,6 +155,17 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
+        if (!(await isAgentInfoOperator(req, authResult.principalType))) {
+          return Response.json(
+            {
+              code: AGENT_INFO_FORBIDDEN_CODE,
+              error:
+                'Agent info is served only to operator principals. Authenticate as a service principal (principalType "service"), or call a local development server.',
+              ok: false,
+            },
+            { status: 403 },
+          );
+        }
 
         const respond = readAgentInfoRouteResponse(args);
         if (respond === undefined) {

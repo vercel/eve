@@ -15,9 +15,13 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 /**
  * Stable framework-owned route exposing the JSON inspection payload for
  * the current agent. The eve channel registers and authenticates this route
- * with the same `auth` input as its session routes.
+ * with the same `auth` input as its session routes, then serves only operator
+ * principals (`service`, `runtime`, or `local-dev`).
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
+
+/** Error code the info route returns with `403` to a non-operator principal. */
+export const AGENT_INFO_FORBIDDEN_CODE = "info_forbidden";
 
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;

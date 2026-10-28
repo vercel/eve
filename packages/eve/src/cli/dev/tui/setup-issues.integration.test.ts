@@ -16,6 +16,8 @@ afterEach(() => {
 });
 
 const BASE_GATEWAY_INFO = createTestAgentInfoResult({
+  agentRoot: "/app/agent",
+  appRoot: "/app",
   modelId: "openai/gpt-5.5",
   name: "Agent",
 });

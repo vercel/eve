@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 import { mountIdSchema } from "#shared/extension-mount.js";
 
 /** Bumped only for breaking reshapes; additive changes keep the version. */
-export const AGENT_INFO_VERSION = 6;
+export const AGENT_INFO_VERSION = 5;
 
 /**
  * A value set the server may grow. Older clients read a newer string as
@@ -24,13 +24,13 @@ const owner = z.discriminatedUnion("kind", [
   }),
 ]);
 
-// Filesystem backings carry no server paths; the binding's logical path locates the file.
 const moduleBacking = z.discriminatedUnion("kind", [
   z.object({
     externalDependencies: z.array(z.string()),
-    extensionScope: z.object({ namespace: z.string() }).optional(),
+    extensionScope: z.object({ namespace: z.string(), sourceRoot: z.string() }).optional(),
     kind: z.literal("filesystem"),
     mountId: z.string().optional(),
+    sourcePath: z.string(),
   }),
   z.object({
     dependencies: z.record(z.string(), z.string()).optional(),
@@ -125,15 +125,20 @@ const tool = entry.extend({
 const skill = entry.extend({
   description: z.string(),
   license: z.string().optional(),
+  markdown: z.string(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
 const instructions = entry.extend({
-  content: z.string().optional(),
+  content: z.string(),
   role: openEnum(["system", "user"]),
 });
 
-const schedule = entry.extend({ cron: z.string(), hasRun: z.boolean() });
+const schedule = entry.extend({
+  cron: z.string(),
+  hasRun: z.boolean(),
+  markdown: z.string().optional(),
+});
 
 const channelMethod = openEnum([
   "GET",
@@ -153,7 +158,10 @@ const channelRoute = entry.extend({
 });
 
 const sourceDescriptor = z.object({
-  backing: z.union([moduleBacking, z.object({ kind: z.literal("resource") })]),
+  backing: z.union([
+    moduleBacking,
+    z.object({ kind: z.literal("resource"), sourcePath: z.string() }),
+  ]),
   form: openEnum(["derived", "direct"]),
   layer: openEnum(["framework-default", "extension-package", "extension-override", "application"]),
   logicalPath: z.string(),
@@ -195,8 +203,10 @@ const sandbox = source.extend({
 const subagent = entry.extend({
   configResolver: dynamicResolver.optional(),
   description: z.string().optional(),
+  entryPath: z.string(),
   nodeId: z.string(),
   parentNodeId: z.string(),
+  rootPath: z.string(),
   summary: z.object({
     channels: z.number(),
     connections: z.number(),
@@ -232,13 +242,15 @@ const compositionDiagnostic = z.object({
 });
 
 /**
- * Runtime contract for the authoritative `/eve/v1/info` v6 response. Parsing is
+ * Runtime contract for the authoritative `/eve/v1/info` v5 response. Parsing is
  * tolerant so a server may add fields and enum values without a version bump:
  * unknown keys are stripped and unknown enum strings read as `"unrecognized"`.
  */
 export const AgentInfoResultSchema = z
   .object({
     agent: z.object({
+      agentRoot: z.string(),
+      appRoot: z.string(),
       config: source.extend({ binding }),
       description: z.string().optional(),
       model: agentModel,

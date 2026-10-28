@@ -45,6 +45,8 @@ const NEWER_VERIFIED_TARGET = await resolveTestVercelTarget({
 });
 
 const INFO: AgentInfoResult = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
   modelId: "gpt-5",
   name: "Weather Agent",
 });
@@ -179,6 +181,20 @@ describe("createRemoteConnectionController", () => {
       expected: {
         state: "unavailable",
         failure: { code: "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH" },
+      },
+    },
+    {
+      name: "an info route that refuses a non-operator credential",
+      error: new ClientError(
+        403,
+        JSON.stringify({ code: "info_forbidden", error: "Forbidden.", ok: false }),
+      ),
+      expected: {
+        state: "unavailable",
+        failure: {
+          code: "info_forbidden",
+          message: expect.stringContaining('principalType "service"'),
+        },
       },
     },
     {

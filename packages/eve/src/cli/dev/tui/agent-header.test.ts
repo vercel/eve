@@ -8,6 +8,8 @@ import { buildAgentHeader } from "./agent-header.js";
 import { createTheme } from "./theme.js";
 
 const INFO = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
   modelId: "zai/glm-5.2",
   name: "Weather Agent",
 });
