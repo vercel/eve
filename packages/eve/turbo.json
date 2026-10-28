@@ -81,9 +81,6 @@
         "!src/computer-use/extension/**"
       ]
     },
-    "test:unit": {
-      "dependsOn": ["build:compiled"]
-    },
     "test:integration": {
       "dependsOn": ["build"]
     },
