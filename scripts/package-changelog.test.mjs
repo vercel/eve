@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -78,6 +78,8 @@ test("npm and pnpm pack only the current release without changing the repository
   await copyFile(join(root, JSON.parse(npmOutput)[0].filename), npmTarball);
   const reportPack = await runPack(root, root);
   const reportTarball = join(root, reportPack.filename);
+  assert.equal(reportPack.size, (await stat(pnpmTarball)).size);
+  assert.equal(reportPack.size, (await stat(reportTarball)).size);
   const consumer = join(root, "consumer");
   await mkdir(consumer);
   await writeFile(

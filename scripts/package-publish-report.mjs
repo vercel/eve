@@ -1,5 +1,16 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -343,17 +354,20 @@ export async function runPack(packageRoot, packDirectory) {
     ? await mkdtemp(join(tmpdir(), "eve-report-pack-"))
     : undefined;
   let output;
+  let pnpmTarball;
   try {
     let packRoot = packagePath;
     if (temporary) {
-      const tarball = join(temporary, "pnpm.tgz");
-      await execFile("pnpm", ["pack", "--out", tarball, "--silent"], {
+      pnpmTarball = join(temporary, "pnpm.tgz");
+      await execFile("pnpm", ["pack", "--out", pnpmTarball, "--silent"], {
         cwd: packagePath,
         maxBuffer: 16 * 1024 * 1024,
       });
       const extracted = join(temporary, "extracted");
       await mkdir(extracted);
-      await execFile("tar", ["-xzf", tarball, "-C", extracted], { maxBuffer: 16 * 1024 * 1024 });
+      await execFile("tar", ["-xzf", pnpmTarball, "-C", extracted], {
+        maxBuffer: 16 * 1024 * 1024,
+      });
       packRoot = join(extracted, "package");
     }
     output = await execFile(
@@ -367,6 +381,19 @@ export async function runPack(packageRoot, packDirectory) {
       ],
       { cwd: packRoot, maxBuffer: 16 * 1024 * 1024 },
     );
+    if (pnpmTarball) {
+      const results = parsePackOutput(output.stdout, output.stderr, packagePath);
+      const packed = Array.isArray(results) ? results[0] : null;
+      if (!packed || typeof packed.filename !== "string") {
+        throw new Error(`Expected one pack result for "${packagePath}".`);
+      }
+      const bytes = await readFile(pnpmTarball);
+      await copyFile(pnpmTarball, resolve(packDirectory, packed.filename));
+      packed.size = bytes.length;
+      packed.shasum = createHash("sha1").update(bytes).digest("hex");
+      packed.integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+      return packed;
+    }
   } finally {
     if (temporary) await rm(temporary, { recursive: true, force: true });
   }
