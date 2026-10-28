@@ -392,6 +392,8 @@ const CONVERSATIONS: {
   },
 ];
 
+const REACTIONS_KEY = "eve-home-reactions";
+
 // Vercel's custom Slack emoji: a short word in white on a colored tile.
 const TEXT_EMOJI = {
   LFG: "bg-pink-700",
@@ -806,12 +808,24 @@ export function SessionTimeline(): JSX.Element {
   // channels returns to the conversation's start.
   const [ended, setEnded] = useState(false);
   // Reactions the visitor added, keyed by emoji, toggled like Slack's: a click adds one to the
-  // count, a second click takes it back.
+  // count, a second click takes it back. Remembered in this browser only; storage can be
+  // unavailable (private windows, blocked site data), so it's best effort.
   const [reacted, setReacted] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(REACTIONS_KEY) ?? "[]");
+      if (Array.isArray(saved)) setReacted(new Set(saved.filter((e) => e in TEXT_EMOJI)));
+    } catch {}
+  }, []);
+
   const toggleReaction = (emoji: string) =>
     setReacted((current) => {
       const next = new Set(current);
       if (!next.delete(emoji)) next.add(emoji);
+      try {
+        localStorage.setItem(REACTIONS_KEY, JSON.stringify([...next]));
+      } catch {}
       return next;
     });
   // Which edges have messages scrolled past them, so only those edges fade.
