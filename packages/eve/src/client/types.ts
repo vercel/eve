@@ -245,7 +245,7 @@ export interface ClientSessionState {
    * rest of the state and pass it back unchanged; eve may change or extend it in any release.
    * A missing, stale, or rejected value only costs a slower lookup.
    */
-  readonly hint?: string;
+  readonly inbox?: string;
   readonly sessionId: string;
   readonly streamIndex: number;
 }

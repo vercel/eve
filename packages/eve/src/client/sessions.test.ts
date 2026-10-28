@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("Client.sessions", () => {
-  it("carries the refreshed hint across sends, snapshots, and restored session state", async () => {
+  it("carries the refreshed inbox handle across sends, snapshots, and restored session state", async () => {
     const hints: Array<string | null> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       hints.push(JSON.parse(String(init?.body)).inbox ?? null);
@@ -35,10 +35,10 @@ describe("Client.sessions", () => {
     const restored = client.sessions.attach(session.state.sessionId, session.state);
     await restored.send("Alice continues after reopening it.");
     expect(hints).toEqual([null, "handle_1", "handle_2"]);
-    expect(restored.state.hint).toBe("handle_3");
+    expect(restored.state.inbox).toBe("handle_3");
   });
 
-  it("returns the full session state, including hint, from snapshot()", async () => {
+  it("returns the full session state, including inbox, from snapshot()", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
         new Response(encodeTestLine({ type: "session.started", data: {} }), {
@@ -49,14 +49,14 @@ describe("Client.sessions", () => {
         }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });
-    const session = client.sessions.attach("session_1", { hint: "handle_1" });
+    const session = client.sessions.attach("session_1", { inbox: "handle_1" });
 
     const snapshot = await session.snapshot();
 
     expect(snapshot.session).toEqual({
       sessionId: "session_1",
       streamIndex: 1,
-      hint: "handle_1",
+      inbox: "handle_1",
     });
     expect(session.state.streamIndex).toBe(0);
   });

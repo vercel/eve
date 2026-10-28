@@ -100,7 +100,7 @@ export class SessionStore {
         ? undefined
         : this.#client?.sessions.attach(init.initialSession.sessionId, {
             streamIndex: init.initialSession.streamIndex,
-            hint: init.initialSession.hint,
+            inbox: init.initialSession.inbox,
           }));
     this.#error = this.#recordedFailure();
     this.#snapshot = this.#createSnapshot();
@@ -624,13 +624,13 @@ export class SessionStore {
     if (this.#session === undefined) return (this.#observedSession = undefined);
     const sessionId = this.#session.id;
     const streamIndex = this.#conversationClient.view.position;
-    const { hint } = this.#session.state;
+    const { inbox } = this.#session.state;
     if (
       this.#observedSession?.sessionId !== sessionId ||
       this.#observedSession.streamIndex !== streamIndex ||
-      this.#observedSession.hint !== hint
+      this.#observedSession.inbox !== inbox
     ) {
-      this.#observedSession = { sessionId, streamIndex, hint };
+      this.#observedSession = { sessionId, streamIndex, inbox };
     }
     return this.#observedSession;
   }
