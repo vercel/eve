@@ -103,21 +103,32 @@ function ChatButton({ children, primary }: { children: string; primary?: boolean
   );
 }
 
-/** Teams renders bot replies as Adaptive Cards: a bordered card with full-width actions. */
+/**
+ * Teams renders agent replies as Adaptive Cards, laid out as Microsoft's agent design guidance
+ * describes: a concise title, a body that leads with the key facts as a fact set, and only the
+ * essential actions, left-aligned with the primary first.
+ */
 function AdaptiveCard({
   title,
-  text,
+  facts,
   actions,
 }: {
   title: string;
-  text: string;
+  facts: [string, string][];
   actions: [string, string];
 }) {
   return (
-    <div className="mt-2 max-w-[26rem] rounded-lg bg-background-100 p-3 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]">
+    <div className="mt-2 max-w-[26rem] rounded-lg bg-background-100 p-4 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]">
       <p className="font-semibold text-copy-14">{title}</p>
-      <p className="mt-1 text-copy-13 text-gray-900">{text}</p>
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-copy-13">
+        {facts.map(([label, value]) => (
+          <div className="contents" key={label}>
+            <dt className="text-gray-900">{label}</dt>
+            <dd className="text-gray-1000">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="mt-4 flex gap-2">
         <ChatButton primary>{actions[0]}</ChatButton>
         <ChatButton>{actions[1]}</ChatButton>
       </div>
@@ -264,7 +275,11 @@ const TEAMS_BEATS: Beat[] = [
     attachment: (
       <AdaptiveCard
         actions={["Roll back", "Not now"]}
-        text="Reverts storefront to the previous deployment. Takes about 30 seconds."
+        facts={[
+          ["Service", "storefront"],
+          ["Deploys to", "Previous deployment (1:42 PM)"],
+          ["Time", "About 30 seconds"],
+        ]}
         title="Roll back production?"
       />
     ),
