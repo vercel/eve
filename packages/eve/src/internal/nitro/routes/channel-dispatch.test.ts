@@ -113,6 +113,7 @@ function createEvent(input?: {
   readonly body?: string;
   readonly headers?: Record<string, string>;
   readonly method?: string;
+  readonly params?: Record<string, string>;
   readonly requestIp?: string;
   readonly url?: string;
   readonly waitUntil?: (task: Promise<unknown>) => void;
@@ -128,7 +129,7 @@ function createEvent(input?: {
 
   return {
     context: {
-      params: {},
+      params: input?.params ?? {},
     },
     req: request,
     waitUntil: input?.waitUntil,
@@ -711,6 +712,35 @@ describe("dispatchChannelRequest", () => {
     }
     expect(thrown).toBeInstanceOf(Response);
     expect((thrown as Response).status).toBe(404);
+  });
+
+  it("answers 400 without calling the handler when a route param is malformed", async () => {
+    const fetch = vi.fn(async () => new Response("ok"));
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          fetch,
+          logicalPath: "agent/channels/callback.ts",
+          method: "GET",
+          name: "callback",
+          sourceId: "channel-callback",
+          sourceKind: "module",
+          urlPath: "/callback/:token",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ params: { token: "%ZZ" }, url: "https://eve.test/callback/%ZZ" }),
+      "GET /callback/:token",
+      {} as never,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Malformed request path.", ok: false });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("logs and returns a 500 with an errorId when a handler throws", async () => {
