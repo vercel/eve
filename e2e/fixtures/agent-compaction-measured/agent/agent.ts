@@ -32,5 +32,5 @@ export default defineAgent({
   ...e2eAgentConfig(),
   model,
   modelContextWindowTokens: 100_000,
-  compaction: { thresholdPercent: 0.2 },
+  compaction: { threshold: 0.2 },
 });

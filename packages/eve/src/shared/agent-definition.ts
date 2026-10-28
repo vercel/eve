@@ -149,7 +149,7 @@ export interface InternalAgentCompactionDefinition {
 
 /**
  * Configures conversation compaction: when the model context window fills past
- * `thresholdPercent`, eve summarizes earlier turns to reclaim space. Every
+ * `threshold`, eve summarizes earlier turns to reclaim space. Every
  * field is optional; omit the block to use eve's defaults.
  */
 export interface PublicAgentCompactionDefinition {
@@ -173,7 +173,7 @@ export interface PublicAgentCompactionDefinition {
    *
    * eve defaults to `0.9` when this is omitted.
    */
-  readonly thresholdPercent?: number;
+  readonly threshold?: number;
 }
 
 /**
@@ -198,11 +198,11 @@ export interface AgentLimitsDefinition {
    * or fails it when nobody can answer. Approving starts a new window.
    *
    * Subagent sessions without their own `sessionUsage` use the root agent's.
-   * Set `sessionUsage: () => false` to leave sessions uncapped.
+   * Set `sessionUsage: false` to leave sessions uncapped.
    *
    * @default ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000
    */
-  readonly sessionUsage?: SessionUsageLimit;
+  readonly sessionUsage?: SessionUsageLimit | false;
 }
 
 /**
@@ -354,7 +354,7 @@ export type InternalAgentDefinition = {
  */
 export interface CompiledAgentLimitsDefinition {
   readonly sessionTimeoutMs?: number | false;
-  readonly sessionUsage?: true;
+  readonly sessionUsage?: boolean;
 }
 
 /**
