@@ -1,5 +1,23 @@
 # eve
 
+## 0.86.1
+
+### Release eve@0.86.1 | 2026-10-28 | patch
+
+### 🐛 Bug Fixes
+
+- Resolve catalog dependencies in staged packages so npm can install them. [#5554](https://github.com/vercel/eve/pull/5554)
+
+- Restore current release notes to `CHANGELOG.md` at the package root. [#5552](https://github.com/vercel/eve/pull/5552)
+
+### Other Changes
+
+See the [full list of changes](https://github.com/vercel/eve/compare/eve%400.86.0...eve%400.86.1).
+
+### Contributors
+
+- [@chadhietala](https://github.com/chadhietala)
+
 ## 0.86.0
 
 ### Release eve@0.86.0 | 2026-10-28 | minor
