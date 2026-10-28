@@ -139,7 +139,7 @@ The choice above is typed as `"billing" | "support"`. Each answer appears under 
 
 A model instance must implement decision model specification `v4`, the version AI SDK 7 supports. A matching `provider`, `modelId`, and `specificationVersion` alone is not enough. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
 
-`decide` also works outside a tool and doesn't need an active eve session.
+`decide` also works outside a tool and doesn't need an active eve session. For example, a Slack message hook can use it to [decide when to reply in a thread](/docs/channels/slack#decide-when-to-reply-in-a-thread) without a mention.
 
 ## Judge eval results
 

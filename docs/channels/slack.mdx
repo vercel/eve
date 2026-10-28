@@ -264,6 +264,61 @@ async onMessage(ctx, message) {
 
 It reads at most the first 50 messages and needs the matching history scope. A failed fetch is logged and returns an empty or stale list, so treat an unexpected empty list as "don't route".
 
+#### Decide when to reply in a thread
+
+Answering every reply in a subscribed thread makes the agent talk over people who are talking to each other. To reply only when a message is meant for the agent, ask a decision model with [`decide`](/docs/guides/decide) from `eve/ai` before any turn starts:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { decide } from "eve/ai";
+import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadContext: { since: "last-agent-reply" },
+  async onMessage(ctx, message) {
+    if (!message.author || message.author.isBot) return null;
+    const auth = defaultSlackAuth(message, ctx);
+
+    // Mentions and DMs always get a reply.
+    if (ctx.isBotMentioned() || (await ctx.isDMOrPrivateChannel())) return { auth };
+
+    // Listen ambiently only in threads the agent already joined.
+    const isThreadReply = message.threadTs !== message.ts;
+    if (!isThreadReply || !(await ctx.isSubscribed())) return null;
+
+    await ctx.thread.refresh();
+    const thread = ctx.thread.recentMessages.slice(-10).map((m) => ({
+      from: m.isMe ? "agent" : (m.user ?? "other-bot"),
+      text: m.markdown,
+    }));
+
+    try {
+      const { answers } = await decide({
+        state: { thread, latest: { from: message.author.userId, text: message.markdown } },
+        questions: {
+          reply: {
+            type: "boolean",
+            instructions: "Should the agent reply to the latest message in this Slack thread?",
+            criteria: {
+              true: "It asks the agent something, follows up on the agent's last reply, or asks it to do work.",
+              false:
+                "It is addressed to other people, is banter or thanks, or needs nothing from the agent.",
+            },
+          },
+        },
+      });
+      return answers.reply.probability >= 0.7 ? { auth } : null;
+    } catch {
+      // Stay quiet when the decider is unavailable; a mention still works.
+      return null;
+    }
+  },
+});
+```
+
+The decider sees only the state you pass, here the last ten thread messages and the new one, so trim what you send to what the decision needs. Pass `model` to use a different decision model. Raise the threshold to make the agent quieter. A message the hook drops never reaches the agent, and returning `{ auth }` starts or steers a turn like any other accepted message. This needs the same `message.channels` event and `channels:history` scope as [continuing conversations without repeated mentions](#continue-conversations-without-repeated-mentions).
+
 #### Load prior thread messages
 
 By default, the agent sees the triggering mention but not earlier replies in the thread. Set `threadContext` to add them, labeled with each sender's Slack user ID:
