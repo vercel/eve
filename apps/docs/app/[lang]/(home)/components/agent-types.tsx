@@ -2,7 +2,7 @@
 
 import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
-import { Brain, ChevronRight } from "lucide-react";
+import { Brain, ChevronRight, Factory, GitPullRequestDraft } from "lucide-react";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type JSX,
@@ -18,52 +18,66 @@ import { analyticsEvents } from "@/lib/analytics/events";
 import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { type Author, DemoButton, Mention, Reaction, SlackMessage, TypingIndicator } from "./chat";
+import {
+  type Author,
+  Card,
+  DemoButton,
+  Mention,
+  Reaction,
+  SlackMessage,
+  TypingIndicator,
+} from "./chat";
 import { AppWindow, HomeSection, PrefetchLink } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
 
 const FACTORY_STATIONS = [
-  { name: "classifier", result: "Feature request, medium scope" },
-  { name: "analyst", result: "Mapped the checkout flow and wrote a plan" },
-  { name: "implementer", result: "Pushed eve/eng-142 and opened draft #318" },
-  { name: "reviewer", result: "Left 2 comments, both addressed" },
+  { name: "classifier", result: "Bug, small scope" },
+  { name: "analyst", result: "Traced it to the cart merge on sign-in" },
+  { name: "implementer", result: "Pushed eve/eng-142, 6 checks passed" },
+  { name: "reviewer", result: "Approved after 1 fix" },
 ];
 
+const SAM: Author = { name: "Sam" };
+const FOREMAN: Author = { name: "foreman", icon: Factory };
+
+// The hero's Slack agents are purple; the factory's foreman is one of them.
+const foremanAvatar = "bg-purple-700";
+
+/**
+ * A bug a teammate reports in Slack becomes a Linear ticket, which the factory picks up on its
+ * own and works through its stations into a draft pull request.
+ */
 function SoftwareFactoryPreview() {
   return (
-    <div className="flex flex-col gap-3 p-5 sm:p-6">
-      <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-400 bg-background-200 px-4 py-3">
-        {logos.linear({ "aria-hidden": true, className: logoClassName })}
-        <span className="font-mono text-copy-13-mono text-gray-900">ENG-142</span>
-        <span className="truncate text-copy-14 text-gray-1000">Add saved carts to checkout</span>
-      </div>
-      <ol className="flex list-none flex-col p-0">
-        {FACTORY_STATIONS.map((station) => (
-          <li
-            className="grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 sm:grid-cols-[1rem_11rem_minmax(0,1fr)]"
-            key={station.name}
-          >
-            <span aria-hidden className="relative flex justify-center">
-              <span className="absolute inset-y-0 w-px bg-gray-alpha-400" />
-              <span className="relative mt-[1.1rem] size-2 rounded-full bg-gray-1000" />
-            </span>
-            <code className="pt-3 font-mono text-copy-13-mono text-gray-1000">
-              subagents/{station.name}
-            </code>
-            <span className="col-start-2 pb-1 text-copy-14 text-gray-900 sm:col-start-3 sm:pt-3 sm:pb-0">
-              {station.result}
-            </span>
-          </li>
-        ))}
-      </ol>
-      <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-600 px-4 py-3">
-        {logos.github({ "aria-hidden": true, className: logoClassName })}
-        <span className="truncate text-copy-14 text-gray-1000">
-          Draft #318 is ready for your review
-        </span>
-      </div>
-    </div>
+    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
+      <SlackMessage author={SAM} avatarColor={foremanAvatar} continued={false} time="10:02 AM">
+        <p>Saved carts disappear after I sign in at checkout.</p>
+      </SlackMessage>
+      <SlackMessage author={FOREMAN} avatarColor={foremanAvatar} continued={false} time="10:02 AM">
+        <p>Filed it and picked it up.</p>
+        <Card
+          icon={logos.linear({ "aria-hidden": true })}
+          meta="Reported by Sam · In progress"
+          title="ENG-142 Saved carts disappear after sign-in"
+        />
+        <ul className="m-0 mt-2 flex list-none flex-col gap-0.5 p-0">
+          {FACTORY_STATIONS.map((station) => (
+            <li className="flex items-baseline gap-3 text-copy-13" key={station.name}>
+              <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
+                {station.name}
+              </code>
+              <span className="truncate text-gray-900">{station.result}</span>
+            </li>
+          ))}
+        </ul>
+        <Card
+          icon={<GitPullRequestDraft />}
+          meta="acme/storefront#318 · draft, ready for review"
+          title="fix(cart): keep guest items after sign-in"
+        />
+      </SlackMessage>
+    </ol>
   );
 }
 

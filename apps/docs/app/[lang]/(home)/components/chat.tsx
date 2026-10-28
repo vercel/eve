@@ -34,6 +34,32 @@ export function AgentBadge() {
   return <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">Agent</span>;
 }
 
+/** A link preview under a message: an icon, a title, and a line of detail. */
+export function Card({
+  icon,
+  title,
+  meta,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  meta: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="mt-2 flex max-w-[24rem] gap-2.5 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-2.5">
+      <span aria-hidden className="mt-0.5 text-gray-900 [&>svg]:size-4">
+        {icon}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate font-medium text-copy-14 text-gray-1000">{title}</span>
+        <span className="truncate text-copy-13 text-gray-900">{meta}</span>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Slack: avatar, name, Agent badge, time; consecutive messages fold under the first. Replies
  * are as wide as `--reply-width` allows, 20rem unless a conversation sets it.

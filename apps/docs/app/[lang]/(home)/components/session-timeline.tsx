@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import {
   AgentBadge,
   type Author,
+  Card,
   ChatAvatar,
   DemoButton,
   Mention,
@@ -59,31 +60,6 @@ type Beat =
       reactions: { emoji: keyof typeof TEXT_EMOJI; count: number }[];
       delay: number;
     };
-
-function Card({
-  icon,
-  title,
-  meta,
-  children,
-}: {
-  icon: ReactNode;
-  title: string;
-  meta: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="mt-2 flex max-w-[24rem] gap-2.5 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-2.5">
-      <span aria-hidden className="mt-0.5 text-gray-900 [&>svg]:size-4">
-        {icon}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate font-medium text-copy-14 text-gray-1000">{title}</span>
-        <span className="truncate text-copy-13 text-gray-900">{meta}</span>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function ChatButton({ children, primary }: { children: string; primary?: boolean }) {
   return (
