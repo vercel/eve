@@ -123,7 +123,9 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   assert.doesNotMatch(line, /<!--/u);
   git("commit", "--allow-empty", "-qm", "fix: Update a tool");
   const fallbackCommit = git("rev-parse", "HEAD");
-  pulls = [{ number: 11, user: { login: "Bob" }, merged_at: "2026-01-01" }];
+  pulls = [
+    { number: 11, user: { login: "Bob" }, merged_at: "2026-01-01", merge_commit_sha: commit },
+  ];
   const fallback = await formatter.getReleaseLine({
     id: "fallback",
     summary: "Update a tool.",
@@ -132,7 +134,12 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   assert.match(fallback, /- Update a tool\. \[#11\]/u);
   git("commit", "--allow-empty", "-qm", "fix: Repair a tool");
   const ambiguousCommit = git("rev-parse", "HEAD");
-  pulls.push({ number: 12, user: { login: "Carol" }, merged_at: "2026-01-01" });
+  pulls.push({
+    number: 12,
+    user: { login: "Carol" },
+    merged_at: "2026-01-01",
+    merge_commit_sha: fallbackCommit,
+  });
   await assert.rejects(
     formatter.getReleaseLine({
       id: "ambiguous",
