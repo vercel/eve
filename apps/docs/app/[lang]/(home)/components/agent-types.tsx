@@ -501,20 +501,22 @@ function WebAppClient() {
         <div className="absolute inset-x-3 bottom-3 flex flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
           {/* The hero's WhatsApp bubble shape, in this chat's colors. */}
-          <p
-            className="relative ml-auto bg-gray-1000 px-3 py-2 text-copy-13 text-background-100"
-            style={{ borderRadius: bubbleRadius }}
-          >
-            <Tail className="text-gray-1000" flipped />
-            Where's my order #4821?
-          </p>
-          <p
-            className="relative bg-gray-alpha-200 px-3 py-2 text-copy-13 text-gray-1000"
-            style={{ borderRadius: bubbleRadius }}
-          >
-            <Tail className="text-gray-alpha-200" />
-            It shipped yesterday and arrives Thursday.
-          </p>
+          <div className="flex flex-col gap-2">
+            <p
+              className="relative ml-auto bg-gray-1000 px-3 py-2 text-copy-13 text-background-100"
+              style={{ borderRadius: bubbleRadius }}
+            >
+              <Tail className="text-gray-1000" flipped />
+              Where's my order #4821?
+            </p>
+            <p
+              className="relative bg-gray-alpha-200 px-3 py-2 text-copy-13 text-gray-1000"
+              style={{ borderRadius: bubbleRadius }}
+            >
+              <Tail className="text-gray-alpha-200" />
+              It shipped yesterday and arrives Thursday.
+            </p>
+          </div>
         </div>
       </div>
     </AppWindow>
