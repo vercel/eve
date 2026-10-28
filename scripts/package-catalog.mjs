@@ -26,7 +26,10 @@ export async function resolveCatalogReferences(packageRoot, manifest) {
       if (typeof range !== "string" || !range.startsWith("catalog:")) continue;
       workspace ??= await readWorkspace(packageRoot);
       const catalogName = range.slice("catalog:".length);
-      const catalog = catalogName ? workspace?.catalogs?.[catalogName] : workspace?.catalog;
+      const catalog =
+        !catalogName || catalogName === "default"
+          ? (workspace?.catalog ?? workspace?.catalogs?.default)
+          : workspace?.catalogs?.[catalogName];
       const value = catalog?.[name];
       if (typeof value !== "string" || !value) {
         throw new Error(

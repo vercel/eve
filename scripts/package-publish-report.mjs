@@ -339,23 +339,38 @@ export async function runPack(packageRoot, packDirectory) {
   const packagePath = resolve(packageRoot);
   const manifest = await readJson(join(packagePath, "package.json"));
   const stagingDirectory = manifest.publishConfig?.directory;
-  if (stagingDirectory && manifest.scripts?.prepack) {
-    await execFile("pnpm", ["run", "prepack"], { cwd: packagePath, maxBuffer: 16 * 1024 * 1024 });
+  const temporary = stagingDirectory
+    ? await mkdtemp(join(tmpdir(), "eve-report-pack-"))
+    : undefined;
+  let output;
+  try {
+    let packRoot = packagePath;
+    if (temporary) {
+      const tarball = join(temporary, "pnpm.tgz");
+      await execFile("pnpm", ["pack", "--out", tarball, "--silent"], {
+        cwd: packagePath,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const extracted = join(temporary, "extracted");
+      await mkdir(extracted);
+      await execFile("tar", ["-xzf", tarball, "-C", extracted], { maxBuffer: 16 * 1024 * 1024 });
+      packRoot = join(extracted, "package");
+    }
+    output = await execFile(
+      "npm",
+      [
+        "pack",
+        ...(temporary ? ["--ignore-scripts"] : []),
+        "--json",
+        "--pack-destination",
+        packDirectory,
+      ],
+      { cwd: packRoot, maxBuffer: 16 * 1024 * 1024 },
+    );
+  } finally {
+    if (temporary) await rm(temporary, { recursive: true, force: true });
   }
-  const { stderr, stdout } = await execFile(
-    "npm",
-    [
-      "pack",
-      ...(stagingDirectory ? ["--ignore-scripts"] : []),
-      "--json",
-      "--pack-destination",
-      packDirectory,
-    ],
-    {
-      cwd: stagingDirectory ? resolve(packagePath, stagingDirectory) : packagePath,
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  );
+  const { stderr, stdout } = output;
   const results = parsePackOutput(stdout, stderr, packagePath);
   const packResult = Array.isArray(results) ? results[0] : null;
 

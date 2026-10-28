@@ -192,6 +192,8 @@ jobs:
 
       - name: Generate pull request base bundle report
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
+        id: baseline_report
+        continue-on-error: true
         env:
           BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-base.json
           STEPS_BASELINE_WEATHER_APP_OUTPUTS_PATH: ${{ steps.baseline_weather_app.outputs.path }}
@@ -203,6 +205,10 @@ jobs:
             --package packages/eve \
             --package-label packages/eve \
             --output-json "$BASELINE_REPORT_JSON"
+
+      - name: Note skipped pull request base report
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_report.outcome == 'failure' }}
+        run: echo "Pull request base report failed; bundle analysis will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build sandbox benchmark on pull request base in Vercel mode
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
@@ -280,7 +286,7 @@ jobs:
         env:
           BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-base.json
           BASELINE_REPORT_LABEL: ${{ steps.baseline.outputs.label }}
-          HAS_BASELINE_REPORT: ${{ github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
+          HAS_BASELINE_REPORT: ${{ github.event_name == 'pull_request' && steps.baseline_report.outcome == 'success' }}
           BUNDLE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report.json
           BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-bundle-report.md
           BUNDLE_WARNING_ACKNOWLEDGED: ${{ steps.mode.outputs.acknowledged }}

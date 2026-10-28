@@ -4,6 +4,7 @@ import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { resolveCatalogReferences } from "./package-catalog.mjs";
 import { runPack } from "./package-publish-report.mjs";
 
 test("npm and pnpm pack only the current release without changing the repository changelog", async (t) => {
@@ -23,7 +24,7 @@ test("npm and pnpm pack only the current release without changing the repository
     publishConfig: { directory: ".package" },
     peerDependencies: { example: "catalog:" },
     peerDependenciesMeta: { example: { optional: true } },
-    devDependencies: { other: "catalog:stable" },
+    devDependencies: { other: "catalog:stable", local: "workspace:*" },
     scripts: { prepack: `node "${script}" .` },
   };
   const source =
@@ -31,7 +32,12 @@ test("npm and pnpm pack only the current release without changing the repository
   await writeFile(join(root, "package.json"), JSON.stringify(manifest));
   await writeFile(
     join(root, "pnpm-workspace.yaml"),
-    'verifyDepsBeforeRun: false\npackages: []\ncatalog:\n  example: "1.2.3"\ncatalogs:\n  stable:\n    other: "2.3.4"\n',
+    'verifyDepsBeforeRun: false\npackages:\n  - packages/*\ncatalog:\n  example: "1.2.3"\ncatalogs:\n  stable:\n    other: "2.3.4"\n',
+  );
+  await mkdir(join(root, "packages/local"), { recursive: true });
+  await writeFile(
+    join(root, "packages/local/package.json"),
+    JSON.stringify({ name: "local", version: "3.4.5" }),
   );
   await writeFile(join(root, "CHANGELOG.md"), source);
   await mkdir(join(root, "dist"));
@@ -107,6 +113,7 @@ test("npm and pnpm pack only the current release without changing the repository
     );
     assert.equal(packedManifest.peerDependencies.example, "1.2.3");
     assert.equal(packedManifest.devDependencies.other, "2.3.4");
+    if (tarball !== npmTarball) assert.equal(packedManifest.devDependencies.local, "3.4.5");
     assert.match(
       changelog,
       /^# Release eve@1\.2\.3 \| 2026-10-27 \| patch\n\n## 🚀 Features\n\n- Current change\./u,
@@ -170,6 +177,23 @@ test("npm and pnpm pack only the current release without changing the repository
     encoding: "utf8",
   });
   assert.match(localPreview, /\/abcdef0123456789\/packages\/eve\/CHANGELOG\.md/u);
+});
+
+test("catalog default aliases resolve from either workspace form", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "eve-default-catalog-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const config of [
+    'catalog:\n  example: "1.2.3"\n',
+    'catalogs:\n  default:\n    example: "1.2.3"\n',
+  ]) {
+    await writeFile(join(root, "pnpm-workspace.yaml"), config);
+    for (const range of ["catalog:", "catalog:default"]) {
+      const { manifest } = await resolveCatalogReferences(root, {
+        dependencies: { example: range },
+      });
+      assert.equal(manifest.dependencies.example, "1.2.3");
+    }
+  }
 });
 
 test("packing fails when the package version has no release notes", async (t) => {
