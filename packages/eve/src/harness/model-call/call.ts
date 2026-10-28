@@ -55,7 +55,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactedTurnInput, maybeCompact } from "#harness/compaction/step.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
-import { reportCompactionFailure } from "./failure.js";
+import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
   isEmptyModelResponse,
@@ -218,7 +218,9 @@ export class ModelCaller {
   /**
    * A failed compaction fails the step, whatever recovery the call attempted.
    * One that left the history over the limit ends the session with its message;
-   * any other failure throws.
+   * any other failure is reported like a failed model call, since its summary
+   * call already retried. Rethrowing would make the workflow replay the step and
+   * then end the session.
    */
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;
@@ -226,7 +228,7 @@ export class ModelCaller {
     if (error instanceof CompactionOverLimitError) {
       return reportCompactionFailure(this.step, error);
     }
-    throw error;
+    return reportModelCallFailure(this.step, error);
   }
 
   /** Steering interrupted the call: the step ends with what it committed, and runs again. */

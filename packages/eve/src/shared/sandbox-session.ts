@@ -18,11 +18,16 @@ export interface SandboxCommandResult {
 }
 
 /** Options for starting a process without waiting for it to exit. */
-export interface SandboxSpawnOptions extends SandboxRunOptions {}
+export interface SandboxSpawnOptions extends SandboxRunOptions {
+  /** Opens a writable `stdin` on the process. Rejects on providers without stdin support. */
+  stdin?: boolean;
+}
 
 /** A running process with byte streams and explicit lifecycle operations. */
 export interface SandboxProcess {
   readonly pid?: number;
+  /** Present when spawned with `stdin: true`. Closing it sends EOF. */
+  readonly stdin?: WritableStream<Uint8Array>;
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   wait(): PromiseLike<{ exitCode: number }>;

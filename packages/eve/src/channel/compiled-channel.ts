@@ -1,11 +1,11 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { TurnPolicy } from "#channel/types.js";
+import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
@@ -47,11 +47,7 @@ export interface CompiledChannel<
   readonly cors?: NormalizedChannelCorsOptions;
   readonly __metadata?: TMetadata;
   readonly receive?: (
-    input: {
-      readonly message: MessageContent;
-      readonly target: Readonly<TReceiveTarget>;
-      readonly auth: SessionAuthContext | null;
-    },
+    input: GenericReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;

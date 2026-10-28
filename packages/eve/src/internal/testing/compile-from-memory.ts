@@ -6,6 +6,8 @@ import { defineAgent, type AgentDefinition } from "#public/definitions/agent.js"
 import { defineSkill } from "#public/definitions/skill.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
   createProgrammaticCompiledModuleMap,
   type CompiledModuleMap,
@@ -50,6 +52,7 @@ export interface CompileFromMemorySkillInput {
 
 interface CompileFromMemoryResult {
   readonly manifest: CompiledAgentManifest;
+  readonly modelMetadata: ModelMetadata;
   readonly moduleMap: CompiledModuleMap;
 }
 
@@ -101,12 +104,16 @@ export async function compileFromMemory(
     agentRoot,
     appRoot,
   });
-  const manifest = await compileAgentManifest(discovered, { sourceRegistries: [registry] });
+  const modelCatalog = createCompiledRuntimeModelCatalogLoader(appRoot);
+  const manifest = await compileAgentManifest(discovered, {
+    modelCatalog,
+    sourceRegistries: [registry],
+  });
   const moduleMap = await createProgrammaticCompiledModuleMap(manifest, [
     frameworkAgentSourceRegistry,
     registry,
   ]);
-  return { manifest, moduleMap };
+  return { manifest, modelMetadata: await modelCatalog.loadModelMetadata(), moduleMap };
 }
 
 function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefinition {

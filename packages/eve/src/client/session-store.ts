@@ -100,6 +100,7 @@ export class SessionStore {
         ? undefined
         : this.#client?.sessions.attach(init.initialSession.sessionId, {
             streamIndex: init.initialSession.streamIndex,
+            inbox: init.initialSession.inbox,
           }));
     this.#error = this.#recordedFailure();
     this.#snapshot = this.#createSnapshot();
@@ -200,6 +201,7 @@ export class SessionStore {
           this.#messageSubmissions.correlate(submissionId, deliveryId);
         }
         this.#acceptReceipt(deliveryId);
+        this.#callbacks.onSessionChange?.(this.#sessionState);
       }
       accepted.resolve(deliveryId);
       return new StreamDelivery<TOutput>({
@@ -622,11 +624,13 @@ export class SessionStore {
     if (this.#session === undefined) return (this.#observedSession = undefined);
     const sessionId = this.#session.id;
     const streamIndex = this.#conversationClient.view.position;
+    const { inbox } = this.#session.state;
     if (
       this.#observedSession?.sessionId !== sessionId ||
-      this.#observedSession.streamIndex !== streamIndex
+      this.#observedSession.streamIndex !== streamIndex ||
+      this.#observedSession.inbox !== inbox
     ) {
-      this.#observedSession = { sessionId, streamIndex };
+      this.#observedSession = { sessionId, streamIndex, inbox };
     }
     return this.#observedSession;
   }

@@ -36,10 +36,14 @@ export class ClientSessions {
   }
 
   /** Attaches a fixed handle to a known session ID without performing I/O. */
-  attach(sessionId: string, options?: { readonly streamIndex?: number }): ClientSession {
+  attach(
+    sessionId: string,
+    options?: { readonly streamIndex?: number; readonly inbox?: string },
+  ): ClientSession {
     if (sessionId.length === 0) throw new Error("sessionId must be a non-empty string.");
     return new ClientSession(this.#context, {
       sessionId,
+      inbox: options?.inbox,
       streamIndex: options?.streamIndex ?? 0,
     });
   }

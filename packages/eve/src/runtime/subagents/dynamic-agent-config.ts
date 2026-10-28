@@ -3,7 +3,7 @@ import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
-import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
@@ -27,7 +27,7 @@ export interface DynamicSubagentAgentConfig {
 export type DynamicSubagentModelReference = RuntimeModelReference;
 
 export async function normalizeDynamicSubagentAgentConfig(input: {
-  readonly catalog?: RuntimeModelCatalog;
+  readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly name: string;
   readonly state: ContextAccessor;
   readonly value: unknown;
@@ -68,14 +68,13 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   } = {
     description: definition.description,
     model: await normalizeDurableModelSelection({
-      catalog: input.catalog,
+      modelMetadata: input.modelMetadata,
       selection: {
         model: definition.model,
         modelContextWindowTokens:
           definition.modelContextWindowTokens ?? parentContextWindow(input.state, definition.model),
         modelOptions: definition.modelOptions,
       },
-      state: input.state,
     }),
   };
 
@@ -86,13 +85,12 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     } = {};
     if (definition.compaction.model !== undefined) {
       compaction.model = await normalizeDurableModelSelection({
-        catalog: input.catalog,
+        modelMetadata: input.modelMetadata,
         selection: {
           model: definition.compaction.model,
           modelContextWindowTokens: definition.compaction.modelContextWindowTokens,
           modelOptions: definition.modelOptions,
         },
-        state: input.state,
       });
     }
     if (definition.compaction.thresholdPercent !== undefined) {
@@ -114,15 +112,13 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
 }
 
 async function normalizeDurableModelSelection(input: {
-  readonly catalog?: RuntimeModelCatalog;
+  readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: Parameters<typeof resolveRuntimeModelSelection>[0]["selection"];
-  readonly state: ContextAccessor;
 }): Promise<DynamicSubagentModelReference> {
   const resolved = await resolveRuntimeModelSelection({
-    catalog: input.catalog,
     durability: "durable",
+    modelMetadata: input.modelMetadata,
     selection: input.selection,
-    state: input.state,
   });
   return resolved.reference;
 }

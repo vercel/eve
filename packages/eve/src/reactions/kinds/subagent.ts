@@ -116,6 +116,7 @@ async function selectionOf(
     return credentials === undefined ? { selection } : { credentials, selection };
   }
   const configured = await normalizeDynamicSubagentAgentConfig({
+    modelMetadata: ctx.require(BundleKey).modelMetadata,
     name: resolver.name,
     state: ctx,
     value: result,

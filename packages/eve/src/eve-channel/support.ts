@@ -56,7 +56,12 @@ export function sessionCommandErrorResponse(error: unknown): Response | undefine
 
 export function deliveryResponse(receipt: DeliveryReceipt): Response {
   return Response.json(
-    { ok: true, sessionId: receipt.sessionId, deliveryId: receipt.deliveryId },
+    {
+      ok: true,
+      sessionId: receipt.sessionId,
+      deliveryId: receipt.deliveryId,
+      inbox: receipt.inbox,
+    },
     {
       headers: { "cache-control": "no-store", [EVE_SESSION_ID_HEADER]: receipt.sessionId },
       status: 202,

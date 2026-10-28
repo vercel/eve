@@ -39,9 +39,11 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   prepareSuccessorStep,
+  readSessionStreamTailStep,
   signalSessionOwnerActivationStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
+import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -250,6 +252,8 @@ export async function bootInitialOwner(
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
   readonly serializedContext: Record<string, unknown>;
+  /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
+  readonly importedTurnCount?: number;
 }
 
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
@@ -260,6 +264,12 @@ async function prepareSuccessor(
   const { sessionId } = input;
   // The previous owner may run an older eve build; read its checkpoint in this build's shape.
   const migration = migrateSessionCheckpoint(input.checkpoint);
+  if (migration.kind === "busy") {
+    // Not `incompatible`, which an owner before v27 remembers for this deployment: once its work
+    // finishes, its next delivery tries again.
+    await signalFailedActivation(input, new Error(migration.detail), { payloads: [] });
+    return undefined;
+  }
   const validation = await prepareSuccessorStep({
     handoffVersion: input.handoffVersion,
     migration,
@@ -284,11 +294,33 @@ async function prepareSuccessor(
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
-  const { checkpoint } = migration;
+  if (migration.kind === "current") {
+    const { checkpoint } = migration;
+    return {
+      checkpoint,
+      serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
+    };
+  }
+  const { checkpoint, turnCount } = migration.imported;
   return {
     checkpoint,
+    importedTurnCount: turnCount,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
+}
+
+/**
+ * An imported session continues its stream after the lines its earlier owner wrote. Read once this
+ * run holds the session, so no line the earlier owner writes lands after the position.
+ */
+async function placeImportedSession(
+  sessionId: string,
+  prepared: PreparedSuccessor,
+): Promise<PreparedSuccessor> {
+  if (prepared.importedTurnCount === undefined) return prepared;
+  const tailIndex = await readSessionStreamTailStep({ sessionId });
+  const projection = preV27Projection(tailIndex, prepared.importedTurnCount);
+  return { ...prepared, checkpoint: withProjection(prepared.checkpoint, projection) };
 }
 
 async function signalFailedActivation(
@@ -348,6 +380,7 @@ async function bootForcedHandoffOwner(
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHooks(hookTokens, { force: true, handover: attemptKey });
+    prepared = await placeImportedSession(sessionId, prepared);
   } catch (error) {
     const claimedHooks = inbox.claimedTokens.length > 0;
     await signalFailedActivation(input, error, { claimedHooks, payloads: [] });
@@ -404,6 +437,7 @@ async function bootReleasedHandoffOwner(
         sessionState: prepared.checkpoint.sessionState,
       }),
     );
+    prepared = await placeImportedSession(input.sessionId, prepared);
     await signalSessionOwnerActivationStep({
       activation: { kind: "active" },
       token: input.activationToken,
@@ -429,6 +463,9 @@ async function startSuccessor(
       admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
+      // The earlier build's history follows its own message conventions, such as memory recalls
+      // and task notices; this build's model reads it only as a summary.
+      compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
       start:

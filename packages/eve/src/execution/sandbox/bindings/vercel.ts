@@ -585,11 +585,13 @@ function createVercelConnection(
         detached: true,
         env: options.env,
         signal: options.signal,
+        stdin: options.stdin,
       });
       return adaptMultiplexedCommandToSandboxProcess({
         abortSignal: options.signal,
         command,
         getOutput: (log) => log.stream,
+        stdin: options.stdin === true ? command : undefined,
       });
     },
     async stop() {

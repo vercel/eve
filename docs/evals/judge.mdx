@@ -66,6 +66,19 @@ t.judge("The assistant remembers the user's favorite word across turns.", {
 
 The transcript contains user and assistant messages in turn order, excluding reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals).
 
+`turn.reply` is the turn's final reply. A turn can reply more than once, for example to confirm that work is underway before it waits on tasks. `session.transcript` includes every reply alongside the user's messages. To grade only one turn's replies, filter its messages with `transcriptOf` from `eve/client`:
+
+```ts
+import { transcriptOf } from "eve/client";
+
+const turn = await t.send("Check the deploy and tell me when it's done.");
+const replies = transcriptOf(turn.events)
+  .messages.filter((message) => message.role === "assistant")
+  .map((message) => message.text);
+
+t.judge("The agent reported the deploy's result.", { on: replies.join("\n\n") }).atLeast(0.8);
+```
+
 ## Decide several questions together
 
 A batch makes one decision request against one shared state. Pass `state` to replace the default `{ input, output }` completely. Batch calls use `state` instead of `on`.

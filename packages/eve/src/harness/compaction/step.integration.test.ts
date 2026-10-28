@@ -1,4 +1,4 @@
-import { jsonSchema } from "ai";
+import { APICallError, jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import * as compaction from "#harness/compaction/engine.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
@@ -148,16 +149,19 @@ describe("compaction summary call", () => {
         { message: "Please continue." },
       );
 
+      const result = await run;
+      expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
       if (terminal) {
-        const result = await run;
         expect(result.next).toEqual({ done: true, output: "" });
-        expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
         expect(events.at(-1)).toMatchObject({
           type: "session.ended",
           data: { outcome: "failed", error: { code: "COMPACTION_FAILED", message: error.message } },
         });
       } else {
-        await expect(run).rejects.toThrow(error.message);
+        expect(result.next).toBeNull();
+        expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+          data: { outcome: "failed", error: { code: "MODEL_CALL_FAILED", message: error.message } },
+        });
         expect(events.some((event) => event.type === "session.ended")).toBe(false);
       }
       expect(doStream).toHaveBeenCalledOnce();
@@ -169,6 +173,61 @@ describe("compaction summary call", () => {
       ]);
     },
   );
+
+  // https://github.com/vercel/eve/issues/5350
+  it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const turnCalls = vi.fn(async () => answer());
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("You help Alice.")) return await turnCalls();
+        throw new APICallError({
+          // eve's retry policy still retries the 429; this skips the AI SDK's slower inner retry.
+          isRetryable: false,
+          message: "Too Many Requests",
+          requestBodyValues: {},
+          statusCode: 429,
+          url: "https://provider.example/v1/messages",
+        });
+      },
+    });
+    const history: HarnessModelMessage[] = [
+      { content: `Read this brief. ${"lorem ipsum ".repeat(1_500)}`, kind: "user", role: "user" },
+      { content: "I read the brief.", role: "assistant" },
+    ];
+    const events: SessionEvent[] = [];
+
+    const result = await contextStorage.run(new ContextContainer(), async () => {
+      let stepped = await createToolLoopHarness({
+        handleEvent: foldingHandler(async (event) => void events.push(event)),
+        resolveModel: async () => model,
+        tools: new Map(),
+      })(
+        {
+          agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+          // Small enough that the long brief compacts before the turn's first model call.
+          compaction: { recentWindowSize: 1, threshold: 2_000 },
+          continuationToken: "http:rate-limited-compaction",
+          history,
+          sessionId: "rate-limited-compaction",
+        },
+        { message: "Which sources back the second claim?" },
+      );
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+      return stepped;
+    });
+
+    expect(turnCalls).not.toHaveBeenCalled();
+    expect(result.next).toBeNull();
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "failed", error: { code: "MODEL_CALL_FAILED" } },
+    });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    expect(result.session.history.slice(0, 2)).toEqual(history);
+  });
 
   it("ends before summarizing when protected request context alone exceeds the limit", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});

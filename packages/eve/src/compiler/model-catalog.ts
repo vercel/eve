@@ -5,78 +5,46 @@ import { z } from "#compiled/zod/index.js";
 import { AI_GATEWAY_MODELS_CATALOG_URL, vercelGatewayFetch } from "#internal/gateway.js";
 import {
   catalogModelSchema,
-  findCatalogModelByProviderModelId,
-  findCatalogModelBySlug,
-  modelCatalogLimitsFromProvider,
+  createModelMetadata,
+  lookupCatalogModelByProviderModelId,
+  lookupCatalogModelBySlug,
   modelCatalogResponseSchema,
-  normalizeCatalogModelId,
+  type ModelCatalog,
+  type ModelCatalogEntry,
+  type ModelMetadata,
 } from "#internal/model-catalog.js";
-const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
-const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION = 2;
-const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
-export {
-  catalogModelProviderSchema,
-  catalogModelSchema,
-  modelCatalogResponseSchema,
-} from "#internal/model-catalog.js";
-export type { CatalogModelProvider, CatalogModel } from "#internal/model-catalog.js";
 
-/**
- * Stable runtime model limits that eve can embed in compiled artifacts without
- * resolving provider metadata at runtime.
- */
-export type CompiledRuntimeModelLimits = z.infer<typeof compiledRuntimeModelLimitsSchema>;
+const MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
+const MODEL_CATALOG_CACHE_VERSION = 2;
+const MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
+// A network that drops packets must not hang a build that may not need the catalog at all.
+const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000;
 
-const compiledRuntimeModelLimitsSchema = z
-  .object({
-    contextWindowTokens: z.number().int().positive(),
-    maxOutputTokens: z.number().int().positive().optional(),
-  })
-  .strict();
-
-const compiledRuntimeModelCatalogCacheSchema = z
+const modelCatalogCacheSchema = z
   .object({
     fetchedAt: z.string(),
-    kind: z.literal(COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND),
+    kind: z.literal(MODEL_CATALOG_CACHE_KIND),
     models: z.array(catalogModelSchema),
     providerAliases: z.record(z.string(), z.string()),
-    version: z.literal(COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION),
+    version: z.literal(MODEL_CATALOG_CACHE_VERSION),
   })
   .strict();
 
-const builtInCompiledRuntimeModelLimitsById = new Map<string, CompiledRuntimeModelLimits>([
-  [
-    "anthropic/claude-opus-4.7",
-    {
-      contextWindowTokens: 200_000,
-      maxOutputTokens: 32_000,
-    },
-  ],
-  [
-    "openai/gpt-5.4",
-    {
-      contextWindowTokens: 400_000,
-      maxOutputTokens: 128_000,
-    },
-  ],
-  [
-    "openai/gpt-5.4-mini",
-    {
-      contextWindowTokens: 400_000,
-      maxOutputTokens: 128_000,
-    },
-  ],
-]);
+type ModelCatalogCache = z.infer<typeof modelCatalogCacheSchema>;
 
 /**
- * Loader that resolves compile-time model limits for one application build.
+ * Build-time reader of the AI Gateway model catalog. A build reads the catalog through a
+ * short-lived disk cache, resolves its static models from it, and bakes the snapshot that
+ * runtime model selections use into the compiled artifacts.
  */
 export interface CompiledRuntimeModelCatalogLoader {
-  getModelLimits(modelId: string): Promise<CompiledRuntimeModelLimits | null>;
+  getModelLimits(modelId: string): Promise<ModelCatalogEntry | null>;
   getByProviderModelId(
     provider: string,
     providerModelId: string,
-  ): Promise<{ slug: string; limits: CompiledRuntimeModelLimits } | null>;
+  ): Promise<ModelCatalogEntry | null>;
+  /** The snapshot this build ships; empty, with `fetchedAt: null`, when the catalog is unavailable. */
+  loadModelMetadata(): Promise<ModelMetadata>;
 }
 
 /**
@@ -94,16 +62,16 @@ export function resolveCompiledRuntimeModelCatalogCachePath(appRoot: string): st
 export function createCompiledRuntimeModelCatalogLoader(
   appRoot: string,
 ): CompiledRuntimeModelCatalogLoader {
-  let cachedCatalogPromise: Promise<CompiledRuntimeModelCatalogCache | null> | null = null;
+  let cachedCatalogPromise: Promise<ModelCatalogCache | null> | null = null;
   let fetchedCatalogError: unknown = null;
-  let fetchedCatalogPromise: Promise<CompiledRuntimeModelCatalogCache> | null = null;
+  let fetchedCatalogPromise: Promise<ModelCatalogCache> | null = null;
 
-  const getCachedCatalog = async (): Promise<CompiledRuntimeModelCatalogCache | null> => {
+  const getCachedCatalog = async (): Promise<ModelCatalogCache | null> => {
     cachedCatalogPromise ??= readModelCatalogCache(appRoot);
     return await cachedCatalogPromise;
   };
 
-  const getFetchedCatalog = async (): Promise<CompiledRuntimeModelCatalogCache> => {
+  const getFetchedCatalog = async (): Promise<ModelCatalogCache> => {
     if (fetchedCatalogError !== null) {
       throw fetchedCatalogError;
     }
@@ -125,9 +93,9 @@ export function createCompiledRuntimeModelCatalogLoader(
     }
   };
 
-  const resolveModelsFromCacheOrFetch = async (options?: {
+  const resolveCatalog = async (options?: {
     forceRefresh?: boolean;
-  }): Promise<CompiledRuntimeModelCatalogCache | null> => {
+  }): Promise<ModelCatalogCache> => {
     const cachedCatalog = await getCachedCatalog();
 
     if (options?.forceRefresh !== true && cachedCatalog !== null && isCacheFresh(cachedCatalog)) {
@@ -144,76 +112,36 @@ export function createCompiledRuntimeModelCatalogLoader(
     }
   };
 
+  // A fresh cache can predate a newly published model, so a miss reads the catalog once more.
+  const lookup = async (
+    find: (catalog: ModelCatalog) => ModelCatalogEntry | null,
+  ): Promise<ModelCatalogEntry | null> =>
+    find(await resolveCatalog()) ?? find(await resolveCatalog({ forceRefresh: true }));
+
   return {
-    async getModelLimits(modelId) {
-      const builtInLimits =
-        builtInCompiledRuntimeModelLimitsById.get(modelId) ??
-        builtInCompiledRuntimeModelLimitsById.get(normalizeCatalogModelId(modelId));
-      if (builtInLimits !== undefined) {
-        return builtInLimits;
+    getModelLimits: async (modelId) =>
+      await lookup((catalog) => lookupCatalogModelBySlug(catalog, modelId)),
+
+    getByProviderModelId: async (provider, providerModelId) =>
+      await lookup((catalog) =>
+        lookupCatalogModelByProviderModelId(catalog, provider, providerModelId),
+      ),
+
+    async loadModelMetadata() {
+      try {
+        const catalog = await resolveCatalog();
+        return createModelMetadata({ catalog, fetchedAt: catalog.fetchedAt });
+      } catch {
+        return createModelMetadata(null);
       }
-
-      let resolved = await resolveModelsFromCacheOrFetch();
-      if (resolved === null) return null;
-
-      let model = findCatalogModelBySlug(resolved.models, modelId);
-      if (model === undefined) {
-        resolved = await resolveModelsFromCacheOrFetch({ forceRefresh: true });
-        if (resolved === null) return null;
-        model = findCatalogModelBySlug(resolved.models, modelId);
-      }
-
-      if (model !== undefined) {
-        for (const provider of model.providers) {
-          const limits = modelCatalogLimitsFromProvider(provider);
-          if (limits !== null) {
-            return limits;
-          }
-        }
-      }
-
-      return null;
-    },
-
-    async getByProviderModelId(provider, providerModelId) {
-      let resolved = await resolveModelsFromCacheOrFetch();
-      if (resolved === null) return null;
-
-      let match = findCatalogModelByProviderModelId({
-        models: resolved.models,
-        provider,
-        providerAliases: resolved.providerAliases,
-        providerModelId,
-      });
-      if (match === null) {
-        resolved = await resolveModelsFromCacheOrFetch({ forceRefresh: true });
-        if (resolved === null) return null;
-        match = findCatalogModelByProviderModelId({
-          models: resolved.models,
-          provider,
-          providerAliases: resolved.providerAliases,
-          providerModelId,
-        });
-      }
-
-      if (match !== null) {
-        const limits = modelCatalogLimitsFromProvider(match.provider);
-        if (limits !== null) {
-          return { slug: match.model.slug, limits };
-        }
-      }
-
-      return null;
     },
   };
 }
 
-type CompiledRuntimeModelCatalogCache = z.infer<typeof compiledRuntimeModelCatalogCacheSchema>;
-
-async function fetchAndPersistModelCatalog(
-  appRoot: string,
-): Promise<CompiledRuntimeModelCatalogCache> {
-  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL);
+async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalogCache> {
+  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, {
+    signal: AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS),
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -227,12 +155,12 @@ async function fetchAndPersistModelCatalog(
     throw new Error("AI Gateway model catalog response did not match the expected schema.");
   }
 
-  const cacheArtifact: CompiledRuntimeModelCatalogCache = {
+  const cacheArtifact: ModelCatalogCache = {
     fetchedAt: new Date().toISOString(),
-    kind: COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND,
+    kind: MODEL_CATALOG_CACHE_KIND,
     models: parsed.data.models,
     providerAliases: parsed.data.providerAliases,
-    version: COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION,
+    version: MODEL_CATALOG_CACHE_VERSION,
   };
 
   try {
@@ -246,30 +174,20 @@ async function fetchAndPersistModelCatalog(
   return cacheArtifact;
 }
 
-async function readModelCatalogCache(
-  appRoot: string,
-): Promise<CompiledRuntimeModelCatalogCache | null> {
+async function readModelCatalogCache(appRoot: string): Promise<ModelCatalogCache | null> {
   try {
     const cacheText = await readFile(resolveCompiledRuntimeModelCatalogCachePath(appRoot), "utf8");
-    const parsed = compiledRuntimeModelCatalogCacheSchema.safeParse(JSON.parse(cacheText));
+    const parsed = modelCatalogCacheSchema.safeParse(JSON.parse(cacheText));
     return parsed.success ? parsed.data : null;
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      typeof error.code === "string" &&
-      error.code === "ENOENT"
-    ) {
-      return null;
-    }
+  } catch {
     return null;
   }
 }
 
-function isCacheFresh(cache: CompiledRuntimeModelCatalogCache): boolean {
+function isCacheFresh(cache: ModelCatalogCache): boolean {
   const fetchedAt = Date.parse(cache.fetchedAt);
   if (!Number.isFinite(fetchedAt)) {
     return false;
   }
-  return Date.now() - fetchedAt <= COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS;
+  return Date.now() - fetchedAt <= MODEL_CATALOG_CACHE_TTL_MS;
 }

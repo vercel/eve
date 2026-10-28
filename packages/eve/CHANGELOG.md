@@ -1,5 +1,92 @@
 # eve
 
+## 0.85.0
+
+### Minor Changes
+
+- 24c6b9f: Client requests now reject redirects by default, including session writes and event streams. Update redirecting base URLs to their final destination, use `redirect: "manual"` to stop at redirects, or explicitly opt into `"follow"` only when every redirect destination is trusted.
+- c8328f8: Protected cross-project callbacks now require reciprocal Vercel Trusted Sources and an explicit `EVE_CALLBACK_TRUSTED_ORIGINS` allowlist on the remote deployment. Callback URLs no longer include the parent's deployment-wide bypass secret; listed origins instead receive the remote's short-lived OIDC credential.
+- 5cfec0e: Slack renderers can restyle approval, question, and budget prompt cards with a new `interactionCard(card, next)` hook, while eve keeps routing, batching, action IDs, and card updates. Cards now update from the session for every request kind, so a question answered by a typed reply or withdrawn, or a settled budget prompt, no longer keeps live buttons.
+  
+  Breaking changes:
+  
+  - `SlackChannelState.pendingApprovalCards` is replaced by `interactionCards`. Cards posted before the upgrade keep their buttons.
+  - `SlackTaskCard` is renamed to `SlackCardMessage`, which both `taskCard` and `interactionCard` return.
+  - Clicking a question no longer rewrites its card from the webhook. The buttons stay until the session admits the answer, and apps that post eve's controls themselves no longer get that rewrite.
+  - An approval's buttons disappear once its answer is admitted, so a later click can't change it. A denied approval reads **Deny** instead of **Cancel**, and a direct-message request's thread note reports the same outcome as its card.
+
+### Patch Changes
+
+- f20a7a1: Bind native Teams activities to the verified Bot Connector token's service URL before dispatch. Connector requests require HTTPS and reject redirects, keeping bearer credentials on the validated destination.
+- 4f290a7: Sessions whose deployment runs eve 0.69 through 0.83 now move to a v27 deployment the next time they receive a message while idle, or earlier when a channel prepares them for the next message, instead of staying on their original deployment until they time out. eve compacts the earlier conversation as the session moves, so the model continues from a summary; the stored transcript stays intact, and new turns continue after it. Remembered tool approvals and usage limits start over.
+- 0553a67: Keep continuation capabilities out of session lookup and child-interaction failure logs, including capability values embedded in error messages and causes. Failure diagnostics retain correlation fields and non-secret error details.
+- e54f078: Render Teams mention display names and fallback IDs as literal text, preserving names that contain ampersands or angle brackets without changing mention identity.
+- ba52da4: Remove the deprecated internal setup type alias `RunPnpmOptions`. Setup tooling should use `RunPackageManagerOptions`; package-manager command behavior is unchanged.
+- 5b8a34b: `to(channel, target).send()`, Slack's `onEvent` `ctx.send()`, dynamic schedules' `to().send()`, and channel `receive` hooks now accept the same options as `from(address).send()`, including `history`, `idempotencyKey`, and `title`. Slack derives a threadless target's session from `idempotencyKey`, and a dynamic schedule's keyed send reaches the session its earlier attempt started, so a retried send no longer starts a second thread or session.
+- 6ea94da: Set `codeChannels: true` on `slackChannel()` to serve Slack code channels as one session per channel. The agent answers un-mentioned messages, replies top-level or in the thread a person wrote in, and follows Slack's session status and stop. The option also adds the code channel scopes and events to the app manifest. A code channel session has no thread: `threadTs` is empty or `null`, and `ctx.slack.codeChannel` marks it. Address its session with `{ channelId, codeChannel: true }` in `onEvent` targets, or with `slackCodeChannelContinuationToken(channelId)`.
+  
+  Two changes also reach agents that don't enable code channels: a cancelled turn now clears the Slack thread status by default, and `SlackSessionTarget` is now a union, so code that reads `target.threadTs` must handle the `{ channelId, codeChannel: true }` variant. `SlackHandle` also gains a required `codeChannel` field, which affects code that builds a handle by hand.
+- 2764e1e: Add `openCodeChannel(ctx, slack, message, { name })` to `eve/channels/slack`, which a tool calls to move the Slack conversation it was called from into a new Slack code channel and continue the work there with the conversation so far. Wrap it in your own tool with your own description and inputs, and pass your Slack channel. It finds the conversation from `ctx.channel`, so it works when message hooks return their own auth. To write your own variant, Slack receive targets accept `codeChannel`. Message hooks can open a code channel without the model through `ctx.openCodeChannel()`.
+- cb14c32: Reject framework-owned adapter attachment references in HTTP messages and restrict Linq attachment downloads to bounded public HTTPS destinations. Thanks to HackerOne researcher ryota for reporting the attachment-reference boundary issue.
+- 412b077: Tools can start or reach sessions on the agent's channels with `ctx.to(channel, target).send(message, options)`, the same call route handlers and schedules use, such as forking a conversation into a new Slack thread. Ordinary tools call it directly, and workflow tools call it in a `"use step"` helper. Pass `` idempotencyKey: `${ctx.session.id}:${ctx.callId}` `` so a retried call reaches the same session once. `ctx.to()` throws in a subagent, a root copy, or a remote agent call. Tools also get `ctx.channel`, the calling session's channel `kind`, `continuationToken`, and `metadata`, as hooks and dynamic resolvers read it.
+
+## 0.84.1
+
+### Patch Changes
+
+- 41916a5: Dynamic models, dynamic subagent configs, and `ctx.agent(name, { model })` overrides now read context windows from the AI Gateway model catalog recorded at build time instead of downloading it at runtime; a model that catalog doesn't list fails until you return `modelContextWindowTokens` or rebuild. Builds no longer carry built-in limits for `anthropic/claude-opus-4.7`, `openai/gpt-5.4`, and `openai/gpt-5.4-mini`, so a static model needs the catalog, a cached copy, or `modelContextWindowTokens` to compile offline.
+- b322096: A compaction that fails during a turn, for example on a provider 429 that outlasts its retries, now fails that turn with `MODEL_CALL_FAILED` and leaves the session waiting with its history uncompacted. Previously the error escaped the turn step, so eve replayed the step and then ended the session. Thanks @gshost1 for the report and reproduction in #5350.
+- 4276727: Messages a route forwards with `ctx.to()` now carry the deployment and request that accepted them, so an idle session reached that way hands off to the new deployment like one reached with `from()`. Thanks @haydenbleasel for reporting this in #5408.
+- bea10fd: Model calls that AI Gateway rejects with a 402 because it temporarily throttled the credit balance check now retry with backoff. They previously reported "AI Gateway credit balance exhausted", told users to add credits, and parked the session without retrying.
+- 105bf60: `eve init apps/my-agent` now creates missing parent directories such as `apps/` instead of failing with `ENOENT` from `mkdtemp`. Thanks @otakusboy for reporting this in #5422.
+- 5bb6d43: Nuxt apps that call the auto-imported `useEveAgent()` now hydrate in `nuxt dev`. The `eve/nuxt` module pre-bundles `eve/vue` with Vite, which previously served its CommonJS dependencies to the browser unbundled and failed with `does not provide an export named 'getContext'`.
+- cb1db12: Sending a message from a web client served over plain HTTP on a host other than `localhost` no longer fails with `crypto.randomUUID is not a function`. Thanks @KingAmo for reporting this in #5415.
+- 5458bc4: Reuse signed inbox routing information between client turns when the Workflow SDK and adapter support guarded resumes and `EVE_INBOX_HANDLE_SECRET` is configured. Refresh stale routing after a confirmed refusal without retrying uncertain deliveries.
+- a5328b4: `sandbox.spawn({ stdin: true })` returns a process with a writable `stdin` stream; closing it sends EOF. The Vercel and Docker sandboxes support it, and just-bash and custom providers without stdin support reject the call.
+- 66103be: `eve dev` on Windows no longer opens a console window for each Docker command, dev build process, or optional package install. Thanks @satish860 for reporting this in #5291.
+- 040519a: The browser client no longer triggers a Content Security Policy `eval` violation on pages whose `script-src` omits `'unsafe-eval'`. eve's bundled Zod now skips its `Function("")` probe and always uses its interpreted parser. Your app's own Zod and `z.config()` are not affected. Thanks @wasimxyz for reporting this in #5365.
+
+## 0.84.0
+
+### Minor Changes
+
+- 4a4951e: Tools and connections now share the `Approval` policy contract; `approvalKey` and `ApprovalContext.approvedTools` are removed. `once()` remembers the latest approval or denial per resolved tool for the session; custom policies must return its decision unchanged to reuse or record consent.
+- 4a4951e: Session commands now return `Delivery` receipts with independent `stream()` and `result()` reads; the eve HTTP message route accepts `idempotencyKey` for retries within a session's recent-key window. Session creation returns `{ session, delivery }` when a message is supplied and `{ session }` otherwise; import shared contracts from `eve/sessions`.
+- 4a4951e: Public APIs now use eve-owned contracts for history, decisions, channel integrations, and sandboxes; legacy aliases and internal helpers are no longer exported. `decide` takes `signal` instead of `abortSignal` and returns only `answers` and `usage`; update other imports using the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events).
+- 4a4951e: Define dynamic capabilities with `defineDynamic(ctx => value)` instead of lifecycle maps, and use ordinary functions and schemas instead of `defineDurableCallback` and `defineDurableSchema`. Cache external JSON observations with `ctx.memo(key, fn)`.
+- 4a4951e: Extension distributions now record the eve version they were built with and a distribution generation instead of per-capability epochs. Extensions built with the old epoch-based manifest must be rebuilt with this release and republished; eve rejects old manifests with rebuild guidance before loading extension code.
+- 4a4951e: Recalled memory is supplied to the model outside durable conversation history, and dynamic user instructions are added only when their content changes. Memory no longer supports compaction recall or `visibility`, and compaction fails if memory capture fails.
+- 4a4951e: Sends, channels, and schedules now accept eve-owned `MessageContent`; images use file parts, and Chat SDK's `messageToUserContent` is renamed to `messageContentOf`. File parts sent through `ctx.agent().send()` must contain HTTP(S) URLs, not inline bytes or base64.
+- 4a4951e: `SessionStore` replaces `EveAgentStore`, and clients and frontend bindings use `baseUrl` instead of `host`. Frontend bindings expose `view`, `messages`, and `agents` directly with native tool and interaction parts; use `followWhile(view)` instead of `followIdle`, and `activeTurn(view)` rather than busy status for Stop controls.
+- 4a4951e: `followAgents: true` now observes child sessions recursively, including workflow-created children, with predicate selection, bounded traversal, and per-session positions and progress. `SessionStore.observe()` supports headless capture; child readers require source-positioned opening events to verify each hop through its parent.
+- 69346ff: Remote agents no longer serve callers on eve 0.66 through 0.68 (remote agent protocol 1), and callers no longer accept remote agents on those releases. Calls in either direction now fail at start with `REMOTE_AGENT_PROTOCOL_MISMATCH`; upgrade both deployments to the same eve release. The `/eve/v1/task-input/:token` route is gone. It accepted unauthenticated answers that settled approvals and added turn input as the session's current user.
+- 4a4951e: Replace `eve remote invoke` and its resumable JSON workflow with `eve remote connect --print <prompt>` for one-shot requests that print the final assistant text and exit. Interactive `eve remote connect` is unchanged; use `eve/client` for scripted multi-turn sessions and input responses.
+- 8efe110: eve's default sandbox image is now tagged by its Dockerfile contents instead of the eve version, so upgrading eve reuses existing sandbox templates unless the image itself changed. Expect one template rebuild on the first upgrade to this release.
+  
+  The default sandbox image no longer includes pnpm or pip, which makes it smaller. Install them in your sandbox `prepare` callback when your agent needs them: run `npm install -g pnpm` for pnpm, and use a Python virtual environment for pip.
+- 4a4951e: The eve HTTP channel now rejects unknown top-level fields on session creation, message, and control requests with HTTP 400 and a list of accepted fields. Correct unsupported options and misspellings instead of relying on them being ignored.
+- 4a4951e: Channel delivery hooks now receive typed `ChannelDelivery` payloads and return replacements; use `channel.state` for state changes. `kindHint` is removed; use path-derived `channel:<name>` identities, `audience()` visibility classification, and the renamed CORS options described in the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events).
+- 4a4951e: Slack's `renderers.taskCard` now receives `TaskCard` instead of `TaskCardView`; use `callState` and `callLabel` from `eve/events` for call rendering. Teams channel state replaces `pendingAuthActivityId` with `pendingAuthActivityIds`.
+- 4a4951e: Evals now use v27 facts and interaction projections, with call matchers such as `turn.waitForToolCall()` and renamed helpers such as `calledAgent()` and `awaitingInput()`. The `remoteUrl` field and matcher are removed; use the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events) to migrate legacy assertions.
+- 4a4951e: Hooks and channel handlers now receive v27 facts with coordinates in `event.scope` and session state in `ctx.view`. Update channel handlers to `(event, ctx)` with `ctx.channel`, and migrate instrumentation providers to `InstrumentationEvent<K>` and the new lifecycle names.
+- 4a4951e: Approvals, questions, sign-ins, and budget prompts now share the `Interaction` model, with answers shaped as `{ interactionId, optionId?, text? }` and approval choices `approve` / `deny`. Turns pause only for human input, and cancelling an agent task retires it.
+- 4a4951e: Remote agents now use protocol 3 and can still relay approvals, questions, and sign-ins from protocol-2 children. Upgrade callers before their remote agents, or both together: protocol-3 children cannot relay human-input requests to older callers.
+- 4a4951e: Session streams now use v27 facts, line-based cursors, and immutable `SessionView` snapshots queried through `eve/events`. Checkpoints require version 18; keep older sessions on their original deployments and follow the [v27 upgrade guide](https://eve.dev/docs/concepts/upgrade-to-v27-events) before updating event consumers or restoring persisted history.
+
+### Patch Changes
+
+- 4a4951e: Deliver concurrent messages to the same `ctx.agent()` session in send order, preventing out-of-order delivery from leaving calls waiting indefinitely for a reply.
+- 4a4951e: Parent session streams now record accepted child deliveries as `child.sent`; use `agentCallActivity(state, callId)` from `eve/client` to inspect per-call child activity, including shared turns.
+- 4a4951e: An unhandled hook error now fails the running turn instead of only being logged. Cancellation requested with `ctx.cancel()` takes effect only if the handler returns successfully.
+- caa9172: The bundled `eve dev` self-modification subagent is now offered only to the local developer: sessions authenticated by `localDev()` or by the linked project's Vercel development token. Chat users and principals from authored authenticators, including HTTP Basic operators, no longer get the editor and must edit files directly; there is no local authorization override, and callers forwarded by a same-machine tunnel can still get the editor if the channel uses `localDev()`.
+- 4a4951e: Remote child sessions no longer fail solely because the parent has already consumed their result or stopped waiting for it, such as after a lost acknowledgement.
+- 4a4951e: Remote session stream proxies now reject unexpected content types and prevent upstream responses from being served as executable content. Error responses with unexpected content types are replaced with generic JSON while preserving the error status.
+- e7453f1: Session callbacks now reach only public addresses. The eve channel rejects callback URLs with a non-HTTP scheme or a loopback host, and callback delivery refuses to connect when a callback hostname resolves to a loopback, private, link-local, or reserved address. Loopback callbacks still work on local development servers (`eve dev` and `vercel dev`).
+- 4a4951e: Built-in channels keep sign-in links and codes out of shared messages; when private delivery is unavailable, they show a credential-free status instead.
+- 4a4951e: Interrupted durable steps recover from recorded outcomes without automatically replaying observed tool calls. Exhausted step retries fail the turn without closing the session, but external effects with unrecorded outcomes still require application-level idempotency.
+- 4a4951e: v27 deployments can read v26 session history through the v27 client and stream APIs. Convert previously saved legacy events with `convertLegacyEvents` from `eve/internal/legacy-events`, a temporary migration aid.
+- 4a4951e: `eve dev` now validates session event lines before writing them and rejects lines larger than 8 MiB. Set `EVE_CHECK_SESSION_EVENTS=0` to disable validation or `=1` to enable it outside development.
+
 ## 0.83.3
 
 ### Patch Changes

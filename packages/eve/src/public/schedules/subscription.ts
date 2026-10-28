@@ -1,3 +1,4 @@
+import type { SessionSendOptions } from "#channel/session.js";
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { SessionSchedule } from "#context/session-schedule.js";
@@ -196,7 +197,20 @@ export interface ScheduleClient<TPayload> {
 export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
-) => { send(message: MessageContent): Promise<Delivery> };
+) => {
+  /**
+   * Accepts the `to().send()` options that apply to a fresh session. `auth` is
+   * the schedule's creator. A send never reaches a session the schedule didn't
+   * start, so `turnPolicy` has nothing to act on. A send with an
+   * `idempotencyKey` reaches the session an earlier send from this schedule
+   * with the same key and target started, so a retried callback whose key
+   * includes `occurrence.executionId` doesn't start a second session.
+   */
+  send(
+    message: MessageContent,
+    options?: Omit<SessionSendOptions, "auth" | "turnPolicy">,
+  ): Promise<Delivery>;
+};
 
 type SchedulePayloadApproval<TPrepared> =
   | ((

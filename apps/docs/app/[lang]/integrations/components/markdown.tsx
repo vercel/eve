@@ -23,14 +23,20 @@ interface MarkdownProps {
  * router and external links with a plain anchor. This overrides Streamdown's
  * default anchor, whose `linkSafety` treats every link — internal ones
  * included — as external and interrupts navigation with a confirmation modal.
+ * Fragment links drop the `target="_blank"` Streamdown's link hardening adds
+ * to every link, so in-page anchors scroll the current tab.
  */
 const components: Partial<Components> = {
-  a: ({ href, ...props }) =>
-    typeof href === "string" && href.startsWith("/") ? (
+  a: ({ href, ...props }) => {
+    if (typeof href === "string" && href.startsWith("#")) {
+      return <a {...props} href={href} rel={undefined} target={undefined} />;
+    }
+    return typeof href === "string" && href.startsWith("/") ? (
       <Link href={href} {...props} prefetch={true} />
     ) : (
       <a href={href} rel="noreferrer" target="_blank" {...props} />
-    ),
+    );
+  },
 };
 
 /**

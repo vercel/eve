@@ -647,6 +647,74 @@ describe("reactions", () => {
     expect(log).not.toContain("call:turn");
   }, 90_000);
 
+  it("resolves a dynamic model's context window from the build without calling AI Gateway", async () => {
+    const log: string[] = [];
+    const started: string[] = [];
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async () => {
+          log.push("call:turn");
+          return textStreamResult("Done.");
+        },
+        modelId: "gpt-5.4",
+        provider: "openai.responses",
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({ model: defineDynamicModel(() => model) } as never),
+        name: "build-metadata",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "model.started": (event: { readonly data: { readonly modelId: string } }) => {
+                  started.push(event.data.modelId);
+                },
+                "turn.settled": () => {
+                  log.push("turn:settled");
+                },
+              },
+            } as never),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Alice asks for a short status update." },
+            serializedContext: buildSerializedContext({
+              auth: ALICE,
+              channelKind: "http",
+              continuationToken: "http:build-metadata",
+            }),
+          },
+        ]);
+        try {
+          await until(log, "turn:settled", 1);
+        } finally {
+          await run.cancel().catch(() => {});
+        }
+      });
+
+      expect(started).toEqual(["openai/gpt-5.4"]);
+      expect(fetchSpy.mock.calls.map(([input]) => String(input))).not.toContainEqual(
+        expect.stringContaining("ai-gateway.vercel.sh"),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }, 90_000);
+
   describe("across deployments", () => {
     afterEach(() => {
       vi.unstubAllEnvs();

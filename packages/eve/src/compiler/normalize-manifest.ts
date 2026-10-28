@@ -130,7 +130,7 @@ export async function compileAgentManifest(
   const registries = [frameworkAgentSourceRegistry, ...(options.sourceRegistries ?? [])];
   assertUniqueRegistryIds(registries);
   const context: ManifestCompileContext = {
-    modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
+    modelCatalog: options.modelCatalog ?? createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
     registries,
   };
   const diagnostics = options.diagnostics ?? [];

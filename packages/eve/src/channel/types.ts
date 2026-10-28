@@ -226,7 +226,12 @@ export function controlCommand<
 }
 
 export type SessionSendCommandResult =
-  | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
+  | {
+      readonly status: "accepted";
+      readonly sessionId: string;
+      readonly deliveryId?: string;
+      readonly inbox?: string;
+    }
   | {
       readonly status: "session_not_active";
       /** The workflow exists but its inbox is not yet available; no delivery was accepted. */
@@ -262,6 +267,7 @@ export interface DispatchContinuationInput<TCommand extends SessionCommand = Ses
 }
 
 export interface DispatchSessionInput<TCommand extends SessionCommand = SessionCommand> {
+  readonly inbox?: string;
   readonly command: TCommand;
   readonly sessionId: string;
 }

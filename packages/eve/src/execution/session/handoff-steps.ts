@@ -42,6 +42,7 @@ import {
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
+import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
 
 const log = createLogger("execution.handoff");
 
@@ -135,7 +136,7 @@ export type SessionCheckpointValidation =
 export async function prepareSuccessorStep(input: {
   /** Absent for version 1 sources, which predate the field. */
   readonly handoffVersion: number | undefined;
-  readonly migration: SessionCheckpointMigration;
+  readonly migration: Exclude<SessionCheckpointMigration, { readonly kind: "busy" }>;
   readonly sessionId: string;
   /** Version 3: the run that still holds the session and the addresses it hands over. */
   readonly source?: { readonly runId: string; readonly hookTokens: readonly string[] };
@@ -151,13 +152,20 @@ export async function prepareSuccessorStep(input: {
     return { kind: "incompatible", reason: "checkpoint-version" };
   };
   if (migration.kind === "incompatible") return unreadable(migration.detail);
-  const { checkpoint } = migration;
+  // An owner before v27 remembers only `incompatible` targets; any other refusal it would retry
+  // on every delivery, though the checkpoint never changes.
+  const refuse = (detail: string): SessionCheckpointValidation => {
+    if (migration.kind === "pre-v27") return unreadable(detail);
+    throw new Error(detail);
+  };
+  const checkpoint =
+    migration.kind === "pre-v27" ? migration.imported.checkpoint : migration.checkpoint;
   const timeout = checkpoint.sessionTimeoutMs;
   if (
     timeout !== false &&
     (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 0)
   )
-    throw new Error("Session checkpoint contains an invalid timeout duration.");
+    return refuse("Session checkpoint contains an invalid timeout duration.");
   let context: Awaited<ReturnType<typeof deserializeContext>>;
   try {
     context = await deserializeContext(checkpoint.serializedContext);
@@ -178,7 +186,7 @@ export async function prepareSuccessorStep(input: {
       getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox,
     );
     if (definition.kind !== "independent") {
-      throw new Error("Session checkpoint sandbox has no resolved provider.");
+      return refuse("Session checkpoint sandbox has no resolved provider.");
     }
     const provider = getSandboxEnvironmentRuntime(definition.environment);
     const resolved = resolvePersistedSandboxSessionState(sandboxState, provider);
@@ -186,11 +194,11 @@ export async function prepareSuccessorStep(input: {
       resolved?.providerName !== provider.providerName ||
       resolved.stateProtocolVersion !== provider.stateProtocolVersion
     ) {
-      throw new Error("Session checkpoint sandbox provider state is incompatible.");
+      return refuse("Session checkpoint sandbox provider state is incompatible.");
     }
   }
   if (!isSessionStateIdleForHandoff(checkpoint)) {
-    throw new Error("Session checkpoint contains pending work and cannot be handed off.");
+    return refuse("Session checkpoint contains pending work and cannot be handed off.");
   }
   if (input.source !== undefined && !(await holdsEveryAddress(input.source))) {
     return { kind: "source-gone" };
@@ -204,6 +212,9 @@ export async function prepareSuccessorStep(input: {
       sessionId: input.sessionId,
     });
   }
+  // This line shows when no owner before v27 remains, which is when that import can go.
+  if (migration.kind === "pre-v27")
+    log.info("session handoff accepted from an owner before v27", { sessionId: input.sessionId });
   return { kind: "valid" };
 }
 
@@ -345,4 +356,12 @@ export async function signalSessionAnchorStep(input: {
 }): Promise<void> {
   "use step";
   await resumeHook(input.token, input.result);
+}
+
+/** The position of the session stream's last line, or `-1` before the first. */
+export async function readSessionStreamTailStep(input: {
+  readonly sessionId: string;
+}): Promise<number> {
+  "use step";
+  return await readSessionStreamTailIndex(input.sessionId);
 }

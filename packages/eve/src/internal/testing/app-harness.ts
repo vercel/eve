@@ -245,13 +245,14 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     });
   }
 
-  const { manifest, moduleMap } = await compileFromMemory(compileInput);
+  const { manifest, modelMetadata, moduleMap } = await compileFromMemory(compileInput);
   const session = createRuntimeSession(descriptor.agent?.name ?? DEFAULT_AGENT_NAME);
   const tools = descriptor.tools ?? [];
 
   function install(): void {
     installBundledCompiledArtifacts({
       manifest,
+      modelMetadata,
       moduleMap,
       // What `eve build` would record for the root sandbox, so a session that opens it (to
       // stage an attachment, say) finds a provisioned template.

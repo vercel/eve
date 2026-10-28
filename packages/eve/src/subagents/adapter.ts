@@ -5,6 +5,7 @@ import { relayedInteractionEvents } from "#harness/interaction-relay.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
+import { formatCapabilityError } from "#internal/capability-error.js";
 
 const log = createLogger("execution.subagent-adapter");
 
@@ -79,9 +80,11 @@ async function forwardToParentStep(input: {
       childSessionId: input.hookPayload.childSessionId,
       errorId: createErrorId(),
       eventTypes: input.hookPayload.events.map((fact) => fact.type),
-      parentContinuationToken: input.parentContinuationToken,
       subagentName: input.hookPayload.subagentName,
-      error,
+      error: formatCapabilityError(error, [
+        input.parentContinuationToken,
+        input.hookPayload.route?.childContinuationToken,
+      ]),
     });
     throw error;
   }

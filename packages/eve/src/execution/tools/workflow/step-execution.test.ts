@@ -138,6 +138,8 @@ function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext 
     baseUrl: "https://agent.example",
     token: `callback-${user}`,
     authorizationResults: [],
+    delegated: false,
+    channel: { kind: "unknown", metadata: {} },
     abortSignal: new AbortController().signal,
     session: {
       id: "session-1",

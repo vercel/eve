@@ -161,7 +161,7 @@ export async function openAgentSessionStep(
   const runtimeOverrides =
     input.model === undefined
       ? undefined
-      : await normalizeRuntimeOverrides(input.name, input.model);
+      : await normalizeRuntimeOverrides({ bundle, model: input.model, name: input.name });
   const start = {
     auth: input.auth,
     bundle,
@@ -177,15 +177,20 @@ export async function openAgentSessionStep(
   return await agentDelegation.resume({ context, agentName: action.name }, execute);
 }
 
-async function normalizeRuntimeOverrides(
-  name: string,
-  model: AgentSessionModelSelection,
-): Promise<AgentSessionRuntimeOverrides> {
+async function normalizeRuntimeOverrides({
+  bundle,
+  model,
+  name,
+}: {
+  readonly bundle: CompiledBundle;
+  readonly model: AgentSessionModelSelection;
+  readonly name: string;
+}): Promise<AgentSessionRuntimeOverrides> {
   try {
     const selection = await resolveRuntimeModelSelection({
       durability: "durable",
+      modelMetadata: bundle.modelMetadata,
       selection: model,
-      state: new ContextContainer(),
     });
     return { model: selection.reference };
   } catch (error) {
