@@ -365,7 +365,7 @@ const CONVERSATIONS: {
 }[] = [
   {
     id: "slack",
-    label: "Software factory",
+    label: "Software Factory",
     logo: (className) => logos.slack({ "aria-hidden": true, className }),
     beats: SLACK_BEATS,
   },
