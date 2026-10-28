@@ -91,7 +91,7 @@ const BRAIN_ROWS = [
 ];
 
 const DANA: Author = { name: "Dana" };
-const BRAIN: Author = { name: "Company brain", icon: Brain };
+const BRAIN: Author = { name: "company-brain", icon: Brain };
 
 /**
  * How long each stage of the demo waits before it shows: Dana's question, the agent working,
@@ -123,7 +123,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
           time="9:41 AM"
         >
           <p>
-            <Mention>Company brain</Mention> how are repeat orders trending this quarter?
+            <Mention>company-brain</Mention> how are repeat orders trending this quarter?
           </p>
         </SlackMessage>
       ) : null}
