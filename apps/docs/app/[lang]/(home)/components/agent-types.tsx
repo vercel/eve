@@ -476,11 +476,10 @@ function WebAppClient() {
     >
       <div className="@container relative min-h-0 flex-1 p-3">
         {/* An orders dashboard in the skeleton style of "Own your agent UI": real heading and
-            figures, gray bars for everything else. The order rows fade out behind the chat, and
-            the KPI cards only show once the window is wide enough to keep them clear of it. */}
+            figures, gray bars for everything else. The KPI cards only show once the window is
+            wide enough to keep them clear of the chat. */}
         <div aria-hidden className="hidden select-none flex-col gap-2 sm:flex">
           <span className="font-medium text-[20px] text-gray-1000 leading-7">Orders</span>
-          <span className="h-3 w-1/2 rounded-[3px] bg-gray-200" />
           <span className="mt-1 hidden grid-cols-3 gap-2 @[20rem]:grid">
             {["1,284", "$48.2k", "96%"].map((metric) => (
               <span
@@ -491,14 +490,6 @@ function WebAppClient() {
                   {metric}
                 </span>
                 <span className="h-2 w-2/3 rounded-[3px] bg-gray-200" />
-              </span>
-            ))}
-          </span>
-          <span className="flex flex-col gap-2 [mask-image:linear-gradient(to_bottom,black,transparent)]">
-            {["w-1/2", "w-2/5", "w-3/5", "w-1/3"].map((width) => (
-              <span className="flex gap-2" key={width}>
-                <span className="h-3 w-10 shrink-0 rounded-[3px] bg-gray-200" />
-                <span className={`h-3 rounded-[3px] bg-gray-200 ${width}`} />
               </span>
             ))}
           </span>
