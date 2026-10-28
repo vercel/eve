@@ -128,10 +128,14 @@ function HarnessTools() {
 // The template thumbnail's window from vercel.com/docs, three times, back to front, each
 // covering the one behind it but for a sliver. Sizes are front's px values in `em` (1em =
 // 16px at a 350px frame), so the windows scale with the frame.
+// In % of the frame: each back window shows a `sliver` before the next covers it, and the
+// front one ends as far from the right edge as the first starts from the left.
+const windowWidth = 46;
+const sliver = 22;
 const APPS = [
-  { name: "SvelteKit", Logo: SiSvelte, left: "8%", back: true },
-  { name: "Nuxt", Logo: SiNuxt, left: "24%", back: true },
-  { name: "Next.js", Logo: SiNextdotjs, left: "40%", back: false },
+  { name: "SvelteKit", Logo: SiSvelte, left: 5, back: true },
+  { name: "Nuxt", Logo: SiNuxt, left: 5 + sliver, back: true },
+  { name: "Next.js", Logo: SiNextdotjs, left: 5 + 2 * sliver, back: false },
 ];
 
 function AgentUi() {
@@ -140,9 +144,9 @@ function AgentUi() {
       <div aria-hidden className="absolute inset-0 select-none text-[4.57cqw]">
         {APPS.map(({ Logo, back, left, name }) => (
           <div
-            className="absolute top-[17%] flex min-h-full w-[52%] flex-col gap-[0.625em] rounded-t-[0.625em] border border-gray-300 bg-background-100 px-[0.75em] pt-[0.25em]"
+            className="absolute top-[17%] flex min-h-full flex-col gap-[0.625em] rounded-t-[0.625em] border border-gray-300 bg-background-100 px-[0.75em] pt-[0.25em]"
             key={name}
-            style={{ left }}
+            style={{ left: `${left}%`, width: `${windowWidth}%` }}
           >
             <div className="flex h-[1em] items-center">
               <div className="mt-[0.25em] flex gap-[0.25em]">
@@ -161,11 +165,16 @@ function AgentUi() {
               <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
               <div className="mt-px h-[3.625em] shrink-0 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100" />
             </div>
-            {/* A back window fades, border and all, into the page across the sliver it shows
-                (31% of its width), so it's gone where the next window starts. Opaque rather
-                than a mask, which would show the window behind instead of the page. */}
+            {/* A back window fades, border and all, into the page across the sliver it shows,
+                so it's gone where the next window starts. Opaque rather than a mask, which
+                would show the window behind instead of the page. */}
             {back ? (
-              <span className="pointer-events-none absolute -inset-px rounded-t-[inherit] bg-[linear-gradient(to_right,transparent_8%,var(--ds-background-200)_31%)]" />
+              <span
+                className="pointer-events-none absolute -inset-px rounded-t-[inherit]"
+                style={{
+                  background: `linear-gradient(to right, transparent 8%, var(--ds-background-200) ${(sliver / windowWidth) * 100}%)`,
+                }}
+              />
             ) : null}
           </div>
         ))}
