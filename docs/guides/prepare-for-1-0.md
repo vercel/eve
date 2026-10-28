@@ -84,19 +84,6 @@ If both `agent/sandbox.ts` and `agent/sandbox/` exist, move the definition to `a
 
 A standalone `agent/sandbox.ts` remains supported. See [Sandbox layout](../sandbox#define-an-environment).
 
-## Declare the sandbox provider contract
-
-Custom providers must declare the provider contract version they target. `defineSandboxProvider()` throws when `contractVersion` is missing or unsupported:
-
-```diff
- export const AcmeSandbox = defineSandboxProvider({
-   name: "acme",
-+  contractVersion: 1,
-   environment(options) {
-```
-
-Built-in providers already set it. See [Declare the contract version](../sandbox/custom-providers#declare-the-contract-version).
-
 ## Move experimental imports
 
 Import workspace helpers from the experimental entry:
@@ -276,6 +263,6 @@ Model-effort `--reasoning` on `eve init` and `eve set model` is unchanged. `--as
 
 ## Check the resulting project
 
-Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it, and call `client.info()` if your clients use it. Test any proactive Slack messages, durable workflow waits, and custom sandbox providers your project defines.
+Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it, and call `client.info()` if your clients use it. Test any proactive Slack messages and durable workflow waits your project defines.
 
 Review [run-data retention](../agent-config#run-data-retention) before depending on a completed transcript remaining readable. This cleanup does not change the retention default: outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends. Backend support determines whether deletion occurs; the current override remains experimental.
