@@ -1,11 +1,11 @@
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
-import type { SlackSenderProfile } from "#public/channels/slack/sender-profiles.js";
+import type {
+  SlackSenderProfile,
+  SlackSenderProfiles,
+} from "#public/channels/slack/sender-profiles.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-
-/** Sender profiles keyed by Slack user id, from the `senderProfiles` option. */
-export type SlackSenderProfiles = ReadonlyMap<string, SlackSenderProfile>;
 
 interface SlackModelMessageInput {
   readonly botUserId?: string;

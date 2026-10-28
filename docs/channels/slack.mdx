@@ -274,8 +274,8 @@ sender_email: alice@example.com
 
 - `sender_name` is the sender's Slack display name, falling back to their real name.
 - `sender_email` appears only when Slack returns one, which needs the `users:read.email` scope.
-- Lookups are cached per workspace and user for an hour, including failed ones, so a missing scope costs one call per user, not one per message.
-- A failed lookup leaves both fields out and the message is still delivered.
+- Profiles are cached per workspace and user for an hour. Each Slack channel keeps its own cache.
+- A failed lookup leaves both fields out, the message is still delivered, and eve retries the lookup after a minute. A missing `users:read` scope is logged with a reinstall hint.
 
 The option adds the `users:read` and `users:read.email` scopes to the generated app manifest. If you manage the Slack app yourself, add them and reinstall the app. Sender emails become part of model context, session history, and traces, so leave the option off when the agent doesn't need them.
 

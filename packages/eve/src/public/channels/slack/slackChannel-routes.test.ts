@@ -13,7 +13,6 @@ import {
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
-import { clearSlackSenderProfileCache } from "#public/channels/slack/sender-profiles.js";
 import { slackChannel, type SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 const SIGNING_SECRET = "test-signing-secret";
@@ -31,7 +30,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  clearSlackSenderProfileCache();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
