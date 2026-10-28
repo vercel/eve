@@ -19,7 +19,7 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
-import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
+import { escapeSlackText, unescapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackInteractionCardParts } from "#public/channels/slack/renderers.js";
 import { type Answer, parseAnswer, type ValidatedAnswer } from "#shared/input.js";
@@ -344,7 +344,8 @@ export function buildFreeformModalView(input: {
   readonly metadata: HitlFreeformModalMetadata;
   readonly prompt?: string;
 }): Record<string, unknown> {
-  const title = input.prompt ? truncateModalTitle(input.prompt) : "Your answer";
+  // The title is plain_text, which Slack shows without decoding `&amp;`.
+  const title = input.prompt ? truncateModalTitle(unescapeSlackText(input.prompt)) : "Your answer";
   const promptBlocks = input.prompt
     ? [{ type: "section", text: { type: "mrkdwn", text: truncateSectionText(input.prompt) } }]
     : [];

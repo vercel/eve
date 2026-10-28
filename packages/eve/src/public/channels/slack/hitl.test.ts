@@ -583,6 +583,24 @@ describe("buildFreeformModalView", () => {
     expect(inputBlock?.element?.action_id).toBe(HITL_FREEFORM_MODAL_ACTION_ID);
   });
 
+  it("shows an escaped card prompt literally in the modal title and section", () => {
+    const view = buildFreeformModalView({
+      metadata: {
+        continuationToken: "slack:C01:1.0",
+        channelId: "C01",
+        threadTs: "1.0",
+        messageTs: "1.1",
+        requestId: "call_abc",
+      },
+      prompt: "Ship A &amp; B &lt;now&gt;?",
+    });
+
+    expect(view.title).toEqual({ type: "plain_text", text: "Ship A & B <now>?" });
+    expect((view.blocks as Array<{ text?: { text?: string } }>)[0]?.text?.text).toBe(
+      "Ship A &amp; B &lt;now&gt;?",
+    );
+  });
+
   it("truncates a long modal prompt to fit the section-text limit", () => {
     const longPrompt = "y".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 200);
     const view = buildFreeformModalView({

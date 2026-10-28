@@ -658,6 +658,28 @@ describe("Slack input request cards", () => {
     expect(neighbor).toEqual(posted.slice(2));
   });
 
+  it("shows a typed answer literally while crediting the person who gave it", async () => {
+    const { answer, ask, blocksOf, calls } = harness();
+    await ask({
+      ...freeformQuestion,
+      request: { ...freeformQuestion.request, prompt: "Scope & <!here>?" },
+    });
+
+    await answer("q_scope", { text: "<!channel> & <@U1>" });
+
+    const [update] = calls("chat.update");
+    expect(update?.body.text).toBe("Answered: &lt;!channel&gt; &amp; &lt;@U1&gt;");
+    expect(blocksOf(update)).toEqual([
+      {
+        text: {
+          text: "Scope &amp; &lt;!here&gt;?\n:white_check_mark: *&lt;!channel&gt; &amp; &lt;@U1&gt;* by <@U_BOB>",
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+    ]);
+  });
+
   it("withdraws two grouped approvals settled in one commit with one update", async () => {
     const { ask, blocksOf, calls, channel, commit } = harness();
     await ask(approval("a_one", "deploy"), approval("a_two", "migrate"));
