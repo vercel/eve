@@ -86,7 +86,8 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       (specifier === "workflow" || specifier.startsWith("workflow/"))
     ) {
       throw new Error(
-        `${input.filePath}: Import from \`eve/workflow\` (or \`eve/workflow/api\`) instead of "${specifier}".`,
+        `${input.filePath}: Import from \`eve/workflow\` (or \`eve/workflow/api\`) instead of "${specifier}". ` +
+          "Only documented exports are supported; other Workflow SDK subpaths and exports are not public eve APIs.",
       );
     }
   });
