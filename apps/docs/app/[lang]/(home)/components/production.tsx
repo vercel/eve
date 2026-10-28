@@ -22,7 +22,16 @@ import {
 import type { JSX, ReactNode } from "react";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "./control-visual";
+import {
+  FeatureCard,
+  GrayBadge,
+  Label,
+  RuledList,
+  ruledRow,
+  Visual,
+  pct,
+  view,
+} from "./control-visual";
 import { HomeSection } from "./section";
 
 // The visibility radar from vercel.com's enterprise page: a guard at the center, dashed rings,
@@ -31,9 +40,13 @@ import { HomeSection } from "./section";
 // chip at the bottom of the outer ring stays inside the frame.
 const radar = { x: 160, y: 90, guard: 32 };
 
-function ringPoint(r: number, degrees: number) {
+function ringPointAt(cx: number, cy: number, r: number, degrees: number) {
   const radians = (degrees * Math.PI) / 180;
-  return { x: radar.x + r * Math.cos(radians), y: radar.y + r * Math.sin(radians) };
+  return { x: cx + r * Math.cos(radians), y: cy + r * Math.sin(radians) };
+}
+
+function ringPoint(r: number, degrees: number) {
+  return ringPointAt(radar.x, radar.y, r, degrees);
 }
 
 const radarRings = [
@@ -183,93 +196,86 @@ function TenantCapabilities() {
   );
 }
 
-type Step = "model" | "code";
+// One run: deterministic steps along a line that fades out at both ends, and one agentic step
+// at its center that loops, drawn as a ring with a sweep like the channel radar's.
+const run = { y: 96, x0: 28, x1: 292 };
+const deterministicSteps = [62, 106, 214, 258];
+const loop = { x: 160, r: 26, from: -150, to: -30 };
 
-const MODES: { label: string; steps: (Step | Step[])[] }[] = [
-  { label: "Fully agentic loop", steps: ["model", "model", "model", "model"] },
-  { label: "Workflow run by an agent", steps: ["model", ["code", "code", "code"], "model"] },
-  { label: "Workflow with agentic steps", steps: ["code", "model", "code", "code"] },
-];
-
-const track = { x0: 34, x1: 286 };
-const modeY = (i: number) => 64 + i * 44;
-
-function StepMark({ step, x, y }: { step: Step; x: number; y: number }) {
-  return step === "model" ? (
-    <circle cx={x} cy={y} fill="var(--ds-background-200)" r={4.5} stroke="var(--ds-gray-1000)" />
-  ) : (
-    <rect fill="var(--ds-gray-1000)" height={8} rx={1.5} width={8} x={x - 4} y={y - 4} />
-  );
-}
-
-function DeterminismModes() {
-  // A row's steps spread evenly over the track, so a grouped workflow sits in the middle.
-  const stepX = (i: number, count: number) => track.x0 + (i * (track.x1 - track.x0)) / (count - 1);
+function DeterminismRun() {
+  const from = ringPointAt(loop.x, run.y, loop.r, loop.from);
+  const to = ringPointAt(loop.x, run.y, loop.r, loop.to);
   return (
     <Visual
-      caption="Three ways to run a task: a fully agentic loop of model steps, a workflow of deterministic steps run by an agent, and a workflow with agentic steps inside it."
+      caption="A workflow run: deterministic steps in sequence, with one agentic step in the middle that loops until it's done."
       scene={
         <>
-          {MODES.map((mode, i) => {
-            const y = modeY(i);
-            return (
-              <g key={mode.label}>
-                <path d={`M${track.x0} ${y}H${track.x1}`} stroke="var(--ds-gray-alpha-400)" />
-                {mode.steps.map((step, j) => {
-                  const x = stepX(j, mode.steps.length);
-                  if (!Array.isArray(step)) {
-                    return <StepMark key={j} step={step} x={x} y={y} />;
-                  }
-                  return (
-                    <g key={j}>
-                      <rect
-                        fill="var(--ds-background-200)"
-                        height={18}
-                        rx={3}
-                        stroke="var(--ds-gray-1000)"
-                        strokeDasharray="2 2.5"
-                        strokeOpacity="0.55"
-                        width={48}
-                        x={x - 24}
-                        y={y - 9}
-                      />
-                      {step.map((inner, k) => (
-                        <StepMark key={k} step={inner} x={x + (k - 1) * 14} y={y} />
-                      ))}
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })}
+          <defs>
+            <linearGradient
+              gradientUnits="userSpaceOnUse"
+              id="determinism-run"
+              x1={run.x0}
+              x2={run.x1}
+              y1={run.y}
+              y2={run.y}
+            >
+              <stop stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
+              <stop offset="0.14" stopColor="var(--ds-gray-alpha-500)" />
+              <stop offset="0.86" stopColor="var(--ds-gray-alpha-500)" />
+              <stop offset="1" stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient
+              gradientUnits="userSpaceOnUse"
+              id="determinism-loop"
+              x1={from.x}
+              x2={to.x}
+              y1={from.y}
+              y2={to.y}
+            >
+              <stop stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+              <stop offset="0.5" stopColor="var(--ds-gray-1000)" />
+              <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={`M${run.x0} ${run.y}H${run.x1}`} stroke="url(#determinism-run)" />
+          <circle
+            cx={loop.x}
+            cy={run.y}
+            fill="var(--ds-background-200)"
+            r={loop.r}
+            stroke="var(--ds-gray-alpha-400)"
+            strokeDasharray="2 3"
+          />
+          <path
+            d={`M${from.x} ${from.y}A${loop.r} ${loop.r} 0 0 1 ${to.x} ${to.y}`}
+            stroke="url(#determinism-loop)"
+            strokeLinecap="round"
+            strokeWidth="0.75"
+          />
+          <circle
+            cx={loop.x}
+            cy={run.y}
+            fill="var(--ds-background-200)"
+            r={5}
+            stroke="var(--ds-gray-1000)"
+          />
+          {deterministicSteps.map((x) => (
+            <rect
+              fill="var(--ds-gray-1000)"
+              height={9}
+              key={x}
+              rx={1.5}
+              width={9}
+              x={x - 4.5}
+              y={run.y - 4.5}
+            />
+          ))}
         </>
       }
     >
-      <div className="absolute inset-0 select-none text-[4.4cqw]">
-        {MODES.map((mode, i) => (
-          <span
-            className="absolute -translate-y-full whitespace-nowrap pb-[0.6em] text-[0.625em] text-gray-1000 leading-none"
-            key={mode.label}
-            style={{ left: pct(track.x0 - 4, view.width), top: pct(modeY(i) - 6, view.height) }}
-          >
-            {mode.label}
-          </span>
-        ))}
-        <span
-          aria-hidden
-          className="absolute flex items-center gap-[1.25em] text-[0.5625em] text-gray-900 leading-none"
-          style={{ left: pct(track.x0 - 4, view.width), top: pct(18, view.height) }}
-        >
-          <span className="flex items-center gap-[0.5em]">
-            <span className="size-[0.8em] rounded-full border border-gray-1000" />
-            Agentic step
-          </span>
-          <span className="flex items-center gap-[0.5em]">
-            <span className="size-[0.7em] rounded-[1.5px] bg-gray-1000" />
-            Deterministic step
-          </span>
-        </span>
-      </div>
+      <Label x={loop.x} y={run.y - loop.r - 14}>
+        Agent
+      </Label>
     </Visual>
   );
 }
@@ -300,7 +306,7 @@ const PRIMARY: {
     text: "Fully agentic loops, deterministic workflows, or both in one run. You choose per task.",
     href: "/docs/tools/workflows",
     icon: <IconRoute aria-hidden size={16} />,
-    visual: <DeterminismModes />,
+    visual: <DeterminismRun />,
   },
 ];
 
