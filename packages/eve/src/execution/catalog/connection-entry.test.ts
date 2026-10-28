@@ -106,8 +106,7 @@ describe("connection approval context", () => {
 });
 
 describe("connection tool calls", () => {
-  // Expected failure until #5509 is fixed: the call rejects the `null` default its own check filled in.
-  it.fails("runs a call whose omitted argument defaults to null", async () => {
+  it("runs a call whose omitted argument defaults to null", async () => {
     // Pydantic publishes `query: str = None` as a string property that defaults to null.
     const search: ConnectionToolMetadata = {
       description: "Search issues.",
@@ -142,7 +141,7 @@ describe("connection tool calls", () => {
     // The harness validates the model's input, then runs the tool on the validated value.
     await contextStorage.run(new ContextContainer(), async () => {
       const checked = await (entry.inputSchema as ToolSchema)["~standard"].validate({});
-      expect(checked).toEqual({ value: { query: null } });
+      expect(checked).toEqual({ value: {} });
       await entry.execute!((checked as { value: unknown }).value, {
         messages: [],
         toolCallId: "call-search",
