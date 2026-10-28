@@ -128,22 +128,31 @@ function HarnessTools() {
 // The template thumbnail's window from vercel.com/docs, three times, back to front, each
 // covering the one behind it but for a sliver. Sizes are front's px values in `em` (1em =
 // 16px at a 350px frame), so the windows scale with the frame.
+// `fade` is where each top border has faded out: across the sliver a back window shows, so
+// it's gone before the next window, and across the whole front window.
 const APPS = [
-  { name: "SvelteKit", Logo: SiSvelte, left: "8%" },
-  { name: "Nuxt", Logo: SiNuxt, left: "24%" },
-  { name: "Next.js", Logo: SiNextdotjs, left: "40%" },
+  { name: "SvelteKit", Logo: SiSvelte, left: "8%", fade: "[--fade:31%]" },
+  { name: "Nuxt", Logo: SiNuxt, left: "24%", fade: "[--fade:31%]" },
+  { name: "Next.js", Logo: SiNextdotjs, left: "40%", fade: "[--fade:100%]" },
 ];
 
 function AgentUi() {
   return (
     <Visual caption="Three agent apps in overlapping windows, built with Next.js in front, Nuxt, and SvelteKit.">
       <div aria-hidden className="absolute inset-0 select-none text-[4.57cqw]">
-        {APPS.map(({ Logo, left, name }) => (
+        {APPS.map(({ Logo, fade, left, name }) => (
           <div
-            className="absolute top-[17%] flex min-h-full w-[52%] flex-col gap-[0.625em] rounded-t-[0.625em] border border-gray-300 bg-background-100 px-[0.75em] pt-[0.25em]"
+            className="absolute top-[17%] flex min-h-full w-[52%] flex-col gap-[0.625em] rounded-t-[0.625em] bg-background-100 px-[0.75em] pt-[0.25em]"
             key={name}
             style={{ left }}
           >
+            {/* The border is its own layer so its fades leave the window's fill opaque. */}
+            <span
+              className={cn(
+                "pointer-events-none absolute inset-0 rounded-t-[inherit] border border-gray-300 [mask-composite:intersect] [mask-image:linear-gradient(to_right,black,transparent_var(--fade)),linear-gradient(to_bottom,black_40%,transparent_95%)]",
+                fade,
+              )}
+            />
             <div className="flex h-[1em] items-center">
               <div className="mt-[0.25em] flex gap-[0.25em]">
                 <span className="size-[0.4375em] rounded-full bg-gray-300" />
