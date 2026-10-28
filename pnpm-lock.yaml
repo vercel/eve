@@ -326,8 +326,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(next@16.3.8(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.5.2(31a86ea52c220294323b3b0d6b7c3aec))(react@19.2.6)(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vue@3.5.42(typescript@6.0.3))
       '@vercel/geistdocs':
-        specifier: 2.13.1-canary.87d00b3
-        version: 2.13.1-canary.87d00b3(7eb82b335cccccda73811972c8fed49f)
+        specifier: 2.14.0
+        version: 2.14.0(7eb82b335cccccda73811972c8fed49f)
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(next@16.3.8(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.5.2(31a86ea52c220294323b3b0d6b7c3aec))(react@19.2.6)(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vue@3.5.42(typescript@6.0.3))
@@ -7899,8 +7899,8 @@ packages:
       ws:
         optional: true
 
-  '@vercel/geistdocs@2.13.1-canary.87d00b3':
-    resolution: {integrity: sha512-OrmvZ4O7Ezi5idvA9ISl5SV7zEj6Tl9ZLPsHyp7sK9NkGUGMwZrVDmZa5NRiqpvJRO84c9jbJgRrFCUIdl41qA==}
+  '@vercel/geistdocs@2.14.0':
+    resolution: {integrity: sha512-IuMXY76UUbQdJcyVld57GF9iR9xfaI+jHRFnQvCV1qoEafj8qRpfgDb0ER4ueibkKkt9aRkV0qFhLd+3hpwYxA==}
     hasBin: true
     peerDependencies:
       next: ^16.3.3
@@ -21719,7 +21719,7 @@ snapshots:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       ws: 8.21.3(bufferutil@4.1.0)
 
-  '@vercel/geistdocs@2.13.1-canary.87d00b3(7eb82b335cccccda73811972c8fed49f)':
+  '@vercel/geistdocs@2.14.0(7eb82b335cccccda73811972c8fed49f)':
     dependencies:
       '@ai-sdk/react': 3.0.288(react@19.2.6)(zod@4.6.5)
       '@clack/prompts': 0.11.0

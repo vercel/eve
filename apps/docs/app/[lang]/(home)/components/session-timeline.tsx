@@ -1,28 +1,51 @@
 "use client";
 
 import {
+  Activity,
   Check,
   CircleDot,
   CodeXml,
   GitMerge,
   GitPullRequestArrow,
+  Headset,
   ScanSearch,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
+import { IconCheck, IconChevronDownSmall } from "@vercel/geistdocs/assets/icons";
 import { Button } from "@vercel/geistdocs/components/button";
-import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
-import { slackLogo } from "@/lib/integrations/logos";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@vercel/geistdocs/components/dropdown-menu";
+import { type ComponentType, type JSX, type ReactNode, useEffect, useRef, useState } from "react";
+import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { monochromeLogo } from "./control-visual";
 
-type Member = "Coder" | "Reviewer";
+type Platform = "slack" | "teams" | "whatsapp";
+
+/** Agents get an icon avatar and an "Agent" badge; people get their initial. */
+type Author = { name: string; icon?: ComponentType<{ className?: string }> };
+
+const AUTHORS = {
+  Coder: { name: "Coder", icon: CodeXml },
+  Reviewer: { name: "Reviewer", icon: ScanSearch },
+  Ops: { name: "Ops", icon: Activity },
+  Dana: { name: "Dana" },
+  Concierge: { name: "Acme", icon: Headset },
+  Maya: { name: "Maya" },
+} satisfies Record<string, Author>;
+
+type AuthorKey = keyof typeof AUTHORS;
 
 /** Each beat waits `delay` ms before it appears; while it waits, its author shows as working. */
 type Beat =
   | {
       kind: "message";
-      author: Member;
+      author: AuthorKey;
       time: string;
       body: ReactNode;
       attachment?: ReactNode;
@@ -65,13 +88,50 @@ function Card({
   );
 }
 
+function ChatButton({ children, primary }: { children: string; primary?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-8 items-center justify-center rounded-md px-3 font-medium text-label-13",
+        primary
+          ? "bg-gray-1000 text-background-100"
+          : "bg-background-100 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Teams renders bot replies as Adaptive Cards: a bordered card with full-width actions. */
+function AdaptiveCard({
+  title,
+  text,
+  actions,
+}: {
+  title: string;
+  text: string;
+  actions: [string, string];
+}) {
+  return (
+    <div className="mt-2 max-w-[26rem] rounded-lg bg-background-100 p-3 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]">
+      <p className="font-semibold text-copy-14">{title}</p>
+      <p className="mt-1 text-copy-13 text-gray-900">{text}</p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <ChatButton primary>{actions[0]}</ChatButton>
+        <ChatButton>{actions[1]}</ChatButton>
+      </div>
+    </div>
+  );
+}
+
 const REVIEW_CHECKS = [
   "Correctness: merge handles empty and duplicate carts",
   "Tests: 4 new cases cover the regression",
   "Security: cart ownership verified, no secrets in logs",
 ];
 
-const BEATS: Beat[] = [
+const SLACK_BEATS: Beat[] = [
   {
     kind: "message",
     author: "Coder",
@@ -193,6 +253,133 @@ const BEATS: Beat[] = [
   },
 ];
 
+const TEAMS_BEATS: Beat[] = [
+  {
+    kind: "message",
+    author: "Ops",
+    time: "2:14 PM",
+    body: "Checkout p95 latency is up 4x since the 2:05 PM deploy.",
+    attachment: (
+      <Card
+        icon={<Activity />}
+        meta="storefront · p95 2.4s · started 2:06 PM"
+        title="Checkout latency is degraded"
+      />
+    ),
+    delay: 600,
+  },
+  {
+    kind: "message",
+    author: "Ops",
+    time: "2:16 PM",
+    body: "Traced it to a cart query added in #421. Rolling back is the fastest fix.",
+    attachment: (
+      <AdaptiveCard
+        actions={["Roll back", "Not now"]}
+        text="Reverts storefront to the previous deployment. Takes about 30 seconds."
+        title="Roll back production?"
+      />
+    ),
+    delay: 2200,
+  },
+  {
+    kind: "message",
+    author: "Dana",
+    time: "2:17 PM",
+    body: "Approved, go ahead.",
+    delay: 2400,
+  },
+  {
+    kind: "message",
+    author: "Ops",
+    time: "2:18 PM",
+    body: "Rolled back. p95 is at 610 ms and holding. I opened an issue to fix the query.",
+    attachment: (
+      <Card
+        icon={<CircleDot />}
+        meta="acme/storefront#424 · assigned to Coder"
+        title="perf(cart): index guest cart lookups"
+      />
+    ),
+    delay: 2200,
+  },
+];
+
+const WHATSAPP_BEATS: Beat[] = [
+  {
+    kind: "message",
+    author: "Maya",
+    time: "9:12 AM",
+    body: "Hi, my order still hasn't arrived.",
+    delay: 600,
+  },
+  {
+    kind: "message",
+    author: "Concierge",
+    time: "9:12 AM",
+    body: "Sorry about that, Maya. Order #4821 has been held at the Oakland depot since Monday.",
+    delay: 2000,
+  },
+  {
+    kind: "message",
+    author: "Concierge",
+    time: "9:12 AM",
+    body: (
+      <>
+        <span className="block font-semibold">Send a replacement?</span>
+        A new one ships today and arrives Thursday.
+      </>
+    ),
+    attachment: (
+      <>
+        <ChatButton>Send replacement</ChatButton>
+        <ChatButton>Refund instead</ChatButton>
+      </>
+    ),
+    delay: 1600,
+  },
+  {
+    kind: "message",
+    author: "Maya",
+    time: "9:13 AM",
+    body: "Send replacement",
+    delay: 2400,
+  },
+  {
+    kind: "message",
+    author: "Concierge",
+    time: "9:13 AM",
+    body: "Done. It ships today with tracking 1Z 999 AA1 0123 4567. I'll message you when it's out for delivery.",
+    delay: 1800,
+  },
+];
+
+const CONVERSATIONS: {
+  id: Platform;
+  label: string;
+  logo: (className: string) => ReactNode;
+  beats: Beat[];
+}[] = [
+  {
+    id: "slack",
+    label: "#software-factory",
+    logo: (className) => logos.slack({ "aria-hidden": true, className }),
+    beats: SLACK_BEATS,
+  },
+  {
+    id: "teams",
+    label: "Operations",
+    logo: (className) => logos.teams({ "aria-hidden": true, className }),
+    beats: TEAMS_BEATS,
+  },
+  {
+    id: "whatsapp",
+    label: "Acme Support",
+    logo: (className) => logos.whatsapp({ "aria-hidden": true, className }),
+    beats: WHATSAPP_BEATS,
+  },
+];
+
 // Vercel's custom Slack emoji: a short word in white on a colored tile.
 const TEXT_EMOJI = {
   ACK: "bg-purple-800",
@@ -214,32 +401,38 @@ function TextEmoji({ name }: { name: keyof typeof TEXT_EMOJI }) {
   );
 }
 
-function authorOf(beat: Beat | undefined): Member | undefined {
+function authorOf(beat: Beat | undefined): AuthorKey | undefined {
   return beat?.kind === "message" ? beat.author : undefined;
 }
 
-function Avatar({ member }: { member: Member }) {
-  const Icon = member === "Coder" ? CodeXml : ScanSearch;
+function Avatar({ author, round }: { author: Author; round: boolean }) {
+  const Icon = author.icon;
   return (
     <span
       aria-hidden
-      className="flex size-9 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 bg-black text-white"
+      className={cn(
+        "flex size-9 shrink-0 items-center justify-center border border-gray-alpha-400 font-medium text-label-14",
+        round ? "rounded-full" : "rounded-md",
+        Icon ? "bg-black text-white" : "bg-background-100 text-gray-1000",
+      )}
     >
-      <Icon className="size-4" />
+      {Icon ? <Icon className="size-4" /> : author.name[0]}
     </span>
   );
 }
 
-function MessageRow({
+/** Slack and Teams: avatar, name, time; consecutive messages fold under the first. */
+function ThreadMessage({
   author,
   time,
   continued,
+  round,
   children,
 }: {
-  author: Member;
+  author: Author;
   time: string;
-  /** Consecutive messages from one author fold under the first, like Slack does. */
   continued: boolean;
+  round: boolean;
   children: ReactNode;
 }) {
   return (
@@ -249,16 +442,18 @@ function MessageRow({
         continued ? "pt-2" : "pt-4",
       )}
     >
-      {continued ? <span /> : <Avatar member={author} />}
+      {continued ? <span /> : <Avatar author={author} round={round} />}
       <div className="min-w-0 text-copy-14 text-gray-1000">
         {continued ? (
-          <span className="sr-only">{author}</span>
+          <span className="sr-only">{author.name}</span>
         ) : (
           <p className="flex items-baseline gap-1.5">
-            <span className="font-medium">{author}</span>
-            <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
-              Agent
-            </span>
+            <span className="font-medium">{author.name}</span>
+            {author.icon ? (
+              <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
+                Agent
+              </span>
+            ) : null}
             <span className="text-copy-13 text-gray-900 tabular-nums">{time}</span>
           </p>
         )}
@@ -268,10 +463,46 @@ function MessageRow({
   );
 }
 
-function TypingIndicator({ member }: { member: Member | undefined }) {
+/** WhatsApp: people on the right in dark bubbles, the agent on the left in light ones. */
+function Bubble({
+  author,
+  attachment,
+  children,
+}: {
+  author: Author;
+  attachment?: ReactNode;
+  children: ReactNode;
+}) {
+  const fromAgent = Boolean(author.icon);
+  return (
+    <li
+      className={cn(
+        "flex flex-col gap-1 pt-2 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+        fromAgent ? "items-start" : "items-end",
+      )}
+    >
+      <span className="sr-only">{author.name}</span>
+      <div
+        className={cn(
+          "max-w-[min(85%,22rem)] text-pretty rounded-xl px-3 py-2 text-copy-14",
+          fromAgent
+            ? "rounded-bl-sm bg-background-100 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]"
+            : "rounded-br-sm bg-gray-1000 text-background-100",
+        )}
+      >
+        {children}
+      </div>
+      {attachment ? (
+        <div className="flex w-full max-w-[min(85%,22rem)] flex-col gap-1">{attachment}</div>
+      ) : null}
+    </li>
+  );
+}
+
+function TypingIndicator({ author }: { author: Author | undefined }) {
   return (
     <p aria-hidden className="flex h-5 items-center gap-1.5 px-1 text-copy-13 text-gray-900">
-      {member ? (
+      {author ? (
         <>
           <span className="flex gap-0.5">
             {[0, 150, 300].map((delay) => (
@@ -283,7 +514,8 @@ function TypingIndicator({ member }: { member: Member | undefined }) {
             ))}
           </span>
           <span>
-            <span className="font-medium text-gray-1000">{member}</span> is working
+            <span className="font-medium text-gray-1000">{author.name}</span>{" "}
+            {author.icon ? "is working" : "is typing"}
           </span>
         </>
       ) : null}
@@ -305,18 +537,25 @@ function IconPlayCircle() {
   );
 }
 
-/** A replayed Slack channel where two agents take a GitHub issue to a merged pull request. */
+/**
+ * A replayed agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
+ * platform's way. It plays once in view; reduced motion shows the whole conversation at once.
+ */
 export function SessionTimeline(): JSX.Element {
   const rootRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
+  const [platform, setPlatform] = useState<Platform>("slack");
   const [shown, setShown] = useState(1);
   const [inView, setInView] = useState(false);
   // Reduced motion shows the whole transcript at once, so there is nothing to replay.
   const [animated, setAnimated] = useState(true);
 
+  const conversation = CONVERSATIONS.find((c) => c.id === platform) ?? CONVERSATIONS[0];
+  const beats = conversation.beats;
+
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setShown(BEATS.length);
+      setShown(Number.POSITIVE_INFINITY);
       setAnimated(false);
       return;
     }
@@ -329,8 +568,8 @@ export function SessionTimeline(): JSX.Element {
     return () => observer.disconnect();
   }, []);
 
-  const next = BEATS[shown];
-  const done = shown === BEATS.length;
+  const next = beats[shown];
+  const done = shown >= beats.length;
 
   useEffect(() => {
     if (!inView || !next) return;
@@ -343,54 +582,100 @@ export function SessionTimeline(): JSX.Element {
       top: listRef.current.scrollHeight,
       behavior: animated ? "smooth" : "auto",
     });
-  }, [shown, animated]);
+  }, [shown, platform, animated]);
 
-  const replay = () => setShown(0);
+  const pick = (id: string) => {
+    setPlatform(id as Platform);
+    if (animated) setShown(1);
+  };
 
   return (
-    <figure aria-label="Example eve session in Slack" className="m-0" ref={rootRef}>
-      {/* No frame: the conversation sits on the page and fades out toward the top, so new
-          messages arrive at the bottom and older ones dissolve upward. */}
+    <figure
+      aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
+      className="m-0"
+      ref={rootRef}
+    >
+      {/* No frame: the conversation sits on the page, fills from the bottom like a chat, and
+          fades out toward the top as older messages scroll up. */}
       <ol
-        className="h-[26rem] list-none overflow-y-auto overscroll-contain p-0 pb-2 [mask-image:linear-gradient(to_bottom,transparent,black_40%)] [scrollbar-width:none]"
+        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [mask-image:linear-gradient(to_bottom,transparent,black_40%)] [scrollbar-width:none] [&>li:first-child]:mt-auto"
+        key={platform}
         ref={listRef}
       >
-        {BEATS.slice(0, shown).map((beat, i) => {
-          const author = authorOf(beat);
-          const continued = author !== undefined && author === authorOf(BEATS[i - 1]);
-          switch (beat.kind) {
-            case "message":
-              return (
-                <MessageRow author={beat.author} continued={continued} key={i} time={beat.time}>
-                  <p className="text-gray-1000">{beat.body}</p>
-                  {beat.attachment}
-                </MessageRow>
-              );
-            case "reactions":
-              return (
-                <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
-                  {beat.reactions.map((reaction) => (
-                    <span
-                      className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 pr-3 pl-[5px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
-                      key={reaction.emoji}
-                    >
-                      <TextEmoji name={reaction.emoji} />
-                      {reaction.count}
-                    </span>
-                  ))}
-                </li>
-              );
+        {beats.slice(0, shown).map((beat, i) => {
+          if (beat.kind === "reactions") {
+            return (
+              <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
+                {beat.reactions.map((reaction) => (
+                  <span
+                    className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 pr-3 pl-[5px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
+                    key={reaction.emoji}
+                  >
+                    <TextEmoji name={reaction.emoji} />
+                    {reaction.count}
+                  </span>
+                ))}
+              </li>
+            );
           }
+          const author = AUTHORS[beat.author];
+          if (platform === "whatsapp") {
+            return (
+              <Bubble attachment={beat.attachment} author={author} key={i}>
+                {beat.body}
+              </Bubble>
+            );
+          }
+          const continued = beat.author === authorOf(beats[i - 1]);
+          return (
+            <ThreadMessage
+              author={author}
+              continued={continued}
+              key={i}
+              round={platform === "teams"}
+              time={beat.time}
+            >
+              <p className="text-gray-1000">{beat.body}</p>
+              {beat.attachment}
+            </ThreadMessage>
+          );
         })}
       </ol>
       <figcaption className="mt-3 flex items-center gap-2 text-copy-13 text-gray-900">
-        {slackLogo({ "aria-hidden": true, className: cn("size-3.5 shrink-0", monochromeLogo) })}
-        <span className="text-gray-1000">#software-factory</span>
-        <TypingIndicator member={next?.kind === "message" ? next.author : undefined} />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={`Conversation: ${conversation.label}`}
+              prefix={conversation.logo("size-4")}
+              size="small"
+              suffix={<IconChevronDownSmall className="text-gray-900" />}
+              variant="tertiary"
+            >
+              {conversation.label}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-56">
+            <DropdownMenuRadioGroup onValueChange={pick} value={platform}>
+              {CONVERSATIONS.map((c) => (
+                // The check sits on the right, so the item's own left indicator is hidden.
+                <DropdownMenuRadioItem
+                  className="group gap-2.5 pl-2 text-label-14 [&>span:first-child]:hidden"
+                  key={c.id}
+                  value={c.id}
+                >
+                  {c.logo("size-4")}
+                  {c.label}
+                  <IconCheck className="ml-auto opacity-0 group-data-[state=checked]:opacity-100" />
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <TypingIndicator author={next?.kind === "message" ? AUTHORS[next.author] : undefined} />
         {done && animated ? (
           <Button
             className="ml-auto motion-safe:animate-in motion-safe:fade-in"
-            onClick={replay}
+            onClick={() => setShown(0)}
             prefix={<IconPlayCircle />}
             size="small"
             variant="tertiary"
