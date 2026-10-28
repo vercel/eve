@@ -164,6 +164,16 @@ describe("executeWebFetchTool", () => {
     expect(result.content).toContain("World");
   });
 
+  it.each([0, -1, Number.NaN])(
+    "rejects a timeout of %s seconds before fetching",
+    async (timeout) => {
+      await expect(executeWebFetchTool({ timeout, url: "https://example.com" })).rejects.toThrow(
+        "timeout must be a positive number of seconds, up to 120.",
+      );
+      expect(requestPublicUrlMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns raw HTML when format is html", async () => {
     const html = "<html><body><h1>Hello</h1></body></html>";
 

@@ -60,6 +60,9 @@ export async function executeWebFetchTool(
   options?: WebFetchExecuteOptions,
 ): Promise<WebFetchResult> {
   const { url, format = "markdown", timeout } = args;
+  if (timeout !== undefined && !(Number.isFinite(timeout) && timeout > 0)) {
+    throw new Error("timeout must be a positive number of seconds, up to 120.");
+  }
 
   const timeoutMs = Math.min(
     timeout !== undefined ? timeout * 1000 : DEFAULT_TIMEOUT_MS,

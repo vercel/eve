@@ -27,7 +27,7 @@ export const WEB_FETCH_INPUT_SCHEMA = defineJsonSchema<WebFetchToolInput>({
     },
     timeout: {
       type: "number",
-      description: "Optional timeout in seconds. Defaults to 30, max 120.",
+      description: "Optional timeout in seconds, greater than 0. Defaults to 30, max 120.",
     },
     url: {
       type: "string",
