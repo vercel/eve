@@ -1,12 +1,10 @@
 import type { DeliverHookPayload } from "#channel/types.js";
+import type { HookSendDropReason } from "#public/definitions/hook.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
 // Read by the session owner between steps, so it imports nothing a workflow body can't load.
 
 export const REACTIONS_STATE_KEY = "eve.reactions";
-
-/** Why a hook's message was dropped, as its `delivery.settled` `reason` records it. */
-export type HookSendDropReason = "cancelled" | "cleared" | "reset" | "preempted";
 
 /** A message a hook sent with `ctx.send()` that the session hasn't admitted yet. */
 export interface PendingSend {

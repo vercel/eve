@@ -11,7 +11,8 @@ import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { bundleReactions } from "./bundle.js";
 import { sessionFrameOf } from "./frame.js";
-import type { HookSendDropReason, PendingSend } from "./hook-send.js";
+import type { HookSendDropReason } from "#public/definitions/hook.js";
+import type { PendingSend } from "./hook-send.js";
 import { reportReactionFailure, takeIntents } from "./intents.js";
 import { effectiveModelId } from "./kinds/model.js";
 import type {

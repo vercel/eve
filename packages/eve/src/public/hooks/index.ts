@@ -14,6 +14,7 @@ export {
   type HookEventKey,
   type HookEventMap,
   type HookEventType,
+  type HookSendDropReason,
   type HookSendOptions,
   type HookSendResult,
   type HookTurnPolicy,

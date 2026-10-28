@@ -69,6 +69,18 @@ export type HookSendOptions = Pick<SessionSendOptions, "auth" | "context"> & {
  * `cancelled`: a cancel that no hook asked for stopped the session's latest turn, so hooks can't
  * start another until a new turn starts.
  */
+/**
+ * Why a hook's message was dropped before it ran: the `reason` on its `delivery.settled`, whose
+ * `outcome` is `"ignored"`. `delivery.settled`'s `reason` is a plain string, since other
+ * deliveries record their own; compare it with these values to tell a dropped hook message.
+ *
+ * - `"cancelled"`: a cancel no hook asked for, such as `session.cancel()`.
+ * - `"cleared"`: the session's history was cleared.
+ * - `"reset"`: the session was reset.
+ * - `"preempted"`: another turn started ahead of a `"yield"` message.
+ */
+export type HookSendDropReason = "cancelled" | "cleared" | "reset" | "preempted";
+
 export type HookSendResult =
   | { readonly recorded: true; readonly deliveryId: string }
   | { readonly recorded: false; readonly reason: "cancelled" };

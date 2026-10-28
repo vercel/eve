@@ -154,14 +154,14 @@ Spend is recorded on `usage.recorded`, once per model run (`owner: { runId }`) a
 
 Everything that reaches a session arrives as a delivery: a message, an answer, a control such as `cancel` or `reset`, or a sign-in callback. `delivery.admitted` records it, with the sender's `principal` and its `source`. A message that a turn takes in is `delivery.consumed`, with the `parts` it received: text, plus file metadata without raw bytes or internal sandbox paths. A delivery that brought [prior history](../channels/eve#start-from-prior-history) also carries it there, in `history`. Every delivery ends with exactly one `delivery.settled`, except after a degraded termination (see below):
 
-| Outcome          | Meaning                                                                                             |
-| ---------------- | --------------------------------------------------------------------------------------------------- |
-| `handled`        | The turn that consumed it settled.                                                                  |
-| `awaiting-input` | The turn paused on an interaction. The delivery's answer is the pause; the answer resumes the turn. |
-| `applied`        | A control or answer took effect.                                                                    |
-| `ignored`        | It had nothing to act on, or a cancel or clear ended its turn before the turn read it.              |
-| `refused`        | Its sender may not do what it asked; `reason` says why.                                             |
-| `failed`         | It couldn't be handled, such as when the session ended first.                                       |
+| Outcome          | Meaning                                                                                                                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handled`        | The turn that consumed it settled.                                                                                                                                                                        |
+| `awaiting-input` | The turn paused on an interaction. The delivery's answer is the pause; the answer resumes the turn.                                                                                                       |
+| `applied`        | A control or answer took effect.                                                                                                                                                                          |
+| `ignored`        | It had nothing to act on, a cancel or clear ended its turn before the turn read it, or it was a hook's message dropped before it ran; `reason` says why: `cancelled`, `cleared`, `reset`, or `preempted`. |
+| `refused`        | Its sender may not do what it asked; `reason` says why.                                                                                                                                                   |
+| `failed`         | It couldn't be handled, such as when the session ended first.                                                                                                                                             |
 
 `POST /eve/v1/session/:sessionId` returns the message's `deliveryId`, so a client resuming from an old cursor knows which `delivery.settled` ends its response. Steering and coalesced messages each keep their own delivery. The id is assigned before dispatch,
 not derived from stream position. An answer-only delivery stops on its own `delivery.settled`.

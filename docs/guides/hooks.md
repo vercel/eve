@@ -312,9 +312,11 @@ The model is told the message was sent automatically, not by a person, without n
 Every recorded message ends in a `delivery.settled` for its `deliveryId` on the session's stream:
 
 - once a turn ran it, an outcome such as `handled`, with the turn's `turnId`;
-- if it was dropped, `outcome: "ignored"`, with `reason` set to `"cancelled"`, `"cleared"`, `"reset"`, or `"preempted"` (a `"yield"` message another turn started ahead of).
+- if it was dropped, `outcome: "ignored"`, with `reason` set to `"cancelled"`, `"cleared"`, `"reset"`, or `"preempted"` (a `"yield"` message another turn started ahead of). `HookSendDropReason` from `eve/hooks` types these values; `delivery.settled`'s `reason` is a plain string, since other deliveries record their own.
 
-A dropped message is recorded at the session's next step boundary, or once its turn ends. Its `delivery.admitted` names the hook in `source.hook`, so a handler that reacts to deliveries sees dropped messages too. Messages still waiting when the session ends end with it.
+A dropped message is recorded at the session's next step boundary, or once its turn ends. Messages still waiting when the session ends end with it.
+
+`delivery.admitted` records every message a hook sent, dropped ones included, with the hook in `source.hook`. It doesn't mean the message ran: the outcome is on `delivery.settled`, as for every [delivery](../concepts/sessions-runs-and-streaming#deliveries-and-responses). To count messages that ran, use `delivery.consumed`, or a `delivery.settled` outcome other than `ignored`.
 
 ## Subagent isolation
 
