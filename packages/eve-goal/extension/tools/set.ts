@@ -16,6 +16,7 @@ export default defineTool({
       .max(MAX_OBJECTIVE_LENGTH)
       .describe("What done looks like, specific enough to check from tool output."),
   }),
+  approval: (ctx) => extension.config.setApproval?.(ctx) ?? "not-applicable",
   execute({ objective }) {
     goal.update(() => ({
       idleRuns: 0,

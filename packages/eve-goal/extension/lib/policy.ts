@@ -45,24 +45,25 @@ export function settle(
   limits: { readonly maxCostUsd?: number },
 ): { readonly goal: Goal; readonly message?: string } {
   if (verdict === undefined) return { goal: pause(current, "The goal judge failed.") };
+  const judged = verdict.notes === undefined ? current : { ...current, notes: verdict.notes };
   if (verdict.verdict !== "continue") {
-    return { goal: { ...current, lastReason: verdict.reason, status: verdict.verdict } };
+    return { goal: { ...judged, lastReason: verdict.reason, status: verdict.verdict } };
   }
   if (current.runs >= current.maxRuns) {
-    return { goal: pause(current, `The goal reached its limit of ${current.maxRuns} runs.`) };
+    return { goal: pause(judged, `The goal reached its limit of ${current.maxRuns} runs.`) };
   }
   const spent = spentUsd(current, turn.costUsd);
   if (limits.maxCostUsd !== undefined && spent >= limits.maxCostUsd) {
     return {
       goal: pause(
-        current,
+        judged,
         `The goal spent $${spent.toFixed(2)} of its $${limits.maxCostUsd.toFixed(2)} budget.`,
       ),
     };
   }
   return {
     goal: {
-      ...current,
+      ...judged,
       followedUp: true,
       idleRuns: turn.idleRuns,
       lastReason: verdict.reason,

@@ -12,12 +12,13 @@ export default defineTool({
   inputSchema: z.object({}),
   approval: always(),
   execute() {
-    // A fresh budget: runs and spend count again from here.
+    // A fresh budget: runs and spend count again from here. The judge's notes carry over.
     goal.update(
       (g) =>
         g && {
           idleRuns: 0,
           maxRuns: g.runs + extension.config.maxRuns,
+          notes: g.notes,
           objective: g.objective,
           runs: g.runs,
           status: "active",

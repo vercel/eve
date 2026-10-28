@@ -13,12 +13,13 @@ import goal from "eve/extensions/goal";
 export default goal({ maxRuns: 30, maxCostUsd: 25 });
 ```
 
-| Option       | Default                    | Meaning                                                                                                             |
-| ------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `model`      | `"openai/gpt-6-luna-fast"` | The default judge's model: an AI Gateway model ID or a model instance.                                              |
-| `judge`      | a structured-output call   | Replaces the default judge: `(input) => Promise<{ verdict, reason }>`.                                              |
-| `maxRuns`    | `50`                       | Follow-ups a goal may queue before it pauses.                                                                       |
-| `maxCostUsd` | unlimited                  | Model spend, in US dollars, the agent's turns may add before the goal pauses. The judge's own calls aren't counted. |
+| Option        | Default                    | Meaning                                                                                                             |
+| ------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `model`       | `"openai/gpt-6-luna-fast"` | The default judge's model: an AI Gateway model ID or a model instance.                                              |
+| `judge`       | a structured-output call   | Replaces the default judge: `(input) => Promise<{ verdict, reason, notes? }>`.                                      |
+| `maxRuns`     | `50`                       | Follow-ups a goal may queue before it pauses.                                                                       |
+| `maxCostUsd`  | unlimited                  | Model spend, in US dollars, the agent's turns may add before the goal pauses. The judge's own calls aren't counted. |
+| `setApproval` | none                       | An approval policy for the model's `goal__set` calls, such as `always()` from `eve/tools/approval`.                 |
 
 A model ID goes through AI SDK's default provider, AI Gateway, so the deployment needs Gateway credentials such as `AI_GATEWAY_API_KEY` or Vercel OIDC. To judge with eve's provider authentication instead, pass a model instance such as `openai("gpt-6-luna-fast")` from `eve/models/openai`.
 
@@ -34,7 +35,20 @@ Mounted as `goal`, the extension contributes:
 | `goal__resume` | Resumes a paused goal with a fresh run and spend budget. Requires approval. |
 | `goal__clear`  | Clears the goal. Requires approval.                                         |
 
-Setting a goal is the only lifecycle action the model takes on its own. The model can't mark a goal met: only the judge can. While a goal is active, a dynamic system instruction shows the objective and the judge's last reason before every model call.
+Setting a goal is the only lifecycle action the model takes on its own, unless you pass `setApproval`. The model can't mark a goal met: only the judge can. While a goal is active, a dynamic system instruction shows the objective and the judge's last reason before every model call.
+
+## Require approval to set a goal
+
+By default, the model can start a goal whenever it decides the person asked it to keep going. To have the person confirm every goal first, pass an approval policy:
+
+```ts title="agent/extensions/goal.ts"
+import goal from "eve/extensions/goal";
+import { always } from "eve/tools/approval";
+
+export default goal({ setApproval: always() });
+```
+
+Any [approval policy](./human-in-the-loop#approvals) works, including `once()` or your own function. It receives the call's `{ objective }` as its input.
 
 ## How the loop decides
 
@@ -46,7 +60,7 @@ After each turn of an active goal settles, the extension pauses the goal when:
 
 Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. Every completed turn is judged, so one that finishes the work at a limit is still met. On `continue`, the goal pauses instead if it reached `maxRuns` or its spend reached `maxCostUsd`; otherwise the extension follows up with `Continue working toward the goal. <reason>` as the session's next message. The model reads it with a note that the hook sent it, not a person.
 
-The judge sees the turn's input, its reply, and its settled tool calls, not the whole transcript, so the agent should prove progress with tool output. A person's message always wins: the continuation yields to any turn that starts first, and that turn is judged next with the person's input in view. A "stop" or a change of direction reaches the verdict.
+The judge sees the turn's input, its reply, and its settled tool calls, not the whole transcript, so the agent should prove progress with tool output. With each verdict, the judge also writes short `notes` on what the evidence has proved so far, and reads them back on the next turn. A check that passed in an earlier turn still counts when a later turn only reports that it's done. A person's message always wins: the continuation yields to any turn that starts first, and that turn is judged next with the person's input in view. A "stop" or a change of direction reaches the verdict.
 
 Continuation turns are ordinary turns, so approvals, task waiting, and `limits.sessionUsage` apply unchanged. Mount the extension on an agent that people talk to directly. In a [subagent](./subagents), the caller receives the first turn's reply and doesn't wait for the continuations.
 
@@ -65,4 +79,4 @@ export default goal({
 });
 ```
 
-The judge receives `{ objective, input, reply, calls, abortSignal }` and returns `{ verdict, reason }`. Throwing pauses the goal.
+The judge receives `{ objective, notes, input, reply, calls, abortSignal }` and returns `{ verdict, reason, notes? }`. `notes` is the value the judge returned for an earlier turn of this goal. Return new `notes` to replace them, or omit them to keep the current ones. Throwing pauses the goal.

@@ -17,6 +17,8 @@ export interface Goal {
   readonly costAtStart?: number;
   /** Why the goal last continued, paused, or settled. */
   readonly lastReason?: string;
+  /** The judge's running record of what earlier turns proved, read back on the next verdict. */
+  readonly notes?: string;
 }
 
 export const goal = defineState<Goal | null>("goal", () => null);

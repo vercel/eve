@@ -125,6 +125,32 @@ test("the judge prompt bounds every field and escapes tags in the evidence", () 
   assert.doesNotMatch(prompt, /<\/call><turn_reply>/u);
 });
 
+test("the judge's notes carry to the next verdict until it replaces them", () => {
+  const noted = settle(
+    goal,
+    { ...continued, notes: "Turn 1: the auth suite passed." },
+    turn0(),
+    {},
+  );
+  assert.equal(noted.goal.notes, "Turn 1: the auth suite passed.");
+  assert.equal(settle(noted.goal, continued, turn0(), {}).goal.notes, noted.goal.notes);
+  const met = settle(
+    noted.goal,
+    { notes: "All suites passed.", reason: "Done.", verdict: "met" },
+    turn0(),
+    {},
+  );
+  assert.equal(met.goal.notes, "All suites passed.");
+  const prompt = judgePrompt({
+    calls: [],
+    input: "",
+    notes: noted.goal.notes,
+    objective: goal.objective,
+    reply: "Done.",
+  });
+  assert.match(prompt, /<notes>"Turn 1: the auth suite passed\."<\/notes>/u);
+});
+
 function turn0(costUsd = 1) {
   return { costUsd, idleRuns: 0 };
 }

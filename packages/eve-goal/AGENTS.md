@@ -6,7 +6,7 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 
 ## Boundaries
 
-- Only the judge marks a goal met or impossible. The model may set a goal; pausing, resuming, and clearing require the person's approval.
+- Only the judge marks a goal met or impossible. The model may set a goal, with approval when `setApproval` is set; pausing, resuming, and clearing require the person's approval.
 - Keep the loop's guards and verdict handling in `extension/lib/policy.ts`, free of eve runtime imports, so unit tests cover them directly.
 - Continue only through `ctx.followUp()` from `turn.settled`. Never add another way to start turns.
 

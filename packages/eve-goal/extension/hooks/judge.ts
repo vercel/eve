@@ -53,6 +53,7 @@ export default defineHook({
             .flatMap(({ parts }) => parts ?? [])
             .flatMap((part) => (part.kind === "text" ? [part.text] : []))
             .join("\n"),
+          notes: current.notes,
           objective: current.objective,
           reply: reply(ctx.view, turnId)
             .flatMap((part) =>

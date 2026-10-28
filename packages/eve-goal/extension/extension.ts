@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { defineExtension } from "eve/extension";
+import type { ApprovalPolicy } from "eve/tools/approval";
 import { z } from "zod";
 
 import type { GoalJudge } from "./lib/judge.ts";
@@ -39,5 +40,10 @@ export default defineExtension({
      * own calls aren't counted. Unlimited when unset.
      */
     maxCostUsd: z.number().positive().optional(),
+    /**
+     * Approval for the model's `goal__set` calls, such as `always()` from `eve/tools/approval`.
+     * The model sets goals without approval when unset.
+     */
+    setApproval: fn<ApprovalPolicy<{ readonly objective: string }>>().optional(),
   }),
 });
