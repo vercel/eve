@@ -259,25 +259,25 @@ export function createWorkflowRuntime(config: {
             rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
             serializedContext,
           });
-    const attributes = {
+    const attributes: Record<string, string> = {
       ...sessionAttributes,
       [EVE_PREWARM_ATTRIBUTE]: "1",
-      // A retry of a caller-reserved creation reads back the delivery its run answered.
-      ...(input.sessionId === undefined || input.delivery === undefined
-        ? {}
-        : { "eve.channel.initialDeliveryId": input.delivery.deliveryId }),
       ...(input.externalInvocation === undefined
         ? {}
         : buildInvocationAttributes(input.externalInvocation)),
     };
+    // A retry of a caller-reserved creation reads back the delivery its run answered.
+    if (input.sessionId !== undefined && input.delivery !== undefined) {
+      attributes["eve.channel.initialDeliveryId"] = input.delivery.deliveryId;
+    }
 
     let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
     try {
       const startOptions: StartOptionsWithoutDeploymentId = {
         allowReservedAttributes: true,
-        ...(input.sessionId === undefined ? {} : { runId: input.sessionId }),
         attributes: normalizeEveAttributes(attributes),
       };
+      if (input.sessionId !== undefined) startOptions.runId = input.sessionId;
       if (retention !== undefined) startOptions.experimental_retention = retention;
       run = await startWorkflowOnDeployment(
         workflowEntryReference,

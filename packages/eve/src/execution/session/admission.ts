@@ -88,11 +88,12 @@ export async function admitSessionInboxPayload(
       return { kind: "cancel" };
     case "cancel": {
       const origin = controlOrigin(command);
-      return {
+      const cancel: { kind: "cancel"; origin?: ControlOrigin; turnId?: string | null } = {
         kind: "cancel",
-        ...(origin === undefined ? {} : { origin }),
-        ...(command.turnId === undefined ? {} : { turnId: command.turnId }),
       };
+      if (origin !== undefined) cancel.origin = origin;
+      if (command.turnId !== undefined) cancel.turnId = command.turnId;
+      return cancel;
     }
   }
 }
