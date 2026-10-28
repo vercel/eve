@@ -587,7 +587,7 @@
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:webchat": "pnpm run build:js && vitest run --config vitest.browser.config.ts",
     "test:framework-fixtures": "pnpm run build:compiled && vitest run --config vitest.framework-fixtures.config.ts",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "pnpm run build:compiled && vitest run --config vitest.integration.config.ts",
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
     "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
     "test:watch": "pnpm run build:compiled && vitest --config vitest.unit.config.ts",
