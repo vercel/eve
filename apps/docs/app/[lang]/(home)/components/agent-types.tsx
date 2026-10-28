@@ -488,7 +488,7 @@ function WebAppClient() {
                 className="flex flex-col gap-2 rounded-md border border-gray-alpha-400 p-2.5"
                 key={metric}
               >
-                <span className="font-medium text-copy-16 text-gray-1000 tabular-nums">
+                <span className="font-medium text-copy-16 text-gray-900 tabular-nums">
                   {metric}
                 </span>
                 <span className="h-2 w-2/3 rounded-[3px] bg-gray-200" />
@@ -524,10 +524,11 @@ function WebAppClient() {
 }
 
 /**
- * The call's waveform plays back on click, filling in bar by bar like a voice message, then
- * holds full for a moment and resets. A second click stops it.
+ * The call's waveform: live audio while the call runs, then the call's recording, which plays
+ * back on click, filling in bar by bar like a voice message, holds full for a moment, and
+ * resets. A second click stops it.
  */
-function Waveform() {
+function Waveform({ live }: { live: boolean }) {
   // How many bars have played, or null when stopped.
   const [played, setPlayed] = useState<number | null>(null);
 
@@ -538,33 +539,59 @@ function Waveform() {
     return () => clearTimeout(timer);
   }, [played]);
 
-  return (
+  const bars = WAVEFORM.map((height, i) => (
+    <span
+      className={cn(
+        "w-[2px] rounded-full transition-colors duration-150",
+        live
+          ? "bg-gray-alpha-600 motion-safe:animate-voice-level"
+          : played !== null && i < played
+            ? "bg-gray-1000"
+            : "bg-gray-alpha-600 group-hover:bg-gray-alpha-700",
+      )}
+      // Bars are positional; the array never reorders.
+      key={i}
+      // Out of step with each other, so the live bars move like a voice rather than in unison.
+      style={{ animationDelay: `-${(i * 337) % 900}ms`, height: `${height}px` }}
+    />
+  ));
+
+  return live ? (
+    <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] @sm:flex">
+      {bars}
+    </span>
+  ) : (
     <button
-      aria-label={played === null ? "Play the call" : "Stop the call"}
+      aria-label={played === null ? "Play the recording" : "Stop the recording"}
       aria-pressed={played !== null}
       className="group ml-auto hidden h-6 cursor-pointer items-center gap-[3px] rounded-[4px] focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @sm:flex"
       onClick={() => setPlayed(played === null ? 0 : null)}
       type="button"
     >
-      {WAVEFORM.map((height, i) => (
-        <span
-          className={cn(
-            "w-[2px] rounded-full transition-colors duration-150",
-            played !== null && i < played
-              ? "bg-gray-1000"
-              : "bg-gray-alpha-600 group-hover:bg-gray-alpha-700",
-          )}
-          // Bars are positional; the array never reorders.
-          key={i}
-          style={{ height: `${height}px` }}
-        />
-      ))}
+      {bars}
     </button>
   );
 }
 
-/** A phone call to a clinic's front desk, with live waveform and call controls. */
+const formatDuration = (seconds: number) =>
+  `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+/**
+ * A phone call to a clinic's front desk. While it's live the timer runs and the waveform moves;
+ * End stops both and leaves the call's recording to play back, and Call starts a new one.
+ */
 function VoiceClient() {
+  const [call, setCall] = useState({ id: 0, live: true, seconds: 42 });
+
+  useEffect(() => {
+    if (!call.live) return;
+    const timer = setInterval(
+      () => setCall((current) => ({ ...current, seconds: current.seconds + 1 })),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [call.live]);
+
   return (
     <div className="@container flex flex-col gap-3 p-3 material-large">
       <div className="flex items-center gap-3">
@@ -574,13 +601,25 @@ function VoiceClient() {
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-copy-13 text-gray-1000">Acme Dental</span>
           <span className="truncate text-label-12 text-gray-900 tabular-nums">
-            Front desk · 00:42
+            {call.live ? "Front desk" : "Call ended"} · {formatDuration(call.seconds)}
           </span>
         </span>
-        <Waveform />
-        <span className="ml-auto hidden shrink-0 rounded-full bg-red-700 px-3 py-1 text-label-12 text-white @[16rem]:inline @sm:ml-3">
-          End
-        </span>
+        {/* A new call gets a fresh waveform, so a playback in progress doesn't carry over. */}
+        <Waveform key={call.id} live={call.live} />
+        {/* Not through cn: tailwind-merge reads text-label-12 and text-white as one conflict. */}
+        <button
+          className={`ml-auto hidden shrink-0 cursor-pointer rounded-full px-3 py-1 text-label-12 text-white focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @[16rem]:inline @sm:ml-3 ${
+            call.live ? "bg-red-700" : "bg-green-700"
+          }`}
+          onClick={() =>
+            setCall(
+              call.live ? { ...call, live: false } : { id: call.id + 1, live: true, seconds: 0 },
+            )
+          }
+          type="button"
+        >
+          {call.live ? "End" : "Call"}
+        </button>
       </div>
       <p className="text-copy-13 text-gray-900">
         <span className="text-gray-1000">Agent</span> Done, you're moved to Friday at 10:00.
