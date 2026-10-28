@@ -7,7 +7,7 @@ import type { ModelMessage } from "ai";
 import { contextStorage } from "#context/container.js";
 import { askApprovals } from "#harness/hitl/approvals.js";
 import { suspendStep } from "#harness/session-machine/transitions.js";
-import { sessionView } from "#harness/session-machine/commit.js";
+import { committedMessages, sessionView } from "#harness/session-machine/commit.js";
 import { writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import { eventsOf } from "#harness/publication.js";
@@ -126,7 +126,7 @@ export function withParkedStep(
   const parked = writeTurnState(
     {
       ...opened,
-      history: [...opened.history, ...(transition.commit ?? [])] as typeof opened.history,
+      history: [...opened.history, ...committedMessages(transition)] as typeof opened.history,
     },
     transition.turn,
   );

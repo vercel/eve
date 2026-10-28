@@ -1,3 +1,4 @@
+import { changeHistory } from "#harness/session-machine/history.js";
 import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
@@ -251,7 +252,7 @@ export class ModelCaller {
     }
     return {
       next: step.runStep,
-      session: { ...step.session, history: [...this.request.history] },
+      session: changeHistory(step.session, { extend: this.request.history }),
       steered: true,
     };
   }

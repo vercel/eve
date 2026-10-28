@@ -2,7 +2,7 @@ import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { contextStorage } from "#context/container.js";
 import { StaticModelReferenceKey } from "#context/keys.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
-import { compactHistory, replaceSessionHistory } from "#harness/compaction/step.js";
+import { compactHistory } from "#harness/compaction/step.js";
 import { runModelStep } from "#harness/model-call/run.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import {
@@ -231,7 +231,7 @@ async function turnInput(
 async function clearContext(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
-  return { next: null, session: replaceSessionHistory(step.session, []) };
+  return { next: null, session: step.session };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

@@ -53,6 +53,7 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Transition } from "./commit.js";
+import type { HistoryChange } from "./history.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
@@ -931,10 +932,10 @@ function commitSteps(
   turn: TurnState,
   completed: readonly SuspendedStep[],
   messages: (step: SuspendedStep) => readonly ModelMessage[] = (step) => step.messages,
-): { readonly commit: readonly ModelMessage[]; readonly turn: TurnState } {
+): { readonly history: HistoryChange; readonly turn: TurnState } {
   const removed = new Set(completed);
   return {
-    commit: completed.flatMap(messages),
+    history: { append: completed.flatMap(messages) },
     turn: { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) },
   };
 }
@@ -971,7 +972,7 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
   const { projection } = view;
   const changeId = nextChangeId(projection);
   return {
-    clearsHistory: true,
+    history: { rewrite: [] },
     signIns: [],
     events: [
       ...clearedInteractions(view),
