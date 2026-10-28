@@ -963,9 +963,9 @@ export function SessionTimeline(): JSX.Element {
       <div className="flex flex-col overflow-hidden material-large">
         <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
           <span aria-hidden className="absolute left-3 flex gap-1">
-            <span className="size-2 rounded-full bg-gray-alpha-400" />
-            <span className="size-2 rounded-full bg-gray-alpha-400" />
-            <span className="size-2 rounded-full bg-gray-alpha-400" />
+            <span className="size-2 rounded-full bg-[#EE6D5E]" />
+            <span className="size-2 rounded-full bg-[#F3BF4A]" />
+            <span className="size-2 rounded-full bg-[#5DC753]" />
           </span>
           <span className="text-gray-800 text-label-13">{conversation.label}</span>
         </header>
