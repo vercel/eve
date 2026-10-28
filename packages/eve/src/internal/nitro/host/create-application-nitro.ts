@@ -63,6 +63,8 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
  * each builder invocation.
  */
 const WORKFLOW_ALIAS_SPECIFIERS = [
+  "eve/workflow",
+  "eve/workflow/api",
   "workflow",
   "workflow/api",
   "workflow/errors",
@@ -258,7 +260,11 @@ function resolveNitroImportPath(
   importSpecifier: string,
   importer?: string,
 ): string | null {
-  if (importSpecifier.startsWith("workflow")) {
+  if (
+    importSpecifier === "eve/workflow" ||
+    importSpecifier === "eve/workflow/api" ||
+    importSpecifier.startsWith("workflow")
+  ) {
     return resolveWorkflowModulePath(importSpecifier);
   }
 

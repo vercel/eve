@@ -492,11 +492,15 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
  * needs, plus an eve-owned builtins module for response body step helpers.
  */
 export function resolveWorkflowModulePath(specifier: string): string {
-  if (specifier === "workflow") {
+  if (specifier === "eve/workflow" || specifier === "workflow") {
     return resolvePackageSourceFilePath("src/internal/workflow/index.ts");
   }
 
-  if (specifier === "workflow/api" || specifier === "workflow/runtime") {
+  if (
+    specifier === "eve/workflow/api" ||
+    specifier === "workflow/api" ||
+    specifier === "workflow/runtime"
+  ) {
     return resolvePackageSourceFilePath("src/internal/workflow/runtime.ts");
   }
 
