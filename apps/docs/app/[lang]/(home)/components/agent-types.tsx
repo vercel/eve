@@ -435,8 +435,8 @@ export function AgentTypes(): JSX.Element {
         </div>
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-x-6">
           {/* Every description shares one grid cell, so it keeps the tallest one's height and
-              switching tabs never shifts the layout. Beside the window, from its top, on wide
-              screens; above it when stacked. */}
+              switching tabs never shifts the layout. Beside the window, from its top and a column
+              clear of it, on wide screens; above it when stacked. */}
           <div className="grid lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:max-w-[44ch]">
             {USE_CASES.map((useCase) => (
               <p
@@ -452,7 +452,7 @@ export function AgentTypes(): JSX.Element {
           </div>
           <div
             aria-labelledby={`${baseId}-tab-${selected.id}`}
-            className="min-w-0 lg:col-span-8 lg:row-start-1"
+            className="min-w-0 lg:col-span-7 lg:row-start-1"
             id={`${baseId}-panel`}
             role="tabpanel"
           >
