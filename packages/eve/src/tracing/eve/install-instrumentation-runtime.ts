@@ -1,5 +1,3 @@
-import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
-
 import { contextStorage } from "#context/container.js";
 import { ConversationIdKey } from "#context/keys.js";
 import {
@@ -17,6 +15,7 @@ import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-st
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
 import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local/traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
+import type { SpanProcessor, SpanProcessorOrName } from "#tracing/eve/otel-configuration.js";
 import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import type { RegisteredOtelPipeline } from "#tracing/eve/otel-registration.js";
 import { registerOtel } from "#tracing/eve/otel-registration.js";
@@ -124,7 +123,7 @@ function hasMemoryOperationHandler(provider: InstrumentationProviderDefinition):
   );
 }
 
-function isSpanProcessor(processor: SpanProcessor | "auto"): processor is SpanProcessor {
+function isSpanProcessor(processor: SpanProcessorOrName): processor is SpanProcessor {
   return processor !== "auto";
 }
 

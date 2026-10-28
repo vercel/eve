@@ -4,15 +4,10 @@ import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { fileMemory } from "#public/memory/file/provider.js";
 import type {
   MemoryProvider,
-  MemoryToolDefinition,
   MemoryToolsContext,
   MemoryTurnStartedContext,
 } from "#public/memory/index.js";
 import type { ToolSchema } from "#tools/schema.js";
-
-interface TestTool<TInput> {
-  execute(input: TInput, context: never): unknown;
-}
 
 const signal = new AbortController().signal;
 const toolContext = { abortSignal: signal } as never;
@@ -382,16 +377,7 @@ async function resolveTools(provider: MemoryProvider) {
   if (saveMemory === undefined || removeMemory === undefined) {
     throw new Error("memory tools were not resolved");
   }
-  return {
-    remove_memory: testTool<{ readonly index: number }>(removeMemory),
-    save_memory: testTool<{ readonly text: string }>(saveMemory),
-  };
-}
-
-function testTool<TInput>(tool: MemoryToolDefinition): TestTool<TInput> {
-  return {
-    execute: (input, context) => tool.execute(input as never, context),
-  };
+  return { remove_memory: removeMemory, save_memory: saveMemory };
 }
 
 function recallAtTurnStart(provider: MemoryProvider) {

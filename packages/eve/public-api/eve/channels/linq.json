@@ -11,6 +11,7 @@
   "LinqCredentialValue",
   "LinqInboundMessageContext",
   "LinqInboundResult",
+  "LinqWebhookVerifier",
   "defaultLinqAuth",
   "linqChannel"
 ]

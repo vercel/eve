@@ -14,7 +14,6 @@
   "MemoryScopeContext",
   "MemoryScopeDefinition",
   "MemoryScopeResolverResult",
-  "MemoryToolDefinition",
   "MemoryToolSet",
   "MemoryToolsContext",
   "MemoryTurnCompletedContext",

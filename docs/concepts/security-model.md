@@ -41,7 +41,7 @@ flowchart LR
 eve sends data where your agent configuration and runtime choices send it:
 
 - Inbound channel data flows through the channel provider you configure, then into the eve app runtime.
-- Model inputs and outputs flow to the model or routing path selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider-authored `LanguageModel`.
+- Model inputs and outputs flow to the model or routing path selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider model instance (`EveLanguageModel`).
 - Tool and connection calls flow to the external services, MCP servers, OpenAPI endpoints, and channels you configure.
 - Sandbox commands can reach network destinations allowed by the sandbox network policy.
 - Telemetry flows to destinations configured under `agent/instrumentation/`.

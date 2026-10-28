@@ -19,7 +19,12 @@ import type { InteractionRequest } from "#protocol/session-events/families/inter
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
-type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
+// `any` passes through so `ToolDefinition<any, any>` stays the type every defined tool fits.
+type ApprovalContextInput<TInput> = 0 extends 1 & TInput
+  ? TInput
+  : unknown extends TInput
+    ? Record<string, unknown>
+    : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
