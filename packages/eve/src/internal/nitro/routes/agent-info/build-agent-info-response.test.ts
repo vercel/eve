@@ -9,6 +9,7 @@ type ReadonlyDeep<T> = T extends readonly (infer Item)[]
     ? { readonly [Key in keyof T]: ReadonlyDeep<T[Key]> }
     : T;
 
+import type { CompiledShadowedChannelRoute } from "#compiler/manifest.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
@@ -280,5 +281,80 @@ describe("buildAgentInfoResponse", () => {
     );
     expect(customTierResponse.agent.model.providerOptions).toBeUndefined();
     expect(JSON.stringify(customTierResponse)).not.toContain("sk-canary-tier");
+  });
+
+  it("sends the ChatGPT account label only from development servers", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const model = manifest.config.model;
+    if (model === undefined) throw new Error("Expected a static compiled model.");
+    model.routing = { kind: "external", provider: "codex" };
+    const build = (mode: "development" | "production") =>
+      buildAgentInfoResponse(
+        { manifest, schedules: [] },
+        {
+          chatgptAuth: { accountLabel: "canary@example.com", kind: "ready" },
+          gatewayCredentials: { apiKey: false, oidc: false },
+          mode,
+        },
+      );
+
+    expect(build("development").agent.model.endpoint).toEqual({
+      accountLabel: "canary@example.com",
+      kind: "chatgpt",
+      state: "ready",
+    });
+    expect(build("production").agent.model.endpoint).toEqual({ kind: "chatgpt", state: "ready" });
+  });
+
+  it("projects shadowed routes and backings without server paths", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const owner = { kind: "application" as const };
+    const shadowed = (backing: CompiledShadowedChannelRoute["source"]["backing"]) => ({
+      method: "GET" as const,
+      source: {
+        backing,
+        form: "direct" as const,
+        layer: "application" as const,
+        logicalPath: "channels/status.ts",
+        owner,
+        sourceId: "channels/status.ts",
+      },
+      urlPath: "/status",
+      winnerSourceId: "channels/status-v2.ts",
+    });
+    const response = buildAgentInfoResponse(
+      {
+        manifest: {
+          ...manifest,
+          channelRoutes: {
+            ...manifest.channelRoutes,
+            shadowed: [
+              shadowed({ kind: "resource", sourcePath: "/srv/canary/agent/channels/status.ts" }),
+              shadowed({
+                externalDependencies: ["zod"],
+                extensionScope: { namespace: "crm", sourceRoot: "/srv/canary/extensions/crm" },
+                kind: "filesystem",
+                mountId: "extensions/crm",
+                sourcePath: "/srv/canary/extensions/crm/channels/status.ts",
+              }),
+            ],
+          },
+        },
+        schedules: [],
+      },
+      { gatewayCredentials: { apiKey: false, oidc: false }, mode: "production" },
+    );
+
+    expect(JSON.stringify(response)).not.toContain("/srv/canary");
+    expect(response.channels.shadowed.map((route) => route.source.backing)).toEqual([
+      { kind: "resource" },
+      {
+        externalDependencies: ["zod"],
+        extensionScope: { namespace: "crm" },
+        kind: "filesystem",
+        mountId: "extensions/crm",
+      },
+    ]);
+    expect(() => AgentInfoResultSchema.parse(response)).not.toThrow();
   });
 });

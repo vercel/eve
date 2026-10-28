@@ -11,10 +11,7 @@ import { createDevelopmentCredentialGate } from "#services/dev-client/credential
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
 
-const AGENT_INFO = createTestAgentInfoResult({
-  agentRoot: "/tmp/weather-agent/agent",
-  name: "Weather Agent",
-});
+const AGENT_INFO = createTestAgentInfoResult({ name: "Weather Agent" });
 
 function testBinding(
   logicalPath: string,
@@ -26,7 +23,6 @@ function testBinding(
     backing: {
       externalDependencies: [],
       kind: "filesystem" as const,
-      sourcePath: `/tmp/weather-agent/agent/${logicalPath}`,
     },
     logicalPath,
     owner,
@@ -375,7 +371,6 @@ describe("Client request policy", () => {
       binding: {
         backing: {
           kind: "filesystem",
-          sourcePath: `/app/tools/${index}.ts`,
           externalDependencies: [],
           mountId,
         },
@@ -513,6 +508,60 @@ describe("Client request policy", () => {
       method: "unrecognized",
       sourceKind: "unrecognized",
     });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["non-string", 42],
+  ])("rejects a %s enum value instead of reading it as unrecognized", async (_case, mode) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ ...AGENT_INFO, mode }));
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AgentInfoResponseError);
+    expect((error as AgentInfoResponseError).issues.join("\n")).toContain("mode");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["non-string", 42],
+  ])("still requires a binding when a source kind is %s", async (_case, sourceKind) => {
+    const { binding: _binding, ...unbound } = AGENT_INFO.sandbox;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ...AGENT_INFO, sandbox: { ...unbound, sourceKind } }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
+
+  it("accepts several unrecognized channel methods on one path", async () => {
+    const owner = { kind: "application" as const };
+    const route = (method: string) => ({
+      binding: testBinding(`channels/${method}.ts`, owner),
+      logicalPath: `channels/${method}.ts`,
+      method,
+      name: method,
+      owner,
+      sourceId: `channels/${method}.ts`,
+      sourceKind: "module",
+      urlPath: "/events",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        channels: { ...AGENT_INFO.channels, routes: [route("QUERY"), route("SUBSCRIBE")] },
+      }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info.channels.routes.map((entry) => entry.method)).toEqual([
+      "unrecognized",
+      "unrecognized",
+    ]);
   });
 
   it.each([

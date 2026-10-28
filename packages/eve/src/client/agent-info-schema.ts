@@ -5,11 +5,12 @@ import { mountIdSchema } from "#shared/extension-mount.js";
 export const AGENT_INFO_VERSION = 6;
 
 /**
- * A value set the server may grow. Older clients read a newer value as
- * `"unrecognized"` instead of rejecting the whole inspection payload.
+ * A value set the server may grow. Older clients read a newer string as
+ * `"unrecognized"` instead of rejecting the whole inspection payload; a missing
+ * or non-string value is still malformed and fails the parse.
  */
 function openEnum<const Values extends readonly [string, ...string[]]>(values: Values) {
-  return z.union([z.enum(values), z.literal("unrecognized")]).catch("unrecognized");
+  return z.union([z.enum(values), z.string().transform(() => "unrecognized" as const)]);
 }
 
 const owner = z.discriminatedUnion("kind", [
@@ -23,13 +24,13 @@ const owner = z.discriminatedUnion("kind", [
   }),
 ]);
 
+// Filesystem backings carry no server paths; the binding's logical path locates the file.
 const moduleBacking = z.discriminatedUnion("kind", [
   z.object({
     externalDependencies: z.array(z.string()),
-    extensionScope: z.object({ namespace: z.string(), sourceRoot: z.string() }).optional(),
+    extensionScope: z.object({ namespace: z.string() }).optional(),
     kind: z.literal("filesystem"),
     mountId: z.string().optional(),
-    sourcePath: z.string(),
   }),
   z.object({
     dependencies: z.record(z.string(), z.string()).optional(),
@@ -152,10 +153,7 @@ const channelRoute = entry.extend({
 });
 
 const sourceDescriptor = z.object({
-  backing: z.union([
-    moduleBacking,
-    z.object({ kind: z.literal("resource"), sourcePath: z.string() }),
-  ]),
+  backing: z.union([moduleBacking, z.object({ kind: z.literal("resource") })]),
   form: openEnum(["derived", "direct"]),
   layer: openEnum(["framework-default", "extension-package", "extension-override", "application"]),
   logicalPath: z.string(),
@@ -197,10 +195,8 @@ const sandbox = source.extend({
 const subagent = entry.extend({
   configResolver: dynamicResolver.optional(),
   description: z.string().optional(),
-  entryPath: z.string(),
   nodeId: z.string(),
   parentNodeId: z.string(),
-  rootPath: z.string(),
   summary: z.object({
     channels: z.number(),
     connections: z.number(),
@@ -238,7 +234,7 @@ const compositionDiagnostic = z.object({
 /**
  * Runtime contract for the authoritative `/eve/v1/info` v6 response. Parsing is
  * tolerant so a server may add fields and enum values without a version bump:
- * unknown keys are stripped and unknown enum values read as `"unrecognized"`.
+ * unknown keys are stripped and unknown enum strings read as `"unrecognized"`.
  */
 export const AgentInfoResultSchema = z
   .object({
@@ -277,12 +273,13 @@ export const AgentInfoResultSchema = z
   .superRefine((value, context) => {
     const assertUnique = <Entry>(
       entries: readonly Entry[],
-      identity: (entry: Entry) => string,
+      identity: (entry: Entry) => string | undefined,
       path: readonly (string | number)[],
     ) => {
       const seen = new Set<string>();
       entries.forEach((entry, index) => {
         const key = identity(entry);
+        if (key === undefined) return;
         if (seen.has(key)) {
           context.addIssue({
             code: "custom",
@@ -317,9 +314,14 @@ export const AgentInfoResultSchema = z
     assertUnique(value.connections, (entry) => entry.connectionName, ["connections"]);
     assertUnique(value.hooks, (entry) => entry.slug, ["hooks"]);
     assertUnique(value.memories, (entry) => entry.slot, ["memories"]);
+    // Distinct methods this client does not know all read as "unrecognized", so
+    // they cannot be compared; a newer server may serve several on one path.
     assertUnique(
       value.channels.routes,
-      (entry) => `${entry.method} ${normalizeRoutePattern(entry.urlPath)}`,
+      (entry) =>
+        entry.method === "unrecognized"
+          ? undefined
+          : `${entry.method} ${normalizeRoutePattern(entry.urlPath)}`,
       ["channels", "routes"],
     );
     assertUnique(value.subagents.local, (entry) => entry.nodeId, ["subagents", "local"]);

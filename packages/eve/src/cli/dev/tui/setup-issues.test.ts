@@ -30,7 +30,7 @@ function infoWithRouting(
         ? { id: "m", routing }
         : { endpoint, id: "m", routing };
 
-  const info = createTestAgentInfoResult({ agentRoot: "/a/agent", name: "Agent" });
+  const info = createTestAgentInfoResult({ name: "Agent" });
   return { ...info, agent: { ...info.agent, model } };
 }
 

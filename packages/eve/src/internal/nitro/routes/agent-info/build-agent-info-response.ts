@@ -7,7 +7,12 @@ import type {
   CompiledDynamicToolDefinition,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import type { AgentSourceOwner, CompiledModuleBinding } from "#compiler/source-graph.js";
+import type {
+  AgentModuleBacking,
+  AgentSourceBacking,
+  AgentSourceOwner,
+  CompiledModuleBinding,
+} from "#compiler/source-graph.js";
 import type { AgentInfoResult, AgentInfoSource } from "#client/agent-info-schema.js";
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import {
@@ -18,11 +23,17 @@ import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broke
 import type { JsonObject } from "#shared/json.js";
 
 export type AgentInfoResponse = AgentInfoResult;
+type AgentInfoModuleBacking = NonNullable<AgentInfoSource["binding"]>["backing"];
+type AgentInfoSourceBacking = AgentInfoResult["channels"]["shadowed"][number]["source"]["backing"];
 
-function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
+// The account label can be an email address, so only the developer's own server sends it.
+function toChatGptEndpoint(
+  state: ChatGptAuthState | undefined,
+  mode: "development" | "production",
+) {
   if (state === undefined) return undefined;
   const endpoint = { state: state.kind };
-  if (state.kind === "ready" && state.accountLabel !== undefined) {
+  if (mode === "development" && state.kind === "ready" && state.accountLabel !== undefined) {
     return { ...endpoint, accountLabel: state.accountLabel };
   }
   return endpoint;
@@ -31,7 +42,8 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
 /**
  * Projects agent info exclusively from the effective compiled graph. End users
  * can read this route when the eve channel admits them, so it omits authored
- * text and server paths; instruction text is kept for the development TUI only.
+ * text and server paths; instruction text and the ChatGPT account label are
+ * kept for the development TUI only.
  */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
@@ -60,7 +72,7 @@ export function buildAgentInfoResponse(
               endpoint: resolveModelEndpointStatus(
                 manifest.config.model.routing,
                 input.gatewayCredentials,
-                toChatGptEndpoint(input.chatgptAuth),
+                toChatGptEndpoint(input.chatgptAuth, input.mode),
               ),
               id: manifest.config.model.id,
               providerOptions: projectProviderOptionsForInfo(manifest.config.model.providerOptions),
@@ -93,7 +105,19 @@ export function buildAgentInfoResponse(
         name: route.name,
         urlPath: route.urlPath,
       })),
-      shadowed: [...manifest.channelRoutes.shadowed],
+      shadowed: manifest.channelRoutes.shadowed.map((route) => ({
+        method: route.method,
+        source: {
+          backing: projectBacking(route.source.backing),
+          form: route.source.form,
+          layer: route.source.layer,
+          logicalPath: route.source.logicalPath,
+          owner: route.source.owner,
+          sourceId: route.source.sourceId,
+        },
+        urlPath: route.urlPath,
+        winnerSourceId: route.winnerSourceId,
+      })),
     },
     composition,
     connections: manifest.connections.map((connection) => ({
@@ -165,11 +189,9 @@ export function buildAgentInfoResponse(
         const projected = {
           ...toOwnedSource(manifest, subagent),
           description: subagent.description,
-          entryPath: subagent.entryPath,
           name: subagent.name,
           nodeId: subagent.nodeId,
           parentNodeId: subagent.parentNodeId,
-          rootPath: subagent.rootPath,
           summary: summarizeNode(subagent.agent),
         };
         if (subagent.configResolver === undefined) return projected;
@@ -268,7 +290,7 @@ function sourceProjection(
     binding === undefined
       ? undefined
       : {
-          backing: binding.backing,
+          backing: projectBacking(binding.backing),
           logicalPath: binding.logicalPath,
           owner: binding.owner,
         };
@@ -278,6 +300,30 @@ function sourceProjection(
   if (binding !== undefined) return { ...projected, binding: publicBinding! };
   if (source.exportName !== undefined) return { ...projected, exportName: source.exportName };
   return projected;
+}
+
+/**
+ * Keeps a backing's provenance but drops filesystem locations, which are
+ * server paths; the source's logical path already says which file it is.
+ */
+function projectBacking(backing: AgentModuleBacking): AgentInfoModuleBacking;
+function projectBacking(backing: AgentSourceBacking): AgentInfoSourceBacking;
+function projectBacking(backing: AgentSourceBacking): AgentInfoSourceBacking {
+  switch (backing.kind) {
+    case "filesystem":
+      return {
+        externalDependencies: [...backing.externalDependencies],
+        ...(backing.extensionScope === undefined
+          ? {}
+          : { extensionScope: { namespace: backing.extensionScope.namespace } }),
+        kind: "filesystem",
+        ...(backing.mountId === undefined ? {} : { mountId: backing.mountId }),
+      };
+    case "programmatic":
+      return backing;
+    case "resource":
+      return { kind: "resource" };
+  }
 }
 
 function toAgentInfoSourceKind(sourceKind: string): AgentInfoSource["sourceKind"] {
