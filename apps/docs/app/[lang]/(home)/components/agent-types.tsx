@@ -690,11 +690,11 @@ const formatDuration = (seconds: number) =>
   `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
 /**
- * A phone call to a clinic's front desk. While it's live the timer runs and the waveform records;
- * End stops both and leaves the call's recording to play back, and Record starts a new one.
+ * A phone call to a clinic's front desk. It opens on a finished call whose recording plays
+ * back; Record starts a new one, which runs the timer and records the waveform until End.
  */
 function VoiceClient() {
-  const [call, setCall] = useState({ id: 0, live: true, seconds: 42 });
+  const [call, setCall] = useState({ id: 0, live: false, seconds: 42 });
 
   useEffect(() => {
     if (!call.live) return;
