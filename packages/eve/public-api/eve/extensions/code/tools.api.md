@@ -22,26 +22,26 @@ interface AppliedPatchFile {
 
 // @public (undocumented)
 export const apply_patch: ToolDefinition<    {
-patchText: string;
 root?: string | undefined;
+patchText: string;
 }, {
 diagnostics: {
-check: "typescript" | "git-diff" | "syntax" | "whitespace";
-message: string;
+check: "git-diff" | "syntax" | "typescript" | "whitespace";
 code?: number | undefined;
 column?: number | undefined;
 line?: number | undefined;
+message: string;
 path?: string | undefined;
 }[];
 files: {
-operation: "delete" | "update" | "add" | "move";
+operation: "add" | "delete" | "move" | "update";
 path: string;
 previousPath?: string | undefined;
 }[];
 }> & {
     execute(input: {
-        patchText: string;
         root?: string | undefined;
+        patchText: string;
     }, ctx: ToolContext): Promise<{
         diagnostics: PostEditDiagnostic[];
         files: AppliedPatchFile[];

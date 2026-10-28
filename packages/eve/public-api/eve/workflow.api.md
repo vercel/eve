@@ -58,6 +58,19 @@ interface RequestWithResponse extends Request {
 }
 
 // @public
+export class RetryableError extends Error {
+    constructor(message: string, options?: RetryableErrorOptions);
+    // (undocumented)
+    static is(value: unknown): value is RetryableError;
+    retryAfter: Date;
+}
+
+// @public (undocumented)
+interface RetryableErrorOptions {
+    retryAfter?: number | StringValue_2 | Date;
+}
+
+// @public
 class Run<TResult> {
     // (undocumented)
     static [WORKFLOW_DESERIALIZE](data: {
@@ -115,6 +128,9 @@ interface StopSleepResult {
 
 // @public (undocumented)
 type StringValue = string;
+
+// @public (undocumented)
+type StringValue_2 = string;
 
 // @public
 interface Thenable<T> {

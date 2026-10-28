@@ -9,10 +9,10 @@ type DockerfileEnvironmentInput = Omit<DockerSandboxEnvironmentOptions, "image">
 
 // @public (undocumented)
 export const DockerSandbox: {
-    dockerfile(options?: DockerfileEnvironmentInput): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession>;
-    image(reference: string, options?: DockerfileEnvironmentInput): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession>;
     name: string;
     environment(options?: Readonly<DockerSandboxEnvironmentOptions> | undefined): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession>;
+    dockerfile(options?: DockerfileEnvironmentInput): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession>;
+    image(reference: string, options?: DockerfileEnvironmentInput): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession>;
 };
 
 // @public

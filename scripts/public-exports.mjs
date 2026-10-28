@@ -10,11 +10,11 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const eve = join(root, "packages/eve");
 const snapshots = join(eve, "public-api");
 
-export async function readPublicEntries() {
+export async function readPackageEntries({ includeInternal = false } = {}) {
   const manifest = JSON.parse(await readFile(join(eve, "package.json"), "utf8"));
   const entries = new Map();
   for (const [key, value] of Object.entries(manifest.exports)) {
-    if (key === "./internal" || key.startsWith("./internal/")) continue;
+    if (!includeInternal && (key === "./internal" || key.startsWith("./internal/"))) continue;
     const declaration = typeof value === "object" ? value.types : value;
     if (typeof declaration !== "string" || !declaration.endsWith(".d.ts")) continue;
     const source = join(eve, declaration.replace(/^\.\/dist\//, ""));
@@ -32,7 +32,7 @@ export async function checkPublicExports({ write = false } = {}) {
     cwd: eve,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const entries = await readPublicEntries();
+  const entries = await readPackageEntries();
   const program = ts.createProgram([...entries.values()], {
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,

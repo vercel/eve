@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CompilerState, Extractor, ExtractorConfig } from "@microsoft/api-extractor";
-import { readPublicEntries } from "./public-exports.mjs";
+import { readPackageEntries } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
-const ts = createRequire(require.resolve("@microsoft/api-extractor/package.json"))("typescript");
+const tsc = join(dirname(require.resolve("typescript/package.json")), "bin", "tsc");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const eve = join(root, "packages/eve");
 const snapshots = join(eve, "public-api");
@@ -18,39 +18,40 @@ export async function checkPublicSignatures({ write = false } = {}) {
     cwd: eve,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const entries = await readPublicEntries();
+  const entries = await readPackageEntries();
+  const selfReferences = await readPackageEntries({ includeInternal: true });
   const scratch = await mkdtemp(join(tmpdir(), "eve-public-signatures-"));
   try {
     const declarations = join(scratch, "declarations");
-    const configPath = join(eve, "tsconfig.build.json");
-    const config = ts.readConfigFile(configPath, ts.sys.readFile);
-    if (config.error)
-      throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
-    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, eve);
-    if (parsed.errors.length)
-      throw new Error(ts.formatDiagnosticsWithColorAndContext(parsed.errors, diagnosticHost()));
-    const program = ts.createProgram([...entries.values()], {
-      ...parsed.options,
-      outDir: declarations,
-      noEmit: false,
-      noEmitOnError: false,
-      emitDeclarationOnly: true,
-      declarationMap: false,
+    // Emit with the same compiler and config as the published package, not the
+    // older TypeScript bundled with API Extractor.
+    const configPath = join(scratch, "tsconfig.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        extends: join(eve, "tsconfig.build.json"),
+        compilerOptions: {
+          outDir: declarations,
+          declarationMap: false,
+          typeRoots: [join(eve, "node_modules/@types"), join(root, "node_modules/@types")],
+          // Self-imports must not resolve to an earlier dist build.
+          paths: Object.fromEntries(
+            [...selfReferences].map(([entry, source]) => [entry, [source]]),
+          ),
+        },
+      }),
+    );
+    execFileSync(process.execPath, [tsc, "-p", configPath], {
+      cwd: eve,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    const emitted = program.emit();
-    if (emitted.emitSkipped || emitted.diagnostics.length) {
-      throw new Error(
-        ts.formatDiagnosticsWithColorAndContext(emitted.diagnostics, diagnosticHost()),
-      );
-    }
     // tsc does not emit handwritten declarations, including the compatibility entry.
-    for (const source of program.getSourceFiles()) {
-      const sourcePath = relative(eve, source.fileName);
-      if (source.isDeclarationFile && sourcePath.replaceAll("\\", "/").startsWith("src/")) {
-        const destination = join(declarations, sourcePath);
-        await mkdir(dirname(destination), { recursive: true });
-        await cp(source.fileName, destination);
-      }
+    for (const sourcePath of await readdir(join(eve, "src"), { recursive: true })) {
+      if (!sourcePath.endsWith(".d.ts")) continue;
+      const destination = join(declarations, "src", sourcePath);
+      await mkdir(dirname(destination), { recursive: true });
+      await cp(join(eve, "src", sourcePath), destination);
     }
     await cp(join(eve, ".generated/compiled"), join(declarations, "compiled"), { recursive: true });
     await symlink(join(eve, "node_modules"), join(declarations, "node_modules"), "junction");
@@ -152,14 +153,6 @@ export async function checkPublicSignatures({ write = false } = {}) {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
-}
-
-function diagnosticHost() {
-  return {
-    getCanonicalFileName: (file) => file,
-    getCurrentDirectory: () => eve,
-    getNewLine: () => "\n",
-  };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

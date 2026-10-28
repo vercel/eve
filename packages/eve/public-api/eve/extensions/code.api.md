@@ -22,22 +22,22 @@ broker: z.ZodOptional<z.ZodCustom<CredentialPolicyBroker, CredentialPolicyBroker
 worker: z.ZodOptional<z.ZodObject<{
 model: z.ZodString;
 reasoning: z.ZodEnum<{
-"provider-default": "provider-default";
-none: "none";
-minimal: "minimal";
+high: "high";
 low: "low";
 medium: "medium";
-high: "high";
+minimal: "minimal";
+none: "none";
+"provider-default": "provider-default";
 xhigh: "xhigh";
 }>;
 openaiReasoningEffort: z.ZodOptional<z.ZodEnum<{
-none: "none";
-minimal: "minimal";
-low: "low";
-medium: "medium";
 high: "high";
-xhigh: "xhigh";
+low: "low";
 max: "max";
+medium: "medium";
+minimal: "minimal";
+none: "none";
+xhigh: "xhigh";
 }>>;
 }, z.core.$strip>>;
 }, z.core.$strict>>;
