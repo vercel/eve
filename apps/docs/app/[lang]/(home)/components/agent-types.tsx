@@ -335,7 +335,7 @@ export function AgentTypes(): JSX.Element {
     <HomeSection
       action={
         <Button
-          className="w-fit rounded-full"
+          className="w-fit rounded-full text-base"
           Component={PrefetchLink}
           href={selected.template ? templatePath(selected.template) : canonicalRoutes.templates}
           onClick={() =>
