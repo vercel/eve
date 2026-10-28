@@ -469,24 +469,30 @@ function ThreadMessage({
 // WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
+// The bubbles' corner radius. The tail below is drawn for a 20px corner, so it scales with
+// the radius to keep meeting the corner, with its stroke widened to stay a 1px hairline.
+const bubbleRadius = 14;
+const tailScale = bubbleRadius / 20;
+
 /**
  * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), with the
- * bubble fill as a prop. It overlaps a 20px-radius bubble's bottom corner: a page-colored
- * square hides the corner, then the bubble's curve flows into the tail with the same hairline.
+ * bubble fill as a prop. It overlaps the bubble's bottom corner: a page-colored square hides
+ * the corner, then the bubble's curve flows into the tail with the same hairline.
  */
 function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
   return (
     <svg
       aria-hidden
       className={cn(
-        "absolute bottom-[-3px] [--tail-border:var(--ds-gray-alpha-400)] dark:[--tail-border:#252525]",
-        flipped ? "right-[-7px] -scale-x-100" : "left-[-7px]",
+        "absolute [--tail-border:var(--ds-gray-alpha-400)] dark:[--tail-border:#252525]",
+        flipped && "-scale-x-100",
       )}
       fill="none"
-      height={24}
+      height={24 * tailScale}
       overflow="hidden"
+      style={{ bottom: -3 * tailScale, [flipped ? "right" : "left"]: -7 * tailScale }}
       viewBox="0 0 24 24"
-      width={24}
+      width={24 * tailScale}
     >
       <path d="M0 0H24V24H0z" fill="var(--ds-background-200)" />
       <g style={{ filter: "drop-shadow(0 1px 2px rgb(0 0 0 / 4%))" }}>
@@ -497,7 +503,7 @@ function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
           fillRule="evenodd"
           paintOrder="stroke fill"
           stroke="var(--tail-border)"
-          strokeWidth={2}
+          strokeWidth={2 / tailScale}
         />
       </g>
     </svg>
@@ -569,10 +575,11 @@ function Bubble({
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          "relative max-w-[min(80%,22rem)] rounded-[20px] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
+          "relative max-w-[min(80%,22rem)] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
           // The agent's bubbles share one width, so a run of them lines up on both edges.
           outgoing ? "bg-gray-200" : "w-full bg-background-100",
         )}
+        style={{ borderRadius: bubbleRadius }}
       >
         {tail ? (
           <Tail
@@ -582,13 +589,13 @@ function Bubble({
         ) : null}
         {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
             shares the last line when it fits and takes its own line when it doesn't. */}
-        <div className="relative text-pretty px-3.5 pt-2 pb-2.5 text-copy-14">
+        <div className="relative text-pretty px-3 pt-1.5 pb-2 text-copy-14">
           {children}
           <span
             aria-hidden
             className={cn("inline-block", outgoing ? "w-[5.5rem]" : "w-[4.25rem]")}
           />
-          <span className="absolute right-3.5 bottom-2 inline-flex items-center gap-1 text-[11px] text-gray-900 leading-none tabular-nums">
+          <span className="absolute right-3 bottom-1.5 inline-flex items-center gap-1 text-[11px] text-gray-900 leading-none tabular-nums">
             {time}
             {outgoing ? <ReadTicks /> : null}
           </span>
