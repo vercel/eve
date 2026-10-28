@@ -9,6 +9,7 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 export type ClientErrorCode =
   | "unauthorized"
   | "forbidden"
+  | "info_forbidden"
   | "eve_production_auth_not_configured"
   | "session_stranded"
   | "session_expired"
