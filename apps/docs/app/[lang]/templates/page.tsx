@@ -37,14 +37,18 @@ const templateSummaries = templateManifest
       description: templateDescription,
       featured,
       integrations,
+      preview,
       slug,
+      tagline,
       title: templateTitle,
     }) => ({
       category,
       description: templateDescription,
       featured,
       integrations,
+      preview,
       slug,
+      tagline,
       title: templateTitle,
     }),
   );

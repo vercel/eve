@@ -26,7 +26,8 @@ import type {
   TemplateIntegration,
   TemplateManifestEntry,
 } from "@/lib/templates/manifest";
-import { integrationIcons } from "./integration-icons";
+import { grayscaleIntegrationIcons } from "./integration-icons";
+import { TemplatePreview } from "./template-preview";
 
 const ALL = "all" as const;
 
@@ -38,7 +39,14 @@ interface TemplateGalleryProps {
 
 type TemplateGalleryEntry = Pick<
   TemplateManifestEntry,
-  "category" | "description" | "featured" | "integrations" | "slug" | "title"
+  | "category"
+  | "description"
+  | "featured"
+  | "integrations"
+  | "preview"
+  | "slug"
+  | "tagline"
+  | "title"
 >;
 
 interface FilterSelectProps<T extends string> {
@@ -96,11 +104,16 @@ const TemplateCard = ({
 }) => (
   <li>
     <Link
-      className="flex h-full min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
+      className="flex h-full min-h-36 flex-col overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
       href={templatePath(entry.slug)}
       onClick={onSelect}
       prefetch={true}
     >
+      <TemplatePreview
+        integrations={entry.integrations}
+        preview={entry.preview}
+        title={entry.title}
+      />
       <div className="flex items-start justify-between gap-3">
         <h3 className="min-w-0 text-gray-1000 text-heading-16">{entry.title}</h3>
         {entry.featured ? (
@@ -109,12 +122,12 @@ const TemplateCard = ({
           </Badge>
         ) : null}
       </div>
-      <p className="mt-2 line-clamp-3 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
-        {entry.description}
+      <p className="mt-1 line-clamp-2 text-[14px] leading-[1.3] text-gray-800">
+        {entry.tagline ?? entry.description}
       </p>
       <ul aria-label="Integrations" className="mt-auto flex items-center gap-2 pt-4">
         {entry.integrations.map((integration) => {
-          const Icon = integrationIcons[integration];
+          const Icon = grayscaleIntegrationIcons[integration];
           return (
             <li
               className="flex size-4 items-center justify-center text-gray-700 grayscale"
@@ -168,7 +181,13 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
         return true;
       }
 
-      return [entry.title, entry.description, entry.category, ...entry.integrations]
+      return [
+        entry.title,
+        entry.tagline ?? "",
+        entry.description,
+        entry.category,
+        ...entry.integrations,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(normalizedQuery);
