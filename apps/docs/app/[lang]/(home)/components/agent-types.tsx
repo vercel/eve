@@ -466,21 +466,38 @@ const WAVEFORM = [3, 6, 10, 14, 9, 16, 20, 13, 7, 4, 8, 13, 18, 12, 7, 4, 3, 6, 
 /** Customer support chat docked in a product, shown inside a browser window. */
 function WebAppClient() {
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden material-large">
-      <div className="flex h-8 shrink-0 items-center gap-1.5 border-gray-alpha-400 border-b px-3">
-        {[0, 1, 2].map((dot) => (
-          <span className="size-2 rounded-full bg-gray-alpha-400" key={dot} />
-        ))}
-        <span className="mx-auto truncate rounded-md bg-gray-alpha-200 px-3 py-0.5 text-label-12 text-gray-900">
+    <AppWindow
+      className="min-h-0"
+      title={
+        <span className="block truncate rounded-md bg-gray-alpha-200 px-3 py-0.5 text-gray-900 text-label-12">
           app.acme.com/orders
         </span>
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background-200 p-3">
-        <div aria-hidden className="hidden flex-col gap-2 sm:flex">
-          <span className="text-copy-13 text-gray-1000">Orders</span>
-          {["w-3/5", "w-2/5", "w-1/2"].map((width) => (
-            <span className={`h-2 rounded-full bg-gray-alpha-200 ${width}`} key={width} />
-          ))}
+      }
+    >
+      <div className="relative min-h-0 flex-1 p-3">
+        {/* The agent UI skeleton from "Own your agent UI": an outlined heading and bars, and
+            blocks that fade into the window. The order rows fade out behind the chat. */}
+        <div aria-hidden className="hidden select-none flex-col gap-2 sm:flex">
+          <span className="font-bold text-[24px] text-gray-700 leading-8 tracking-[-0.01em] [-webkit-text-fill-color:var(--ds-background-100)] [-webkit-text-stroke:1px_currentColor] [paint-order:stroke_fill]">
+            Orders
+          </span>
+          <span className="h-5 w-3/4 rounded-[3px] bg-gray-200" />
+          <span className="mt-1 grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((tile) => (
+              <span
+                className="h-14 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100"
+                key={tile}
+              />
+            ))}
+          </span>
+          <span className="flex flex-col gap-2 [mask-image:linear-gradient(to_bottom,black,transparent)]">
+            {["w-1/2", "w-2/5", "w-3/5", "w-1/3"].map((width) => (
+              <span className="flex gap-2" key={width}>
+                <span className="h-3 w-10 shrink-0 rounded-[3px] bg-gray-200" />
+                <span className={`h-3 rounded-[3px] bg-gray-200 ${width}`} />
+              </span>
+            ))}
+          </span>
         </div>
         <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 p-2.5 material-menu sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
@@ -492,7 +509,7 @@ function WebAppClient() {
           </p>
         </div>
       </div>
-    </div>
+    </AppWindow>
   );
 }
 

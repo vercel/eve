@@ -64,7 +64,10 @@ export function AppWindow({
             <span className="size-2 rounded-full bg-[#F3BF4A]" />
             <span className="size-2 rounded-full bg-[#5DC753]" />
           </span>
-          <span className="text-gray-800 text-label-13">{title}</span>
+          {/* Kept clear of the traffic lights on both sides, so it stays centered. */}
+          <span className="min-w-0 max-w-[calc(100%-7rem)] truncate text-gray-800 text-label-13">
+            {title}
+          </span>
         </header>
       ) : null}
       {children}
