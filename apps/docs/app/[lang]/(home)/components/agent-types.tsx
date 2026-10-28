@@ -555,7 +555,7 @@ function IMessageClient() {
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-3 text-copy-13">
         {IMESSAGE_THREAD.map((message) => (
           <p
-            className={`max-w-[85%] rounded-[18px] px-3 py-1.5 ${
+            className={`max-w-[85%] text-pretty rounded-[18px] px-3 py-1.5 ${
               message.sent ? sentBubbleClassName : receivedBubbleClassName
             }`}
             key={message.text}
@@ -582,7 +582,7 @@ function IMessageClient() {
 
 function AgenticAppsPreview() {
   return (
-    <figure className="grid h-full grid-cols-[minmax(0,1fr)_9.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4">
+    <figure className="grid h-full grid-cols-[minmax(0,1fr)_10.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
       <figcaption className="sr-only">
         The same kind of agent in three clients: customer support chat in a web app, a voice call to
         a clinic's front desk, and a personal planner in iMessage.
