@@ -69,7 +69,12 @@ const APPS = [
 function AgentUi() {
   return (
     <Visual caption="Three agent apps in overlapping windows, built with Next.js in front, Nuxt, and SvelteKit.">
-      <div aria-hidden className="absolute inset-0 select-none text-[4.57cqw]">
+      {/* The front window runs past the frame's right edge and fades out before it. Only the
+          frame's background is behind it there, so a mask reads as fading into the page. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 select-none text-[4.57cqw] [mask-image:linear-gradient(to_right,black_80%,transparent)]"
+      >
         {APPS.map(({ Logo, back, left, name }) => (
           <div
             className="absolute top-[17%] flex min-h-full flex-col gap-[0.625em] rounded-t-[0.625em] border border-gray-300 bg-background-100 px-[0.75em] pt-[0.25em]"
