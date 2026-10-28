@@ -40,11 +40,7 @@ import {
   type SlackHitlRoute,
 } from "#public/channels/slack/hitl.js";
 import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
-import {
-  settleFreeformCard,
-  settleHitlCard,
-  updateAnsweredHitlCard,
-} from "#public/channels/slack/interaction-cards.js";
+import { settleFreeformCard, settleHitlCard } from "#public/channels/slack/interaction-cards.js";
 import { authorizeAnswer } from "#public/channels/slack/answers.js";
 import type {
   SlackChannelConfig,
@@ -574,19 +570,6 @@ async function dispatchBlockAnswers(input: {
       }),
     ]);
   }
-  if (response.outcome !== "delivered") return;
-
-  if (
-    input.submission.actions.some((action) => decodeHitlResponse(action)?.kind === "tool-approval")
-  ) {
-    return;
-  }
-
-  try {
-    await updateAnsweredHitlCard(input.interaction, input.deps);
-  } catch (error) {
-    log.error("HITL answered-card update failed", { error });
-  }
 }
 
 /** Tells only `userId` that the card they answered is no longer active. */
@@ -740,7 +723,6 @@ async function handleViewSubmission(
       metadata,
       submission,
       teamId,
-      text,
     }),
   );
 
@@ -756,7 +738,6 @@ async function dispatchViewAnswer(input: {
   readonly metadata: HitlFreeformModalMetadata;
   readonly submission: Extract<SlackAnswerSubmission, { type: "view_submission" }>;
   readonly teamId: string | null;
-  readonly text: string;
 }): Promise<void> {
   const { channelId, threadTs } = input.metadata;
   const result = await authorizeAnswer({
@@ -800,23 +781,6 @@ async function dispatchViewAnswer(input: {
         userId: input.submission.user.id,
       }),
     ]);
-  }
-  if (response.outcome !== "delivered") return;
-
-  try {
-    await settleFreeformCard({
-      card: {
-        label: input.text,
-        text: `Answered: ${input.text}`,
-        userId: input.submission.user.id,
-      },
-      channelId: cardChannelId,
-      deps: input.deps,
-      installationTeamId: input.installationTeamId,
-      messageTs: input.metadata.messageTs,
-    });
-  } catch (error) {
-    log.error("freeform answered-card update failed", { error });
   }
 }
 

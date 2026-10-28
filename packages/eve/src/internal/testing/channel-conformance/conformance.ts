@@ -60,24 +60,6 @@ const answeredPromptRules = {
 
 type AnsweredPrompt = keyof typeof answeredPromptRules;
 
-/** Answered prompts in `groups` are never edited, so they keep their buttons and never say who answered. */
-function staleAnsweredPrompts(
-  reason: string,
-  groups: readonly AnsweredPrompt[],
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    groups
-      .flatMap((group) => Object.values(answeredPromptRules[group]))
-      .map((rule) => [
-        rule,
-        {
-          reason,
-          symptom: /the answered prompt (still offers \[".+\]|never names who answered)/,
-        },
-      ]),
-  );
-}
-
 /** Answered prompts in `groups` lose their buttons, but the edit doesn't say who answered. */
 function unnamedAnsweredPrompts(
   reason: string,
@@ -186,10 +168,6 @@ const DISCORD_SERVER_SIGN_IN = signInKeptPrivate(
 );
 
 const SLACK_BROKEN = {
-  ...staleAnsweredPrompts(
-    "only the button interaction handler edits a question; a typed answer leaves it",
-    ["questionText"],
-  ),
   "text replies answer two pending approvals one at a time, in the order shown": {
     reason:
       "one card shows every approval a step raises, so a typed reply can't say which it answers",

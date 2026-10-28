@@ -586,9 +586,7 @@ function parseMessagePart(raw: unknown): MessageTextPart | MessageFilePart | Res
         { status: 400 },
       );
     }
-    // Callers must never supply framework-internal refs (`eve-url:`,
-    // `eve-sandbox:`): the staging pipeline trusts the scheme and would
-    // reconstitute the string into a privileged sandbox read.
+    // Only the framework can mint refs that invoke sandbox or adapter capabilities.
     if (hasInternalRefScheme(part.data)) {
       return Response.json(
         { error: "File part 'data' must not use a framework-internal ref scheme.", ok: false },

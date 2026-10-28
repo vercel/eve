@@ -4,7 +4,7 @@ description: "Reach your agent from Microsoft Teams via the Bot Framework Activi
 type: integration
 ---
 
-The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
+The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT and its `serviceurl` binding on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -77,7 +77,11 @@ export default teamsChannel({
 
 ### Delivery
 
-Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests.
+Native Bot Connector verification requires the activity's `serviceUrl` to match the verified token's `serviceurl` claim. A custom `webhookVerifier` replaces this verification and must authenticate the forwarded activity and its service URL. Proactive conversation references are trusted application input: load them from your own verified records, not a caller-supplied URL. Outbound Connector requests require HTTPS without URL credentials, query strings, or fragments, and do not follow redirects.
+
+HTTP service URLs used by Bot Framework Emulator are not supported, even with a custom verifier. Use an HTTPS endpoint or proxy for local Connector testing.
+
+Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests. `thread.mentionUser()` escapes the display name (or fallback user ID) as literal text inside the mention; the mention entity retains the original identity fields.
 
 ### Human-in-the-loop (HITL)
 

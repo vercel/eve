@@ -405,9 +405,9 @@ describe("turn caller notification", () => {
         "[eve:execution.delegated-parent-notification] turn caller hook no longer exists",
         expect.objectContaining({
           callId: "call-1",
-          callerToken: "parent-tok",
         }),
       );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("parent-tok");
     } finally {
       warnSpy.mockRestore();
     }

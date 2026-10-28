@@ -491,7 +491,8 @@ describe("startRemoteAgentSession", () => {
     },
   );
 
-  it("posts the formatted subagent message and callback metadata", async () => {
+  it("posts callback metadata without sharing deployment-protection credentials", async () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "test-only-parent-bypass");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -760,37 +761,6 @@ describe("startRemoteAgentSession", () => {
       token: "turn-inbox",
       url: "https://caller.example.com/eve/v1/callback/turn-inbox?eveRemoteProtocol=3",
     });
-  });
-
-  it("adds the Vercel automation bypass secret to callback URLs", async () => {
-    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "remote callback secret");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
-          sessionId: "remote-session",
-          status: "accepted",
-        }),
-        { status: 202 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await startRemoteAgentSession({
-      action: createAction(),
-      callbackBaseUrl: "https://caller.example.com",
-      remote: createRemoteAgent(),
-      session: { continuationToken: "eve:parent-token" },
-    });
-
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(
-      expect.objectContaining({
-        callback: expect.objectContaining({
-          url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token?x-vercel-protection-bypass=remote+callback+secret&eveRemoteProtocol=3",
-        }),
-      }),
-    );
   });
 });
 

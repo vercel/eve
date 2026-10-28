@@ -1,7 +1,1 @@
-[
-  "EveVercelConfig",
-  "EveVercelRouteConfig",
-  "EveVercelServiceConfig",
-  "WithEveOptions",
-  "withEve"
-]
+["EveVercelConfig", "EveVercelRouteConfig", "EveVercelServiceConfig", "WithEveOptions", "withEve"]

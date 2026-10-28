@@ -1,4 +1,1 @@
-[
-  "loadJson",
-  "loadYaml"
-]
+["loadJson", "loadYaml"]

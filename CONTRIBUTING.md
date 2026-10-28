@@ -65,8 +65,8 @@ This runs the `eve` package build in watch mode alongside the [`apps/fixtures/we
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests
 pnpm test:integration   # integration tests
-pnpm test:scenario      # scenario tests (requires pnpm build first)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:scenario      # scenario tests (Turbo builds prerequisites)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
 pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -237,6 +237,28 @@ on when one exists. Do not create an issue solely to accompany a pull request.
    or decision behind the change before describing the solution.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
+
+### Changeset summaries
+
+Start the changeset summary with one complete sentence:
+
+```md
+---
+"eve": patch
+---
+
+Restore the connection sign-in page after an authorization error.
+
+Thanks @octocat for reporting this in #1234.
+```
+
+For a PR with a changeset, start the PR title with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. GitHub uses the PR title as the squash-merge subject; keep the prefix in that subject, which selects the category independently of the version bump. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
+
+Run `pnpm guard:invariants` to validate changeset summaries. CI also checks the actual PR title.
+
+The release workflow classifies from the immutable commit that introduced the changeset, not the editable PR title. Unrecognized commit subjects do not block the release; review them through the **Other Changes** link to the full repository change list. For a first release without a previous package tag, that link opens the repository history at the new tag. The contributor list includes the pull request author, GitHub noreply co-authors, and explicitly thanked handles, excluding bots. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
+
+The published packages contain only their own release notes in `CHANGELOG.md`, with a link to the full changelog at that release's tag. Packing fails if the package version has no changelog entry. Git preview builds use the base version's notes, identify them as such, and link to the source commit when it contains that version's newest notes. Use `pnpm pack` in the package directory; the build stages the package without modifying the repository changelog.
 
 ## Developer Certificate of Origin (DCO)
 

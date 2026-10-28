@@ -95,7 +95,7 @@ Move its `evals/` directory, if present, to `agents/support/evals/`. Keep `packa
 Before adding the next agent:
 
 - Update `tsconfig.json` to include `agents/**/*.ts`, preserving any application includes. Update moved-file imports and path aliases, including scaffolded `package.json#imports` entries that point at `./agent/*` or `./evals/*`.
-- Update scripts that assume one agent. Use `--agent support` for agent-scoped commands; build an agent-only Vercel workspace with root `eve build`. For a Next.js app, keep the framework scripts and follow its [build instructions](/docs/guides/frontend/nextjs#dev-vs-deploy-topology).
+- Update scripts that assume one agent. Use `--agent support` for agent-scoped commands; build an agent-only Vercel workspace with root `eve build`. For a Next.js app, keep the framework scripts and follow its [build instructions](/docs/guides/frontend/nextjs#run-build-and-deploy).
 - Update HTTP clients and webhook registrations for the named agent's public routes. In a root Next.js app, remove a single-agent `eveRoot` override to enable workspace discovery, and select `support` in the client hook. Store the agent name alongside durable-session links.
 
 Then add the second agent and check discovery:

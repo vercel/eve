@@ -4,6 +4,7 @@ import { northstarFulfillmentSetup } from "../../lib/setups/northstar-fulfillmen
 // An operations agent from an empty workspace. Each requirement is graded by its
 // own check, so a run that gets part of the agent right still scores partial credit.
 export default defineAuthoringCase({
+  category: "full-agents",
   startingPoint: emptyProject,
   projectDirectory: "restock-agent",
   setup: northstarFulfillmentSetup,

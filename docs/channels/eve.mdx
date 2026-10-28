@@ -35,10 +35,6 @@ eve link
 eve add channel/web
 ```
 
-`eve init --channel-web-nextjs` keeps its existing scaffolding behavior and does
-not provision authentication. Sign-in setup runs through `eve add channel/web`
-or the terminal UI's channel picker.
-
 The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
 channel verifies the same session, while retaining Vercel OIDC and local
 development access. In an agent workspace, setup configures only the selected
@@ -109,7 +105,7 @@ deployment, `accepted` (HTTP 202) when a background preparation hint has been qu
 `unsupported` when the World or owner cannot prepare, or `no_active_session` when no live
 owner exists. Other successful statuses use HTTP 200. Acceptance does not mean the handoff
 has completed. Idle preparation preserves the session ID, stream, history, and expiry;
-active work is not interrupted. See the [frontend guide](../guides/frontend/overview#returned-state)
+active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
 for client usage and deployment routing.
 
 `GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
@@ -211,6 +207,8 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -H "Content-Type: application/json" \
   -d '{"message":[{"type":"text","text":"Summarize this report."},{"type":"file","mediaType":"application/pdf","filename":"report.pdf","data":"data:application/pdf;base64,JVBERi0xLjQK..."}]}'
 ```
+
+Framework-generated attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`) are not accepted in HTTP request bodies; they return `400 Bad Request`.
 
 `uploadPolicy` sets the size cap and allowed media types, 25 MB and every type by default. A request whose inline file breaks the policy returns `413` for size or `415` for type. Inline bytes also count toward the request body limit of the platform that serves the channel. On Vercel Functions that limit is 4.5 MB, so a base64 file stops at about 3.3 MB.
 

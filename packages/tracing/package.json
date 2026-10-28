@@ -1,6 +1,6 @@
 {
   "name": "@vercel/agent-runs",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": false,
   "description": "Framework-neutral agent run tracing with OpenTelemetry and durable checkpoints.",
   "license": "Apache-2.0",
@@ -11,6 +11,7 @@
   },
   "files": [
     "dist",
+    "!dist/CHANGELOG.md",
     "src",
     "!src/**/*.test.ts",
     "NOTICE"
@@ -41,13 +42,15 @@
     "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "directory": ".package",
+    "linkDirectory": false
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
-    "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
+    "prepack": "pnpm run build && node ../../scripts/stage-package.mjs .",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

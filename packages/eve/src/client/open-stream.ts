@@ -359,6 +359,16 @@ export async function openStreamBody(
       });
     } catch (error) {
       if (
+        input.redirect === "error" &&
+        error instanceof Error &&
+        error.cause instanceof Error &&
+        error.cause.message === "unexpected redirect"
+      ) {
+        throw new Error("The session stream refused a redirect. Use the final agent URL instead.", {
+          cause: error,
+        });
+      }
+      if (
         input.signal?.aborted ||
         !isStreamDisconnectError(error) ||
         attempt === openRetryPolicy.maxAttempts - 1

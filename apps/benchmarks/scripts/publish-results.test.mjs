@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { parseTranscript } from "@vercel/agent-eval";
 
-import { publishResults } from "./publish-results.mjs";
+import { caseCategories, publishResults } from "./publish-results.mjs";
 
 const plan = {
   sha: "a".repeat(40),
@@ -195,4 +195,24 @@ test("publishes a pull request run apart from main's runs", async (t) => {
   assert.equal(JSON.parse(store.objects.get(`${prefix}/manifest.json`)).pull_request, 4567);
   const [first] = store.objects.get(`${prefix}/records.jsonl`).toString().trim().split("\n");
   assert.equal(JSON.parse(first).pull_request, 4567);
+});
+
+test("records carry their case's category from CASE.ts", async (t) => {
+  const store = memoryStore();
+  const result = await publishResults({
+    plan,
+    artifactsDir: artifactsDirectory(t),
+    githubRunId: "123",
+    runAttempt: 1,
+    categories: await caseCategories(plan.cases),
+    store,
+  });
+  const records = store.objects
+    .get(`${result.prefix}/records.jsonl`)
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  // Missing runs (claude-fable-5-1 uploaded nothing) carry it too.
+  assert.deepEqual(new Set(records.map((record) => record.category)), new Set(["features/tools"]));
 });

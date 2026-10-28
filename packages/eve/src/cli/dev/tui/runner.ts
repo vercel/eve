@@ -479,7 +479,7 @@ export class EveTUIRunner {
   readonly #dismissedInputs = new Set<string>();
   /** Questions answered here that stay open until the session settles them. */
   readonly #answeredInputs = new Set<string>();
-  /** Registry setups queued by tool results on root or child streams. */
+  /** Registry setups queued by tool results from the self-modification subagent. */
   readonly #pendingRegistrySetups: string[] = [];
   #activeRegistrySetup?: string;
   /** Tool calls whose registry handoff was already queued. */
@@ -1706,7 +1706,7 @@ function registryHandoffs(
   conversation: ConversationState,
 ): Array<{ readonly callId: string; readonly address: string }> {
   const handoffs: Array<{ callId: string; address: string }> = [];
-  const collect = (state: ConversationState, subagentName: string | undefined) => {
+  const collect = (state: ConversationState, subagentName: string) => {
     for (const message of state.messages) {
       for (const part of message.parts) {
         if (!isTerminalToolCallPart(part) || part.state !== "completed") continue;
@@ -1715,7 +1715,6 @@ function registryHandoffs(
       }
     }
   };
-  collect(conversation, undefined);
   for (const agent of Object.values(conversation.agents)) {
     if (agent.observation.status === "not-followed") continue;
     const child = agent.observation.conversation;
@@ -1726,14 +1725,13 @@ function registryHandoffs(
 
 /** Returns the registry address carried by a packaged self-modification terminal handoff. */
 export function registryHandoffAddress(
-  subagentName: string | undefined,
+  subagentName: string,
   toolName: string | undefined,
   output: unknown,
 ): string | undefined {
   const isPackagedChild =
     subagentName === "self-modification__agent" && toolName === "registry_add";
-  const isLegacyRoot = subagentName === undefined && toolName === "selfmod__registry_add";
-  if ((!isPackagedChild && !isLegacyRoot) || typeof output !== "object" || output === null) {
+  if (!isPackagedChild || typeof output !== "object" || output === null) {
     return undefined;
   }
   const result = output as { address?: unknown; status?: unknown };

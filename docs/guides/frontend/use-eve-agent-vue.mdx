@@ -54,11 +54,11 @@ The state fields are computed refs; the commands are ordinary methods:
 | `session`                                                                                   | `ComputedRef<ClientSessionState \| undefined>`  |
 | `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `reset`, `newSession` | Methods                                         |
 
-Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
+Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
 
 ## Send a message
 
-Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Vue. `send()` and `respond()` resolve with a `Delivery` receipt when accepted, without waiting for execution to finish. Read its `sessionId` and `deliveryId`, or use the receipt's [delivery reads](../client/messages#reusable-delivery-reads).
+Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [sending reference](./use-eve-agent#sending); only reactive access differs in Vue. `send()` and `respond()` resolve with a `Delivery` receipt when accepted, without waiting for execution to finish. Read its `sessionId` and `deliveryId`, or use the receipt's [delivery reads](../client/messages#reusable-delivery-reads).
 
 ## Human-in-the-loop prompts
 
@@ -104,10 +104,10 @@ See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for reques
 
 Pass `prewarm: true` to prepare an owned workflow on mount and after `newSession()`. It defaults
 to `false`, so the first send creates the session. The binding waits for create acceptance,
-retries while the inbox starts, and keeps the session stream open across turns. See [Prewarming and returned state](./overview#returned-state) for creation, failure, and
+retries while the inbox starts, and keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation, failure, and
 connection behavior.
 
-Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Offer it while `activeTurn(view.value)` from `eve/events` returns a turn: `status` reports outstanding work, so it is `"idle"` while a turn waits only on a person. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `newSession()` to clear local state and start a new session. `reset()` instead retires the server-side session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `status.value` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"idle"` or `"busy"`, and inspect the separate `error` field. Use `resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Offer it while `activeTurn(view.value)` from `eve/events` returns a turn: `status` reports outstanding work, so it is `"idle"` while a turn waits only on a person. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `newSession()` to clear local state and start a new session. `reset()` instead retires the server-side session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `status.value` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"idle"` or `"busy"`, and inspect the separate `error` field. Use `resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
 
 ## Custom host and credentials
 
@@ -119,7 +119,7 @@ Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add con
 
 ## Lifecycle callbacks
 
-Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./overview#lifecycle-callbacks) for callback timing and optimistic projection behavior.
+Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for callback timing and optimistic projection behavior.
 
 ## Derive your own state
 

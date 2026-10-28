@@ -264,6 +264,9 @@ importers:
       '@changesets/cli':
         specifier: 3.0.3
         version: 3.0.3
+      '@manypkg/get-packages':
+        specifier: 3.1.0
+        version: 3.1.0
       '@microsoft/api-extractor':
         specifier: 7.59.4
         version: 7.59.4(@types/node@26.6.5)
@@ -1869,8 +1872,8 @@ importers:
         specifier: 'catalog:'
         version: 3.9.0
       '@vercel/schedules':
-        specifier: 0.0.0-alpha.11
-        version: 0.0.0-alpha.11
+        specifier: 0.0.0-alpha.19
+        version: 0.0.0-alpha.19
       '@vercel/sdk':
         specifier: 1.28.8
         version: 1.28.8
@@ -1976,6 +1979,8 @@ importers:
       zod-validation-error:
         specifier: 5.0.0
         version: 5.0.0(zod@4.5.4)
+    linkDirectory: false
+    publishDirectory: .package
 
   packages/eve-board:
     dependencies:
@@ -2071,16 +2076,6 @@ importers:
         specifier: npm:typescript@6.0.3
         version: typescript@6.0.3
 
-  packages/eve-self-modification:
-    dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../eve
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
   packages/tracing:
     devDependencies:
       '@ai-sdk/harness':
@@ -2113,6 +2108,8 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.5.4
+    linkDirectory: false
+    publishDirectory: .package
 
 packages:
 
@@ -8036,8 +8033,8 @@ packages:
   '@vercel/sandbox@3.9.0':
     resolution: {integrity: sha512-l02jAULYqPdfKCnGr6Eyd58OfTXNmL1ffvNOwwsAtgiN+PuI6zhySpvtm0hnMoWQ3fIbhnSG7SRqoUuwx6XvDg==}
 
-  '@vercel/schedules@0.0.0-alpha.11':
-    resolution: {integrity: sha512-wu2YwHwO+GMW/0ou8l+5749zvV1eNdJNQrD+juTcsaIqcuksAnaXDSlmG/qAJZhLcIy+cSgURhdGqpLpSXrV5g==}
+  '@vercel/schedules@0.0.0-alpha.19':
+    resolution: {integrity: sha512-NYbMhY/BoVlNVJTIDjfm57eynvmp7ygyqwCcvkoUDeV6zvcpgaoifhMO2Ua5DXJUJlMhjOfhZj6cPusbYqzCPQ==}
     engines: {node: '>=20.0.0'}
 
   '@vercel/sdk@1.28.8':
@@ -21992,7 +21989,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/schedules@0.0.0-alpha.11':
+  '@vercel/schedules@0.0.0-alpha.19':
     dependencies:
       '@vercel/oidc': 3.8.10
 

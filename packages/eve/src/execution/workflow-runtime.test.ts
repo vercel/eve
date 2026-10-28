@@ -323,9 +323,9 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).resolves.toEqual({ status });
   });
 
-  it("re-throws unexpected errors from `resumeHook`", async () => {
+  it("re-throws unexpected errors from `resumeHook` without logging capabilities", async () => {
     const logs = captureLogRecords();
-    const failure = new Error("transient backing-store outage");
+    const failure = new Error(`transient backing-store outage for ${NOT_FOUND_TOKEN}`);
     resumeHookMock.mockRejectedValue(failure);
 
     const runtime = buildRuntime();
@@ -339,6 +339,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(logs.records).toContainEqual(
       expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
     );
+    expect(JSON.stringify(logs.records)).not.toContain(NOT_FOUND_TOKEN);
   });
 
   it("dispatches guarded cancellation through the stable inbox", async () => {
@@ -453,9 +454,11 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     await expect(buildRuntime().resolveContinuation("test:token")).resolves.toBeUndefined();
   });
 
-  it("rethrows unexpected lookup failures", async () => {
+  it("rethrows unexpected lookup failures without logging the capability", async () => {
     const logs = captureLogRecords();
-    const failure = new Error("transient backing-store outage");
+    const failure = new Error("lookup failed for test:token", {
+      cause: new Error("request included test:token"),
+    });
     getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
@@ -465,6 +468,7 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
         message: "failed to resolve session by continuation token",
       }),
     );
+    expect(JSON.stringify(logs.records)).not.toContain("test:token");
   });
 });
 
@@ -573,6 +577,28 @@ describe("createWorkflowRuntime#createSession", () => {
         }),
     });
   }
+
+  it("keeps the continuation out of start-failure diagnostics", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const logs = captureLogRecords();
+    const token = "test-only:start-capability";
+    const failure = new Error(`Backing store unavailable for ${token}`);
+    startMock.mockRejectedValue(failure);
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        continuationToken: token,
+        input: { message: "hello" },
+      }),
+    ).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ message: "failed to start workflow run" }),
+    );
+    expect(JSON.stringify(logs.records)).not.toContain(token);
+  });
 
   it("starts workflowEntry on the deployment accepting the request", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");

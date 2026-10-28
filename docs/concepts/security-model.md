@@ -75,6 +75,10 @@ A [channel](../channels/overview) is your agent's front door, so authenticating 
 
 A custom channel that accepts dashboard-style webhooks should follow the same shape: authenticate the raw body with an HMAC, compare signatures in constant time, and trust any body-supplied principal only after the signature verifies.
 
+## A turn runs as one principal
+
+A turn's principal (its authenticator, issuer, principal type and id) never changes while the turn runs; only its claims may update. Only that principal's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn, so their text never drives the turn's credentials and the turn never continues under their identity. Another person can still settle a pending request with a button or structured answer; they are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
+
 ## Authored markdown is data
 
 [Skill](../skills) and [schedule](../schedules) files are markdown with YAML frontmatter, and eve treats that frontmatter strictly as data. The code-capable engines (`---js` / `---javascript`, which would `eval()` the frontmatter body the moment the file is parsed) are disabled, so such a fence throws rather than running. Frontmatter has to parse to a plain YAML object.

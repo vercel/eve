@@ -346,7 +346,6 @@ async function resumeSettledTurnHook(
 
     log.warn("turn caller hook no longer exists", {
       callId: result.callId,
-      callerToken: token,
     });
   }
 }

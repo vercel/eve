@@ -9,7 +9,9 @@ name: Mirror Stress Artifacts
 # daily run catches anything that missed, such as a renamed release PR. A
 # metric definition change on main re-derives every release under the new
 # metrics version right away: eve-evals reads only the newest import root, so
-# waiting for the daily run would leave it without the hosted history.
+# waiting for the daily run would leave it without the hosted history. The same
+# change re-derives the benchmark's own runs in place
+# (scripts/eval-benchmark/rederive-runs.mjs).
 on:
   schedule:
     - cron: "41 6 * * *"
@@ -45,7 +47,7 @@ jobs:
       group: mirror-stress-artifacts
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Require main
         if: github.ref != 'refs/heads/main'
@@ -87,3 +89,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
         run: node scripts/eval-benchmark/import-stress-artifacts.mjs --repo "$GITHUB_REPOSITORY"
+
+      - name: Re-derive benchmark runs under the current metrics version
+        # Benchmark runs keep their ids, so a metrics version change rewrites
+        # them in place (keeping the old records under superseded/). Runs
+        # already at the current version are skipped, so this is a no-op
+        # until the next definition change.
+        if: ${{ !cancelled() }}
+        env:
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+        run: node scripts/eval-benchmark/rederive-runs.mjs
