@@ -35,7 +35,7 @@ const AUTHORS = {
   Reviewer: { name: "Reviewer", icon: ScanSearch },
   Ops: { name: "Ops", icon: Activity },
   Dana: { name: "Dana" },
-  Concierge: { name: "Acme", icon: Headset },
+  Concierge: { name: "Acme Org", icon: Headset },
   Maya: { name: "Maya" },
 } satisfies Record<string, Author>;
 
@@ -349,7 +349,7 @@ const WHATSAPP_BEATS: Beat[] = [
     time: "9:13 AM",
     body: (
       <>
-        <Quote author="Acme">Send a replacement?</Quote>
+        <Quote author="Acme Org">Send a replacement?</Quote>
         Send replacement
       </>
     ),
@@ -783,14 +783,23 @@ export function SessionTimeline(): JSX.Element {
   const shown = playing ? count : beats.length;
   const next = playing ? beats[count] : undefined;
 
+  // After a message lands, the typing indicator waits a beat before coming back, so the message
+  // reads as taking its place instead of the indicator flickering below it.
+  const [typing, setTyping] = useState(false);
+
   useEffect(() => {
     if (!playing) return;
     if (!next) {
       setPlaying(false);
       return;
     }
+    setTyping(false);
+    const show = setTimeout(() => setTyping(true), Math.min(500, next.delay * 0.4));
     const timer = setTimeout(() => setCount((n) => n + 1), next.delay);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(timer);
+    };
   }, [playing, next]);
 
   useEffect(() => {
@@ -881,8 +890,13 @@ export function SessionTimeline(): JSX.Element {
             </ThreadMessage>
           );
         })}
-        {next?.kind === "message" ? (
-          <li className={cn("pt-3", platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]")}>
+        {typing && next?.kind === "message" ? (
+          <li
+            className={cn(
+              "pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300",
+              platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
+            )}
+          >
             <TypingIndicator author={AUTHORS[next.author]} />
           </li>
         ) : null}
