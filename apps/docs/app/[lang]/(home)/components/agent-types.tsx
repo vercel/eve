@@ -3,7 +3,15 @@
 import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
-import { type JSX, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
+import {
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
@@ -309,11 +317,32 @@ const USE_CASES: UseCase[] = [
   },
 ];
 
-export function AgentTypes(): JSX.Element {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
-  const baseId = useId();
-  const selected = USE_CASES[selectedIndex];
+/**
+ * vercel.com/ai-gateway's sliding tabs (vercel-marketing's SlidingTabs): a gray pill slides
+ * under the selected tab, which turns medium weight without shifting its neighbors.
+ */
+function UseCaseTabs({
+  baseId,
+  selectedIndex,
+  onSelect,
+}: {
+  baseId: string;
+  selectedIndex: number;
+  onSelect: (index: number) => void;
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState<{ left: number; width: number }>();
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const tab = list.current?.querySelector<HTMLElement>("[aria-selected=true]");
+      if (tab) setIndicator({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (list.current) observer.observe(list.current);
+    return () => observer.disconnect();
+  }, [selectedIndex]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
@@ -327,9 +356,72 @@ export function AgentTypes(): JSX.Element {
             : (selectedIndex + step + USE_CASES.length) % USE_CASES.length;
     if (target === undefined) return;
     event.preventDefault();
-    setSelectedIndex(target);
-    tabs.current[target]?.focus();
+    onSelect(target);
+    list.current?.querySelectorAll<HTMLElement>("[role=tab]")[target]?.focus();
   };
+
+  return (
+    <div
+      aria-label="Use cases"
+      aria-orientation="horizontal"
+      className="relative inline-flex max-w-full gap-1 overflow-x-auto overscroll-x-contain p-1 [scrollbar-width:none]"
+      onKeyDown={onKeyDown}
+      ref={list}
+      role="tablist"
+    >
+      {USE_CASES.map((useCase, index) => {
+        const isSelected = index === selectedIndex;
+        return (
+          <button
+            aria-controls={`${baseId}-panel`}
+            aria-selected={isSelected}
+            className="relative z-10 flex-none cursor-pointer whitespace-nowrap rounded-[6px] focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none"
+            id={`${baseId}-tab-${useCase.id}`}
+            key={useCase.id}
+            onClick={() => onSelect(index)}
+            role="tab"
+            tabIndex={isSelected ? 0 : -1}
+            type="button"
+          >
+            <span
+              className={cn(
+                "relative inline-flex items-center rounded-[6px] px-3.5 py-1.5 text-copy-14 transition-colors hover:text-gray-1000",
+                isSelected ? "text-gray-1000" : "text-gray-900",
+              )}
+            >
+              {/* The medium-weight label reserves the width, so selecting never shifts tabs. */}
+              <span aria-hidden className="invisible flex items-center gap-2 font-medium">
+                {useCase.logo}
+                {useCase.name}
+              </span>
+              <span
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center gap-2",
+                  isSelected && "font-medium",
+                )}
+              >
+                {useCase.logo}
+                {useCase.name}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+      {indicator ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1 bottom-1 z-0 rounded-[6px] bg-gray-200 transition-[left,width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none"
+          style={indicator}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export function AgentTypes(): JSX.Element {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const baseId = useId();
+  const selected = USE_CASES[selectedIndex];
 
   return (
     <HomeSection
@@ -353,59 +445,45 @@ export function AgentTypes(): JSX.Element {
       lede="Start from a working template, or build your own from scratch."
       title="Agents that run your company, power your product, or are personal"
     >
-      <div className="grid gap-8 lg:grid-cols-12 lg:gap-x-6">
-        <div
-          aria-label="Use cases"
-          aria-orientation="vertical"
-          className="flex flex-col self-start border-gray-alpha-400 border-l lg:col-span-4"
-          onKeyDown={onKeyDown}
-          role="tablist"
-        >
-          {USE_CASES.map((useCase, index) => {
-            const isSelected = index === selectedIndex;
-            return (
-              <button
-                aria-controls={`${baseId}-panel`}
-                aria-selected={isSelected}
-                className="group relative flex cursor-pointer flex-col gap-1.5 py-4 pl-5 text-left"
-                id={`${baseId}-tab-${useCase.id}`}
+      {/* vercel.com/ai-gateway's routing panel: a gradient border that dissolves toward the
+          bottom, the tabs at its top, the example below. */}
+      <div
+        className={cn(
+          "relative isolate overflow-hidden rounded-xs bg-background-200",
+          "before:pointer-events-none before:absolute before:inset-0 before:z-10 before:rounded-[inherit] before:p-px before:content-['']",
+          "before:[background:linear-gradient(to_bottom,var(--ds-gray-400),var(--ds-background-200))]",
+          // Longhand mask properties, since the shorthand would reset mask-composite.
+          "before:[mask-image:linear-gradient(#000_0_0),linear-gradient(#000_0_0)]",
+          "before:[mask-clip:content-box,border-box] before:[mask-composite:exclude]",
+        )}
+      >
+        <div className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
+          <UseCaseTabs baseId={baseId} onSelect={setSelectedIndex} selectedIndex={selectedIndex} />
+          {/* Every description shares one grid cell, so the row keeps the tallest one's
+              height and switching tabs never shifts the layout. */}
+          <div className="grid px-1 lg:max-w-[44ch] lg:px-0">
+            {USE_CASES.map((useCase) => (
+              <p
+                className={cn(
+                  "col-start-1 row-start-1 text-pretty text-copy-14 text-gray-900",
+                  useCase !== selected && "invisible",
+                )}
                 key={useCase.id}
-                onClick={() => setSelectedIndex(index)}
-                ref={(node) => {
-                  tabs.current[index] = node;
-                }}
-                role="tab"
-                tabIndex={isSelected ? 0 : -1}
-                type="button"
               >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "absolute inset-y-0 -left-px w-0.5 transition-colors",
-                    isSelected ? "bg-gray-1000" : "bg-transparent group-hover:bg-gray-alpha-600",
-                  )}
-                />
-                <span
-                  className={`flex items-center gap-2.5 text-heading-16 transition-colors ${
-                    isSelected ? "text-gray-1000" : "text-gray-900 group-hover:text-gray-1000"
-                  }`}
-                >
-                  <span className={cn("flex", !isSelected && "opacity-70")}>{useCase.logo}</span>
-                  {useCase.name}
-                </span>
-                <span className="text-copy-14 text-gray-900">{useCase.text}</span>
-              </button>
-            );
-          })}
+                {useCase.text}
+              </p>
+            ))}
+          </div>
         </div>
-
         <div
           aria-labelledby={`${baseId}-tab-${selected.id}`}
-          className="flex min-w-0 flex-col lg:col-span-8"
+          className="px-4 pt-4 pb-10 sm:px-8 sm:pt-6 sm:pb-14"
           id={`${baseId}-panel`}
           role="tabpanel"
         >
-          <Frame className="flex h-[30rem] flex-col sm:h-[24rem]">{selected.preview}</Frame>
+          <Frame className="mx-auto flex h-[30rem] w-full max-w-[56rem] flex-col sm:h-[24rem]">
+            {selected.preview}
+          </Frame>
         </div>
       </div>
     </HomeSection>
