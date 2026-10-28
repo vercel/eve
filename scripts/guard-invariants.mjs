@@ -164,6 +164,10 @@
  *             and no entry exports a name `stripInternal` drops (`@internal`).
  *   rule 56 — Retired: dangling references to stripped declarations are caught
  *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
+ *   rule 57 — Session history changes through `changeHistory`
+ *             (`harness/session-machine/history.ts`) or a transition's `history`.
+ *             Writing `{ ...session, history }` elsewhere skips the checks and the
+ *             resets a rewrite needs.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -285,6 +289,7 @@ function isTsLike(relPath) {
  *   rule47: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
+ *   rule57: Violation[];
  *   rule52: Violation[];
  *   rule53: Violation[];
  *   symlinks: string[];
@@ -322,6 +327,7 @@ async function scanRepo(state) {
     checkRule47(posix, lines, state.rule47);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
+    checkRule57(posix, content, state.rule57);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -784,6 +790,36 @@ function checkRule51(posix, lines, violations) {
       });
     }
   });
+}
+
+// ---------- Rule 57: one writer for session history ----------
+
+const HISTORY_OWNER = "packages/eve/src/harness/session-machine/history.ts";
+/** Assembles a legacy snapshot from stored history; it changes nothing. */
+const HISTORY_ASSEMBLY_FILES = new Set([
+  "packages/eve/src/execution/legacy-session/completion-step.ts",
+]);
+const SESSION_HISTORY_WRITE_RE = /\.\.\.\s*(?:[\w.]*\.)?session\s*,\s*history\s*:/g;
+
+/** @param {string} posix @param {string} content @param {Violation[]} violations */
+function checkRule57(posix, content, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix === HISTORY_OWNER ||
+    HISTORY_ASSEMBLY_FILES.has(posix) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts")
+  )
+    return;
+  for (const match of content.matchAll(SESSION_HISTORY_WRITE_RE)) {
+    violations.push({
+      rule: 57,
+      file: posix,
+      line: content.slice(0, match.index).split("\n").length,
+      message:
+        "writes session history directly. Change it with `changeHistory(session, { append | extend | repaired | rewrite })` from `#harness/session-machine/history.js`, or return `history` from a transition.",
+    });
+  }
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1843,6 +1879,7 @@ async function main() {
     rule47: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
+    rule57: /** @type {Violation[]} */ ([]),
     rule52: /** @type {Violation[]} */ ([]),
     rule53: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
@@ -1953,6 +1990,7 @@ async function main() {
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
+  violations.push(...state.rule57);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
 
