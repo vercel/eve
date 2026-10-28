@@ -306,12 +306,13 @@ export function Reaction({
     if (demo && button.current) animateReaction(button.current, true, 150 + index * 60);
   }, []);
 
+  // The emoji sits 5px in from the left, as from the top and bottom: (28px - 2px border - 16px) / 2.
   return (
     <button
       aria-label={`:${name}: ${total}`}
       aria-pressed={mine}
       className={cn(
-        "flex h-7 origin-left cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]",
+        "flex h-7 origin-left cursor-pointer items-center gap-1.5 rounded-full border pr-[7px] pl-[5px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]",
         demo && "motion-safe:animate-scale-in motion-reduce:animate-fade-in",
         mine
           ? "border-gray-alpha-700 bg-gray-alpha-200"
