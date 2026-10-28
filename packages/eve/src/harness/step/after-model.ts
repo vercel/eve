@@ -34,7 +34,10 @@ import {
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
 import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
-import { recordStepEndingStubCalls } from "#harness/step/stub-ending-calls.js";
+import { ToolStubsKey } from "#context/keys.js";
+import { activeTurnId } from "#harness/session-machine/view.js";
+import { recordEndingStubCalls } from "#tool-stubs/ending-calls.js";
+import { stubsMayEndTurn } from "#tool-stubs/target.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -64,7 +67,6 @@ function getInvalidToolCallInputErrors(input: {
 
 export async function handleStepResult(step: Step, input: ModelResponse): Promise<StepResult> {
   const { promptMessages, result } = input;
-  recordStepEndingStubCalls(step);
 
   const stepOutput = resolveAssistantStepText(result.response.messages, result.text);
   const invalidInputToolErrors = getInvalidToolCallInputErrors({
@@ -99,6 +101,16 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     providerExecutedOutcomeIds,
   });
   const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
+  const ending = await endingCalls(
+    result,
+    responseMessages,
+    input.endsTurnTools,
+    input.endingStubCalls,
+  );
+  // A step that parks on other calls decides once they settle, from what this one recorded.
+  if (stubsMayEndTurn(step.ctx?.get(ToolStubsKey))) {
+    step.session = recordEndingStubCalls(step.session, activeTurnId(step.position()), ending);
+  }
 
   step.session = {
     ...step.session,
@@ -182,12 +194,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     };
   }
 
-  const endsTurn = await stepEndsTurn(
-    result,
-    responseMessages,
-    input.endsTurnTools,
-    input.endingStubCalls,
-  );
+  const toolCalls = result.toolCalls ?? [];
+  const endsTurn =
+    toolCalls.length > 0 && toolCalls.every((toolCall) => ending.has(toolCall.toolCallId));
   const continueLoop =
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
@@ -232,19 +241,18 @@ function answerCallsThatWontRun(
 }
 
 /**
- * Whether the step ends the turn: every tool call targets a tool that can end
- * the turn, or got a tool stub's `endsTurn` response, and succeeded, and each
- * `endsTurn` function accepts its call's `execute` output. A failed or invalid
- * call lets the model recover instead.
+ * The step's calls that end the turn: each succeeded, and got a tool stub's `endsTurn` response or
+ * targets a tool that can end the turn, whose `endsTurn` function, if any, accepts its `execute`
+ * output. The step ends the turn when all of its calls do; a failed or invalid call lets the model
+ * recover instead.
  */
-async function stepEndsTurn(
+async function endingCalls(
   result: HarnessStepResult,
   responseMessages: readonly ModelMessage[],
   endsTurnTools: EndsTurnTools,
   endingStubCalls: ReadonlySet<string>,
-): Promise<boolean> {
+): Promise<Set<string>> {
   const toolCalls = result.toolCalls ?? [];
-  if (toolCalls.length === 0) return false;
   const outputs = new Map<string, ToolResultPart["output"]>();
   for (const message of responseMessages) {
     if (message.role !== "tool") continue;
@@ -252,27 +260,27 @@ async function stepEndsTurn(
       if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
     }
   }
-  const succeeded = toolCalls.every((toolCall) => {
-    const output = outputs.get(toolCall.toolCallId);
-    return (
-      (endsTurnTools.has(toolCall.toolName) || endingStubCalls.has(toolCall.toolCallId)) &&
-      output !== undefined &&
-      !isToolResultError(output)
-    );
-  });
-  if (!succeeded) return false;
   const executeOutputs = new Map(
     (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
   );
+  const ending = new Set<string>();
   for (const toolCall of toolCalls) {
-    if (endingStubCalls.has(toolCall.toolCallId)) continue;
+    const output = outputs.get(toolCall.toolCallId);
+    if (output === undefined || isToolResultError(output)) continue;
+    if (endingStubCalls.has(toolCall.toolCallId)) {
+      ending.add(toolCall.toolCallId);
+      continue;
+    }
     const endsTurn = endsTurnTools.get(toolCall.toolName);
-    if (typeof endsTurn !== "function") continue;
-    if (!(await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))) {
-      return false;
+    if (endsTurn === undefined) continue;
+    if (
+      typeof endsTurn !== "function" ||
+      (await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))
+    ) {
+      ending.add(toolCall.toolCallId);
     }
   }
-  return true;
+  return ending;
 }
 
 /** A throwing `endsTurn` function keeps the turn going rather than failing it. */

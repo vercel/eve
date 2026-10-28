@@ -126,7 +126,14 @@ async function runStubbedTurn(
 /** A workflow tool whose body must never run, since a stub answers every call to it. */
 interface WorkflowToolSpec {
   readonly name: string;
-  readonly runs: "execute" | "task" | "serve" | "deferred" | "approved";
+  readonly runs:
+    | "execute"
+    | "task"
+    | "serve"
+    | "deferred"
+    | "approved"
+    | "approved-execute"
+    | "ends-turn-if-posted";
 }
 
 function toolDefinition(tool: string | WorkflowToolSpec) {
@@ -143,6 +150,22 @@ function toolDefinition(tool: string | WorkflowToolSpec) {
       description: `Run ${tool.name}.`,
       execute: async () => ({ real: tool.name }),
       inputSchema: z.object({}).passthrough(),
+    });
+  }
+  if (tool.runs === "ends-turn-if-posted") {
+    return defineTool({
+      description: `Run ${tool.name}.`,
+      execute: async () => ({ posted: true }),
+      inputSchema: z.object({}).passthrough(),
+      endsTurn: (output) => output.posted,
+    });
+  }
+  if (tool.runs === "approved-execute") {
+    return defineWorkflowTool({
+      approval: { request: always() },
+      description: `Run ${tool.name}.`,
+      execute: failingDeployWorkflow,
+      inputSchema: z.object({ service: z.string() }),
     });
   }
   if (tool.runs === "deferred") {
@@ -264,6 +287,49 @@ describe("a stub response that ends the turn", () => {
 
     expect(requests).toHaveLength(1);
     expect(settledCalls(events)).toEqual(["call_1_0:completed"]);
+    expect(turnOutcome(events)).toEqual(["completed"]);
+  });
+
+  it("ends the turn when a call to an endsTurn tool accepts its output beside an ending workflow call", async () => {
+    const { model, requests } = scriptedModel((request) =>
+      request === 1
+        ? [{ toolName: "post" }, { toolName: "deploy", input: { service: "api" } }]
+        : "never asked",
+    );
+    const events = await runStubbedTurn("stub-ends-turn-beside-predicate", {
+      message: "Post it and deploy it.",
+      model,
+      rules: [{ id: "deploy", tool: "deploy", outcome: { response: "deployed", endsTurn: true } }],
+      tools: [
+        { name: "post", runs: "ends-turn-if-posted" },
+        { name: "deploy", runs: "execute" },
+      ],
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(turnOutcome(events)).toEqual(["completed"]);
+  });
+
+  it("ends the turn when approved inline and workflow calls both get endsTurn responses", async () => {
+    const { model, requests } = scriptedModel((request) =>
+      request === 1
+        ? [{ toolName: "publish" }, { toolName: "deploy", input: { service: "api" } }]
+        : "never asked",
+    );
+    const events = await runStubbedTurn("stub-ends-turn-approved-both", {
+      message: "Publish and deploy it.",
+      model,
+      rules: [
+        { id: "publish", tool: "publish", outcome: { response: "published", endsTurn: true } },
+        { id: "deploy", tool: "deploy", outcome: { response: "deployed", endsTurn: true } },
+      ],
+      tools: [
+        { name: "publish", runs: "approved" },
+        { name: "deploy", runs: "approved-execute" },
+      ],
+    });
+
+    expect(requests).toHaveLength(1);
     expect(turnOutcome(events)).toEqual(["completed"]);
   });
 

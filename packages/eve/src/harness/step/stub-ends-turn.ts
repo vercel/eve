@@ -8,7 +8,6 @@ import type { HarnessSession, StepResult } from "#harness/types.js";
 import { readEndingStubCalls } from "#tool-stubs/ending-calls.js";
 import { settleTurnWithoutReply } from "./after-model.js";
 import type { Step } from "./context.js";
-import { recordStepEndingStubCalls } from "./stub-ending-calls.js";
 import type { TurnInput } from "./intake.js";
 
 /** What the turn does next because tool stubs answered the model's last step with `endsTurn`. */
@@ -17,16 +16,12 @@ export type StubTurnEnd =
   | { readonly kind: "wait"; readonly taskIds: readonly string[] };
 
 /**
- * Ends the turn when every call of the model's last step got a tool stub's `endsTurn` response or
- * is a call to an `endsTurn` tool, since the model would read only their results; while tasks those
- * calls started still work, the turn waits for them instead. Undefined when the model runs as usual,
- * including while any other task works or has a result the model hasn't read.
+ * Ends the turn when every call of the model's last step is recorded as ending it, since the model
+ * would read only their results; while tasks those calls started still work, the turn waits for
+ * them instead. Undefined when the model runs as usual, including while any other task works or has
+ * a result the model hasn't read.
  */
-export function stubTurnEnd(
-  session: HarnessSession,
-  turnId: string,
-  endsTurnTool: (name: string) => boolean,
-): StubTurnEnd | undefined {
+export function stubTurnEnd(session: HarnessSession, turnId: string): StubTurnEnd | undefined {
   if (session.outputSchema !== undefined) return undefined;
   const ending = readEndingStubCalls(session.state, turnId);
   if (ending.size === 0) return undefined;
@@ -34,10 +29,8 @@ export function stubTurnEnd(
   if (
     calls === undefined ||
     ![...calls].every(
-      ([callId, { output, toolName }]) =>
-        (ending.has(callId) || endsTurnTool(toolName)) &&
-        output !== undefined &&
-        !isToolResultError(output),
+      ([callId, output]) =>
+        ending.has(callId) && output !== undefined && !isToolResultError(output),
     )
   ) {
     return undefined;
@@ -59,13 +52,8 @@ export async function endTurnAfterStubs(
   step: Step,
   turn: TurnInput,
 ): Promise<StepResult | undefined> {
-  recordStepEndingStubCalls(step);
   if (step.hasDelegatedCaller || turn.hasUserMessage) return undefined;
-  const end = stubTurnEnd(
-    step.session,
-    activeTurnId(step.position()),
-    (name) => step.config.tools.get(name)?.endsTurn === true,
-  );
+  const end = stubTurnEnd(step.session, activeTurnId(step.position()));
   if (end === undefined) return undefined;
   if (end.kind === "wait") {
     return { held: { kind: "tasks", taskIds: end.taskIds }, next: null, session: step.session };
@@ -80,36 +68,27 @@ export async function endTurnAfterStubs(
   return await settleTurnWithoutReply(step, [...history, ...delivered.messages]);
 }
 
-/** The calls the latest assistant message made, with their outputs, by call ID; undefined without calls. */
+/** The outputs of the calls the latest assistant message made, by call ID; undefined without calls. */
 function lastStepCalls(
   history: readonly HarnessModelMessage[],
-):
-  | ReadonlyMap<
-      string,
-      { readonly output: ToolResultPart["output"] | undefined; readonly toolName: string }
-    >
-  | undefined {
+): ReadonlyMap<string, ToolResultPart["output"] | undefined> | undefined {
   const index = history.findLastIndex((message) => message.role === "assistant");
   const message = history[index];
   if (message === undefined || typeof message.content === "string") return undefined;
-  const calls = new Map<
-    string,
-    { output: ToolResultPart["output"] | undefined; readonly toolName: string }
-  >();
+  const outputs = new Map<string, ToolResultPart["output"] | undefined>();
   for (const part of message.content) {
-    if (part.type === "tool-call") {
-      calls.set(part.toolCallId, { output: undefined, toolName: part.toolName });
-    }
+    if (part.type === "tool-call") outputs.set(part.toolCallId, undefined);
   }
-  if (calls.size === 0) return undefined;
+  if (outputs.size === 0) return undefined;
   for (const later of history.slice(index + 1)) {
     if (later.role !== "tool") continue;
     for (const part of later.content) {
-      const call = part.type === "tool-result" ? calls.get(part.toolCallId) : undefined;
-      if (call !== undefined && part.type === "tool-result") call.output = part.output;
+      if (part.type === "tool-result" && outputs.has(part.toolCallId)) {
+        outputs.set(part.toolCallId, part.output);
+      }
     }
   }
-  return calls;
+  return outputs;
 }
 
 function startedBy(record: TaskRecord, calls: ReadonlyMap<string, unknown>): boolean {

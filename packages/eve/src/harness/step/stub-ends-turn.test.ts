@@ -60,19 +60,7 @@ function sessionAfter(
   return session;
 }
 
-const noEndsTurnTools = () => false;
-
 describe("stubTurnEnd", () => {
-  it("counts a call to an endsTurn tool beside the ending calls", () => {
-    expect(
-      stubTurnEnd(
-        sessionAfter(["a", "react"], { ending: ["a"] }),
-        TURN,
-        (name) => name === "react",
-      ),
-    ).toEqual({ kind: "settle" });
-  });
-
   it("lets the model run while a task no ending call started has a result to read", () => {
     let session = sessionAfter(["a"]);
     const created = createTask(readTaskTable(session.state), {
@@ -90,19 +78,17 @@ describe("stubTurnEnd", () => {
         taskId: created.taskId,
       }).table,
     );
-    expect(stubTurnEnd(session, TURN, noEndsTurnTools)).toBeUndefined();
+    expect(stubTurnEnd(session, TURN)).toBeUndefined();
   });
 
   it("settles the turn when every call of the last step got an endsTurn response", () => {
-    expect(stubTurnEnd(sessionAfter(["a", "b"]), TURN, noEndsTurnTools)).toEqual({
+    expect(stubTurnEnd(sessionAfter(["a", "b"]), TURN)).toEqual({
       kind: "settle",
     });
   });
 
   it("waits for a task an ending call started instead of having the model read its receipt", () => {
-    expect(
-      stubTurnEnd(sessionAfter(["researcher"], { task: "researcher" }), TURN, noEndsTurnTools),
-    ).toEqual({
+    expect(stubTurnEnd(sessionAfter(["researcher"], { task: "researcher" }), TURN)).toEqual({
       kind: "wait",
       taskIds: [expect.any(String)],
     });
@@ -119,12 +105,11 @@ describe("stubTurnEnd", () => {
           outputSchema: outputSchema as HarnessSession["outputSchema"],
         }),
         TURN,
-        noEndsTurnTools,
       ),
     ).toBeUndefined();
   });
 
   it("lets the model run when the ending calls belong to an earlier turn", () => {
-    expect(stubTurnEnd(sessionAfter(["a"]), "turn_1", noEndsTurnTools)).toBeUndefined();
+    expect(stubTurnEnd(sessionAfter(["a"]), "turn_1")).toBeUndefined();
   });
 });
