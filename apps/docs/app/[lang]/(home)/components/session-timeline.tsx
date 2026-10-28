@@ -59,7 +59,7 @@ type Beat =
 
 function Mention({ children }: { children: string }) {
   return (
-    <span className="rounded bg-gray-alpha-200 px-0.5 font-medium text-gray-1000">@{children}</span>
+    <span className="rounded bg-gray-alpha-200 px-0.5 text-gray-1000">@{children}</span>
   );
 }
 
