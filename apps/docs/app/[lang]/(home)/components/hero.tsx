@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import { ChannelStack } from "./channel-stack";
 import { InstallSwitcher } from "./install-switcher";
+import { SessionTimeline } from "./session-timeline";
 
 export function Hero({ tagline }: { tagline: string }): JSX.Element {
   return (
@@ -17,7 +17,7 @@ export function Hero({ tagline }: { tagline: string }): JSX.Element {
         <InstallSwitcher className="mt-2" source="home_hero" />
       </div>
       <div className="min-w-0 lg:col-span-5 lg:col-start-8">
-        <ChannelStack />
+        <SessionTimeline />
       </div>
     </section>
   );
