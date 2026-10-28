@@ -847,6 +847,7 @@ export function SessionTimeline(): JSX.Element {
     if (!next) {
       setPlaying(false);
       setEnded(true);
+      setTyping(false);
       return;
     }
     setTyping(false);
@@ -980,10 +981,11 @@ export function SessionTimeline(): JSX.Element {
             }}
           >
             <ol
-              // Messages only animate in during a replay; shown in full, they're simply there.
+              // Messages only animate in during a replay, including the last one as it ends;
+              // shown in full, they're simply there.
               className={cn(
                 "m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-28 [&>li:first-child]:mt-auto",
-                !playing && "[&_*]:animate-none [&>*]:animate-none",
+                !playing && !ended && "[&_*]:animate-none [&>*]:animate-none",
               )}
               ref={contentRef}
             >
