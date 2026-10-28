@@ -639,7 +639,7 @@
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
-    "@vercel/schedules": "0.0.0-alpha.18",
+    "@vercel/schedules": "0.0.0-alpha.19",
     "@vercel/sdk": "1.28.8",
     "@workflow/core": "5.2.3",
     "@workflow/errors": "5.0.5",
