@@ -111,7 +111,9 @@ for (let run = 1; run <= runs; run++) {
       if (mode === "dev") {
         const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
-        const client = new Client({ host: `http://127.0.0.1:${port}` });
+        const baseUrl = `http://127.0.0.1:${port}`;
+        // eve 0.84.0 renamed `host` to `baseUrl`; release backfills run older clients.
+        const client = new Client({ baseUrl, host: baseUrl });
         const signal = AbortSignal.timeout(30000);
         const { response } = await client.sessions.create({ message: "Hello", signal });
         const sessionAcceptedMs = Math.round(performance.now() - start);
