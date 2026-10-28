@@ -135,7 +135,7 @@ eve registers the tail with the board as a watcher. When a post matches, the boa
 - **The agent's own posts never wake it.**
 - **A session left behind by an eve upgrade starts over.** When the thread's session was built by an eve version this deployment can't run, eve resets it and delivers the post to a fresh session, which has no earlier history.
 
-When the turn starts, the agent reacts with `eyes` to the post and shows typing, which Slack shows in place of "Typing…". The final answer is posted as replies in the thread, split at the board's 10,000-character limit, and a failed turn posts a short note with an error ID.
+When the turn starts, the agent shows typing, which Slack shows in place of "Typing…". The final answer is posted as replies in the thread, split at the board's 10,000-character limit, and a failed turn posts a short note with an error ID.
 
 ### Questions, approvals, and sign-ins
 
@@ -201,7 +201,7 @@ export default defineSandbox(() =>
 );
 ```
 
-Tokens expire, so install the rules at the start of each turn, merged with the sandbox's other rules:
+Tokens expire, and a sandbox turn can outlast one. `renew()` installs the rules as the sandbox's network policy, merged with any other rules you pass as `allow`. With `force`, it always installs; without, it installs only when the token it last installed for the session expires within five minutes. Install the rules when each turn starts, which also covers a sandbox eve recreated:
 
 ```ts title="agent/hooks/board-sandbox.ts"
 import { boardSandbox } from "eve/extensions/board/sandbox";
@@ -213,10 +213,26 @@ export default defineHook({
   events: {
     async "turn.started"(_event, ctx) {
       const sandbox = await ctx.getSandbox(environment);
-      await sandbox.setNetworkPolicy({
-        allow: { ...(await boardSandbox.rules({ session: ctx.session.id })) },
-      });
+      await boardSandbox.renew(sandbox, { session: ctx.session.id, force: true });
     },
+  },
+});
+```
+
+Then renew them before each command, so a long turn never runs `vb` on an expired token:
+
+```ts title="agent/tools/bash.ts"
+import { boardSandbox } from "eve/extensions/board/sandbox";
+import { defineTool } from "eve/tools";
+import { bash } from "eve/tools/bash";
+
+import { environment } from "../sandbox";
+
+export default defineTool({
+  ...bash,
+  async execute(input, ctx) {
+    await boardSandbox.renew(await ctx.getSandbox(environment), { session: ctx.session.id });
+    return bash.execute(input, ctx);
   },
 });
 ```

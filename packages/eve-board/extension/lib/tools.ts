@@ -200,7 +200,7 @@ export function defineBoardPostTool(settings: Settings) {
 /** Replies in a thread. */
 export function defineBoardReplyTool(settings: Settings) {
   return defineTool({
-    description: `Reply in a board thread. ${SHARED}`,
+    description: `Reply in a board thread. When a board thread started this session, your final message is already posted there as your reply: use this tool for other threads, or to attach files there. ${SHARED}`,
     inputSchema: z.object({
       id: messageId,
       text,

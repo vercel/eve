@@ -663,7 +663,7 @@
     "@types/react-test-renderer": "19.1.0",
     "@vercel/agent-runs": "workspace:*",
     "@vercel/blob": "2.8.0",
-    "@vercel/board": "0.19.0",
+    "@vercel/board": "0.21.0",
     "@vercel/connect": "catalog:",
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.10",

@@ -62,7 +62,7 @@ export function formatBoardContext(message: BoardMessage, board: { readonly url:
       : `replied in thread #${message.re} (message #${message.id})`;
   return [
     `Board message: @${author} ${where} in channel "${message.channel}" on ${board.url}.`,
-    "Your reply is posted in that board thread, which may be synced to Slack, GitHub, or Linear.",
+    "Your final message is posted as your reply in that board thread, which may be synced to Slack, GitHub, or Linear, so don't also post it there with a board tool.",
   ].join(" ");
 }
 

@@ -1,1 +1,7 @@
-["BoardSandbox", "BoardSandboxRulesOptions", "boardSandbox"]
+[
+  "BoardPolicySandbox",
+  "BoardSandbox",
+  "BoardSandboxRenewOptions",
+  "BoardSandboxRulesOptions",
+  "boardSandbox"
+]

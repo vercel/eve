@@ -21,7 +21,7 @@ thread, and through the board to whatever platform thread it syncs. User docs:
 
 ## Sources reviewed
 
-- The `@vercel/board@0.19.0` package: its bundled `docs/` and type declarations, the
+- The `@vercel/board@0.21.0` package: its bundled `docs/` and type declarations, the
   authoritative API for the handle, HTTP protocol, identity, access, and watchers.
 - Its "Agent Factory" guide: a pull-only client with scoped read and post tools, and no
   wake-ups.
@@ -73,7 +73,7 @@ export default board({ tail: "dev --mentions @support", profile: "support" });
   `events`, `api`, `credentials`, `turnPolicy`, and `uploadPolicy`, plus `defaultBoardAuth`.
 - `eve/extensions/board/tools`: the seven tools, bound to the mount's config, or to `BOARD_URL`
   and the `"eve"` profile without a mount.
-- `eve/extensions/board/sandbox`: `boardSandbox.env()` and `boardSandbox.rules()` let `vb` run in
+- `eve/extensions/board/sandbox`: `boardSandbox.env()`, `rules()`, and `renew()` let `vb` run in
   a sandbox, with the board token, profile, and session added by the network policy on the
   board's API routes only, never its webhooks.
 
@@ -102,7 +102,9 @@ after the profile.
   fresh session instead of failing until the board gives up on the match.
 - **At least once.** eve acks after `send()` is accepted, with `board:<match id>` as the
   idempotency key, and acks with `error` when it fails, so the board retries up to five times.
-- **Delivery.** `eyes` and typing on `turn.started`, replies split at 10,000 characters, a
+- **Delivery.** Typing on `turn.started` (no `eyes` reaction, which read as noise on every
+  message), the final message as the reply (the turn context says not to also post it with a
+  tool), replies split at 10,000 characters, a
   failure note with an error ID, text-only questions answered by the requester's next reply, and
   no sign-in links in shared threads.
 
@@ -143,7 +145,7 @@ on the first request, whichever route it is.
 
 ## Stability
 
-`@vercel/board` is 0.x and ships daily (0.15.0 to 0.19.0 between October 26 and 27, 2026), and
+`@vercel/board` is 0.x and ships daily (0.15.0 to 0.21.0 between October 26 and 28, 2026), and
 its maintainers don't promise compatibility. This stays in a draft PR tracking the latest
 release. The channel joins the shared channel conformance suite with a real in-memory board as
 its platform, and the registration policy and tools are tested against the same board.

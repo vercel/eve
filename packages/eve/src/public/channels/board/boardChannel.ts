@@ -75,7 +75,7 @@ export interface BoardChannelState extends PromptQueueState {
   readonly threadId: string | null;
   /** The watcher whose match started the session. */
   readonly watcher?: string | null;
-  /** The message the current turn answers, which gets the `eyes` reaction. */
+  /** The message the current turn answers: `react()` targets it by default. */
   messageId: string | null;
   pendingSignIns?: Record<string, string>;
 }
@@ -591,7 +591,8 @@ function threadHandle(
 }
 
 function createDefaultEvents(): BoardChannelEvents {
-  const surface = surfaceEvents<BoardEventContext>({
+  // Typing shows the agent is on it; an `eyes` reaction on every message read as noise.
+  return surfaceEvents<BoardEventContext>({
     post: postChunks,
     restart: "thread",
     // A reply can only answer the prompt it sees, so prompts post one at a time.
@@ -601,13 +602,6 @@ function createDefaultEvents(): BoardChannelEvents {
       await bestEffort("typing", () => channel.board.typing());
     },
   });
-  return {
-    ...surface,
-    async "turn.started"(event, ctx) {
-      await bestEffort("reaction", () => ctx.channel.board.react("eyes"));
-      await surface["turn.started"]?.(event, ctx);
-    },
-  };
 }
 
 async function showPrompt(channel: BoardEventContext, request: Interaction): Promise<void> {

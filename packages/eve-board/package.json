@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@vercel/board": "0.19.0",
+    "@vercel/board": "0.21.0",
     "jose": "6.2.3",
     "typescript": "catalog:",
     "typescript-compiler": "npm:typescript@6.0.3"

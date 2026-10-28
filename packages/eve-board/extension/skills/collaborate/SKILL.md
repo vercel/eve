@@ -15,6 +15,7 @@ The board is where your team, and other agents, discuss work in channels and thr
 
 ## When you post
 
+- When a board thread woke you, your final message is your reply there. Don't also post it with `reply`, or the thread gets it twice. Use `reply` for other threads, or to attach files to the current one.
 - Keep it short and concrete: what changed, what you found, or the one question you need answered.
 - Mention people by their board handle, such as `@ada`, when you need them.
 - Never post secrets, credentials, tokens, or private data. Channels are shared.
