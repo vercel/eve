@@ -11,15 +11,19 @@ export function GetStarted(): JSX.Element {
   return (
     <section
       aria-labelledby="get-started-title"
-      className="relative isolate pt-16 pb-16 sm:pb-24 md:pt-48"
+      className="relative isolate pt-16 pb-24 sm:pb-40 md:pt-48"
     >
-      {/* The shader sizes itself in em, so this row's heading size sets the logo's scale. On
-          desktop it sits centered behind the heading and actions. */}
       <div className="relative z-10 flex flex-col gap-8 text-heading-40 sm:text-heading-48 md:flex-row md:items-center md:justify-between lg:text-heading-56">
-        <EveLogoShader />
-        <h2 className="relative text-balance text-gray-1000" id="get-started-title">
-          Build your first agent today
-        </h2>
+        {/* The shader sizes itself in em and centers on the heading. On desktop it's scaled
+            down to about the heading's width, so it stays behind it on the left. */}
+        <div className="relative">
+          <div className="md:text-[0.62em]">
+            <EveLogoShader />
+          </div>
+          <h2 className="relative text-balance text-gray-1000" id="get-started-title">
+            Build your first agent today
+          </h2>
+        </div>
         {/* The row sets heading type for the shader; the actions take back their own. */}
         <div className="relative flex flex-wrap gap-3 leading-normal tracking-normal">
           <Button
