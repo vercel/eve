@@ -6,6 +6,11 @@ import * as sdkRuntime from "#internal/workflow/runtime.js";
 import * as api from "./api.ts";
 import * as workflow from "./index.ts";
 
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof sdkRuntime>()),
+  resumeHook: vi.fn(),
+}));
+
 describe("eve/workflow", () => {
   it("re-exports the SDK runtime values", () => {
     expect(workflow.createHook).toBe(sdk.createHook);
@@ -40,7 +45,7 @@ describe("eve/workflow", () => {
 describe("eve/workflow/api", () => {
   it("waits for hook persistence without exposing the SDK record or hiding failures", async () => {
     const persisted = Promise.withResolvers<Awaited<ReturnType<typeof sdkRuntime.resumeHook>>>();
-    const resume = vi.spyOn(sdkRuntime, "resumeHook").mockReturnValueOnce(persisted.promise);
+    const resume = vi.mocked(sdkRuntime.resumeHook).mockReturnValueOnce(persisted.promise);
     try {
       const result = api.resumeHook("approval", { approved: true });
       expect(resume).toHaveBeenCalledWith("approval", { approved: true });
@@ -60,7 +65,7 @@ describe("eve/workflow/api", () => {
       resume.mockRejectedValueOnce(failure);
       await expect(api.resumeHook("approval", { approved: false })).rejects.toBe(failure);
     } finally {
-      resume.mockRestore();
+      resume.mockReset();
     }
   });
 
