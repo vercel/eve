@@ -12,15 +12,8 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
-import { IconBox, IconCheck, IconChevronDownSmall } from "@vercel/geistdocs/assets/icons";
+import { IconBox } from "@vercel/geistdocs/assets/icons";
 import { Button } from "@vercel/geistdocs/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@vercel/geistdocs/components/dropdown-menu";
 import { type ComponentType, type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
@@ -689,7 +682,7 @@ function IconStopCircle() {
 
 /**
  * Every label stacked in one grid cell with only the current one visible, so a button keeps
- * the width of its longest label and the dock doesn't resize between choices.
+ * the width of its longest label and doesn't resize between states.
  */
 function StableLabel({ current, labels }: { current: string; labels: string[] }) {
   return (
@@ -762,11 +755,54 @@ export function SessionTimeline(): JSX.Element {
 
   return (
     <figure aria-label="Example eve sessions in Slack, Teams, and WhatsApp" className="m-0">
+      {/* Channel tabs on a hairline, with the demo control at the row's end. On narrow
+          screens the tabs scroll sideways rather than run into it. */}
+      <div className="mb-4 flex items-center justify-between gap-4 border-gray-alpha-400 border-b">
+        <div
+          aria-label="Channel"
+          className="-mb-px flex min-w-0 gap-5 overflow-x-auto [scrollbar-width:none]"
+          role="tablist"
+        >
+          {CONVERSATIONS.map((c) => {
+            const selected = c.id === platform;
+            return (
+              <button
+                aria-selected={selected}
+                className={cn(
+                  "flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 py-3 transition-colors [&>svg]:size-4 [&>svg]:shrink-0",
+                  selected
+                    ? "border-gray-1000 text-gray-1000"
+                    : "border-transparent text-gray-900 hover:text-gray-1000",
+                )}
+                key={c.id}
+                onClick={() => pick(c.id)}
+                role="tab"
+                type="button"
+              >
+                {c.logo("size-4")}
+                <span className="text-label-14">{c.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <Button
+          className="shrink-0"
+          onClick={playing ? () => setPlaying(false) : play}
+          prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
+          size="small"
+          variant="tertiary"
+        >
+          <StableLabel
+            current={playing ? "Stop demo" : "Play demo"}
+            labels={["Play demo", "Stop demo"]}
+          />
+        </Button>
+      </div>
       {/* No frame: the conversation sits on the page and fades out only at an edge that has
           messages scrolled past it. In full it opens at its start; a replay fills from the
           bottom like a chat. */}
       <ol
-        className="-mx-1 flex h-[34rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-12 [scrollbar-width:none] [&>li:first-child]:mt-auto"
+        className="-mx-1 flex h-[34rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [scrollbar-width:none] [&>li:first-child]:mt-auto"
         key={platform}
         onScroll={(event) => measure(event.currentTarget)}
         ref={listRef}
@@ -825,56 +861,6 @@ export function SessionTimeline(): JSX.Element {
           </li>
         ) : null}
       </ol>
-      {/* A floating dock: the only raised element, overlapping the conversation's bottom so
-          messages fade out behind it. */}
-      <figcaption className="relative z-10 mx-auto -mt-9 flex w-fit items-center gap-1 rounded-full border border-gray-alpha-400 bg-background-100 p-1 shadow-sm">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              aria-label={`Conversation: ${conversation.label}`}
-              className="rounded-full"
-              prefix={conversation.logo("size-4")}
-              size="small"
-              suffix={<IconChevronDownSmall className="text-gray-900" />}
-              variant="tertiary"
-            >
-              <StableLabel
-                current={conversation.label}
-                labels={CONVERSATIONS.map((c) => c.label)}
-              />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-56" side="top">
-            <DropdownMenuRadioGroup onValueChange={pick} value={platform}>
-              {CONVERSATIONS.map((c) => (
-                // The check sits on the right, so the item's own left indicator is hidden.
-                <DropdownMenuRadioItem
-                  className="group gap-2.5 pl-2 text-label-14 [&>span:first-child]:hidden"
-                  key={c.id}
-                  value={c.id}
-                >
-                  {c.logo("size-4")}
-                  {c.label}
-                  <IconCheck className="ml-auto opacity-0 group-data-[state=checked]:opacity-100" />
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <span aria-hidden className="h-4 w-px bg-gray-alpha-400" />
-        <Button
-          className="rounded-full"
-          onClick={playing ? () => setPlaying(false) : play}
-          prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
-          size="small"
-          variant="tertiary"
-        >
-          <StableLabel
-            current={playing ? "Stop demo" : "Play demo"}
-            labels={["Play demo", "Stop demo"]}
-          />
-        </Button>
-      </figcaption>
     </figure>
   );
 }
