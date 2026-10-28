@@ -1,4 +1,5 @@
-// World-hub client: forwards World calls to an external host over signed HTTP.
+// World-hub client: forwards World calls to an external host over signed HTTP,
+// so a deployment can run against a hub-owned workflow world.
 import { randomUUID } from "node:crypto";
 import type { World, MessageId, ValidQueueName } from "#compiled/@workflow/world/index.js";
 import { WORLD_OPERATIONS } from "#internal/workflow/world-protocol.js";
