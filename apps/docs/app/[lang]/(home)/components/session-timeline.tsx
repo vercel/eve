@@ -809,13 +809,14 @@ export function SessionTimeline(): JSX.Element {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    // The full conversation opens at its start; a replay follows new messages to the end and
-    // stays there once it finishes.
-    if (playing) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
-    else if (ended) list.scrollTo({ top: list.scrollHeight });
+    // The full conversation opens at its start; a replay follows new messages and the typing
+    // indicator to the end, so neither slips behind the dock, and stays there once it finishes.
+    // Jumping rather than scrolling smoothly keeps the newest line from passing under the dock
+    // mid-scroll; new messages already slide in on their own.
+    if (playing || ended) list.scrollTo({ top: list.scrollHeight });
     else list.scrollTo({ top: 0 });
     measure(list);
-  }, [shown, platform, playing, ended]);
+  }, [shown, typing, platform, playing, ended]);
 
   const measure = (list: HTMLOListElement) => {
     const above = list.scrollTop > 1;
