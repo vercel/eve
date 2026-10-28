@@ -800,6 +800,9 @@ function StableLabel({ current, labels }: { current: string; labels: string[] })
 export function SessionTimeline(): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLOListElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // The outgoing conversation while a channel switch slides it out, and which way it goes.
+  const leaving = useRef<{ node: HTMLElement; direction: 1 | -1 } | null>(null);
   const [platform, setPlatform] = useState<Platform>("slack");
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
@@ -903,10 +906,51 @@ export function SessionTimeline(): JSX.Element {
     setEnded(false);
   };
 
+  // Switching channels pushes the current conversation out and the next one in, like moving
+  // between screens: toward the left when the channel is further down the picker, else right.
   const pick = (id: string) => {
+    if (id === platform) return;
+    const list = listRef.current;
+    const body = bodyRef.current;
+    if (list && body && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      leaving.current?.node.remove();
+      const node = list.cloneNode(true) as HTMLElement;
+      node.setAttribute("aria-hidden", "true");
+      node.style.position = "absolute";
+      node.style.inset = "0";
+      node.style.pointerEvents = "none";
+      body.append(node);
+      node.scrollTop = list.scrollTop;
+      const order = CONVERSATIONS.map((c) => c.id);
+      leaving.current = {
+        node,
+        direction: order.indexOf(id as Platform) > order.indexOf(platform) ? 1 : -1,
+      };
+    }
     setPlatform(id as Platform);
     stop();
   };
+
+  useLayoutEffect(() => {
+    const out = leaving.current;
+    const list = listRef.current;
+    if (!out || !list) return;
+    leaving.current = null;
+    const timing = { duration: 300, easing: "ease-in-out" };
+    out.node
+      .animate(
+        [{ transform: "none" }, { transform: `translateX(${-100 * out.direction}%)` }],
+        timing,
+      )
+      .finished.then(
+        () => out.node.remove(),
+        () => out.node.remove(),
+      );
+    list.animate(
+      [{ transform: `translateX(${100 * out.direction}%)` }, { transform: "none" }],
+      timing,
+    );
+  }, [platform]);
 
   return (
     // Laid out like vercel.com/sandbox's hero: the conversation in a browser window, the channel
@@ -927,95 +971,101 @@ export function SessionTimeline(): JSX.Element {
         </header>
         {/* The conversation fades out only at an edge with messages scrolled past it. In full it
             opens at its start; a replay fills from the bottom like a chat. */}
-        <div
-          className="h-[26rem] overflow-y-auto overscroll-contain px-4 [scrollbar-width:none]"
-          key={platform}
-          onScroll={(event) => measure(event.currentTarget)}
-          ref={listRef}
-          style={{
-            maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
-          }}
-        >
-          <ol
-            className="m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-28 [&>li:first-child]:mt-auto"
-            ref={contentRef}
+        <div className="relative overflow-hidden" ref={bodyRef}>
+          <div
+            className="h-[26rem] overflow-y-auto overscroll-contain px-4 [scrollbar-width:none]"
+            key={platform}
+            onScroll={(event) => measure(event.currentTarget)}
+            ref={listRef}
+            style={{
+              maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
+            }}
           >
-            {beats.slice(0, shown).map((beat, i) => {
-              if (beat.kind === "reactions") {
+            <ol
+              // Messages only animate in during a replay; shown in full, they're simply there.
+              className={cn(
+                "m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-28 [&>li:first-child]:mt-auto",
+                !playing && "[&_*]:animate-none [&>*]:animate-none",
+              )}
+              ref={contentRef}
+            >
+              {beats.slice(0, shown).map((beat, i) => {
+                if (beat.kind === "reactions") {
+                  return (
+                    <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
+                      {beat.reactions.map((reaction, index) => {
+                        const mine = reacted.has(reaction.emoji);
+                        const count = reaction.count + (mine ? 1 : 0);
+                        return (
+                          <button
+                            aria-label={`:${reaction.emoji.toLowerCase()}: ${count}`}
+                            aria-pressed={mine}
+                            className={cn(
+                              "flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-95 motion-safe:animate-scale-in motion-reduce:animate-fade-in",
+                              mine
+                                ? "border-gray-alpha-700 bg-gray-alpha-200"
+                                : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
+                            )}
+                            key={reaction.emoji}
+                            onClick={() => toggleReaction(reaction.emoji)}
+                            style={{ animationDelay: `${index * 60}ms` }}
+                            type="button"
+                          >
+                            <TextEmoji name={reaction.emoji} />
+                            <span className="text-copy-13">{count}</span>
+                          </button>
+                        );
+                      })}
+                    </li>
+                  );
+                }
+                const author = AUTHORS[beat.author];
+                if (platform === "whatsapp") {
+                  return (
+                    <Bubble
+                      attachment={beat.attachment}
+                      author={author}
+                      continued={beat.author === authorOf(beats[i - 1])}
+                      tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
+                      key={i}
+                      time={beat.time}
+                    >
+                      {beat.body}
+                    </Bubble>
+                  );
+                }
+                const continued = beat.author === authorOf(beats[i - 1]);
+                if (platform === "teams") {
+                  return (
+                    <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
+                      <p>{beat.body}</p>
+                      <Attachment>{beat.attachment}</Attachment>
+                    </TeamsMessage>
+                  );
+                }
                 return (
-                  <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
-                    {beat.reactions.map((reaction, index) => {
-                      const mine = reacted.has(reaction.emoji);
-                      const count = reaction.count + (mine ? 1 : 0);
-                      return (
-                        <button
-                          aria-label={`:${reaction.emoji.toLowerCase()}: ${count}`}
-                          aria-pressed={mine}
-                          className={cn(
-                            "flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-95 motion-safe:animate-scale-in motion-reduce:animate-fade-in",
-                            mine
-                              ? "border-gray-alpha-700 bg-gray-alpha-200"
-                              : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
-                          )}
-                          key={reaction.emoji}
-                          onClick={() => toggleReaction(reaction.emoji)}
-                          style={{ animationDelay: `${index * 60}ms` }}
-                          type="button"
-                        >
-                          <TextEmoji name={reaction.emoji} />
-                          <span className="text-copy-13">{count}</span>
-                        </button>
-                      );
-                    })}
-                  </li>
-                );
-              }
-              const author = AUTHORS[beat.author];
-              if (platform === "whatsapp") {
-                return (
-                  <Bubble
-                    attachment={beat.attachment}
-                    author={author}
-                    continued={beat.author === authorOf(beats[i - 1])}
-                    tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
-                    key={i}
-                    time={beat.time}
-                  >
-                    {beat.body}
-                  </Bubble>
-                );
-              }
-              const continued = beat.author === authorOf(beats[i - 1]);
-              if (platform === "teams") {
-                return (
-                  <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
-                    <p>{beat.body}</p>
+                  <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
+                    <p className="text-gray-1000">{beat.body}</p>
                     <Attachment>{beat.attachment}</Attachment>
-                  </TeamsMessage>
+                  </ThreadMessage>
                 );
-              }
-              return (
-                <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
-                  <p className="text-gray-1000">{beat.body}</p>
-                  <Attachment>{beat.attachment}</Attachment>
-                </ThreadMessage>
-              );
-            })}
-            {/* During a replay the typing indicator keeps a reserved row and only fades, so its
+              })}
+              {/* During a replay the typing indicator keeps a reserved row and only fades, so its
             coming and going never changes the conversation's height. */}
-            {playing || ended ? (
-              <li
-                aria-hidden={!typing}
-                className={cn(
-                  "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                  platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
-                  typing ? "opacity-100" : "opacity-0",
-                )}
-              >
-                <TypingIndicator author={typingAuthor} />
-              </li>
-            ) : null}
-          </ol>
+              {playing || ended ? (
+                <li
+                  aria-hidden={!typing}
+                  className={cn(
+                    "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
+                    platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
+                    typing ? "opacity-100" : "opacity-0",
+                  )}
+                >
+                  <TypingIndicator author={typingAuthor} />
+                </li>
+              ) : null}
+            </ol>
+          </div>
         </div>
       </div>
       {/* The channel picker stays open, so every conversation is one click away. */}
