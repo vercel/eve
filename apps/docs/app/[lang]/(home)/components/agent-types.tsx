@@ -958,7 +958,7 @@ function UseCaseTabs({
                 isSelected ? "text-gray-1000" : "text-gray-900",
               )}
             >
-              <span className="text-copy-14">{useCase.name}</span>
+              <span className="font-medium text-copy-14">{useCase.name}</span>
             </span>
           </button>
         );
