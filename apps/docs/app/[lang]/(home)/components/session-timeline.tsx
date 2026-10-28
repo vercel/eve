@@ -365,7 +365,7 @@ const CONVERSATIONS: {
 }[] = [
   {
     id: "slack",
-    label: "#software-factory",
+    label: "Software factory",
     logo: (className) => logos.slack({ "aria-hidden": true, className }),
     beats: SLACK_BEATS,
   },
@@ -649,6 +649,8 @@ export function SessionTimeline(): JSX.Element {
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
   const [count, setCount] = useState(0);
+  // Which edges have messages scrolled past them, so only those edges fade.
+  const [overflow, setOverflow] = useState({ above: false, below: false });
 
   const conversation = CONVERSATIONS.find((c) => c.id === platform) ?? CONVERSATIONS[0];
   const beats = conversation.beats;
@@ -670,7 +672,14 @@ export function SessionTimeline(): JSX.Element {
     if (!list) return;
     // The full conversation opens at its start; a replay follows new messages at the end.
     list.scrollTo(playing ? { top: list.scrollHeight, behavior: "smooth" } : { top: 0 });
+    measure(list);
   }, [shown, platform, playing]);
+
+  const measure = (list: HTMLOListElement) => {
+    const above = list.scrollTop > 1;
+    const below = list.scrollTop + list.clientHeight < list.scrollHeight - 1;
+    setOverflow((o) => (o.above === above && o.below === below ? o : { above, below }));
+  };
 
   const play = () => {
     setCount(0);
@@ -684,18 +693,17 @@ export function SessionTimeline(): JSX.Element {
 
   return (
     <figure aria-label="Example eve sessions in Slack, Teams, and WhatsApp" className="m-0">
-      {/* No frame: the conversation sits on the page. In full it opens at its start and fades
-          out toward the bottom; a replay fills from the bottom like a chat and fades out toward
-          the top as older messages scroll up. */}
+      {/* No frame: the conversation sits on the page and fades out only at an edge that has
+          messages scrolled past it. In full it opens at its start; a replay fills from the
+          bottom like a chat. */}
       <ol
-        className={cn(
-          "-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [scrollbar-width:none] [&>li:first-child]:mt-auto",
-          playing
-            ? "[mask-image:linear-gradient(to_bottom,transparent,black_40%)]"
-            : "[mask-image:linear-gradient(to_bottom,black_60%,transparent)]",
-        )}
+        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [scrollbar-width:none] [&>li:first-child]:mt-auto"
         key={platform}
+        onScroll={(event) => measure(event.currentTarget)}
         ref={listRef}
+        style={{
+          maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
+        }}
       >
         {beats.slice(0, shown).map((beat, i) => {
           if (beat.kind === "reactions") {
