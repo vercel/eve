@@ -26,29 +26,38 @@ import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "
 import { HomeSection } from "./section";
 
 // The visibility radar from vercel.com's enterprise page: a guard at the center, dashed rings,
-// and one sweep per ring that fades out at both ends, turned a different way on each. Arc
-// endpoints are that visual's, precomputed from each center angle and sweep (-50° ± 55°,
-// 160° ± 60°, 30° ± 50°).
+// and one sweep per ring that fades out at both ends, turned a different way on each (that
+// visual's center angles and sweeps). The rings sit a little tighter than its 34/58/82 so a
+// chip at the bottom of the outer ring stays inside the frame.
 const radar = { x: 160, y: 90, guard: 32 };
+
+function ringPoint(r: number, degrees: number) {
+  const radians = (degrees * Math.PI) / 180;
+  return { x: radar.x + r * Math.cos(radians), y: radar.y + r * Math.sin(radians) };
+}
+
 const radarRings = [
-  { r: 34, from: { x: 151.2, y: 57.16 }, to: { x: 193.87, y: 92.96 } },
-  { r: 58, from: { x: 149.93, y: 147.12 }, to: { x: 115.57, y: 52.72 } },
-  { r: 82, from: { x: 237.05, y: 61.95 }, to: { x: 174.24, y: 170.75 } },
-];
+  { r: 34, center: -50, sweep: 55 },
+  { r: 56, center: 160, sweep: 60 },
+  { r: 78, center: 30, sweep: 50 },
+].map(({ center, r, sweep }) => ({
+  r,
+  from: ringPoint(r, center - sweep),
+  to: ringPoint(r, center + sweep),
+}));
 
 // Slack and Teams have no single-color simple icon, so their brand marks take the text color;
 // Teams' white letter takes the chip's color so it stays cut out.
 const monochrome = "[&_path]:fill-current [&_path[fill=white]]:fill-background-100";
 
-// One chip every 36° around the guard, starting 18° off the horizontal, so the gaps between
-// neighbors match and the layout mirrors on both axes. Chips sit on the outer ring, except the
-// two straight above and below the guard, which the outer ring would push past the frame.
+// One chip every 36° around the guard, alternating between the middle and outer rings, so each
+// ring holds five spaced 72° apart and the layout mirrors left to right.
 const CHANNELS = (
   [
-    { label: "GitHub", logo: <SiGithub /> },
-    { label: "Linear", logo: <SiLinear /> },
-    { label: "Slack", logo: logos.slack({ className: monochrome }) },
     { label: "WhatsApp", logo: <SiWhatsapp /> },
+    { label: "GitHub", logo: <SiGithub /> },
+    { label: "Slack", logo: logos.slack({ className: monochrome }) },
+    { label: "Linear", logo: <SiLinear /> },
     { label: "Discord", logo: <SiDiscord /> },
     { label: "Telegram", logo: <SiTelegram /> },
     { label: "Google Chat", logo: <SiGooglechat /> },
@@ -56,10 +65,7 @@ const CHANNELS = (
     { label: "iMessage", logo: <SiImessage /> },
     { label: "Web", logo: logos.web({}) },
   ] satisfies { label: string; logo: ReactNode }[]
-).map((channel, i) => {
-  const angle = 18 + i * 36;
-  return { ...channel, angle, ring: angle === 90 || angle === 270 ? 1 : 2 };
-});
+).map((channel, i) => ({ ...channel, angle: 90 + i * 36, ring: i % 2 === 0 ? 2 : 1 }));
 
 function ChannelRadar() {
   return (
@@ -112,15 +118,14 @@ function ChannelRadar() {
         <IconAgents />
       </span>
       {CHANNELS.map(({ angle, label, logo, ring }) => {
-        const radians = (angle * Math.PI) / 180;
-        const { r } = radarRings[ring];
+        const { x, y } = ringPoint(radarRings[ring].r, angle);
         return (
           <span
             className="absolute flex size-[6.5cqw] -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[48%]"
             key={label}
             style={{
-              left: pct(radar.x + r * Math.cos(radians), view.width),
-              top: pct(radar.y + r * Math.sin(radians), view.height),
+              left: pct(x, view.width),
+              top: pct(y, view.height),
             }}
           >
             {logo}
