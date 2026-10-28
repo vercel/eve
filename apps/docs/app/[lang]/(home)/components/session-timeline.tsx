@@ -474,9 +474,9 @@ function ThreadMessage({
 }
 
 /**
- * Teams chat with an agent: the agent on the left, its rounded-square app icon, name, time, and
- * "AI generated" label above a light bubble that holds text and cards; people on the right in a
- * tinted bubble with only the time above. Consecutive messages stack under one header.
+ * Teams chat with an agent: the agent on the left, its rounded-square app icon, name, Agent badge,
+ * and time above a light bubble that holds text and cards; people on the right in a tinted bubble
+ * with only the time above. Consecutive messages stack under one header.
  */
 function TeamsMessage({
   author,
@@ -505,8 +505,10 @@ function TeamsMessage({
         ) : isAgent ? (
           <p className="mb-1 flex items-baseline gap-1.5 text-copy-13 text-gray-900">
             <span className="font-medium text-gray-1000">{author.name}</span>
+            <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
+              Agent
+            </span>
             <span className="tabular-nums">{time}</span>
-            <span>AI generated</span>
           </p>
         ) : (
           <p className="mb-1 text-copy-13 text-gray-900 tabular-nums">
