@@ -6,11 +6,11 @@ import {
   CodeXml,
   GitMerge,
   GitPullRequestArrow,
-  RotateCcw,
   ScanSearch,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
+import { Button } from "@vercel/geistdocs/components/button";
 import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 import { slackLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
@@ -291,6 +291,20 @@ function TypingIndicator({ member }: { member: Member | undefined }) {
   );
 }
 
+// geistcn-assets' play-circle icon, as on vercel.com/sandbox's "Play demo" button.
+function IconPlayCircle() {
+  return (
+    <svg aria-hidden fill="none" height={16} viewBox="0 0 16 16" width={16}>
+      <path
+        clipRule="evenodd"
+        d="M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M6 11l5.5-3L6 5z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 /** A replayed Slack channel where two agents take a GitHub issue to a merged pull request. */
 export function SessionTimeline(): JSX.Element {
   const rootRef = useRef<HTMLElement>(null);
@@ -374,14 +388,15 @@ export function SessionTimeline(): JSX.Element {
         <span className="text-gray-1000">#software-factory</span>
         <TypingIndicator member={next?.kind === "message" ? next.author : undefined} />
         {done && animated ? (
-          <button
-            className="ml-auto flex items-center gap-1 text-gray-900 transition-colors hover:text-gray-1000 motion-safe:animate-in motion-safe:fade-in"
+          <Button
+            className="ml-auto motion-safe:animate-in motion-safe:fade-in"
             onClick={replay}
-            type="button"
+            prefix={<IconPlayCircle />}
+            size="small"
+            variant="tertiary"
           >
-            <RotateCcw aria-hidden className="size-3.5" />
-            Replay
-          </button>
+            Play demo
+          </Button>
         ) : null}
       </figcaption>
     </figure>
