@@ -8,12 +8,11 @@ import {
   GitMerge,
   GitPullRequestArrow,
   Headset,
-  Reply,
   ScanSearch,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
-import { IconCheck, IconChevronDownSmall } from "@vercel/geistdocs/assets/icons";
+import { IconBox, IconCheck, IconChevronDownSmall } from "@vercel/geistdocs/assets/icons";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   DropdownMenu,
@@ -336,7 +335,7 @@ const WHATSAPP_BEATS: Beat[] = [
     attachment: (
       <ReplyButtons
         buttons={[
-          { label: "Send replacement", icon: <Reply aria-hidden className="size-4" /> },
+          { label: "Send replacement", icon: <IconBox aria-hidden size={16} /> },
           { label: "Refund instead", icon: <IconCoins /> },
         ]}
       />
@@ -384,7 +383,7 @@ const CONVERSATIONS: {
   },
   {
     id: "whatsapp",
-    label: "Acme Support",
+    label: "Customer Support",
     logo: (className) => logos.whatsapp({ "aria-hidden": true, className }),
     beats: WHATSAPP_BEATS,
   },
@@ -477,8 +476,9 @@ function ThreadMessage({
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
 // The bubbles' corner radius. The tail below is drawn for a 20px corner, so it scales with
-// the radius to keep meeting the corner, with its stroke widened to stay a 1px hairline.
-const bubbleRadius = 14;
+// the radius to keep meeting the corner, with its stroke widened to stay a 1px hairline. At
+// half scale its edge lands on whole device pixels, so it lines up with the bubble's border.
+const bubbleRadius = 10;
 const tailScale = bubbleRadius / 20;
 
 /**
