@@ -70,7 +70,7 @@ import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
-import { createHook, sleep, createWebhook, FatalError, getWorkflowMetadata } from "eve/workflow";
+import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
 import { start, getRun, resumeHook, getHookByToken } from "eve/workflow/api";
 // @ts-expect-error Bare Workflow imports are no longer declared by eve.
 import { sleep as bareSleep } from "workflow";
@@ -80,6 +80,10 @@ async function durable() {
   const answer: { approved: boolean } = await hook;
   await sleep("1s");
   return answer.approved;
+}
+async function retryableStep() {
+  "use step";
+  throw new RetryableError("Please try again.", { retryAfter: "5s" });
 }
 async function launch() {
   const run = await start(durable, []);

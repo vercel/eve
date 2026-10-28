@@ -4,5 +4,6 @@ export {
   createWebhook,
   sleep,
   FatalError,
+  RetryableError,
   getWorkflowMetadata,
 } from "#internal/workflow/index.js";

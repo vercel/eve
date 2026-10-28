@@ -8,10 +8,22 @@ import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 
 let cachedPackageInfo: InstalledPackageInfo | undefined;
 let cachedPackageLocation: PackageLocation | undefined;
-const WORKFLOW_MODULE_ALIASES = {
+const WORKFLOW_SOURCE_MODULE_ALIASES: Readonly<Record<string, string>> = {
+  "eve/workflow": "src/internal/workflow/index.ts",
+  workflow: "src/internal/workflow/index.ts",
+  "eve/workflow/api": "src/internal/workflow/runtime.ts",
+  "workflow/api": "src/internal/workflow/runtime.ts",
+  "workflow/runtime": "src/internal/workflow/runtime.ts",
+  "workflow/internal/builtins": "src/internal/workflow/builtins.ts",
+};
+const WORKFLOW_MODULE_ALIASES: Readonly<Record<string, string>> = {
   "workflow/errors": "src/compiled/@workflow/errors/index.js",
   "workflow/internal/private": "src/compiled/@workflow/core/private.js",
-} as const;
+};
+export const WORKFLOW_MODULE_SPECIFIERS: readonly string[] = [
+  ...Object.keys(WORKFLOW_SOURCE_MODULE_ALIASES),
+  ...Object.keys(WORKFLOW_MODULE_ALIASES),
+];
 
 interface InstalledPackageInfo {
   name: string;
@@ -492,23 +504,10 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
  * needs, plus an eve-owned builtins module for response body step helpers.
  */
 export function resolveWorkflowModulePath(specifier: string): string {
-  if (specifier === "eve/workflow" || specifier === "workflow") {
-    return resolvePackageSourceFilePath("src/internal/workflow/index.ts");
-  }
+  const source = WORKFLOW_SOURCE_MODULE_ALIASES[specifier];
+  if (source !== undefined) return resolvePackageSourceFilePath(source);
 
-  if (
-    specifier === "eve/workflow/api" ||
-    specifier === "workflow/api" ||
-    specifier === "workflow/runtime"
-  ) {
-    return resolvePackageSourceFilePath("src/internal/workflow/runtime.ts");
-  }
-
-  if (specifier === "workflow/internal/builtins") {
-    return resolvePackageSourceFilePath("src/internal/workflow/builtins.ts");
-  }
-
-  const alias = WORKFLOW_MODULE_ALIASES[specifier as keyof typeof WORKFLOW_MODULE_ALIASES];
+  const alias = WORKFLOW_MODULE_ALIASES[specifier];
 
   if (alias !== undefined) {
     return resolvePackageCompiledFilePath(alias);
