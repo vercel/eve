@@ -459,12 +459,16 @@ function Avatar({ author, platform }: { author: Author; platform: keyof typeof A
     <span
       aria-hidden
       className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium",
+        "flex size-7 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium",
         Icon ? AGENT_AVATAR[platform] : "bg-background-100 text-gray-1000",
       )}
     >
       {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
-      {Icon ? <Icon className="size-4" /> : <span className="text-label-13">{author.name[0]}</span>}
+      {Icon ? (
+        <Icon className="size-3.5" />
+      ) : (
+        <span className="text-label-12">{author.name[0]}</span>
+      )}
     </span>
   );
 }
@@ -505,7 +509,7 @@ function ThreadMessage({
   return (
     <li
       className={cn(
-        "grid origin-top-left grid-cols-[2rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+        "grid origin-top-left grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
         author.icon && agentEntrance,
         continued ? "pt-2" : "pt-4",
       )}
@@ -553,7 +557,7 @@ function TeamsMessage({
       className={cn(
         "motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
         isAgent
-          ? cn("grid origin-top-left grid-cols-[2rem_minmax(0,1fr)] gap-x-2.5", agentEntrance)
+          ? cn("grid origin-top-left grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5", agentEntrance)
           : "flex origin-top-right flex-col items-end",
         continued ? "pt-1" : "pt-4",
       )}
@@ -1022,7 +1026,7 @@ export function SessionTimeline(): JSX.Element {
               {beats.slice(0, shown).map((beat, i) => {
                 if (beat.kind === "reactions") {
                   return (
-                    <li className="flex gap-1.5 pt-1.5 pl-[2.625rem]" key={i}>
+                    <li className="flex gap-1.5 pt-1.5 pl-[2.375rem]" key={i}>
                       {beat.reactions.map((reaction, index) => {
                         const mine = reacted.has(reaction.emoji);
                         const count = reaction.count + (mine ? 1 : 0);
@@ -1089,7 +1093,7 @@ export function SessionTimeline(): JSX.Element {
                   aria-hidden={!typing}
                   className={cn(
                     "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                    platform === "whatsapp" ? "pl-2" : "pl-[2.625rem]",
+                    platform === "whatsapp" ? "pl-2" : "pl-[2.375rem]",
                     typing ? "opacity-100" : "opacity-0",
                   )}
                 >
