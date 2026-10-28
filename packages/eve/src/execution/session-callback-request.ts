@@ -153,14 +153,14 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
     return host !== undefined && host !== "" && URL.parse(`https://${host}`)?.origin === url.origin;
   });
   if (url.protocol !== "https:") return headers;
-  if (!currentHost && !configuredCallbackOrigins().includes(url.origin)) return headers;
+  if (!currentHost && !configuredCallbackOrigins().some((matches) => matches(url))) return headers;
 
   const token = readAmbientVercelOidcToken();
   if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
   return headers;
 }
 
-function configuredCallbackOrigins(): string[] {
+function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
   const configured = process.env.EVE_CALLBACK_TRUSTED_ORIGINS?.trim();
   if (!configured) return [];
   return configured.split(",").map((entry) => {
@@ -174,12 +174,38 @@ function configuredCallbackOrigins(): string[] {
       url.search !== "" ||
       url.hash !== ""
     ) {
-      throw new FatalError(
-        "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments.",
-      );
+      throw invalidCallbackOriginsError();
     }
-    return url.origin;
+    if (!url.hostname.includes("*")) return (target) => target.origin === url.origin;
+
+    // `*.example.com` matches exactly one label so a subdomain owner several
+    // levels down cannot claim the trust. `vercel.app` is shared by every
+    // Vercel customer, so a wildcard over it would trust all deployments.
+    const suffix = url.hostname.slice(1);
+    if (
+      !url.hostname.startsWith("*.") ||
+      suffix.includes("*") ||
+      suffix.split(".").length < 3 ||
+      suffix === ".vercel.app"
+    ) {
+      throw invalidCallbackOriginsError();
+    }
+    return (target) => {
+      const label = target.hostname.slice(0, -suffix.length);
+      return (
+        target.port === url.port &&
+        target.hostname.endsWith(suffix) &&
+        label !== "" &&
+        !label.includes(".")
+      );
+    };
   });
+}
+
+function invalidCallbackOriginsError(): FatalError {
+  return new FatalError(
+    "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments. A leading `*.` label (e.g. `https://*.preview.example.com`) matches exactly one subdomain label and needs at least two labels after it; `*.vercel.app` is not allowed.",
+  );
 }
 
 function readAmbientVercelOidcToken(): string | undefined {
