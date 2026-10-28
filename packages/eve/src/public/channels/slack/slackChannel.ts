@@ -280,11 +280,13 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * first non-empty line as the next typing indicator, surfacing the
    * model's pre-tool narration instead of the action label. Cleared at
    * `turn.started` and after use.
+   * @internal
    */
   pendingToolCallMessage?: string | null;
   /**
    * The thread status the default renderer last set. A later model step shows
    * it again, as does a new task card, which Slack clears the status for.
+   * @internal
    */
   threadStatus?: SlackThreadStatus | null;
   /**
@@ -293,10 +295,11 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * sign-in `interaction.opened` handler; the matching
    * sign-in `interaction.settled` handler edits it in place to surface the
    * resolution outcome.
+   * @internal
    */
   pendingAuthMessageTs?: Record<string, string>;
   /**
-   * The messages holding open or recently answered approvals, questions, and budget prompts.
+   * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
    * the `pendingApprovalCards` field that earlier versions wrote, so cards posted before an
    * upgrade keep their buttons.
@@ -305,12 +308,14 @@ export interface SlackChannelState extends UndeliveredReplyState {
   /**
    * Each recent turn's tool calls and the task card eve last wrote for it, by
    * turn id. The default `turn.paused` handler names the working tasks.
+   * @internal
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
   /**
    * Tasks that settled since the turn's last model step: each named agent, or
    * `null` for another task. The default `step.started` handler shows
    * `Reviewing results...` for the step that reads them.
+   * @internal
    */
   pendingTaskResults?: {
     readonly names: readonly (string | null)[];
@@ -326,6 +331,7 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * Whether eve has posted in this thread. Once it has, deleting the root
    * leaves a tombstone that keeps the thread, so the final reply skips the
    * deleted-root check.
+   * @internal
    */
   postedInThread?: boolean;
 }

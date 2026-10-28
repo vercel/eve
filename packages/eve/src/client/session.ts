@@ -57,7 +57,7 @@ export class ClientSession {
   readonly #context: ClientSessionContext;
   #state: ClientSessionState;
 
-  /** @internal */
+  /** Built by the eve client, which supplies the session's transport context. */
   constructor(context: ClientSessionContext, state: ClientSessionState) {
     this.#context = context;
     this.#state = state;

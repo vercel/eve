@@ -60,6 +60,7 @@
   "RespondTurnOptions",
   "SendTurnInput",
   "SendTurnOptions",
+  "SendTurnPayload",
   "SessionEvent",
   "SessionEventMeta",
   "SessionNotActiveError",

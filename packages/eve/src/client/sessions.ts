@@ -17,7 +17,7 @@ export interface CreatedIdleClientSession {
 export class ClientSessions {
   readonly #context: ClientSessionContext;
 
-  /** @internal */
+  /** Built by the eve client, which supplies its transport context. */
   constructor(context: ClientSessionContext) {
     this.#context = context;
   }

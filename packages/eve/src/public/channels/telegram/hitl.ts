@@ -32,16 +32,17 @@ const TELEGRAM_INLINE_ROW_SIZE = 2;
 const TELEGRAM_RESOLVED_LABEL_MAX_LENGTH = 90;
 
 /**
- * Durable HITL state. `hitlCallbacks` maps compact callback ids to their stored
- * `Answer`. `nextHitlCallbackId` is the monotonic id counter.
- * `pendingFreeformReplies` maps a posted prompt's message id to the awaiting
- * requestId.
+ * Durable state the Telegram channel keeps for posted input requests. Telegram
+ * caps `callback_data` at 64 bytes, so buttons carry compact ids instead of answers.
  */
 export interface TelegramHitlState {
+  /** @internal Answer behind each compact callback id. */
   hitlCallbacks?: Record<string, Answer>;
+  /** @internal Monotonic counter for the next compact callback id. */
   nextHitlCallbackId?: number;
+  /** @internal Awaiting request id behind each posted `ForceReply` prompt, by message id. */
   pendingFreeformReplies?: Record<string, string>;
-  /** Posted prompts with inline keyboards, keyed by requestId, until eve resolves them. */
+  /** @internal Posted prompts with inline keyboards, keyed by requestId, until eve resolves them. */
   hitlPrompts?: Record<string, TelegramHitlPrompt>;
 }
 

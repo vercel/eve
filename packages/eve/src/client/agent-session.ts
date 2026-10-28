@@ -19,7 +19,7 @@ export class ClientAgentSession implements SessionReader {
   readonly #rootId: string;
   readonly #children: readonly DescendantHop[];
 
-  /** @internal */
+  /** Built by the eve client when the parent stream opens this child. */
   constructor(
     context: ClientSessionContext,
     rootId: string,

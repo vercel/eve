@@ -6,6 +6,7 @@ export interface UndeliveredReplyState {
   /**
    * Error id of a final reply that never reached the user. The next delivered
    * message tells the model the reply was not seen, then clears it.
+   * @internal
    */
   undeliveredReplyErrorId?: string | null;
 }

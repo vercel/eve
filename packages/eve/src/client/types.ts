@@ -169,7 +169,11 @@ export interface SendTurnOptions<TOutput = unknown> {
 /** Options for answering pending HITL input requests on a client session. */
 export type RespondTurnOptions<TOutput = unknown> = Omit<SendTurnOptions<TOutput>, "turnPolicy">;
 
-/** @internal Transport envelope used by stores and command adapters. */
+/**
+ * One outbound turn accepted by `SessionStore.send` and passed through `prepareSend`: either a
+ * `message` with {@link SendTurnOptions}, or `answers` to pending input requests with
+ * {@link RespondTurnOptions}. Never both.
+ */
 export type SendTurnPayload<TOutput = unknown> =
   | (SendTurnOptions<TOutput> & {
       readonly answers?: never;

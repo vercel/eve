@@ -8,7 +8,7 @@ import type { Interaction } from "#channel/interaction-prompts.js";
  * shows that one and holds the rest until it is answered.
  */
 export interface PromptQueueState {
-  /** The request the channel last showed, which a typed reply answers. */
+  /** @internal The request the channel last showed, which a typed reply answers. */
   shownPromptId?: string;
 }
 

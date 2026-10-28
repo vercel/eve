@@ -117,9 +117,9 @@ export interface DiscordChannelState {
   initialResponseSent: boolean;
   /** Whether `conversationId` is a real Discord message id. */
   hasMessageAnchor: boolean;
-  /** Posted prompts with components, keyed by requestId, until eve resolves them. */
+  /** @internal Posted prompts with components, keyed by requestId, until eve resolves them. */
   hitlPrompts?: Record<string, DiscordHitlPrompt>;
-  /** The sign-ins the default flow posted for, by connection name. */
+  /** @internal The sign-ins the default flow posted for, by connection name. */
   pendingSignIns?: Record<string, string>;
 }
 
