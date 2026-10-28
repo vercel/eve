@@ -433,25 +433,18 @@ function Avatar({ author, round }: { author: Author; round: boolean }) {
   );
 }
 
-/**
- * Slack and Teams: avatar, name, time; consecutive messages fold under the first. Slack marks
- * agents with a badge and squares every avatar; Teams shows agents as rounded-square app icons
- * beside round photos of people, with its "AI generated" label instead of a badge.
- */
+/** Slack: avatar, name, Agent badge, time; consecutive messages fold under the first. */
 function ThreadMessage({
   author,
   time,
   continued,
-  platform,
   children,
 }: {
   author: Author;
   time: string;
   continued: boolean;
-  platform: "slack" | "teams";
   children: ReactNode;
 }) {
-  const isAgent = Boolean(author.icon);
   return (
     <li
       className={cn(
@@ -459,25 +452,76 @@ function ThreadMessage({
         continued ? "pt-2" : "pt-4",
       )}
     >
-      {continued ? <span /> : <Avatar author={author} round={platform === "teams" && !isAgent} />}
+      {continued ? <span /> : <Avatar author={author} round={false} />}
       <div className="min-w-0 text-copy-14 text-gray-1000">
         {continued ? (
           <span className="sr-only">{author.name}</span>
         ) : (
           <p className="flex items-baseline gap-1.5">
             <span className="font-medium">{author.name}</span>
-            {isAgent && platform === "slack" ? (
+            {author.icon ? (
               <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">
                 Agent
               </span>
             ) : null}
             <span className="text-copy-13 text-gray-900 tabular-nums">{time}</span>
-            {isAgent && platform === "teams" ? (
-              <span className="text-copy-13 text-gray-900">AI generated</span>
-            ) : null}
           </p>
         )}
         {children}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Teams chat with an agent: the agent on the left, its rounded-square app icon, name, time, and
+ * "AI generated" label above a light bubble that holds text and cards; people on the right in a
+ * tinted bubble with only the time above. Consecutive messages stack under one header.
+ */
+function TeamsMessage({
+  author,
+  time,
+  continued,
+  children,
+}: {
+  author: Author;
+  time: string;
+  continued: boolean;
+  children: ReactNode;
+}) {
+  const isAgent = Boolean(author.icon);
+  return (
+    <li
+      className={cn(
+        "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+        isAgent ? "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5" : "flex flex-col items-end",
+        continued ? "pt-1" : "pt-4",
+      )}
+    >
+      {isAgent ? continued ? <span /> : <Avatar author={author} round={false} /> : null}
+      <div className={cn("min-w-0", isAgent ? "flex flex-col items-start" : "contents")}>
+        {continued ? (
+          <span className="sr-only">{author.name}</span>
+        ) : isAgent ? (
+          <p className="mb-1 flex items-baseline gap-1.5 text-copy-13 text-gray-900">
+            <span className="font-medium text-gray-1000">{author.name}</span>
+            <span className="tabular-nums">{time}</span>
+            <span>AI generated</span>
+          </p>
+        ) : (
+          <p className="mb-1 text-copy-13 text-gray-900 tabular-nums">
+            <span className="sr-only">{author.name}, </span>
+            {time}
+          </p>
+        )}
+        <div
+          className={cn(
+            "max-w-[min(85%,26rem)] rounded-md px-3 py-2 text-copy-14 text-gray-1000",
+            isAgent ? "bg-gray-100" : "bg-gray-200",
+          )}
+        >
+          {children}
+        </div>
       </div>
     </li>
   );
@@ -817,14 +861,16 @@ export function SessionTimeline(): JSX.Element {
             );
           }
           const continued = beat.author === authorOf(beats[i - 1]);
+          if (platform === "teams") {
+            return (
+              <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
+                <p>{beat.body}</p>
+                {beat.attachment}
+              </TeamsMessage>
+            );
+          }
           return (
-            <ThreadMessage
-              author={author}
-              continued={continued}
-              key={i}
-              platform={platform === "teams" ? "teams" : "slack"}
-              time={beat.time}
-            >
+            <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
               <p className="text-gray-1000">{beat.body}</p>
               {beat.attachment}
             </ThreadMessage>
