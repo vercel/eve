@@ -593,25 +593,22 @@ function TeamsMessage({
 // WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
-// The bubbles' corner radius, and the tail's scale: drawn at 24px, it renders at 15px, its
-// stroke widened to stay a 1px hairline. Its curve stays tangent to the bubble's side and
-// bottom at any scale, so it meets the border even though its corner is a little rounder.
+// The bubbles' corner radius, and the tail's scale: drawn at 24px, it renders at 15px. Its
+// curve stays tangent to the bubble's side and bottom at any scale, so it meets the bubble's
+// edges even though its corner is a little rounder.
 const bubbleRadius = 10;
 const tailScale = 0.625;
 
 /**
  * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), with the
  * bubble fill as a prop. It overlaps the bubble's bottom corner: a window-colored square hides
- * the corner, then the bubble's curve flows into the tail, with the same hairline when bordered.
+ * the corner, then the bubble's curve flows into the tail.
  */
-function Tail({ fill, flipped, bordered }: { fill: string; flipped?: boolean; bordered: boolean }) {
+function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
   return (
     <svg
       aria-hidden
-      className={cn(
-        "absolute [--tail-border:var(--ds-gray-alpha-400)] dark:[--tail-border:#252525]",
-        flipped && "-scale-x-100",
-      )}
+      className={cn("absolute", flipped && "-scale-x-100")}
       fill="none"
       height={24 * tailScale}
       overflow="hidden"
@@ -625,9 +622,6 @@ function Tail({ fill, flipped, bordered }: { fill: string; flipped?: boolean; bo
         d="M27-19C15.954-19 7-10.046 7 1c0 .335.008.669.025 1H7v10a15 15 0 01-3 9c4.116 0 7.845-1.658 10.555-4.342A19.915 19.915 0 0027 21c11.046 0 20-8.954 20-20s-8.954-20-20-20z"
         fill={fill}
         fillRule="evenodd"
-        paintOrder="stroke fill"
-        stroke={bordered ? "var(--tail-border)" : undefined}
-        strokeWidth={2 / tailScale}
       />
     </svg>
   );
@@ -716,20 +710,14 @@ function Bubble({
       <div
         className={cn(
           "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000",
-          // The agent's bubbles share one width, the reply width the Slack and Teams chats use too.
-          // People's green bubbles stand off the white window without a border.
-          outgoing
-            ? "bg-green-300"
-            : "w-full bg-background-200 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
+          // The agent's bubbles share one width, the reply width the Slack and Teams chats use
+          // too, and the gray of the agent's Teams bubbles.
+          outgoing ? "bg-green-300" : "w-full bg-gray-100",
         )}
         style={{ borderRadius: bubbleRadius }}
       >
         {tail ? (
-          <Tail
-            bordered={!outgoing}
-            fill={outgoing ? "var(--ds-green-300)" : "var(--ds-background-200)"}
-            flipped={outgoing}
-          />
+          <Tail fill={outgoing ? "var(--ds-green-300)" : "var(--ds-gray-100)"} flipped={outgoing} />
         ) : null}
         {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
             shares the last line when it fits and takes its own line when it doesn't. */}
