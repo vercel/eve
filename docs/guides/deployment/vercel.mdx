@@ -123,6 +123,14 @@ eve deploy
 
 `eve deploy` installs dependencies, runs `vercel deploy --prod --logs` to show build logs, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
+<Callout type="warning" title="Prebuilt deployments">
+  `vercel deploy --prebuilt` uploads only `.vercel/output`. `eve build` writes the agent summary
+  that feeds the project overview card to `.eve/agent-summary.json`, outside that directory, so
+  Vercel never receives it. A prebuilt deployment runs normally, but its overview card shows zero
+  tools, connections, channels, and schedules. To populate the card, let Vercel run the build: use
+  `eve deploy`, `vercel deploy --prod` without `--prebuilt`, or a Git-connected project.
+</Callout>
+
 When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
 
 For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
