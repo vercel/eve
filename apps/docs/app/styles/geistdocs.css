@@ -41,7 +41,6 @@ body:has([data-nights-route]) {
   --animate-scale-in: scale-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   --animate-fade-in: fade-in 200ms ease-out both;
   --animate-thinking-loader: thinking-loader 1.5s linear infinite;
-  --animate-voice-level: voice-level 900ms ease-in-out infinite alternate;
 
   @keyframes bubble-in {
     from {
@@ -69,13 +68,6 @@ body:has([data-nights-route]) {
     }
     100% {
       background-position: 0% 50%;
-    }
-  }
-
-  /* A live call's waveform bar, rising and falling with the voice. */
-  @keyframes voice-level {
-    from {
-      transform: scaleY(0.35);
     }
   }
 

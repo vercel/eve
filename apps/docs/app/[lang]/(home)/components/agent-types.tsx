@@ -462,8 +462,25 @@ function ThreadReply({ demo }: { demo: boolean }) {
   );
 }
 
-// A fixed, hand-shaped envelope so the waveform renders identically on server and client.
-const WAVEFORM = [3, 6, 10, 14, 9, 16, 20, 13, 7, 4, 8, 13, 18, 12, 7, 4, 3, 6, 11, 15, 9, 5, 3];
+// WhatsApp's voice recorder: every tenth of a second a bar for the voice's level joins at the
+// right and the rest shift left, a 2px bar and a 3px gap at a time, keeping the latest 30.
+const BAR_MS = 100;
+const BAR_PITCH = 5;
+const BAR_COUNT = 30;
+
+/**
+ * The voice's level at bar `t`, as a bar height in px: mostly full and a little uneven, with a
+ * short silence of dots between phrases that ramps back up over a few bars. Pure, with integer
+ * noise, so server and client draw the same.
+ */
+function voiceLevel(t: number) {
+  const phrase = Math.abs(Math.sin(t / 11));
+  const noise = (Math.imul(t + 1, 2654435761) >>> 0) / 2 ** 32;
+  const swell = 0.85 + 0.15 * Math.sin(t / 2.3);
+  return phrase < 0.1
+    ? 2
+    : Math.round(4 + 16 * Math.min(1, phrase * 3) * (0.6 + 0.4 * noise) * swell);
+}
 
 /** Customer support chat docked in a product, shown inside a browser window. */
 function WebAppClient() {
@@ -524,51 +541,80 @@ function WebAppClient() {
 }
 
 /**
- * The call's waveform: live audio while the call runs, then the call's recording, which plays
- * back on click, filling in bar by bar like a voice message, holds full for a moment, and
- * resets. A second click stops it.
+ * The call's waveform. While the call is live it records, scrolling left as bars join; once it
+ * ends, the recorded bars play back on click, filling in bar by bar like a voice message,
+ * holding full for a moment, and resetting. A second click stops playback.
  */
-function Waveform({ live }: { live: boolean }) {
+function Waveform({ live, from }: { live: boolean; from: number }) {
+  // Bars recorded so far, counted from the start of the call.
+  const [recorded, setRecorded] = useState(from);
   // How many bars have played, or null when stopped.
   const [played, setPlayed] = useState<number | null>(null);
+  const row = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => setRecorded((count) => count + 1), BAR_MS);
+    return () => clearInterval(timer);
+  }, [live]);
+
+  // Each new bar pushes the row a bar to the left; starting it a bar to the right and gliding
+  // back makes the bars scroll rather than step.
+  useLayoutEffect(() => {
+    if (recorded === from || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    row.current?.animate([{ transform: `translateX(${BAR_PITCH}px)` }, { transform: "none" }], {
+      duration: BAR_MS,
+      easing: "linear",
+    });
+  }, [recorded, from]);
+
+  const first = Math.max(0, recorded - BAR_COUNT);
+  const bars = Array.from({ length: recorded - first }, (_, i) => first + i);
 
   useEffect(() => {
     if (played === null) return;
-    const done = played === WAVEFORM.length;
+    const done = played === bars.length;
     const timer = setTimeout(() => setPlayed(done ? null : played + 1), done ? 600 : 110);
     return () => clearTimeout(timer);
-  }, [played]);
+  }, [played, bars.length]);
 
-  const bars = WAVEFORM.map((height, i) => (
-    <span
-      className={cn(
-        "w-[2px] rounded-full transition-colors duration-150",
-        live
-          ? "bg-gray-alpha-600 motion-safe:animate-voice-level"
-          : played !== null && i < played
-            ? "bg-gray-1000"
-            : "bg-gray-alpha-600 group-hover:bg-gray-alpha-700",
-      )}
-      // Bars are positional; the array never reorders.
-      key={i}
-      // Out of step with each other, so the live bars move like a voice rather than in unison.
-      style={{ animationDelay: `-${(i * 337) % 900}ms`, height: `${height}px` }}
-    />
-  ));
+  const wave = (
+    <span className="flex items-center gap-[3px]" ref={row}>
+      {bars.map((t, i) => (
+        <span
+          className={cn(
+            "w-[2px] shrink-0 rounded-full transition-colors duration-150",
+            !live && played !== null && i < played
+              ? "bg-gray-1000"
+              : cn("bg-gray-alpha-600", !live && "group-hover:bg-gray-alpha-700"),
+          )}
+          key={t}
+          style={{ height: voiceLevel(t) }}
+        />
+      ))}
+      {/* Where the recording continues. */}
+      {live ? <span className="size-[2px] shrink-0 rounded-full bg-gray-alpha-600" /> : null}
+    </span>
+  );
+  const frame =
+    "ml-auto hidden h-6 w-[9.75rem] shrink-0 items-center justify-end overflow-hidden @sm:flex";
 
   return live ? (
-    <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] @sm:flex">
-      {bars}
+    <span aria-hidden className={frame}>
+      {wave}
     </span>
   ) : (
     <button
       aria-label={played === null ? "Play the recording" : "Stop the recording"}
       aria-pressed={played !== null}
-      className="group ml-auto hidden h-6 cursor-pointer items-center gap-[3px] rounded-[4px] focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @sm:flex"
+      className={cn(
+        "group cursor-pointer rounded-[4px] focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none",
+        frame,
+      )}
       onClick={() => setPlayed(played === null ? 0 : null)}
       type="button"
     >
-      {bars}
+      {wave}
     </button>
   );
 }
@@ -577,7 +623,7 @@ const formatDuration = (seconds: number) =>
   `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
 /**
- * A phone call to a clinic's front desk. While it's live the timer runs and the waveform moves;
+ * A phone call to a clinic's front desk. While it's live the timer runs and the waveform records;
  * End stops both and leaves the call's recording to play back, and Record starts a new one.
  */
 function VoiceClient() {
@@ -604,8 +650,8 @@ function VoiceClient() {
             {call.live ? "Front desk" : "Call ended"} · {formatDuration(call.seconds)}
           </span>
         </span>
-        {/* A new call gets a fresh waveform, so a playback in progress doesn't carry over. */}
-        <Waveform key={call.id} live={call.live} />
+        {/* A new call gets a fresh waveform, recorded from its start. */}
+        <Waveform from={(call.seconds * 1000) / BAR_MS} key={call.id} live={call.live} />
         {/* Not through cn: tailwind-merge reads text-label-12 and text-white as one conflict. */}
         <button
           className={`ml-auto hidden shrink-0 cursor-pointer rounded-full px-3 py-1 text-label-12 text-white focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @[16rem]:inline @sm:ml-3 ${
