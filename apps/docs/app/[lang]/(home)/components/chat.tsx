@@ -287,6 +287,7 @@ export function Reaction({
   count,
   demo,
   index = 0,
+  className,
   children,
 }: {
   /** The emoji's shortcode, without colons. */
@@ -294,6 +295,7 @@ export function Reaction({
   count: number;
   demo: boolean;
   index?: number;
+  className?: string;
   /** The emoji, with `role="img"` so it pops. */
   children: ReactNode;
 }) {
@@ -317,6 +319,7 @@ export function Reaction({
         mine
           ? "border-gray-alpha-700 bg-gray-alpha-200"
           : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
+        className,
       )}
       onClick={(event) => {
         setMine(!mine);

@@ -769,6 +769,9 @@ export function SessionTimeline(): JSX.Element {
                     <li className="flex gap-1.5 pt-1.5 pl-[2.375rem]" key={i}>
                       {beat.reactions.map((reaction, index) => (
                         <Reaction
+                          // A square text emoji's corners crowd the pill's curve at the round
+                          // emoji's 5px inset, so it sits as far in as the count does.
+                          className="pl-[7px]"
                           count={reaction.count}
                           demo={playing || ended}
                           index={index}
