@@ -524,10 +524,13 @@ function ReadTicks() {
   );
 }
 
-/** A tapped reply quotes the message it answers, like any WhatsApp reply. */
+/**
+ * A tapped reply quotes the message it answers, like any WhatsApp reply. The quote is inset
+ * as far from the bubble's sides as from its top.
+ */
 function Quote({ author, children }: { author: string; children: string }) {
   return (
-    <span className="mb-1 block rounded-[5px] border-gray-700 border-l-4 bg-gray-alpha-100 px-2 py-1">
+    <span className="-mx-1.5 mb-1 block rounded-[8px] border-gray-700 border-l-4 bg-gray-alpha-100 px-2 py-1">
       <span className="block font-medium text-copy-13 text-gray-1000">{author}</span>
       <span className="block truncate text-copy-13 text-gray-900">{children}</span>
     </span>
