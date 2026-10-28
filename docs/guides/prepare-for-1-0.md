@@ -210,25 +210,16 @@ You can remove `eve/workflow-modules` from tsconfig `types` and reference direct
 
 ## Replace third-party types in eve signatures
 
-eve's public types no longer expose AI SDK, zod, OpenTelemetry, or channel-adapter types. Any AI SDK language model or OpenTelemetry processor still type-checks wherever eve accepts one, so most projects only change annotations:
+eve's authoring and configuration types no longer expose AI SDK, zod, OpenTelemetry, or channel-adapter types; only the model helpers still return AI SDK models. Any AI SDK language model or OpenTelemetry processor still type-checks wherever eve accepts one, so most projects only change annotations:
 
-- `anthropic()` and `openai()` from `eve/models/*`, `chatgpt()`, and `mockModel()` return `EveLanguageModel` instead of the AI SDK `LanguageModel`. Annotate with `EveLanguageModel` from `eve` or `eve/models`. AI SDK functions such as `generateText` no longer accept these values without a cast, and eve does not promise they are AI SDK models; pass a model from an AI SDK provider package when you call the AI SDK directly.
+- Agent `model` fields accept `EveLanguageModel` (exported from `eve` and `eve/models`); any AI SDK language model satisfies it. `anthropic()`, `openai()`, `chatgpt()`, and `mockModel()` still return AI SDK language models, so nothing changes where you pass them to AI SDK functions.
 - `DecisionModel` instances must declare `specificationVersion: "v4"`.
 - `MemoryToolDefinition` is removed. Type memory provider tools as `MemoryToolSet`, a map of `defineTool()` values (`ToolDefinition` from `eve/tools`).
 - Import `SpanProcessor`, `SpanExporter`, and `SpanProcessorOrName` from `eve/instrumentation/otel`, `LinqWebhookVerifier` from `eve/channels/linq`, and `PhotonIMessageWebhookVerifier` and `PhotonProjectCredentials` from `eve/channels/photon`.
 
-```diff
--import type { LanguageModel } from "ai";
-+import type { EveLanguageModel } from "eve/models";
- import { anthropic } from "eve/models/anthropic";
-
--const model: LanguageModel = anthropic();
-+const model: EveLanguageModel = anthropic();
-```
-
 ## Keep custom data out of channel state bookkeeping
 
-Built-in channel state types no longer include the default handlers' bookkeeping, such as Slack `taskCards` and `threadStatus`, Chat SDK streaming fields, `pendingSignIns`, posted prompt cards, `shownPromptId`, and `undeliveredReplyErrorId`. Addressing, identity, and audience fields are unchanged. Keep custom handler data in your own state keys instead of reading or writing these fields.
+Built-in channel state types no longer include the default handlers' bookkeeping, such as Slack `taskCards` and `threadStatus`, Chat SDK streaming fields, `pendingSignIns`, posted prompt cards, `shownPromptId`, `undeliveredReplyErrorId`, and Discord's `interactionToken`, `initialResponseSent`, and `hasMessageAnchor` (read the interaction token from the Discord handle). `TelegramHitlState` is no longer exported. Addressing, identity, and audience fields are unchanged. Keep custom handler data in your own state keys instead of reading or writing these fields.
 
 ## Remove unsupported Slack card imports
 
