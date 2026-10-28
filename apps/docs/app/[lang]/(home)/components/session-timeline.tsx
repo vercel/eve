@@ -766,7 +766,7 @@ export function SessionTimeline(): JSX.Element {
           messages scrolled past it. In full it opens at its start; a replay fills from the
           bottom like a chat. */}
       <ol
-        className="-mx-1 flex h-[34rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-12 [scrollbar-width:none] [&>li:first-child]:mt-auto"
+        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-12 [scrollbar-width:none] [&>li:first-child]:mt-auto"
         key={platform}
         onScroll={(event) => measure(event.currentTarget)}
         ref={listRef}
