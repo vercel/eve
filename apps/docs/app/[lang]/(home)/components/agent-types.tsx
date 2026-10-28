@@ -479,7 +479,7 @@ function WebAppClient() {
             figures, gray bars for everything else. The KPI cards only show once the window is
             wide enough to keep them clear of the chat. */}
         <div aria-hidden className="hidden select-none flex-col gap-2 sm:flex">
-          <span className="font-medium text-[20px] text-gray-1000 leading-7">Orders</span>
+          <span className="font-medium text-copy-14 text-gray-1000">Orders</span>
           <span className="mt-1 hidden grid-cols-3 gap-2 @[20rem]:grid">
             {["1,284", "$48.2k", "96%"].map((metric) => (
               <span
