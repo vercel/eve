@@ -179,7 +179,7 @@ The turn completes, without a final reply, once that call has its result. The mo
 - **Every call in the step.** The turn ends only when every call the model made in that step got an `endsTurn` response or is a tool with its own [`endsTurn`](../tools#end-the-turn-after-a-tool-call), and all of them succeeded. Otherwise the model receives the results as usual.
 - **Agents and tools that run as tasks.** When those calls started tasks, the session waits for the tasks to finish instead of having the model read that they started, then ends the turn. While other work is running or has a result the model hasn't read, the model runs as usual.
 - **Sequences.** Only the call that receives an `endsTurn` outcome ends the turn. `outcomes: [{ throw: { message: "Busy" } }, { response: "done", endsTurn: true }]` lets the agent recover from the first failure, then ends the turn on its retry.
-- **Approvals.** A call that waits on approval ends the turn once it is approved and gets its `endsTurn` response.
+- **Approvals.** A call that waits on approval ends the turn once it is approved and gets its `endsTurn` response. A tool's own `endsTurn` never applies to a call that waited on approval, so an approved call to that tool, unstubbed, keeps the turn going.
 
 `endsTurn` does not apply in a delegated session, which must reply to its caller, on a turn that requests structured output, or when a person's message arrives before the model would run. A rule for a subagent's tool, such as `researcher/list_tasks`, cannot set it; stub the subagent itself, as `researcher`, instead. `endsTurn` is only allowed beside `response`, never beside `throw`.
 
