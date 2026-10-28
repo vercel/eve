@@ -64,6 +64,7 @@ const FAILED_LOOKUP_TTL_MS = 60_000;
 const MAX_CACHED_PROFILES = 1000;
 // Bounds the lookups one inbound message can trigger.
 const MAX_LOOKUPS_PER_MESSAGE = 20;
+const PROFILE_LOOKUP_TIMEOUT_MS = 2_000;
 
 interface CachedProfile {
   readonly expiresAt: number;
@@ -122,12 +123,20 @@ export async function resolveSlackSenderProfiles(input: {
   const userIds = [...new Set(input.userIds)].slice(0, MAX_LOOKUPS_PER_MESSAGE);
   const entries = await Promise.all(
     userIds.map(async (userId) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const profile = await input.lookup({ userId, teamId: input.teamId, slack: input.slack });
+        const profile = await Promise.race([
+          input.lookup({ userId, teamId: input.teamId, slack: input.slack }),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => resolve(undefined), PROFILE_LOOKUP_TIMEOUT_MS);
+          }),
+        ]);
         return profile === undefined ? [] : [[userId, profile] as const];
       } catch (error) {
         logError(log, "sender profile lookup threw; omitting it", error, { userId });
         return [];
+      } finally {
+        clearTimeout(timer);
       }
     }),
   );

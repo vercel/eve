@@ -96,6 +96,48 @@ describe("createCachedSlackSenderProfileLookup", () => {
 });
 
 describe("resolveSlackSenderProfiles", () => {
+  it("omits stalled lookups after two seconds and keeps completed profiles", async () => {
+    vi.useFakeTimers();
+    try {
+      const { slack } = workspace({});
+      const lookup: SlackSenderProfileLookup = async ({ userId }) =>
+        userId === "U_STALLED" ? new Promise(() => {}) : { name: "Alice" };
+      const result = resolveSlackSenderProfiles({
+        lookup,
+        slack,
+        teamId: "T1",
+        userIds: ["U_STALLED", "U1"],
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect([...(await result)]).toEqual([["U1", { name: "Alice" }]]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears deadlines when lookups complete or reject", async () => {
+    vi.useFakeTimers();
+    try {
+      const { slack } = workspace({});
+      await resolveSlackSenderProfiles({
+        lookup: async ({ userId }) => {
+          if (userId === "U_BAD") throw new Error("cache down");
+          return { name: "Alice" };
+        },
+        slack,
+        teamId: "T1",
+        userIds: ["U1", "U_BAD"],
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("calls the lookup once per distinct sender with the workspace", async () => {
     const { slack } = workspace({});
     const lookup = vi.fn<SlackSenderProfileLookup>(async ({ userId }) =>
