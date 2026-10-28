@@ -18,6 +18,9 @@
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     },
+    "test:unit": {
+      "dependsOn": ["build"]
+    },
     "typecheck": {
       "inputs": [
         "$TURBO_EXTENDS$",
