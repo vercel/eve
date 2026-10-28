@@ -969,8 +969,8 @@ export function SessionTimeline(): JSX.Element {
           </span>
           <span className="text-gray-800 text-label-13">{conversation.label}</span>
         </header>
-        {/* The conversation fades out only at an edge with messages scrolled past it. In full it
-            opens at its start; a replay fills from the bottom like a chat. */}
+        {/* The conversation fades out over the outer 40px of an edge with messages scrolled past
+            it. In full it opens at its start; a replay fills from the bottom like a chat. */}
         <div className="relative overflow-hidden" ref={bodyRef}>
           <div
             className="h-[26rem] overflow-y-auto overscroll-contain px-4 [scrollbar-width:none]"
@@ -978,7 +978,7 @@ export function SessionTimeline(): JSX.Element {
             onScroll={(event) => measure(event.currentTarget)}
             ref={listRef}
             style={{
-              maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
+              maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 40px" : "black"}, ${overflow.below ? "black calc(100% - 40px), transparent" : "black"})`,
             }}
           >
             <ol
