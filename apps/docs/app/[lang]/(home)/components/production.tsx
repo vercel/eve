@@ -40,18 +40,26 @@ const radarRings = [
 // Teams' white letter takes the chip's color so it stays cut out.
 const monochrome = "[&_path]:fill-current [&_path[fill=white]]:fill-background-100";
 
-// Middle ring on the diagonals, outer ring kept near the horizontal so chips clear the frame.
-const CHANNELS: { label: string; ring: 1 | 2; angle: number; logo: ReactNode }[] = [
-  { label: "Slack", ring: 1, angle: 240, logo: logos.slack({ className: monochrome }) },
-  { label: "Microsoft Teams", ring: 1, angle: 300, logo: logos.teams({ className: monochrome }) },
-  { label: "WhatsApp", ring: 1, angle: 60, logo: <SiWhatsapp /> },
-  { label: "iMessage", ring: 1, angle: 120, logo: <SiImessage /> },
-  { label: "Discord", ring: 2, angle: 180, logo: <SiDiscord /> },
-  { label: "Telegram", ring: 2, angle: 215, logo: <SiTelegram /> },
-  { label: "Google Chat", ring: 2, angle: 325, logo: <SiGooglechat /> },
-  { label: "GitHub", ring: 2, angle: 0, logo: <SiGithub /> },
-  { label: "Linear", ring: 2, angle: 35, logo: <SiLinear /> },
-  { label: "Web", ring: 2, angle: 145, logo: logos.web({}) },
+// Spread evenly around each ring: the outer every 60° from the horizontal, the only even
+// spacing that keeps chips inside the frame, and the middle every 90°, turned 15° so the two
+// rings interleave instead of lining up.
+const MIDDLE: { label: string; logo: ReactNode }[] = [
+  { label: "Slack", logo: logos.slack({ className: monochrome }) },
+  { label: "WhatsApp", logo: <SiWhatsapp /> },
+  { label: "Microsoft Teams", logo: logos.teams({ className: monochrome }) },
+  { label: "iMessage", logo: <SiImessage /> },
+];
+const OUTER: { label: string; logo: ReactNode }[] = [
+  { label: "GitHub", logo: <SiGithub /> },
+  { label: "Linear", logo: <SiLinear /> },
+  { label: "Web", logo: logos.web({}) },
+  { label: "Discord", logo: <SiDiscord /> },
+  { label: "Telegram", logo: <SiTelegram /> },
+  { label: "Google Chat", logo: <SiGooglechat /> },
+];
+const CHANNELS = [
+  ...MIDDLE.map((channel, i) => ({ ...channel, ring: 1, angle: 15 + i * 90 })),
+  ...OUTER.map((channel, i) => ({ ...channel, ring: 2, angle: i * 60 })),
 ];
 
 function ChannelRadar() {
