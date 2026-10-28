@@ -469,26 +469,37 @@ function ThreadMessage({
 // WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
-/** The curved tail WhatsApp gives the last bubble in a run, at its bottom outer corner. */
-function BubbleTail({ outgoing }: { outgoing: boolean }) {
+/**
+ * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), with the
+ * bubble fill as a prop. It overlaps a 20px-radius bubble's bottom corner: a page-colored
+ * square hides the corner, then the bubble's curve flows into the tail with the same hairline.
+ */
+function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
   return (
     <svg
       aria-hidden
       className={cn(
-        "absolute bottom-0 h-3.5 w-2",
-        outgoing ? "-right-[7.5px] text-gray-200" : "-left-[7.5px] text-background-100",
+        "absolute bottom-[-3px] [--tail-border:var(--ds-gray-alpha-400)] dark:[--tail-border:#252525]",
+        flipped ? "right-[-7px] -scale-x-100" : "left-[-7px]",
       )}
-      viewBox="0 0 8 14"
+      fill="none"
+      height={24}
+      overflow="hidden"
+      viewBox="0 0 24 24"
+      width={24}
     >
-      {/* The side curves in and flares out to a point flush with the bubble's flat bottom. */}
-      <path
-        d={
-          outgoing
-            ? "M0 0C0 7 2.5 11 7 13Q7.6 13.3 7.3 13.7 7.1 14 6.5 14H0Z"
-            : "M8 0C8 7 5.5 11 1 13Q.4 13.3.7 13.7.9 14 1.5 14H8Z"
-        }
-        fill="currentColor"
-      />
+      <path d="M0 0H24V24H0z" fill="var(--ds-background-200)" />
+      <g style={{ filter: "drop-shadow(0 1px 2px rgb(0 0 0 / 4%))" }}>
+        <path
+          clipRule="evenodd"
+          d="M27-19C15.954-19 7-10.046 7 1c0 .335.008.669.025 1H7v10a15 15 0 01-3 9c4.116 0 7.845-1.658 10.555-4.342A19.915 19.915 0 0027 21c11.046 0 20-8.954 20-20s-8.954-20-20-20z"
+          fill={fill}
+          fillRule="evenodd"
+          paintOrder="stroke fill"
+          stroke="var(--tail-border)"
+          strokeWidth={2}
+        />
+      </g>
     </svg>
   );
 }
@@ -558,23 +569,26 @@ function Bubble({
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          // A drop-shadow edge follows the tail too, which a box-shadow border would skip.
-          "relative max-w-[min(80%,22rem)] rounded-[7.5px] text-copy-14 text-gray-1000 [filter:drop-shadow(0_0_0.5px_var(--ds-gray-alpha-600))_drop-shadow(0_1px_0.5px_var(--ds-gray-alpha-300))]",
+          "relative max-w-[min(80%,22rem)] rounded-[20px] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
           // The agent's bubbles share one width, so a run of them lines up on both edges.
           outgoing ? "bg-gray-200" : "w-full bg-background-100",
-          tail && (outgoing ? "rounded-br-none" : "rounded-bl-none"),
         )}
       >
-        {tail ? <BubbleTail outgoing={outgoing} /> : null}
+        {tail ? (
+          <Tail
+            fill={outgoing ? "var(--ds-gray-200)" : "var(--ds-background-100)"}
+            flipped={outgoing}
+          />
+        ) : null}
         {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
             shares the last line when it fits and takes its own line when it doesn't. */}
-        <div className="relative text-pretty px-2 pt-1.5 pb-2 text-copy-14">
+        <div className="relative text-pretty px-3.5 pt-2 pb-2.5 text-copy-14">
           {children}
           <span
             aria-hidden
             className={cn("inline-block", outgoing ? "w-[5.5rem]" : "w-[4.25rem]")}
           />
-          <span className="absolute right-2 bottom-1.5 inline-flex items-center gap-1 text-[11px] text-gray-900 leading-none tabular-nums">
+          <span className="absolute right-3.5 bottom-2 inline-flex items-center gap-1 text-[11px] text-gray-900 leading-none tabular-nums">
             {time}
             {outgoing ? <ReadTicks /> : null}
           </span>
