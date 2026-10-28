@@ -212,7 +212,13 @@ export function ArchitectureDiagram() {
     <HomeSection
       id="self-host"
       lede="Swap any backend and self-host the whole runtime with no managed infrastructure, or deploy on Vercel for fully native support."
-      title="Built on open-source SDKs, yours to self-host"
+      title={
+        <>
+          Built on open-source SDKs,
+          <br />
+          yours to self-host
+        </>
+      }
     >
       <div>
         <LogoEveSvg className="ml-5 text-gray-1000" height={13} />
