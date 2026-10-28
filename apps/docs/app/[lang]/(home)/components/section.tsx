@@ -43,28 +43,30 @@ export function HomeSection({
 }
 
 /**
- * A desktop window like vercel.com/sandbox's: the material surface, traffic lights, and a
- * centered title over the content.
+ * A desktop window like vercel.com/sandbox's: the material surface, and with a title, traffic
+ * lights and the title centered over the content.
  */
 export function AppWindow({
   title,
   children,
   className,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   children: ReactNode;
   className?: string;
 }): JSX.Element {
   return (
     <div className={cn("flex min-w-0 flex-col overflow-hidden material-large", className)}>
-      <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
-        <span aria-hidden className="absolute left-3 flex gap-1">
-          <span className="size-2 rounded-full bg-[#EE6D5E]" />
-          <span className="size-2 rounded-full bg-[#F3BF4A]" />
-          <span className="size-2 rounded-full bg-[#5DC753]" />
-        </span>
-        <span className="text-gray-800 text-label-13">{title}</span>
-      </header>
+      {title ? (
+        <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
+          <span aria-hidden className="absolute left-3 flex gap-1">
+            <span className="size-2 rounded-full bg-[#EE6D5E]" />
+            <span className="size-2 rounded-full bg-[#F3BF4A]" />
+            <span className="size-2 rounded-full bg-[#5DC753]" />
+          </span>
+          <span className="text-gray-800 text-label-13">{title}</span>
+        </header>
+      ) : null}
       {children}
     </div>
   );

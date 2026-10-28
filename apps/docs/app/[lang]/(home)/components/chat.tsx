@@ -4,22 +4,22 @@ import { cn } from "@/lib/utils";
 /** Agents get an icon avatar and an "Agent" badge; people get their initial. */
 export type Author = { name: string; icon?: ComponentType<{ className?: string }> };
 
-/** A rounded-square avatar: the agent's icon on its color, or a person's initial. */
+/** A rounded-square avatar: the agent's icon on its color, or a person's initial on pink. */
 export function ChatAvatar({ author, color }: { author: Author; color: string }) {
   const Icon = author.icon;
   return (
     <span
       aria-hidden
       className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium",
-        Icon ? cn("border-transparent text-white", color) : "bg-background-100 text-gray-1000",
+        "flex size-7 shrink-0 items-center justify-center rounded-md text-white",
+        Icon ? color : "bg-pink-700",
       )}
     >
       {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
       {Icon ? (
         <Icon className="size-3.5" />
       ) : (
-        <span className="text-label-12">{author.name[0]}</span>
+        <span className="font-semibold text-label-12">{author.name[0]}</span>
       )}
     </span>
   );

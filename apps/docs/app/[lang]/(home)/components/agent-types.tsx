@@ -82,7 +82,7 @@ const BRAIN_ROWS = [
 ];
 
 const DANA: Author = { name: "Dana" };
-const BRAIN: Author = { name: "Brain", icon: Brain };
+const BRAIN: Author = { name: "Company brain", icon: Brain };
 
 /** The hero's Slack thread, with the company brain on its own avatar color. */
 function CompanyBrainPreview() {
@@ -281,8 +281,6 @@ interface UseCase {
   /** Template slug, or null to send people to the full gallery. */
   template: string | null;
   cta: string;
-  /** The example window's title. */
-  window: string;
   /** What the agent does, a short title and line each. */
   features: { title: string; text: string }[];
   preview: ReactNode;
@@ -295,7 +293,6 @@ const USE_CASES: UseCase[] = [
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
     cta: "Use the company brain template",
-    window: "#analytics",
     features: [
       { title: "Answers in Slack", text: "Only for the people and channels you allow." },
       { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
@@ -309,7 +306,6 @@ const USE_CASES: UseCase[] = [
     text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
     template: "eve-software-factory-template",
     cta: "Use the software factory template",
-    window: "acme/storefront",
     features: [
       { title: "GitHub and Linear", text: "Picks up tasks where your team already files them." },
       {
@@ -329,7 +325,6 @@ const USE_CASES: UseCase[] = [
     text: "Agents inside your product, over web, voice, or iMessage, with memory for every user.",
     template: null,
     cta: "Browse app templates",
-    window: "Web, voice, and iMessage",
     features: [
       { title: "Web chat", text: "Inside your app, with long-term memory for each user." },
       { title: "Voice", text: "Calls that run tools and ask for approval." },
@@ -493,9 +488,7 @@ export function AgentTypes(): JSX.Element {
             id={`${baseId}-panel`}
             role="tabpanel"
           >
-            <AppWindow className="h-[30rem] sm:h-[26rem]" title={selected.window}>
-              {selected.preview}
-            </AppWindow>
+            <AppWindow className="h-[30rem] sm:h-[26rem]">{selected.preview}</AppWindow>
           </div>
         </div>
       </div>
