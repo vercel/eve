@@ -5,7 +5,6 @@ interface ActionsComponent {
   (
     children: (ButtonElement | LinkButtonElement | SelectElement | RadioSelectElement)[],
   ): ActionsElement;
-  (props: ContainerProps): ChatElement;
 }
 interface ButtonElement {
   actionType?: "action" | "modal";
@@ -57,88 +56,8 @@ interface ActionsElement {
   children: (ButtonElement | LinkButtonElement | SelectElement | RadioSelectElement)[];
   type: "actions";
 }
-interface ContainerProps {
-  children?: unknown;
-}
-type ChatElement =
-  | CardElement
-  | TextElement
-  | ButtonElement
-  | LinkButtonElement
-  | LinkElement
-  | ImageElement
-  | DividerElement
-  | ActionsElement
-  | SectionElement
-  | FieldsElement
-  | FieldElement
-  | SelectElement
-  | SelectOptionElement
-  | RadioSelectElement
-  | TableElement
-  | ChartElement;
-interface CardProps {
-  children?: unknown;
-  imageUrl?: string;
-  subtitle?: string;
-  title?: string;
-  width?: CardWidth;
-}
 type CardWidth = "default" | "full";
-interface TextProps {
-  children?: string | number | (string | number | undefined)[];
-  style?: TextStyle;
-}
 type TextStyle = "plain" | "bold" | "muted";
-interface ButtonProps {
-  actionType?: "action" | "modal";
-  callbackUrl?: string;
-  children?: string | number | (string | number | undefined)[];
-  disabled?: boolean;
-  id: string;
-  label?: string;
-  style?: ButtonStyle;
-  tooltip?: string;
-  value?: string;
-  visibleTo?: string[];
-}
-interface LinkButtonProps {
-  children?: string | number | (string | number | undefined)[];
-  id?: string;
-  label?: string;
-  style?: ButtonStyle;
-  tooltip?: string;
-  url: string;
-  visibleTo?: string[];
-}
-interface CardLinkProps {
-  children?: string | number | (string | number | undefined)[];
-  label?: string;
-  url: string;
-}
-interface ImageProps {
-  alt?: string;
-  url: string;
-}
-interface FieldProps {
-  label: string;
-  value: string;
-}
-type DividerProps = Record<string, never>;
-interface SelectProps {
-  children?: unknown;
-  dispatchAction?: boolean;
-  id: string;
-  initialOption?: string;
-  label: string;
-  optional?: boolean;
-  placeholder?: string;
-}
-interface SelectOptionProps {
-  description?: string;
-  label: string;
-  value: string;
-}
 interface TableOptions {
   align?: TableAlignment[];
   caption?: string;
@@ -281,17 +200,14 @@ declare function _Table(options: TableOptions): TableElement;
 declare const _ButtonInternal: ButtonComponent;
 interface ButtonComponent {
   (options: ButtonOptions): ButtonElement;
-  (props: ButtonProps): ChatElement;
 }
 declare const _CardInternal: CardComponent;
 interface CardComponent {
   (options?: CardOptions): CardElement;
-  (props: CardProps): ChatElement;
 }
 declare const _CardLinkInternal: CardLinkComponent;
 interface CardLinkComponent {
   (options: { url: string; label: string }): LinkElement;
-  (props: CardLinkProps): ChatElement;
 }
 declare const _CardText: TextComponent;
 interface TextComponent {
@@ -301,52 +217,42 @@ interface TextComponent {
       style?: TextStyle;
     },
   ): TextElement;
-  (props: TextProps): ChatElement;
 }
 declare const _DividerInternal: DividerComponent;
 interface DividerComponent {
   (): DividerElement;
-  (props: DividerProps): ChatElement;
 }
 declare const _FieldInternal: FieldComponent;
 interface FieldComponent {
   (options: { label: string; value: string }): FieldElement;
-  (props: FieldProps): ChatElement;
 }
 declare const _FieldsInternal: FieldsComponent;
 interface FieldsComponent {
   (children: FieldElement[]): FieldsElement;
-  (props: ContainerProps): ChatElement;
 }
 declare const _ImageInternal: ImageComponent;
 interface ImageComponent {
   (options: { url: string; alt?: string }): ImageElement;
-  (props: ImageProps): ChatElement;
 }
 declare const _LinkButtonInternal: LinkButtonComponent;
 interface LinkButtonComponent {
   (options: LinkButtonOptions): LinkButtonElement;
-  (props: LinkButtonProps): ChatElement;
 }
 declare const _RadioSelectInternal: RadioSelectComponent;
 interface RadioSelectComponent {
   (options: RadioSelectOptions): RadioSelectElement;
-  (props: SelectProps): ChatElement;
 }
 declare const _SectionInternal: SectionComponent;
 interface SectionComponent {
   (children: CardChild[]): SectionElement;
-  (props: ContainerProps): ChatElement;
 }
 declare const _SelectInternal: SelectComponent;
 interface SelectComponent {
   (options: SelectOptions): SelectElement;
-  (props: SelectProps): ChatElement;
 }
 declare const _SelectOptionInternal: SelectOptionComponent;
 interface SelectOptionComponent {
   (options: { label: string; value: string; description?: string }): SelectOptionElement;
-  (props: SelectOptionProps): ChatElement;
 }
 declare const _TableInternal: typeof _Table;
 interface FileUpload {
@@ -365,26 +271,17 @@ export type {
   ActionsElement,
   ButtonElement,
   ButtonOptions,
-  ButtonProps,
   ButtonStyle,
   CardChild,
   CardElement,
-  CardLinkProps,
   CardOptions,
-  CardProps,
-  ChatElement,
-  ContainerProps,
   DividerElement,
-  DividerProps,
   FieldElement,
-  FieldProps,
   FieldsElement,
   FileUpload,
   ImageElement,
-  ImageProps,
   LinkButtonElement,
   LinkButtonOptions,
-  LinkButtonProps,
   LinkElement,
   PostableCard,
   RadioSelectElement,
@@ -392,14 +289,11 @@ export type {
   SectionElement,
   SelectElement,
   SelectOptionElement,
-  SelectOptionProps,
   SelectOptions,
-  SelectProps,
   TableAlignment,
   TableElement,
   TableOptions,
   TextElement,
-  TextProps,
   TextStyle,
 };
 export const Actions: typeof _Actions = chat.Actions as typeof _Actions;

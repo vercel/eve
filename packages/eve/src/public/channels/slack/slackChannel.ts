@@ -418,6 +418,10 @@ export interface SlackCodeChannelTarget {
  * Pre-agent post issued by `slackChannel().receive` when the caller
  * provides `target.initialMessage`. Accepts the same explicit message forms
  * as `ctx.thread.post`: Markdown, text, blocks, or a card, plus optional files.
+ *
+ * Unlike `thread.post({ text, files })`, which sends one message with the files
+ * attached, this posts the root message first and then uploads files as a
+ * threaded reply. Upload failures are logged, not thrown, so the run still starts.
  */
 export type SlackInitialMessage = SlackPostInput;
 
@@ -1171,8 +1175,8 @@ async function receiveOnSlack(
       teamId: deps.teamId,
     });
     // Upload-only posts return a file ID, not a message ts; always anchor the root first.
-    const { files, ...message } = initialMessage;
-    const posted = await thread.post(message);
+    const { files, ...rootMessage } = initialMessage;
+    const posted = await thread.post(rootMessage);
     threadTs = posted.id;
     if (files?.length) {
       try {

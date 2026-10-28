@@ -934,7 +934,7 @@ export default slackChannel({
 });
 ```
 
-Handle your own button and select callbacks in `onInteraction`. To build eve-owned approval or question controls, use the [HITL helpers](#render-and-decode-hitl-controls-yourself). `cardToBlocks(card)` converts a card to Slack blocks; `cardToFallbackText(card)` produces notification and accessibility text. `thread.post({ card })` calls both converters automatically unless you supply `fallbackText`.
+Handle your own button and select callbacks in `onInteraction`. To build eve-owned approval or question controls, use the [HITL helpers](#render-and-decode-hitl-controls-yourself). `cardToBlocks(card)` converts a card to Slack blocks; `cardToFallbackText(card)` produces notification and accessibility text. `thread.post({ card })` runs `cardToBlocks` automatically, and runs `cardToFallbackText` unless you supply `fallbackText`.
 
 Message cards do not support modals, text inputs, or external selects. Use `CardText` for labels. For custom modals, send native Slack view data with `ctx.slack.request("views.open", ...)`; see [interactive callbacks](#message-hooks).
 
