@@ -639,6 +639,26 @@ function IconStopCircle() {
 }
 
 /**
+ * Every label stacked in one grid cell with only the current one visible, so a button keeps
+ * the width of its longest label and the dock doesn't resize between choices.
+ */
+function StableLabel({ current, labels }: { current: string; labels: string[] }) {
+  return (
+    <span className="grid">
+      {labels.map((label) => (
+        <span
+          aria-hidden={label !== current}
+          className={cn("col-start-1 row-start-1 text-left", label !== current && "invisible")}
+          key={label}
+        >
+          {label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
  * An agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
  * platform's way. It shows in full; "Play demo" replays it message by message and "Stop demo"
  * returns to the full conversation, as on vercel.com/sandbox.
@@ -768,7 +788,10 @@ export function SessionTimeline(): JSX.Element {
               suffix={<IconChevronDownSmall className="text-gray-900" />}
               variant="tertiary"
             >
-              {conversation.label}
+              <StableLabel
+                current={conversation.label}
+                labels={CONVERSATIONS.map((c) => c.label)}
+              />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-56" side="top">
@@ -796,7 +819,10 @@ export function SessionTimeline(): JSX.Element {
           size="small"
           variant="tertiary"
         >
-          {playing ? "Stop demo" : "Play demo"}
+          <StableLabel
+            current={playing ? "Stop demo" : "Play demo"}
+            labels={["Play demo", "Stop demo"]}
+          />
         </Button>
       </figcaption>
     </figure>
