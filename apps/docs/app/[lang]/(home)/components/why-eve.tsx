@@ -1,4 +1,4 @@
-import { SiNextdotjs, SiNuxt, SiSvelte, SiTanstack } from "@icons-pack/react-simple-icons";
+import { SiNextdotjs, SiNuxt, SiSvelte } from "@icons-pack/react-simple-icons";
 import {
   IconCheck,
   IconChevronRightSmall,
@@ -125,81 +125,70 @@ function HarnessTools() {
   );
 }
 
-const FRAMEWORKS = [
-  { name: "Next.js", Logo: SiNextdotjs, y: 54 },
-  { name: "Nuxt", Logo: SiNuxt, y: 78 },
-  { name: "SvelteKit", Logo: SiSvelte, y: 102 },
-  { name: "TanStack", Logo: SiTanstack, y: 126 },
-];
-const frameworkX = 36;
-const hook = { x: 112, y: 90, halfWidth: 34 };
-const appWindow = { x: 178, y: 36, width: 118, height: 108 };
 const SIGNUPS = [620, 680, 710, 690, 820, 905, 1010, 1284];
 const SIGNUPS_MAX = Math.max(...SIGNUPS);
 
+function SignupsChart() {
+  return (
+    <div className="flex h-[3em] items-end gap-[0.18em] border-gray-alpha-400 border-b">
+      {SIGNUPS.map((value, i) => (
+        <span
+          className={cn(
+            "flex-1 rounded-t-[0.15em]",
+            i === SIGNUPS.length - 1
+              ? "bg-gray-1000"
+              : "border border-gray-alpha-500 border-b-0 bg-linear-to-b from-gray-200 to-transparent",
+          )}
+          key={i}
+          style={{ height: `${(value / SIGNUPS_MAX) * 100}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Back to front. Each window covers the one behind it but for a sliver, so the back two
+// show only their framework and the start of their agent's reply.
+const APPS = [
+  { name: "Next.js", Logo: SiNextdotjs, x: 16, reply: "Refund approved for order 4821" },
+  { name: "Nuxt", Logo: SiNuxt, x: 84, reply: "Rolled back the Friday deploy" },
+  { name: "SvelteKit", Logo: SiSvelte, x: 152, reply: null },
+];
+
 function AgentUi() {
   return (
-    <Visual
-      caption="Next.js, Nuxt, SvelteKit, and TanStack all connect through the useEveAgent() hook to one chat UI, where the agent answers a question about signups with a bar chart."
-      scene={
-        <>
-          {FRAMEWORKS.map(({ name, y }) => (
-            <path
-              d={`M${frameworkX + 10} ${y}C${frameworkX + 40} ${y} ${hook.x - hook.halfWidth - 24} ${hook.y} ${hook.x - hook.halfWidth} ${hook.y}`}
-              key={name}
-              stroke="var(--ds-gray-alpha-400)"
-            />
-          ))}
-          <path
-            d={`M${hook.x + hook.halfWidth} ${hook.y}H${appWindow.x}`}
-            stroke="var(--ds-gray-alpha-400)"
-          />
-        </>
-      }
-    >
-      {FRAMEWORKS.map(({ Logo, name, y }) => (
-        <span
-          className="absolute flex size-[6cqw] -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[55%]"
-          key={name}
-          style={{ left: pct(frameworkX, view.width), top: pct(y, view.height) }}
-        >
-          <Logo aria-hidden />
-        </span>
-      ))}
-      <Label x={hook.x} y={hook.y}>
-        <code className="font-mono">useEveAgent()</code>
-      </Label>
-      <div
-        className="absolute flex select-none flex-col gap-[0.6em] rounded-[0.75em] bg-background-100 px-[0.75em] pt-[0.5em] pb-[0.75em] text-[4.4cqw] shadow-(--ds-shadow-border-small)"
-        style={{
-          left: pct(appWindow.x, view.width),
-          top: pct(appWindow.y, view.height),
-          width: pct(appWindow.width, view.width),
-          height: pct(appWindow.height, view.height),
-        }}
-      >
-        <div aria-hidden className="mt-[0.25em] flex gap-[0.25em]">
-          <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
-          <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
-          <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
-        </div>
-        <span className="self-end whitespace-nowrap rounded-full bg-gray-200 px-[0.6em] py-[0.3em] text-[0.625em] text-gray-1000 leading-none">
-          Signups trend?
-        </span>
-        <div className="flex flex-1 items-end gap-[0.18em] border-gray-alpha-400 border-b">
-          {SIGNUPS.map((value, i) => (
-            <span
-              className={cn(
-                "flex-1 rounded-t-[0.15em]",
-                i === SIGNUPS.length - 1
-                  ? "bg-gray-1000"
-                  : "border border-gray-alpha-500 border-b-0 bg-linear-to-b from-gray-200 to-transparent",
-              )}
-              key={i}
-              style={{ height: `${(value / SIGNUPS_MAX) * 100}%` }}
-            />
-          ))}
-        </div>
+    <Visual caption="Three agent apps in overlapping windows, built with Next.js, Nuxt, and SvelteKit. The front one answers a question about signups with a bar chart.">
+      {/* The fade sits on a frame-sized layer so it ends at the frame, not the windows. */}
+      <div className="absolute inset-0 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black_72%,transparent),linear-gradient(to_right,black_90%,transparent)]">
+        {APPS.map(({ Logo, name, reply, x }) => (
+          <div
+            className="absolute top-[15%] -bottom-[10%] flex w-[75%] select-none flex-col gap-[0.75em] rounded-[0.75em] bg-background-100 px-[0.75em] pt-[0.5em] text-[4.4cqw] shadow-(--ds-shadow-border-small)"
+            key={name}
+            style={{ left: pct(x, view.width) }}
+          >
+            <div aria-hidden className="mt-[0.25em] flex gap-[0.25em]">
+              <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
+              <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
+              <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
+            </div>
+            <span className="flex items-center gap-[0.4em] whitespace-nowrap text-[0.75em] text-gray-1000 leading-none [&>svg]:size-[1em] [&>svg]:shrink-0">
+              <Logo aria-hidden />
+              {name}
+            </span>
+            {reply ? (
+              <span className="whitespace-nowrap text-[0.625em] text-gray-900 leading-none">
+                {reply}
+              </span>
+            ) : (
+              <div className="flex w-[9em] flex-col gap-[0.5em]">
+                <span className="self-end whitespace-nowrap rounded-full bg-gray-200 px-[0.6em] py-[0.3em] text-[0.625em] text-gray-1000 leading-none">
+                  Signups trend?
+                </span>
+                <SignupsChart />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </Visual>
   );
