@@ -75,7 +75,7 @@ function Card({
   children?: ReactNode;
 }) {
   return (
-    <div className="mt-2 flex max-w-[26rem] gap-2.5 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-2.5">
+    <div className="mt-2 flex max-w-[24rem] gap-2.5 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-2.5">
       <span aria-hidden className="mt-0.5 text-gray-900 [&>svg]:size-4">
         {icon}
       </span>
@@ -118,7 +118,7 @@ function AdaptiveCard({
   actions: [string, string];
 }) {
   return (
-    <div className="mt-2 max-w-[26rem] rounded-lg bg-background-100 p-4 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]">
+    <div className="mt-2 max-w-[24rem] rounded-lg bg-background-100 p-4 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]">
       <p className="font-semibold text-copy-14">{title}</p>
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-copy-13">
         {facts.map(([label, value]) => (
@@ -518,7 +518,7 @@ function TeamsMessage({
         )}
         <div
           className={cn(
-            "max-w-[min(85%,26rem)] rounded-md px-3 py-2 text-gray-1000",
+            "max-w-[min(85%,24rem)] rounded-md px-3 py-2 text-gray-1000",
             isAgent ? "bg-gray-100" : "bg-gray-200",
           )}
         >
@@ -655,7 +655,7 @@ function Bubble({
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          "relative max-w-[min(80%,22rem)] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
+          "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
           // The agent's bubbles share one width, so a run of them lines up on both edges.
           outgoing ? "bg-gray-200" : "w-full bg-background-100",
         )}
@@ -819,7 +819,10 @@ export function SessionTimeline(): JSX.Element {
   };
 
   return (
-    <figure aria-label="Example eve sessions in Slack, Teams, and WhatsApp" className="m-0">
+    <figure
+      aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
+      className="m-0 mx-auto w-full max-w-[30rem]"
+    >
       {/* No frame: the conversation sits on the page and fades out only at an edge that has
           messages scrolled past it. In full it opens at its start; a replay fills from the
           bottom like a chat. */}
