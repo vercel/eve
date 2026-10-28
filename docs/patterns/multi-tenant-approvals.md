@@ -3,7 +3,7 @@ title: "Multi-Tenant Approvals"
 description: "Resolve tenant policy asynchronously for authored tools, OpenAPI operations, and MCP tools."
 ---
 
-eve's `approval` field is an async policy hook. It receives the active session, qualified tool name, tool input, and previously approved tools. That is enough to ask your application whether this tenant should allow, deny, or require human confirmation for any authored or connection tool.
+eve's `approval` field is an async policy hook. It receives the active session, qualified tool name, and tool input. That is enough to ask your application whether this tenant should allow, deny, or require human confirmation for any authored or connection tool.
 
 Use this with [multi-tenant outbound auth](./multi-tenant-auth) when your own
 API key, JWT, or app session establishes the tenant and the connection
@@ -68,7 +68,7 @@ export async function decideTenantApproval(
 
 For authored tools, `ctx.toolName` is the path-derived name such as `transfer_funds`. For connection tools, it is qualified, such as `billing__updateSubscription` or `support__add_internal_note`. Your policy service can match exact names, connection-wide patterns, roles, amounts, environments, or any other tenant-owned rule.
 
-The callback deliberately does not treat `approvedTools` as a session-wide grant. Every call is evaluated. If your policy supports approve-once behavior, consult `ctx.approvedTools` explicitly after pinning the session tenant.
+The callback evaluates every call. Return `"user-approval"` when each tenant-specific action needs a separate decision. [`once()`](/docs/human-in-the-loop#remember-approval-for-a-tool) remembers approval for the tool across all inputs in the session; it does not create tenant-specific grants.
 
 ## Apply it to an authored tool
 
@@ -187,7 +187,7 @@ Policy lookup failures should throw or deny, never silently allow. Recheck autho
 
 An approval durably pauses the session and a later request resumes it. Your HTTP boundary must ensure a caller cannot continue or stream a session owned by another tenant. Persist session ownership in your application and check it before proxying:
 
-- `POST /eve/v1/session/:sessionId`, including `inputResponses`;
+- `POST /eve/v1/session/:sessionId`, including `answers`;
 - `GET /eve/v1/session/:sessionId/stream`.
 
 Built-in approval confirms that a human with access to the session approved the call. To restrict who may respond, add an [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses): it receives who responded as `response.principal` and who asked for the call as `request.principal`, and runs for both Approve and Cancel. For a four-eyes workflow, where a different person or role must approve, branch on `response.decision`: allow `cancel` so the requester can still withdraw the call, and for `approve` reject a `response.principal` that matches `request.principal` and check the responder's role.

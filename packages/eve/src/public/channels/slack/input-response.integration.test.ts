@@ -6,10 +6,10 @@ import { slackDriver } from "#internal/testing/channel-conformance/slack-driver.
 const PROMPT = "What should the review cover?";
 const REPLY = "Mostly the billing migration";
 
-describe("slackChannel onInputResponse", () => {
+describe("slackChannel onAnswers", () => {
   // https://github.com/vercel/eve/issues/5074
   it("keeps a typed thread reply from answering a question the hook would refuse", async () => {
-    const driver = slackDriver("shared", { onInputResponse: () => null });
+    const driver = slackDriver("shared", { onAnswers: () => null });
     await withChannelConversation(driver, async (conversation) => {
       await conversation.say(`Use ask_question and set question to: "${PROMPT}"`);
       await conversation.waitForQuestion(PROMPT);

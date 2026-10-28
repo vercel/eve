@@ -1555,7 +1555,12 @@ describe("createVercelSandbox", () => {
     const abortSignal = new AbortController().signal;
 
     await expect(
-      provider.endSession({ ...session, abortSignal, reason: "deleted", state: handle.state }),
+      provider.endSession({
+        ...session,
+        signal: abortSignal,
+        reason: "deleted",
+        state: handle.state,
+      }),
     ).resolves.toBeUndefined();
 
     expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
@@ -1715,7 +1720,7 @@ describe("createVercelSandbox", () => {
   });
 
   // https://github.com/vercel/eve/issues/5301
-  it("kills a running command when its abortSignal fires", async () => {
+  it("kills a running command when its signal fires", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     // Like the SDK's detached Command, the `runCommand` signal only covers the
     // start request: `wait` and `logs` honor their own signal, and only
@@ -1744,7 +1749,7 @@ describe("createVercelSandbox", () => {
     const controller = new AbortController();
     const stop = new Error("stop");
 
-    const running = handle.sandbox.run({ abortSignal: controller.signal, command: "sleep 60" });
+    const running = handle.sandbox.run({ signal: controller.signal, command: "sleep 60" });
     // Settle `run()` now so its rejection is handled while `kill()` is awaited.
     const settled = running.then(
       () => undefined,

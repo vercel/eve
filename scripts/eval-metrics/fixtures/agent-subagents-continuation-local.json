@@ -1,816 +1,1669 @@
 {
   "id": "agent-continuation-local",
   "verdict": "passed",
-  "startedAt": "2026-10-05T23:37:05.534Z",
-  "completedAt": "2026-10-05T23:37:08.653Z",
+  "startedAt": "2026-10-27T07:43:02.303Z",
+  "completedAt": "2026-10-27T07:43:06.346Z",
   "result": {
     "derived": {
       "usage": {
         "cacheReadTokens": 0,
         "cacheWriteTokens": 0,
-        "inputTokens": 6006,
-        "outputTokens": 178
+        "inputTokens": 11901,
+        "outputTokens": 243
       }
     },
-    "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+    "sessionId": "wrun_01M5Y5025EMBEXSTDBCCZSANF0",
     "runtimeIdentity": {
-      "eveVersion": "0.71.2"
+      "agentId": "agent-subagents",
+      "agentName": "agent-subagents",
+      "eveVersion": "0.84.0"
     },
     "sessions": [
       {
-        "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+        "sessionId": "wrun_01M5Y5025EMBEXSTDBCCZSANF0",
+        "primary": true,
         "events": [
           {
+            "type": "session.started",
+            "data": {
+              "runtime": {
+                "agentId": "agent-subagents",
+                "agentName": "agent-subagents",
+                "eveVersion": "0.84.0"
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.456Z", "position": { "index": 0, "line": 0 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "d195eae0-5eaf-4461-8864-6269ee417bc3",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "channel:eve" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.456Z", "position": { "index": 1, "line": 0 } }
+          },
+          {
             "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476V6228BYTWHV7MKWND209",
-              "at": "2026-10-05T23:37:05.858Z"
-            },
             "data": {
+              "cause": { "deliveryId": "d195eae0-5eaf-4461-8864-6269ee417bc3" },
+              "follows": null,
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "40e5f1e0af671703",
+                "traceFlags": 1,
+                "traceId": "f30561b5047cb99008f8f727…"
+              },
               "turnId": "turn_0"
-            }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.464Z", "position": { "index": 0, "line": 1 } }
           },
           {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V6233AEN19P97Z73SW8Y",
-              "at": "2026-10-05T23:37:05.859Z"
-            },
+            "type": "delivery.consumed",
             "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0
-            }
+              "deliveryId": "d195eae0-5eaf-4461-8864-6269ee417bc3",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-REMEMBER notebo…" }],
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.464Z", "position": { "index": 1, "line": 1 } }
           },
           {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V62C7GS0XB8YSMBRD14H",
-              "at": "2026-10-05T23:37:05.868Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-remember",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_0",
-              "stepIndex": 0
-            }
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_0" }, "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:02.470Z", "position": { "index": 0, "line": 2 } }
           },
           {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V62FPZP28T46PNM7S065",
-              "at": "2026-10-05T23:37:05.871Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0,
-              "usage": {
-                "inputTokens": 332,
-                "outputTokens": 27,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:02.474Z", "position": { "index": 0, "line": 3 } }
           },
           {
-            "type": "task.started",
-            "meta": {
-              "id": "evt_01M476V63J65W3D9RW1NNBY17K",
-              "at": "2026-10-05T23:37:05.906Z"
-            },
-            "data": {
-              "taskId": "notebook-keeper-eqtna6",
-              "callId": "notebook-remember"
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V641X0H8BK1KC4JV92AZ",
-              "at": "2026-10-05T23:37:05.921Z"
-            },
-            "data": {
-              "result": {
-                "callId": "notebook-remember"
-              },
-              "status": "completed"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V642AZR2058TEEM9X5EE",
-              "at": "2026-10-05T23:37:05.922Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 1
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V645XV19K4368X5VK1B6",
-              "at": "2026-10-05T23:37:05.925Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-remember-wait",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_0",
-              "stepIndex": 1
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V646ZCXJ0YY0CE8DSFT3",
-              "at": "2026-10-05T23:37:05.926Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 1,
-              "usage": {
-                "inputTokens": 402,
-                "outputTokens": 1,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
-          },
-          {
-            "type": "agent.started",
-            "meta": {
-              "id": "evt_01M476V6898SRG54ZSBFDFWJZH",
-              "at": "2026-10-05T23:37:06.057Z"
-            },
+            "type": "call.requested",
             "data": {
               "callId": "notebook-remember",
-              "turnId": "turn_0",
-              "taskId": "notebook-keeper-eqtna6",
-              "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0"
-            }
-          },
-          {
-            "type": "task.settled",
-            "meta": {
-              "id": "evt_01M476V6A2Z1SG7X142798JF05",
-              "at": "2026-10-05T23:37:06.114Z"
-            },
-            "data": {
-              "taskId": "notebook-keeper-eqtna6",
-              "callId": "notebook-remember"
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V6AF87ZGQAP6CT77QW5G",
-              "at": "2026-10-05T23:37:06.127Z"
-            },
-            "data": {
-              "result": {
-                "callId": "notebook-remember-wait"
+              "capability": {
+                "kind": "agent",
+                "name": "notebook-keeper",
+                "label": "Notebook keeper: NOTEBOO…"
               },
-              "status": "completed"
-            }
+              "input": { "message": "NOTEBOOK-ENTRY Alice nam…" },
+              "owner": { "runId": "run_0" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.492Z", "position": { "index": 0, "line": 4 } }
           },
           {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V6AF87ZGQAP6CT77QW5H",
-              "at": "2026-10-05T23:37:06.127Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 2
-            }
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:02.497Z", "position": { "index": 0, "line": 5 } }
           },
           {
-            "type": "message.appended",
-            "meta": {
-              "id": "evt_01M476V6AJFFZPR5418NZFPRTZ",
-              "at": "2026-10-05T23:37:06.130Z"
-            },
+            "type": "usage.recorded",
             "data": {
-              "turnId": "turn_0",
-              "stepIndex": 2
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V6AJFFZPR5418NZFPRV1",
-              "at": "2026-10-05T23:37:06.130Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 2,
+              "kind": "model",
+              "owner": { "runId": "run_0" },
               "usage": {
-                "inputTokens": 468,
-                "outputTokens": 8,
                 "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "stop"
-            }
-          },
-          {
-            "type": "turn.completed",
-            "meta": {
-              "id": "evt_01M476V6AN6BYGDG7F56X57112",
-              "at": "2026-10-05T23:37:06.133Z"
+                "cacheWriteTokens": 0,
+                "inputTokens": 334,
+                "outputTokens": 27
+              }
             },
-            "data": {
-              "turnId": "turn_0"
-            }
-          },
-          {
-            "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476V6C9MRXR1GD56EV73ZQF",
-              "at": "2026-10-05T23:37:06.185Z"
-            },
-            "data": {
-              "turnId": "turn_1"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V6C9MRXR1GD56EV73ZQH",
-              "at": "2026-10-05T23:37:06.185Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V6CC7A5R3Q13GNTS1WV3",
-              "at": "2026-10-05T23:37:06.188Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-review",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_1",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V6CC7A5R3Q13GNTS1WV4",
-              "at": "2026-10-05T23:37:06.188Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 0,
-              "usage": {
-                "inputTokens": 496,
-                "outputTokens": 32,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
+            "meta": { "at": "2026-10-27T07:43:02.497Z", "position": { "index": 1, "line": 5 } }
           },
           {
             "type": "task.started",
-            "meta": {
-              "id": "evt_01M476V6D7X4DPT801AKTD751Q",
-              "at": "2026-10-05T23:37:06.215Z"
-            },
             "data": {
-              "taskId": "notebook-keeper-eqtna6",
-              "callId": "notebook-review"
-            }
+              "taskId": "notebook-keeper-w5bnjg",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "startedBy": { "callId": "notebook-remember" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.593Z", "position": { "index": 0, "line": 6 } }
           },
           {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V6DRHF4FYDKZ1NVPXHE3",
-              "at": "2026-10-05T23:37:06.232Z"
-            },
-            "data": {
-              "result": {
-                "callId": "notebook-review"
-              },
-              "status": "completed"
-            }
+            "type": "call.started",
+            "data": { "callId": "notebook-remember", "taskId": "notebook-keeper-w5bnjg" },
+            "meta": { "at": "2026-10-27T07:43:02.593Z", "position": { "index": 1, "line": 6 } }
           },
           {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V6DSJ0SD80XPPPRQZZBH",
-              "at": "2026-10-05T23:37:06.233Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 1
-            }
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_0" }, "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:02.637Z", "position": { "index": 0, "line": 7 } }
           },
           {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V6DV5APK6YK4ARJ56BAJ",
-              "at": "2026-10-05T23:37:06.235Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-review-wait",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_1",
-              "stepIndex": 1
-            }
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:02.639Z", "position": { "index": 0, "line": 8 } }
           },
           {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V6DV5APK6YK4ARJ56BAK",
-              "at": "2026-10-05T23:37:06.235Z"
-            },
+            "type": "call.requested",
             "data": {
-              "turnId": "turn_1",
-              "stepIndex": 1,
+              "callId": "notebook-remember-wait",
+              "capability": { "kind": "control", "name": "eve__task_wait" },
+              "input": {},
+              "owner": { "runId": "run_1" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.651Z", "position": { "index": 0, "line": 9 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:02.653Z", "position": { "index": 0, "line": 10 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_1" },
               "usage": {
-                "inputTokens": 543,
-                "outputTokens": 5,
                 "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
+                "cacheWriteTokens": 0,
+                "inputTokens": 404,
+                "outputTokens": 1
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.653Z", "position": { "index": 1, "line": 10 } }
           },
           {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V8E667SBF93W9HCSJ4VD",
-              "at": "2026-10-05T23:37:08.294Z"
-            },
+            "type": "child.opened",
             "data": {
-              "result": {
-                "callId": "notebook-review-wait"
-              },
-              "status": "completed"
-            }
+              "name": "notebook-keeper",
+              "owner": { "callId": "notebook-remember" },
+              "sessionId": "wrun_01M5Y502GE4YSB1RRPECFPGKZ7",
+              "stream": "/eve/v1/session/wrun_01M…"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.823Z", "position": { "index": 0, "line": 11 } }
           },
           {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V8E7S6HBJVCYS5FSH3SW",
-              "at": "2026-10-05T23:37:08.295Z"
-            },
+            "type": "child.sent",
             "data": {
-              "turnId": "turn_1",
-              "stepIndex": 2
-            }
+              "callId": "notebook-remember",
+              "childDeliveryId": "agent-session:wrun_01M5Y…",
+              "sessionId": "wrun_01M5Y502GE4YSB1RRPECFPGKZ7"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.823Z", "position": { "index": 1, "line": 11 } }
           },
           {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V8EAWVYYB5H2Q699KMG6",
-              "at": "2026-10-05T23:37:08.298Z"
-            },
+            "type": "call.settled",
             "data": {
-              "actions": [
-                {
-                  "callId": "notebook-cancel",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_1",
-              "stepIndex": 2
-            }
+              "callId": "notebook-remember",
+              "outcome": "completed",
+              "output": "NOTEBOOK-SAVED"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.878Z", "position": { "index": 0, "line": 12 } }
           },
           {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V8EBTW72T7YGSZTNMA8T",
-              "at": "2026-10-05T23:37:08.299Z"
-            },
+            "type": "usage.recorded",
             "data": {
-              "turnId": "turn_1",
-              "stepIndex": 2,
+              "kind": "model",
+              "owner": { "callId": "notebook-remember" },
               "usage": {
-                "inputTokens": 576,
-                "outputTokens": 9,
                 "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
-          },
-          {
-            "type": "task.settled",
-            "meta": {
-              "id": "evt_01M476V8F8Z1FX7TZSZ7ZHDJRX",
-              "at": "2026-10-05T23:37:08.328Z"
-            },
-            "data": {
-              "taskId": "notebook-keeper-eqtna6",
-              "callId": "notebook-review"
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V8FTN14FSP3KYHVCYTRZ",
-              "at": "2026-10-05T23:37:08.346Z"
-            },
-            "data": {
-              "result": {
-                "callId": "notebook-cancel"
-              },
-              "status": "completed"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V8FTN14FSP3KYHVCYTS0",
-              "at": "2026-10-05T23:37:08.346Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 3
-            }
-          },
-          {
-            "type": "message.appended",
-            "meta": {
-              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDH",
-              "at": "2026-10-05T23:37:08.349Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 3
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDK",
-              "at": "2026-10-05T23:37:08.349Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 3,
-              "usage": {
-                "inputTokens": 639,
-                "outputTokens": 42,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "stop"
-            }
-          },
-          {
-            "type": "turn.completed",
-            "meta": {
-              "id": "evt_01M476V8G10T9NCS0BYG14C6P5",
-              "at": "2026-10-05T23:37:08.353Z"
-            },
-            "data": {
-              "turnId": "turn_1"
-            }
-          },
-          {
-            "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476V8K9NZ8YZ6QQKNAH92TD",
-              "at": "2026-10-05T23:37:08.457Z"
-            },
-            "data": {
-              "turnId": "turn_2"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V8KA3WS00AS63TKXAKKC",
-              "at": "2026-10-05T23:37:08.458Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V8KCQ4RPNX1HD3Y1C7N8",
-              "at": "2026-10-05T23:37:08.460Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-recall",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_2",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V8KCQ4RPNX1HD3Y1C7N9",
-              "at": "2026-10-05T23:37:08.460Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 0,
-              "usage": {
-                "inputTokens": 695,
-                "outputTokens": 29,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
-          },
-          {
-            "type": "task.started",
-            "meta": {
-              "id": "evt_01M476V8M6Z762FW3TK0BPFPDC",
-              "at": "2026-10-05T23:37:08.486Z"
-            },
-            "data": {
-              "taskId": "notebook-keeper-eqtna6",
-              "callId": "notebook-recall"
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V8MNP1SETGP49BVH3SB6",
-              "at": "2026-10-05T23:37:08.501Z"
-            },
-            "data": {
-              "result": {
-                "callId": "notebook-recall"
-              },
-              "status": "completed"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V8MPWG53PDJJX23ZGY1K",
-              "at": "2026-10-05T23:37:08.502Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 1
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V8MRFEP96D0MWRXSBG3S",
-              "at": "2026-10-05T23:37:08.504Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-recall-wait",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_2",
-              "stepIndex": 1
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V8MRFEP96D0MWRXSBG3T",
-              "at": "2026-10-05T23:37:08.504Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 1,
-              "usage": {
-                "inputTokens": 742,
-                "outputTokens": 1,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
-          },
-          {
-            "type": "task.settled",
-            "meta": {
-              "id": "evt_01M476V8RPXJGVVE5F24WJ79AF",
-              "at": "2026-10-05T23:37:08.630Z"
-            },
-            "data": {
-              "taskId": "notebook-keeper-eqtna6",
-              "callId": "notebook-recall"
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476V8S10A6Z1Y50ERZCD2A9",
-              "at": "2026-10-05T23:37:08.641Z"
-            },
-            "data": {
-              "result": {
-                "callId": "notebook-recall-wait"
-              },
-              "status": "completed"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V8S2RMQRM83HM2NQ6N86",
-              "at": "2026-10-05T23:37:08.642Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 2
-            }
-          },
-          {
-            "type": "message.appended",
-            "meta": {
-              "id": "evt_01M476V8S3ZK1JPMHQEJ5WW503",
-              "at": "2026-10-05T23:37:08.643Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 2
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V8S40C4W83AANGJFAY23",
-              "at": "2026-10-05T23:37:08.644Z"
-            },
-            "data": {
-              "turnId": "turn_2",
-              "stepIndex": 2,
-              "usage": {
-                "inputTokens": 813,
-                "outputTokens": 12,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "stop"
-            }
-          },
-          {
-            "type": "turn.completed",
-            "meta": {
-              "id": "evt_01M476V8S8M483PXMJW7TCF6A5",
-              "at": "2026-10-05T23:37:08.648Z"
-            },
-            "data": {
-              "turnId": "turn_2"
-            }
-          }
-        ]
-      },
-      {
-        "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
-        "events": [
-          {
-            "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAF",
-              "at": "2026-10-05T23:37:06.009Z"
-            },
-            "data": {
-              "turnId": "turn_0"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAH",
-              "at": "2026-10-05T23:37:06.009Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "message.appended",
-            "meta": {
-              "id": "evt_01M476V66VDRJ4S2TSRXESVFGN",
-              "at": "2026-10-05T23:37:06.011Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476V66VDRJ4S2TSRXESVFGQ",
-              "at": "2026-10-05T23:37:06.011Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0,
-              "usage": {
+                "cacheWriteTokens": 0,
                 "inputTokens": 130,
-                "outputTokens": 4,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "stop"
-            }
+                "outputTokens": 4
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.878Z", "position": { "index": 1, "line": 12 } }
           },
           {
-            "type": "turn.completed",
-            "meta": {
-              "id": "evt_01M476V671EP9FBHHQBZNAD0CT",
-              "at": "2026-10-05T23:37:06.017Z"
-            },
+            "type": "call.settled",
             "data": {
+              "callId": "notebook-remember-wait",
+              "outcome": "completed",
+              "output": "notebook-keeper-w5bnjg c…"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.894Z", "position": { "index": 0, "line": 13 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_0" }, "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:02.897Z", "position": { "index": 0, "line": 14 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:02.898Z", "position": { "index": 0, "line": 15 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-REPLY NOTEBOOK-…", "kind": "text", "partId": "run_2.0" },
+            "meta": { "at": "2026-10-27T07:43:02.898Z", "position": { "index": 0, "line": 16 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_2.0",
+              "phase": "reply",
+              "runId": "run_2",
+              "value": "NOTEBOOK-REPLY NOTEBOOK-…"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.904Z", "position": { "index": 0, "line": 17 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:02.905Z", "position": { "index": 0, "line": 18 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_2" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 471,
+                "outputTokens": 8
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.905Z", "position": { "index": 1, "line": 18 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_2.0"], "turnId": "turn_0" },
+            "meta": { "at": "2026-10-27T07:43:02.910Z", "position": { "index": 0, "line": 19 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "d195eae0-5eaf-4461-8864-6269ee417bc3",
+              "outcome": "handled",
               "turnId": "turn_0"
-            }
-          }
-        ]
-      },
-      {
-        "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
-        "events": [
+            },
+            "meta": { "at": "2026-10-27T07:43:02.910Z", "position": { "index": 1, "line": 19 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "f6e01d39-226e-4d8d-8d32-85d139d005fc",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "channel:eve" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.976Z", "position": { "index": 0, "line": 20 } }
+          },
           {
             "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476V6F9EBD55ZG238NQ1ZJW",
-              "at": "2026-10-05T23:37:06.281Z"
-            },
             "data": {
+              "cause": { "deliveryId": "f6e01d39-226e-4d8d-8d32-85d139d005fc" },
+              "follows": "turn_0",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "a31f012e116afe07",
+                "traceFlags": 1,
+                "traceId": "a31f012e116afe07f45a8d21…"
+              },
               "turnId": "turn_1"
-            }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.977Z", "position": { "index": 0, "line": 21 } }
           },
           {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476V6F9EBD55ZG238NQ1ZJY",
-              "at": "2026-10-05T23:37:06.281Z"
-            },
+            "type": "delivery.consumed",
             "data": {
-              "turnId": "turn_1",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476V6FBET7W3ABD5M66T5ZH",
-              "at": "2026-10-05T23:37:06.283Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "notebook-review-2",
-                  "kind": "tool-call"
-                }
-              ],
-              "turnId": "turn_1",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "turn.cancelled",
-            "meta": {
-              "id": "evt_01M476V8HQR8KWGGH1VA5BHRGS",
-              "at": "2026-10-05T23:37:08.407Z"
-            },
-            "data": {
+              "deliveryId": "f6e01d39-226e-4d8d-8d32-85d139d005fc",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-CHECK notebook-…" }],
               "turnId": "turn_1"
-            }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.977Z", "position": { "index": 1, "line": 21 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_1" }, "runId": "run_3" },
+            "meta": { "at": "2026-10-27T07:43:02.978Z", "position": { "index": 0, "line": 22 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_3" },
+            "meta": { "at": "2026-10-27T07:43:02.979Z", "position": { "index": 0, "line": 23 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-idle-recall",
+              "capability": {
+                "kind": "agent",
+                "name": "notebook-keeper",
+                "label": "Notebook keeper: NOTEBOO…"
+              },
+              "input": {
+                "message": "NOTEBOOK-ENTRY What name…",
+                "taskId": "notebook-keeper-w5bnjg"
+              },
+              "owner": { "runId": "run_3" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.986Z", "position": { "index": 0, "line": 24 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_3" },
+            "meta": { "at": "2026-10-27T07:43:02.987Z", "position": { "index": 0, "line": 25 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_3" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 501,
+                "outputTokens": 29
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.987Z", "position": { "index": 1, "line": 25 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "notebook-idle-recall", "taskId": "notebook-keeper-w5bnjg" },
+            "meta": { "at": "2026-10-27T07:43:03.025Z", "position": { "index": 0, "line": 26 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_1" }, "runId": "run_4" },
+            "meta": { "at": "2026-10-27T07:43:03.044Z", "position": { "index": 0, "line": 27 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_4" },
+            "meta": { "at": "2026-10-27T07:43:03.046Z", "position": { "index": 0, "line": 28 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-idle-recall-wait",
+              "capability": { "kind": "control", "name": "eve__task_wait" },
+              "input": {},
+              "owner": { "runId": "run_4" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.051Z", "position": { "index": 0, "line": 29 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_4" },
+            "meta": { "at": "2026-10-27T07:43:03.053Z", "position": { "index": 0, "line": 30 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_4" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 549,
+                "outputTokens": 1
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.053Z", "position": { "index": 1, "line": 30 } }
+          },
+          {
+            "type": "child.sent",
+            "data": {
+              "callId": "notebook-idle-recall",
+              "childDeliveryId": "agent-session:wrun_01M5Y…",
+              "sessionId": "wrun_01M5Y502GE4YSB1RRPECFPGKZ7"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.145Z", "position": { "index": 0, "line": 31 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-idle-recall",
+              "outcome": "completed",
+              "output": "NOTEBOOK-NAME=Harbor Lum…"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.222Z", "position": { "index": 0, "line": 32 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "callId": "notebook-idle-recall" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 150,
+                "outputTokens": 8
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.222Z", "position": { "index": 1, "line": 32 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-idle-recall-wait",
+              "outcome": "completed",
+              "output": "notebook-keeper-w5bnjg c…"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.235Z", "position": { "index": 0, "line": 33 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_1" }, "runId": "run_5" },
+            "meta": { "at": "2026-10-27T07:43:03.237Z", "position": { "index": 0, "line": 34 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_5" },
+            "meta": { "at": "2026-10-27T07:43:03.238Z", "position": { "index": 0, "line": 35 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-REPLY NOTEBOOK-…", "kind": "text", "partId": "run_5.0" },
+            "meta": { "at": "2026-10-27T07:43:03.238Z", "position": { "index": 0, "line": 36 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_5.0",
+              "phase": "reply",
+              "runId": "run_5",
+              "value": "NOTEBOOK-REPLY NOTEBOOK-…"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.245Z", "position": { "index": 0, "line": 37 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_5" },
+            "meta": { "at": "2026-10-27T07:43:03.245Z", "position": { "index": 0, "line": 38 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_5" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 619,
+                "outputTokens": 12
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.245Z", "position": { "index": 1, "line": 38 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_5.0"], "turnId": "turn_1" },
+            "meta": { "at": "2026-10-27T07:43:03.250Z", "position": { "index": 0, "line": 39 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "f6e01d39-226e-4d8d-8d32-85d139d005fc",
+              "outcome": "handled",
+              "turnId": "turn_1"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.250Z", "position": { "index": 1, "line": 39 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "7b687a27-02da-4309-ad1c-b0a8bfdde972",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "channel:eve" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.299Z", "position": { "index": 0, "line": 40 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": { "deliveryId": "7b687a27-02da-4309-ad1c-b0a8bfdde972" },
+              "follows": "turn_1",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "32ce3ea0cbea6556",
+                "traceFlags": 1,
+                "traceId": "32ce3ea0cbea6556c16e5867…"
+              },
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.301Z", "position": { "index": 0, "line": 41 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "7b687a27-02da-4309-ad1c-b0a8bfdde972",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-REVIEW notebook…" }],
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.301Z", "position": { "index": 1, "line": 41 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_2" }, "runId": "run_6" },
+            "meta": { "at": "2026-10-27T07:43:03.302Z", "position": { "index": 0, "line": 42 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_6" },
+            "meta": { "at": "2026-10-27T07:43:03.303Z", "position": { "index": 0, "line": 43 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-review",
+              "capability": {
+                "kind": "agent",
+                "name": "notebook-keeper",
+                "label": "Notebook keeper: NOTEBOO…"
+              },
+              "input": {
+                "message": "NOTEBOOK-ENTRY Please re…",
+                "taskId": "notebook-keeper-w5bnjg"
+              },
+              "owner": { "runId": "run_6" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.309Z", "position": { "index": 0, "line": 44 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_6" },
+            "meta": { "at": "2026-10-27T07:43:03.310Z", "position": { "index": 0, "line": 45 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_6" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 651,
+                "outputTokens": 32
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.310Z", "position": { "index": 1, "line": 45 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "notebook-review", "taskId": "notebook-keeper-w5bnjg" },
+            "meta": { "at": "2026-10-27T07:43:03.345Z", "position": { "index": 0, "line": 46 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_2" }, "runId": "run_7" },
+            "meta": { "at": "2026-10-27T07:43:03.363Z", "position": { "index": 0, "line": 47 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_7" },
+            "meta": { "at": "2026-10-27T07:43:03.364Z", "position": { "index": 0, "line": 48 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-review-wait",
+              "capability": { "kind": "control", "name": "eve__task_wait" },
+              "input": { "timeoutSeconds": 2 },
+              "owner": { "runId": "run_7" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.371Z", "position": { "index": 0, "line": 49 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_7" },
+            "meta": { "at": "2026-10-27T07:43:03.372Z", "position": { "index": 0, "line": 50 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_7" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 698,
+                "outputTokens": 5
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.372Z", "position": { "index": 1, "line": 50 } }
+          },
+          {
+            "type": "child.sent",
+            "data": {
+              "callId": "notebook-review",
+              "childDeliveryId": "agent-session:wrun_01M5Y…",
+              "sessionId": "wrun_01M5Y502GE4YSB1RRPECFPGKZ7"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.444Z", "position": { "index": 0, "line": 51 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-review-wait",
+              "outcome": "completed",
+              "output": "Stopped waiting after 2s…"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.431Z", "position": { "index": 0, "line": 52 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_2" }, "runId": "run_8" },
+            "meta": { "at": "2026-10-27T07:43:05.433Z", "position": { "index": 0, "line": 53 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_8" },
+            "meta": { "at": "2026-10-27T07:43:05.434Z", "position": { "index": 0, "line": 54 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-cancel",
+              "capability": { "kind": "control", "name": "eve__task_cancel" },
+              "input": { "taskId": "notebook-keeper-w5bnjg" },
+              "owner": { "runId": "run_8" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.440Z", "position": { "index": 0, "line": 55 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_8" },
+            "meta": { "at": "2026-10-27T07:43:05.442Z", "position": { "index": 0, "line": 56 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_8" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 731,
+                "outputTokens": 9
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.442Z", "position": { "index": 1, "line": 56 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-review",
+              "outcome": "interrupted",
+              "reason": "task-cancel"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.465Z", "position": { "index": 0, "line": 57 } }
+          },
+          {
+            "type": "task.ended",
+            "data": {
+              "outcome": "cancelled",
+              "reason": "task-cancel",
+              "taskId": "notebook-keeper-w5bnjg"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.465Z", "position": { "index": 1, "line": 57 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-cancel",
+              "outcome": "completed",
+              "output": "Stopped notebook-keeper-…"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.491Z", "position": { "index": 0, "line": 58 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_2" }, "runId": "run_9" },
+            "meta": { "at": "2026-10-27T07:43:05.494Z", "position": { "index": 0, "line": 59 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_9" },
+            "meta": { "at": "2026-10-27T07:43:05.495Z", "position": { "index": 0, "line": 60 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-REPLY Stopped n…", "kind": "text", "partId": "run_9.0" },
+            "meta": { "at": "2026-10-27T07:43:05.495Z", "position": { "index": 0, "line": 61 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_9.0",
+              "phase": "reply",
+              "runId": "run_9",
+              "value": "NOTEBOOK-REPLY Stopped n…"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.501Z", "position": { "index": 0, "line": 62 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_9" },
+            "meta": { "at": "2026-10-27T07:43:05.501Z", "position": { "index": 0, "line": 63 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_9" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 751,
+                "outputTokens": 17
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.501Z", "position": { "index": 1, "line": 63 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_9.0"], "turnId": "turn_2" },
+            "meta": { "at": "2026-10-27T07:43:05.533Z", "position": { "index": 0, "line": 64 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "7b687a27-02da-4309-ad1c-b0a8bfdde972",
+              "outcome": "handled",
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.533Z", "position": { "index": 1, "line": 64 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "22a27e35-d0dd-4083-bd87-976c91a862da",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "channel:eve" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.805Z", "position": { "index": 0, "line": 65 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": { "deliveryId": "22a27e35-d0dd-4083-bd87-976c91a862da" },
+              "follows": "turn_2",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "badaa164b6addab2",
+                "traceFlags": 1,
+                "traceId": "badaa164b6addab2f41a46ad…"
+              },
+              "turnId": "turn_3"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.806Z", "position": { "index": 0, "line": 66 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "22a27e35-d0dd-4083-bd87-976c91a862da",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-RESTART noteboo…" }],
+              "turnId": "turn_3"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.806Z", "position": { "index": 1, "line": 66 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_3" }, "runId": "run_10" },
+            "meta": { "at": "2026-10-27T07:43:05.807Z", "position": { "index": 0, "line": 67 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_10" },
+            "meta": { "at": "2026-10-27T07:43:05.808Z", "position": { "index": 0, "line": 68 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-restart",
+              "capability": {
+                "kind": "agent",
+                "name": "notebook-keeper",
+                "label": "Notebook keeper: NOTEBOO…"
+              },
+              "input": { "message": "NOTEBOOK-ENTRY Alice nam…" },
+              "owner": { "runId": "run_10" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.814Z", "position": { "index": 0, "line": 69 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_10" },
+            "meta": { "at": "2026-10-27T07:43:05.816Z", "position": { "index": 0, "line": 70 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_10" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 793,
+                "outputTokens": 27
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.816Z", "position": { "index": 1, "line": 70 } }
+          },
+          {
+            "type": "task.started",
+            "data": {
+              "taskId": "notebook-keeper-k3kza5",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "startedBy": { "callId": "notebook-restart" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.853Z", "position": { "index": 0, "line": 71 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "notebook-restart", "taskId": "notebook-keeper-k3kza5" },
+            "meta": { "at": "2026-10-27T07:43:05.853Z", "position": { "index": 1, "line": 71 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_3" }, "runId": "run_11" },
+            "meta": { "at": "2026-10-27T07:43:05.870Z", "position": { "index": 0, "line": 72 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_11" },
+            "meta": { "at": "2026-10-27T07:43:05.871Z", "position": { "index": 0, "line": 73 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-restart-wait",
+              "capability": { "kind": "control", "name": "eve__task_wait" },
+              "input": {},
+              "owner": { "runId": "run_11" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.877Z", "position": { "index": 0, "line": 74 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_11" },
+            "meta": { "at": "2026-10-27T07:43:05.879Z", "position": { "index": 0, "line": 75 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_11" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 864,
+                "outputTokens": 1
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.879Z", "position": { "index": 1, "line": 75 } }
+          },
+          {
+            "type": "child.opened",
+            "data": {
+              "name": "notebook-keeper",
+              "owner": { "callId": "notebook-restart" },
+              "sessionId": "wrun_01M5Y505MVDJDFVZWD29WYZ9YD",
+              "stream": "/eve/v1/session/wrun_01M…"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.966Z", "position": { "index": 0, "line": 76 } }
+          },
+          {
+            "type": "child.sent",
+            "data": {
+              "callId": "notebook-restart",
+              "childDeliveryId": "agent-session:wrun_01M5Y…",
+              "sessionId": "wrun_01M5Y505MVDJDFVZWD29WYZ9YD"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.966Z", "position": { "index": 1, "line": 76 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-restart",
+              "outcome": "completed",
+              "output": "NOTEBOOK-SAVED"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.038Z", "position": { "index": 0, "line": 77 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "callId": "notebook-restart" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 130,
+                "outputTokens": 4
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.038Z", "position": { "index": 1, "line": 77 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-restart-wait",
+              "outcome": "completed",
+              "output": "notebook-keeper-k3kza5 c…"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.051Z", "position": { "index": 0, "line": 78 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_3" }, "runId": "run_12" },
+            "meta": { "at": "2026-10-27T07:43:06.052Z", "position": { "index": 0, "line": 79 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_12" },
+            "meta": { "at": "2026-10-27T07:43:06.053Z", "position": { "index": 0, "line": 80 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-REPLY NOTEBOOK-…", "kind": "text", "partId": "run_12.0" },
+            "meta": { "at": "2026-10-27T07:43:06.053Z", "position": { "index": 0, "line": 81 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_12.0",
+              "phase": "reply",
+              "runId": "run_12",
+              "value": "NOTEBOOK-REPLY NOTEBOOK-…"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.060Z", "position": { "index": 0, "line": 82 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_12" },
+            "meta": { "at": "2026-10-27T07:43:06.060Z", "position": { "index": 0, "line": 83 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_12" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 930,
+                "outputTokens": 8
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.060Z", "position": { "index": 1, "line": 83 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_12.0"], "turnId": "turn_3" },
+            "meta": { "at": "2026-10-27T07:43:06.064Z", "position": { "index": 0, "line": 84 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "22a27e35-d0dd-4083-bd87-976c91a862da",
+              "outcome": "handled",
+              "turnId": "turn_3"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.064Z", "position": { "index": 1, "line": 84 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "0703e7ae-64d4-439d-888f-ac3db6ea441f",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "channel:eve" }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.116Z", "position": { "index": 0, "line": 85 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": { "deliveryId": "0703e7ae-64d4-439d-888f-ac3db6ea441f" },
+              "follows": "turn_3",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "ae0747af08a8a339",
+                "traceFlags": 1,
+                "traceId": "ae0747af08a8a339b5716a2f…"
+              },
+              "turnId": "turn_4"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.117Z", "position": { "index": 0, "line": 86 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "0703e7ae-64d4-439d-888f-ac3db6ea441f",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-RECALL notebook…" }],
+              "turnId": "turn_4"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.117Z", "position": { "index": 1, "line": 86 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_4" }, "runId": "run_13" },
+            "meta": { "at": "2026-10-27T07:43:06.118Z", "position": { "index": 0, "line": 87 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_13" },
+            "meta": { "at": "2026-10-27T07:43:06.119Z", "position": { "index": 0, "line": 88 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-recall",
+              "capability": {
+                "kind": "agent",
+                "name": "notebook-keeper",
+                "label": "Notebook keeper: NOTEBOO…"
+              },
+              "input": {
+                "message": "NOTEBOOK-ENTRY What name…",
+                "taskId": "notebook-keeper-k3kza5"
+              },
+              "owner": { "runId": "run_13" }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.125Z", "position": { "index": 0, "line": 89 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_13" },
+            "meta": { "at": "2026-10-27T07:43:06.126Z", "position": { "index": 0, "line": 90 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_13" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 960,
+                "outputTokens": 29
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.126Z", "position": { "index": 1, "line": 90 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "notebook-recall", "taskId": "notebook-keeper-k3kza5" },
+            "meta": { "at": "2026-10-27T07:43:06.171Z", "position": { "index": 0, "line": 91 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_4" }, "runId": "run_14" },
+            "meta": { "at": "2026-10-27T07:43:06.188Z", "position": { "index": 0, "line": 92 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_14" },
+            "meta": { "at": "2026-10-27T07:43:06.189Z", "position": { "index": 0, "line": 93 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-recall-wait",
+              "capability": { "kind": "control", "name": "eve__task_wait" },
+              "input": {},
+              "owner": { "runId": "run_14" }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.196Z", "position": { "index": 0, "line": 94 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_14" },
+            "meta": { "at": "2026-10-27T07:43:06.198Z", "position": { "index": 0, "line": 95 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_14" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 1007,
+                "outputTokens": 1
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.198Z", "position": { "index": 1, "line": 95 } }
+          },
+          {
+            "type": "child.sent",
+            "data": {
+              "callId": "notebook-recall",
+              "childDeliveryId": "agent-session:wrun_01M5Y…",
+              "sessionId": "wrun_01M5Y505MVDJDFVZWD29WYZ9YD"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.237Z", "position": { "index": 0, "line": 96 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-recall",
+              "outcome": "completed",
+              "output": "NOTEBOOK-NAME=Harbor Lum…"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.315Z", "position": { "index": 0, "line": 97 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "callId": "notebook-recall" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 150,
+                "outputTokens": 8
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.315Z", "position": { "index": 1, "line": 97 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-recall-wait",
+              "outcome": "completed",
+              "output": "notebook-keeper-k3kza5 c…"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.326Z", "position": { "index": 0, "line": 98 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_4" }, "runId": "run_15" },
+            "meta": { "at": "2026-10-27T07:43:06.328Z", "position": { "index": 0, "line": 99 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-parent", "runId": "run_15" },
+            "meta": { "at": "2026-10-27T07:43:06.329Z", "position": { "index": 0, "line": 100 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-REPLY NOTEBOOK-…", "kind": "text", "partId": "run_15.0" },
+            "meta": { "at": "2026-10-27T07:43:06.329Z", "position": { "index": 0, "line": 101 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_15.0",
+              "phase": "reply",
+              "runId": "run_15",
+              "value": "NOTEBOOK-REPLY NOTEBOOK-…"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.334Z", "position": { "index": 0, "line": 102 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_15" },
+            "meta": { "at": "2026-10-27T07:43:06.334Z", "position": { "index": 0, "line": 103 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_15" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 1078,
+                "outputTokens": 12
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:06.334Z", "position": { "index": 1, "line": 103 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_15.0"], "turnId": "turn_4" },
+            "meta": { "at": "2026-10-27T07:43:06.338Z", "position": { "index": 0, "line": 104 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "0703e7ae-64d4-439d-888f-ac3db6ea441f",
+              "outcome": "handled",
+              "turnId": "turn_4"
+            },
+            "meta": { "at": "2026-10-27T07:43:06.338Z", "position": { "index": 1, "line": 104 } }
           }
-        ]
+        ],
+        "clock": {
+          "receivedAt": [
+            1793086982509, 1793086982509, 1793086982520, 1793086982520, 1793086982520,
+            1793086982520, 1793086982520, 1793086982521, 1793086982521, 1793086982599,
+            1793086982599, 1793086982671, 1793086982678, 1793086982678, 1793086982678,
+            1793086982678, 1793086982827, 1793086982827, 1793086982882, 1793086982882,
+            1793086982908, 1793086982909, 1793086982910, 1793086982910, 1793086982910,
+            1793086982910, 1793086982910, 1793086982915, 1793086982915, 1793086982991,
+            1793086982992, 1793086982992, 1793086982992, 1793086982993, 1793086982993,
+            1793086982993, 1793086982993, 1793086983029, 1793086983065, 1793086983067,
+            1793086983068, 1793086983068, 1793086983068, 1793086983156, 1793086983225,
+            1793086983226, 1793086983249, 1793086983250, 1793086983251, 1793086983251,
+            1793086983251, 1793086983251, 1793086983251, 1793086983255, 1793086983255,
+            1793086983314, 1793086983318, 1793086983318, 1793086983318, 1793086983318,
+            1793086983318, 1793086983318, 1793086983318, 1793086983349, 1793086983381,
+            1793086983385, 1793086983385, 1793086983385, 1793086983385, 1793086983447,
+            1793086985445, 1793086985446, 1793086985448, 1793086985448, 1793086985448,
+            1793086985448, 1793086985468, 1793086985468, 1793086985516, 1793086985529,
+            1793086985529, 1793086985529, 1793086985529, 1793086985529, 1793086985529,
+            1793086985555, 1793086985555, 1793086985819, 1793086985821, 1793086985821,
+            1793086985823, 1793086985823, 1793086985823, 1793086985823, 1793086985823,
+            1793086985856, 1793086985856, 1793086985883, 1793086985887, 1793086985887,
+            1793086985887, 1793086985887, 1793086985968, 1793086985968, 1793086986042,
+            1793086986042, 1793086986063, 1793086986064, 1793086986064, 1793086986064,
+            1793086986064, 1793086986064, 1793086986064, 1793086986068, 1793086986068,
+            1793086986136, 1793086986140, 1793086986140, 1793086986140, 1793086986140,
+            1793086986140, 1793086986140, 1793086986140, 1793086986174, 1793086986204,
+            1793086986206, 1793086986206, 1793086986206, 1793086986206, 1793086986239,
+            1793086986318, 1793086986318, 1793086986337, 1793086986338, 1793086986338,
+            1793086986338, 1793086986339, 1793086986339, 1793086986339, 1793086986342, 1793086986342
+          ],
+          "sends": [
+            {
+              "kind": "create",
+              "deliveryId": "d195eae0-5eaf-4461-8864-6269ee417bc3",
+              "startedAt": 1793086982303,
+              "notReadyMs": 0,
+              "acceptedAt": 1793086982337
+            },
+            {
+              "kind": "message",
+              "startedAt": 1793086982938,
+              "notReadyMs": 0,
+              "acceptedAt": 1793086982954,
+              "deliveryId": "f6e01d39-226e-4d8d-8d32-85d139d005fc"
+            },
+            {
+              "kind": "message",
+              "startedAt": 1793086983256,
+              "notReadyMs": 0,
+              "acceptedAt": 1793086983273,
+              "deliveryId": "7b687a27-02da-4309-ad1c-b0a8bfdde972"
+            },
+            {
+              "kind": "message",
+              "startedAt": 1793086985738,
+              "notReadyMs": 0,
+              "acceptedAt": 1793086985768,
+              "deliveryId": "22a27e35-d0dd-4083-bd87-976c91a862da"
+            },
+            {
+              "kind": "message",
+              "startedAt": 1793086986070,
+              "notReadyMs": 0,
+              "acceptedAt": 1793086986086,
+              "deliveryId": "0703e7ae-64d4-439d-888f-ac3db6ea441f"
+            }
+          ]
+        }
+      },
+      {
+        "sessionId": "wrun_01M5Y502GE4YSB1RRPECFPGKZ7",
+        "primary": false,
+        "events": [
+          {
+            "type": "session.started",
+            "data": {
+              "parent": {
+                "callId": "notebook-remember",
+                "sessionId": "wrun_01M5Y5025EMBEXSTDBCCZSANF0"
+              },
+              "runtime": {
+                "agentId": "notebook-keeper",
+                "agentName": "notebook-keeper",
+                "eveVersion": "0.84.0"
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.780Z", "position": { "index": 0, "line": 0 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:0:initial",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "subagent" }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.780Z", "position": { "index": 1, "line": 0 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": { "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:0:initial" },
+              "follows": null,
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "4aa8955b3af5089d",
+                "traceFlags": 1,
+                "traceId": "f30561b5047cb99008f8f727…"
+              },
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.781Z", "position": { "index": 0, "line": 1 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:0:initial",
+              "parts": [{ "kind": "text", "text": "You are the subagent \"no…" }],
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.781Z", "position": { "index": 1, "line": 1 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_0" }, "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:02.782Z", "position": { "index": 0, "line": 2 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-keeper", "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:02.783Z", "position": { "index": 0, "line": 3 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-SAVED", "kind": "text", "partId": "run_0.0" },
+            "meta": { "at": "2026-10-27T07:43:02.783Z", "position": { "index": 0, "line": 4 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_0.0",
+              "phase": "reply",
+              "runId": "run_0",
+              "value": "NOTEBOOK-SAVED"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.788Z", "position": { "index": 0, "line": 5 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:02.789Z", "position": { "index": 0, "line": 6 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_0" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 130,
+                "outputTokens": 4
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:02.789Z", "position": { "index": 1, "line": 6 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_0.0"], "turnId": "turn_0" },
+            "meta": { "at": "2026-10-27T07:43:02.794Z", "position": { "index": 0, "line": 7 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:0:initial",
+              "outcome": "handled",
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:02.794Z", "position": { "index": 1, "line": 7 } }
+          }
+        ],
+        "clock": {
+          "receivedAt": [
+            1793086982935, 1793086982935, 1793086982935, 1793086982935, 1793086982936,
+            1793086982936, 1793086982937, 1793086982937, 1793086982938, 1793086982938,
+            1793086982938, 1793086982938
+          ],
+          "sends": []
+        }
+      },
+      {
+        "sessionId": "wrun_01M5Y502GE4YSB1RRPECFPGKZ7",
+        "primary": false,
+        "events": [
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VW9:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "subagent" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.095Z", "position": { "index": 0, "line": 8 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": {
+                "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VW9:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send"
+              },
+              "follows": "turn_0",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "056713a772ccffa7",
+                "traceFlags": 1,
+                "traceId": "056713a772ccffa749ae1596…"
+              },
+              "turnId": "turn_1"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.097Z", "position": { "index": 0, "line": 9 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VW9:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-ENTRY What name…" }],
+              "turnId": "turn_1"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.097Z", "position": { "index": 1, "line": 9 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_1" }, "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:03.097Z", "position": { "index": 0, "line": 10 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-keeper", "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:03.098Z", "position": { "index": 0, "line": 11 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "NOTEBOOK-NAME=Harbor Lum…", "kind": "text", "partId": "run_1.0" },
+            "meta": { "at": "2026-10-27T07:43:03.098Z", "position": { "index": 0, "line": 12 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_1.0",
+              "phase": "reply",
+              "runId": "run_1",
+              "value": "NOTEBOOK-NAME=Harbor Lum…"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.103Z", "position": { "index": 0, "line": 13 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:03.103Z", "position": { "index": 0, "line": 14 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_1" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 150,
+                "outputTokens": 8
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.103Z", "position": { "index": 1, "line": 14 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_1.0"], "turnId": "turn_1" },
+            "meta": { "at": "2026-10-27T07:43:03.111Z", "position": { "index": 0, "line": 15 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VW9:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send",
+              "outcome": "handled",
+              "turnId": "turn_1"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.111Z", "position": { "index": 1, "line": 15 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWF:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send",
+              "principal": { "id": "e2e-user", "issuer": "e2e", "type": "user" },
+              "source": { "channel": "subagent" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.414Z", "position": { "index": 0, "line": 16 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": {
+                "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWF:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send"
+              },
+              "follows": "turn_1",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "5db7531380d228d1",
+                "traceFlags": 1,
+                "traceId": "5db7531380d228d1073ca545…"
+              },
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.415Z", "position": { "index": 0, "line": 17 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWF:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send",
+              "parts": [{ "kind": "text", "text": "NOTEBOOK-ENTRY Please re…" }],
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:03.415Z", "position": { "index": 1, "line": 17 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_2" }, "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:03.416Z", "position": { "index": 0, "line": 18 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/notebook-keeper", "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:03.417Z", "position": { "index": 0, "line": 19 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "notebook-review-3",
+              "capability": { "kind": "tool", "name": "notebook-review" },
+              "input": {},
+              "owner": { "runId": "run_2" }
+            },
+            "meta": { "at": "2026-10-27T07:43:03.420Z", "position": { "index": 0, "line": 20 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "notebook-review-3" },
+            "meta": { "at": "2026-10-27T07:43:03.423Z", "position": { "index": 0, "line": 21 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWJ:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:cancel",
+              "source": { "control": "cancel" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.631Z", "position": { "index": 0, "line": 22 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "notebook-review-3",
+              "outcome": "interrupted",
+              "reason": "turn-cancelled"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.631Z", "position": { "index": 1, "line": 22 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "outcome": "interrupted", "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:05.631Z", "position": { "index": 2, "line": 22 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": {
+              "cause": {
+                "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWJ:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:cancel"
+              },
+              "outcome": "cancelled",
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.631Z", "position": { "index": 3, "line": 22 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWF:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:send",
+              "outcome": "handled",
+              "turnId": "turn_2"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.631Z", "position": { "index": 4, "line": 22 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWJ:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:cancel",
+              "outcome": "applied"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.631Z", "position": { "index": 5, "line": 22 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWK:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:reset",
+              "source": { "control": "reset" }
+            },
+            "meta": { "at": "2026-10-27T07:43:05.733Z", "position": { "index": 0, "line": 23 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWK:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:reset",
+              "outcome": "applied"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.733Z", "position": { "index": 1, "line": 23 } }
+          },
+          {
+            "type": "session.ended",
+            "data": {
+              "cause": {
+                "deliveryId": "agent-session:wrun_01M5Y502CW1G38ABJAFD89G7DZ:step_01M5Y502CWP3B10BPBC84P2VWK:wrun_01M5Y502GE4YSB1RRPECFPGKZ7:reset"
+              },
+              "outcome": "completed"
+            },
+            "meta": { "at": "2026-10-27T07:43:05.733Z", "position": { "index": 2, "line": 23 } }
+          }
+        ],
+        "clock": {
+          "receivedAt": [
+            1793086985589, 1793086985589, 1793086985589, 1793086985589, 1793086985589,
+            1793086985589, 1793086985589, 1793086985589, 1793086985589, 1793086985589,
+            1793086985589, 1793086985589, 1793086985589, 1793086985589, 1793086985589,
+            1793086985589, 1793086985589, 1793086985589, 1793086985635, 1793086985635,
+            1793086985635, 1793086985635, 1793086985635, 1793086985635, 1793086985737,
+            1793086985737, 1793086985737
+          ],
+          "sends": []
+        }
       }
     ]
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION } from "#compiler/extension-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
@@ -32,9 +33,9 @@ describe("loadCompiledModuleMapFromAuthoredSource", () => {
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "0.0.0-test",
-          requires: { extension: 1 },
+          formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+          builtWithEve: "0.0.0",
+          contractMajor: 0,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": 'export default { name: "crm" };',
       },

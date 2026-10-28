@@ -93,21 +93,14 @@ function validateConfig(
  * const { apiKey } = extension.config;
  * ```
  *
- * The second argument is retained for source compatibility with compiled extension
- * declarations; instance bindings come from the loaded module graph, not its value.
  */
-export function defineExtension<const S extends StandardSchemaV1>(
-  options: { readonly config: S },
-  namespace?: string,
-): ExtensionHandle<S>;
-export function defineExtension(
-  options?: { readonly config?: undefined },
-  namespace?: string,
-): NoConfigExtensionHandle;
-export function defineExtension(
-  options?: { readonly config?: StandardSchemaV1 },
-  _namespace?: string,
-): ExtensionHandle | NoConfigExtensionHandle {
+export function defineExtension<const S extends StandardSchemaV1>(options: {
+  readonly config: S;
+}): ExtensionHandle<S>;
+export function defineExtension(options?: { readonly config?: undefined }): NoConfigExtensionHandle;
+export function defineExtension(options?: {
+  readonly config?: StandardSchemaV1;
+}): ExtensionHandle | NoConfigExtensionHandle {
   const schema = options?.config;
   let bound: Record<string, unknown> | undefined;
   const handle = ((values?: unknown): MountedExtension => {

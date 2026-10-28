@@ -383,6 +383,7 @@ describe("refreshSessionFromTurnAgent", () => {
           ...session.compaction,
           lastKnownInputTokens: 321,
           lastKnownPromptMessageCount: 7,
+          requestEnvelopeTokens: 42,
         },
       },
       turnAgent: createTestTurnAgent({
@@ -393,9 +394,20 @@ describe("refreshSessionFromTurnAgent", () => {
     expect(refreshed.compaction).toEqual({
       lastKnownInputTokens: 321,
       lastKnownPromptMessageCount: 7,
+      requestEnvelopeTokens: 42,
       recentWindowSize: 10,
       threshold: 100_000,
       thresholdPercent: 0.5,
+    });
+    const restored = hydrateDurableSession({
+      durable: structuredClone(projectToDurableSession(refreshed)),
+      turnAgent: createTestTurnAgent({ model: { contextWindowTokens: 400_000, id: "new-model" } }),
+    });
+    expect(restored.compaction).toMatchObject({
+      lastKnownInputTokens: 321,
+      lastKnownPromptMessageCount: 7,
+      requestEnvelopeTokens: 42,
+      threshold: 360_000,
     });
   });
 

@@ -985,8 +985,16 @@ describe("application Nitro creation", () => {
 
     await mkdir(importedModulesDir, { recursive: true });
     await Promise.all([
-      writeFile(stepModulePath, 'export const step = "step";\n'),
-      writeFile(bootstrapModulePath, 'export const bootstrap = "bootstrap";\n'),
+      writeFile(
+        stepModulePath,
+        `export const step = "step";
+`,
+      ),
+      writeFile(
+        bootstrapModulePath,
+        `export const bootstrap = "bootstrap";
+`,
+      ),
       writeFile(
         join(workflowBuildDir, "steps.mjs"),
         [

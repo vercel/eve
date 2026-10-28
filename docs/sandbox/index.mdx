@@ -26,7 +26,7 @@ export default defineTool({
 });
 ```
 
-Relative paths resolve from the workspace root, and `sandbox.resolvePath(".")` returns its absolute path. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
+Relative paths resolve from the workspace root, and `sandbox.resolvePath(".")` returns its absolute path. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process. Pass `stdin: true` to get a writable `stdin` stream on the process, for example to talk to a stdio server; closing it sends EOF. The Vercel and Docker sandboxes support it.
 
 Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, set `AI_AGENT` in the environment's `env` option or pass it in the `env` of one `run()` or `spawn()` call.
 
@@ -167,6 +167,10 @@ To run sandboxes on a backend eve does not ship, define a provider with `defineS
 | [Vercel](/docs/sandbox/vercel)       | Persistent Vercel Sandboxes, prepared snapshots, domain network policies, and Drive mounts. |
 | [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
 | [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
+
+For SDK-specific just-bash commands or filesystem factories, use `JustBashSandbox.environment()`
+from `eve/sandbox/just-bash`. `DefaultSandbox` keeps only `autoInstall` and `prepare` for its
+just-bash fallback.
 
 ## Lifecycle
 

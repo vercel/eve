@@ -92,7 +92,7 @@ export async function installProductionRegistryItem(input: {
     let probe: Awaited<ReturnType<typeof input.sandbox.run>>;
     try {
       probe = await input.sandbox.run({
-        abortSignal: input.signal,
+        signal: input.signal,
         command: isolatedCommand(
           applicationRoot,
           `${quote(executable)} add ${quote(input.address)} --non-interactive --skip-install`,
@@ -134,7 +134,7 @@ export async function installProductionRegistryItem(input: {
   try {
     const command = `${quote(executable)} add ${quote(input.address)} --non-interactive ${input.installed === true ? "--skip-install " : ""}${answerArgs.map(quote).join(" ")}`;
     const result = await input.sandbox.run({
-      abortSignal: input.signal,
+      signal: input.signal,
       command: isolatedCommand(applicationRoot, command),
     });
     const event = readTerminalHeadlessEvent(
@@ -228,7 +228,7 @@ export async function locatePackageManagerRoot(
   signal?: AbortSignal,
 ): Promise<PackageRoot | undefined> {
   const result = await sandbox.run({
-    abortSignal: signal,
+    signal: signal,
     command: `root=${quote(applicationRoot)}; repository=${quote(repositoryRoot)}; while :; do if test -f "$root/pnpm-lock.yaml"; then printf 'pnpm\\t%s' "$root"; exit 0; fi; if test -f "$root/package-lock.json"; then printf 'npm\\t%s' "$root"; exit 0; fi; test "$root" = "$repository" && exit 0; root=\${root%/*}; done`,
   });
   if (result.exitCode !== 0) throw new Error("Could not inspect the proposal package workspace.");
@@ -258,7 +258,7 @@ async function locateEveExecutable(
     `${packageRoot}/node_modules/.bin/eve`,
   ];
   const result = await sandbox.run({
-    abortSignal: signal,
+    signal: signal,
     command: `for executable in ${candidates.map(quote).join(" ")}; do if test -x "$executable"; then printf '%s' "$executable"; exit 0; fi; done`,
   });
   if (result.exitCode !== 0) throw new Error("Could not inspect the checkout's eve executable.");
@@ -299,7 +299,7 @@ async function runChecked(
   command: string,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  return (await sandbox.run({ abortSignal: signal, command })).exitCode === 0;
+  return (await sandbox.run({ signal: signal, command })).exitCode === 0;
 }
 function isolatedCommand(cwd: string, command: string): string {
   return `env -i HOME=/tmp/eve-selfmod-home PATH=${SAFE_PATH} CI=1 npm_config_ignore_scripts=true sh -c ${quote(`cd ${quote(cwd)} && ${command}`)}`;

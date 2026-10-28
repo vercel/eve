@@ -43,7 +43,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +52,7 @@ import { onVendoredDependencyLog } from "../../src/internal/bundler/vendored-dep
 
 const declarationsDir = fileURLToPath(new URL("./declarations/", import.meta.url));
 const require = createRequire(import.meta.url);
+const ts = createRequire(require.resolve("@microsoft/api-extractor/package.json"))("typescript");
 
 // ───────────────────────────────────────────────────────────────────────────
 // Per-package authoring API
@@ -105,9 +106,9 @@ export async function loadDeclaration(relativePath) {
  * `declarationRoot` changes the package-relative source directory when
  * declarations live outside `dist`.
  *
- * `discoverExtraFiles` is consulted for chunk files the upstream `.d.ts`
- * references by relative path (e.g. chat's `./jsx-runtime-<hash>.d.ts`).
- * Each returned filename is co-copied verbatim into the destination.
+ * Relative declaration imports are followed recursively, including hashed chunks,
+ * and receive the same external rewrite rules as the entry declarations.
+ * `discoverExtraFiles` can additionally copy non-declaration assets verbatim.
  */
 export function createDeclarationCopier({
   declarationRoot = "dist",
@@ -125,12 +126,61 @@ export function createDeclarationCopier({
           ? files
           : [{ source: "index.d.ts", output: "index.d.ts" }];
 
-    const declarations = await Promise.all(
-      declarationFiles.map(async (file) => ({
-        ...file,
-        sourceText: await readFile(join(distDir, file.source), "utf8"),
-      })),
-    );
+    const declarations = [];
+    const queued = new Map(declarationFiles.map((file) => [file.source, file]));
+    const extras = typeof discoverExtraFiles === "function" ? discoverExtraFiles(distEntries) : [];
+    for (const file of extras.filter((file) => /\.d\.[cm]?ts$/u.test(file))) {
+      if (!queued.has(file)) queued.set(file, { source: file, output: file });
+    }
+    for (const file of queued.values()) {
+      const sourceText = await readFile(join(distDir, file.source), "utf8");
+      declarations.push({ ...file, sourceText });
+      for (const specifier of collectRelativeDeclarationReferences(sourceText)) {
+        const candidates = /\.d\.[cm]?ts$/u.test(specifier)
+          ? [specifier]
+          : /\.[cm]?js$/u.test(specifier)
+            ? [
+                specifier
+                  .replace(/\.js$/u, ".d.ts")
+                  .replace(/\.mjs$/u, ".d.mts")
+                  .replace(/\.cjs$/u, ".d.cts"),
+              ]
+            : [`${specifier}.d.ts`, `${specifier}/index.d.ts`];
+        let resolved;
+        for (const candidate of candidates) {
+          const source = posix.normalize(posix.join(posix.dirname(file.source), candidate));
+          if (source.startsWith("../") || posix.isAbsolute(source)) {
+            throw new Error(
+              `Vendor: declaration ${file.source} escapes ${declarationRoot}: ${specifier}`,
+            );
+          }
+          try {
+            if ((await stat(join(distDir, source))).isFile()) {
+              resolved = source;
+              break;
+            }
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+        }
+        if (resolved === undefined) {
+          throw new Error(
+            `Vendor: ${packageInfo.packageJson.name}'s declaration ${file.source} imports missing declaration ${specifier}`,
+          );
+        }
+        if (!queued.has(resolved)) {
+          queued.set(resolved, {
+            source: resolved,
+            output: posix.normalize(
+              posix.join(
+                posix.dirname(file.output),
+                posix.relative(posix.dirname(file.source), resolved),
+              ),
+            ),
+          });
+        }
+      }
+    }
     const externals = mergeExternalDeclarationImports(
       declarations.map((declaration) => declaration.sourceText),
     );
@@ -183,17 +233,44 @@ export function createDeclarationCopier({
       }),
     );
 
-    if (typeof discoverExtraFiles === "function") {
-      const extras = discoverExtraFiles(distEntries);
+    if (extras.length > 0) {
       await Promise.all(
-        extras.map(async (file) => {
-          const outputPath = join(destinationRoot, file);
-          await mkdir(dirname(outputPath), { recursive: true });
-          await copyFile(join(distDir, file), outputPath);
-        }),
+        extras
+          .filter((file) => !/\.d\.[cm]?ts$/u.test(file))
+          .map(async (file) => {
+            const outputPath = join(destinationRoot, file);
+            await mkdir(dirname(outputPath), { recursive: true });
+            await copyFile(join(distDir, file), outputPath);
+          }),
       );
     }
   };
+}
+
+function collectRelativeDeclarationReferences(source) {
+  const file = ts.createSourceFile("declarations.d.ts", source, ts.ScriptTarget.Latest, true);
+  const references = new Set(
+    file.referencedFiles.map(({ fileName }) =>
+      fileName.startsWith(".") ? fileName : `./${fileName}`,
+    ),
+  );
+  function visit(node) {
+    let specifier;
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      specifier = node.moduleSpecifier;
+    else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument))
+      specifier = node.argument.literal;
+    else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    )
+      specifier = node.moduleReference.expression;
+    if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("."))
+      references.add(specifier.text);
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  return references;
 }
 
 function mergeExternalDeclarationImports(sources) {
@@ -247,7 +324,7 @@ export function collectExternalDeclarationImports(source) {
     !moduleName.startsWith(".") &&
     !moduleName.startsWith("/") &&
     !moduleName.startsWith("#") &&
-    !moduleName.startsWith("node:");
+    !isBuiltin(moduleName);
 
   const addName = (moduleName, name) => {
     if (!isExternal(moduleName)) {
@@ -301,6 +378,21 @@ export function collectExternalDeclarationImports(source) {
     addName(match[1]);
   }
 
+  const file = ts.createSourceFile("declarations.d.ts", source, ts.ScriptTarget.Latest, true);
+  function visit(node) {
+    if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteral(node.argument.literal)
+    ) {
+      let qualifier = node.qualifier;
+      while (qualifier && ts.isQualifiedName(qualifier)) qualifier = qualifier.left;
+      addName(node.argument.literal.text, qualifier?.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+
   return result;
 }
 
@@ -316,7 +408,11 @@ export function rewriteImportSource(source, moduleName, replacement) {
     .replaceAll(new RegExp(`from '${escaped}'`, "g"), `from '${replacement}'`)
     .replaceAll(new RegExp(`from "${escaped}"`, "g"), `from "${replacement}"`)
     .replaceAll(new RegExp(`import '${escaped}'`, "g"), `import '${replacement}'`)
-    .replaceAll(new RegExp(`import "${escaped}"`, "g"), `import "${replacement}"`);
+    .replaceAll(new RegExp(`import "${escaped}"`, "g"), `import "${replacement}"`)
+    .replaceAll(
+      new RegExp(`import\\s*\\(\\s*(["'])${escaped}\\1\\s*\\)`, "g"),
+      `import("${replacement}")`,
+    );
 }
 
 /**

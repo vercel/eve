@@ -78,7 +78,7 @@ export async function inspectVerifiedRemoteAgent(input: {
     ...verified.options,
     auth: { vercelOidc: { token: authentication.resolveToken } },
     headers: input.headers,
-    host: input.serverUrl,
+    baseUrl: input.serverUrl,
     redirect: "manual",
   };
   return inspection(

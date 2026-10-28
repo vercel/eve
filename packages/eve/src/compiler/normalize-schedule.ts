@@ -45,9 +45,9 @@ export function compileScheduleDefinition(
   };
 
   const withMarkdown =
-    definition.markdown === undefined
+    definition.content === undefined
       ? compiled
-      : { ...compiled, markdown: definition.markdown.trim() };
+      : { ...compiled, markdown: definition.content.trim() };
 
   return source.sourceKind === "module"
     ? { ...withMarkdown, sourceKind: "module" }

@@ -202,7 +202,9 @@ eve add tool/web_search
 ```
 
 ```ts title="agent/tools/web_search.ts"
-export { default } from "eve/tools/web_search";
+import { webSearch } from "eve/tools/web_search";
+
+export default webSearch({ provider: "exa" });
 ```
 
 Override the provider-managed configuration for AI Gateway:
@@ -340,7 +342,7 @@ Entries the agent declares count from the session's first step. An entry a dynam
 - `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes. A connection tool call the server doesn't answer within 5 minutes is cancelled and fails with an error such as `"linear" did not answer list_issues within 5 minutes. It may still have run, so check before you retry.` The server may finish the call after eve stops waiting, so a tool that changes data may already have made the change.
 - `eve__skill({ name })` loads the named skill, deferred or not, and returns its instructions. An unknown name fails with the closest skill names, a tool's name fails with a reminder to call it with `eve__tool` or directly, and a name that matches a connection says to find its tools with `eve__search({ query: "<connection>__" })`.
 
-After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load reports a `load-skill` action and a `load-skill-result`, both with the skill's `name`, and an `execute_tool eve:load-skill` span. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
+After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load publishes `call.requested` with `capability: { kind: "skill", name }`, followed by `call.settled` for its outcome. Approval policies, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
 
 eve tells the model what it can reach in an append-only context message rather than in the system prompt: which kinds of deferred entries exist, up to 20 namespaces (the first `__` segment of deferred names, such as `sre` for `sre__list_alerts`), and up to 20 connections with their descriptions. It never names a deferred entry, so deferred entries stay out of context until `eve__search` finds them. A later step appends the listing again only when that changes; a deferred entry added to a listed namespace, or without one, changes nothing. After the session first reaches each kind of entry, adding or removing entries, signing in, or resolving more dynamic connections doesn't change the catalog tools, so the cached prompt prefix holds.
 
@@ -350,8 +352,8 @@ The tools eve adds itself all live in the `eve` namespace: `eve__search`, `eve__
 
 eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Like every `eve__` name, both are reserved.
 
-- `eve__task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the stream reports `turn.waiting` for the open turn. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
-- `eve__task_cancel({ taskId })` stops a task's current work and says so, or says the task had no work to stop when it already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task fails with `UNKNOWN_TASK`. A resumable task stays available after a cancel.
+- `eve__task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the turn stays running rather than pausing, since `turn.paused` only reports interactions. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
+- `eve__task_cancel({ taskId })` stops a task's current work and says so, or says the task had no work to stop when it already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
@@ -372,7 +374,7 @@ eve add tool/ask_question
 ```ts title="agent/tools/ask_question.ts"
 import { askQuestion } from "eve/tools/ask_question";
 
-export default askQuestion();
+export default askQuestion;
 ```
 
 `ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the first open request and the message matches an option or the question allows free text; see [Several requests at once](/docs/human-in-the-loop#several-requests-at-once). A steering message that doesn't answer it withdraws the question: `ask_question` resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a [markdown schedule](/docs/schedules#markdown-form-fire-and-forget), the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
@@ -405,7 +407,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `glob
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file, which accepts the same paths as `read_file`. Add it:
+`grep` searches file contents inside the sandbox workspace with a regular expression. It searches the workspace root unless the model passes a directory or file inside the workspace. It is also the implementation of the code extension's `code__grep` tool. Add it:
 
 ```sh
 eve add tool/grep
@@ -429,6 +431,16 @@ export default defineTool({
 
 Remove the file to remove the tool. `disableTool()` is unnecessary because `grep` is not added by default.
 
+Inputs are `pattern`, optional `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit`, and
+`outputMode`. `files_with_matches` is the default and lists paths; `content` returns matching
+lines and `count` returns per-file totals. Identifier-like patterns use literal matching unless
+`literal: false` is explicit. The default limit is 50 rows, capped at 200, with additional byte
+and line bounds. Relative paths resolve against the workspace root; `$HOME` paths, parent traversal, and symlinks
+outside it are rejected. Ripgrep respects `.gitignore`; the POSIX fallback does not.
+
+Results contain `content`, `matchCount`, `outputMode`, `path`, and `truncated`. Use
+`outputMode: "content"` to return matching lines.
+
 ### `no_reply`
 
 `no_reply` ends the turn without a reply. Use it when a scheduled check finds nothing to report, or when an action the agent already took is the whole answer. The model calls it with an optional `{ reason }`, which stays in the session history and traces and is never sent. The turn completes without a final message, so channels and schedule sends post nothing, and later turns see that the agent chose to stay quiet. Add it:
@@ -440,7 +452,7 @@ eve add tool/no_reply
 ```ts title="agent/tools/no_reply.ts"
 import { noReply } from "eve/tools/no_reply";
 
-export default noReply();
+export default noReply;
 ```
 
 `no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
@@ -458,7 +470,7 @@ eve add tool/sleep
 ```ts title="agent/tools/sleep.ts"
 import { sleep } from "eve/tools/sleep";
 
-export default sleep();
+export default sleep;
 ```
 
 Customize it by wrapping the framework definition:
@@ -468,7 +480,7 @@ import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "eve/tools/sleep";
 
 export default defineWorkflowTool({
-  ...sleep(),
+  ...sleep,
   description: "Pause before checking an external operation again.",
 });
 ```

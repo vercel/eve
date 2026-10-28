@@ -1,4 +1,4 @@
-import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type {
   EveEval,
   EveEvalResult,
@@ -20,7 +20,7 @@ export interface EveEvalStartEvent {
 export interface EveEvalSessionStartEvent extends EveEvalStartEvent {
   readonly primary: boolean;
   readonly sessionId: string;
-  readonly traceContext: RuntimeTraceContext;
+  readonly traceContext: TraceContext;
 }
 
 /** Additional run context delivered with a completed eval result. */

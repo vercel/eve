@@ -25,7 +25,7 @@ export default defineEval({
 
     turn.expectOk();
     const citedUrls = new Set(
-      (turn.message?.match(/https:\/\/[^\s<>"'`)\]]+/gu) ?? [])
+      (turn.reply?.match(/https:\/\/[^\s<>"'`)\]]+/gu) ?? [])
         .map(referenceUrl)
         .filter((url) => url !== undefined),
     );
@@ -61,6 +61,6 @@ export default defineEval({
         },
       })
       .label("search returns the MDN flatMap reference and the final answer cites it");
-    turn.noFailedActions();
+    turn.noFailedCalls();
   },
 });

@@ -15,7 +15,10 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
-import { readSessionEventStream } from "#execution/session-event-stream.js";
+import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { encodeLine } from "#protocol/session-events/envelope.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -26,16 +29,8 @@ import {
 } from "#internal/testing/session-inbox-workflow.js";
 import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
-import {
-  createMessageCompletedEvent,
-  createMessageReceivedEvent,
-  createSessionStartedEvent,
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
-  type SessionPredecessor,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
-import { transcriptReducer, type TranscriptData } from "#client/transcript-reducer.js";
+import { type SessionPredecessor } from "#protocol/session-events/families/session.js";
+import { transcriptOf, type TranscriptData } from "#client/transcript.js";
 import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -101,9 +96,10 @@ async function waitForReceivedMessages(sessionId: string, expected: readonly str
     while (pending.size > 0) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.type === "message.received") {
+      if (value.type === "delivery.consumed") {
+        const text = value.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
         for (const message of pending) {
-          if (value.data.message.includes(message)) pending.delete(message);
+          if (text.some((part) => part.includes(message))) pending.delete(message);
         }
       }
     }
@@ -127,15 +123,16 @@ async function readSessionStarted(sessionId: string) {
   }
 }
 
-/** Appends events to a parked session's stream, as its earlier build recorded them. */
+/** Appends v26 events to a parked session's stream, one per line, as its earlier build recorded them. */
 async function recordHistory(
   sessionId: string,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly Record<string, unknown>[],
 ): Promise<void> {
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   try {
-    for (const event of events) {
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+    for (const [index, event] of events.entries()) {
+      const meta = { at: "2026-10-01T00:00:00.000Z", id: `evt_${String(index)}` };
+      await writer.write(new TextEncoder().encode(`${JSON.stringify({ ...event, meta })}\n`));
     }
   } finally {
     writer.releaseLock();
@@ -144,16 +141,22 @@ async function recordHistory(
 
 const TURN = { sequence: 0, turnId: "turn_0" };
 
-/** A short conversation the stranded session recorded before the upgrade. */
-const OFFSITE_HISTORY: readonly UnstampedMessageStreamEvent[] = [
-  createSessionStartedEvent(),
-  createMessageReceivedEvent({ ...TURN, message: "Alice asks for help planning the offsite." }),
-  createMessageCompletedEvent({
-    ...TURN,
-    finishReason: "stop",
-    message: "Here is a draft agenda for the offsite.",
-    stepIndex: 0,
-  }),
+/** A short conversation the stranded session recorded before the upgrade, in v26 events. */
+const OFFSITE_HISTORY: readonly Record<string, unknown>[] = [
+  { data: {}, type: "session.started" },
+  {
+    data: { ...TURN, message: "Alice asks for help planning the offsite." },
+    type: "message.received",
+  },
+  {
+    data: {
+      ...TURN,
+      finishReason: "stop",
+      message: "Here is a draft agenda for the offsite.",
+      stepIndex: 0,
+    },
+    type: "message.completed",
+  },
 ];
 
 /** A fresh session claims its address after `createSession` returns. */
@@ -185,7 +188,10 @@ function httpAddress(runtime: Runtime, continuationToken: string) {
 
 async function resetSession(runtime: Runtime, sessionId: string | undefined): Promise<void> {
   if (sessionId === undefined) return;
-  await runtime.dispatchSession({ command: { kind: "reset" }, sessionId });
+  await runtime.dispatchSession({
+    command: { deliveryId: "reset-delivery", kind: "reset" },
+    sessionId,
+  });
   // Keep the World through shutdown without reading result data, which may already have expired.
   await vi.waitFor(async () => {
     expect(["completed", "cancelled", "failed"]).toContain(await getRun(sessionId).status);
@@ -208,35 +214,37 @@ describe("stranded sessions", () => {
           "Alice asks for the weekly summary after the upgrade.",
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
         await expect(waiting).resolves.toMatchObject({
           done: false,
           value: {
-            type: "session.failed",
+            type: "session.ended",
             data: {
-              code: "session_stranded",
-              details: { trigger: "message" },
-              message: "This session is no longer available.",
-              sessionId: anchor.runId,
+              cause: { policy: "stranded-message" },
+              error: { code: "session_stranded", message: "This session is no longer available." },
+              outcome: "failed",
             },
           },
         });
         await expect(reader.read()).resolves.toMatchObject({ done: true });
-        expect(fresh.id).not.toBe(anchor.runId);
+        expect(fresh.sessionId).not.toBe(anchor.runId);
         // The runtime started the successor itself; the channel started nothing.
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("cancelled");
         await expect(anchor.status).resolves.toBe("cancelled");
-        await waitForHook({ runId: fresh.id }, { token: sessionInboxHookToken(continuationToken) });
+        await waitForHook(
+          { runId: fresh.sessionId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.id,
+          sessionId: fresh.sessionId,
         });
         await expect(
-          waitForReceivedMessages(fresh.id, ["Alice asks for the weekly summary"]),
+          waitForReceivedMessages(fresh.sessionId, ["Alice asks for the weekly summary"]),
         ).resolves.toEqual([]);
         // The successor names the session it replaced.
-        const started = await readSessionStarted(fresh.id);
+        const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
         // A remote job can finish after replacement. Its fixed parent inbox
         // must not route the result into the new conversation.
@@ -268,7 +276,7 @@ describe("stranded sessions", () => {
         );
         expect(callback.status).toBe(404);
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.id,
+          sessionId: fresh.sessionId,
         });
 
         const resets = logs.records.filter((record) => record.message === "Reset stranded session");
@@ -304,11 +312,11 @@ describe("stranded sessions", () => {
           { context: ["Alice moved the standup to Thursday."] },
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
-        expect(fresh.id).not.toBe(stranded.runId);
+        expect(fresh.sessionId).not.toBe(stranded.runId);
         await expect(stranded.status).resolves.toBe("cancelled");
-        await expect(waitForAliasOwner(runtime, continuationToken)).resolves.toBe(fresh.id);
+        await expect(waitForAliasOwner(runtime, continuationToken)).resolves.toBe(fresh.sessionId);
       } finally {
         await cancelIfActive(stranded);
         await resetSession(runtime, freshSessionId);
@@ -331,7 +339,7 @@ describe("stranded sessions", () => {
         ]);
         freshSessionId = await waitForAliasOwner(runtime, continuationToken);
 
-        expect(candidates.map((session) => session.id)).toContain(freshSessionId);
+        expect(candidates.map((session) => session.sessionId)).toContain(freshSessionId);
         expect(freshSessionId).not.toBe(stranded.runId);
         await expect(stranded.status).resolves.toBe("cancelled");
         await expect(
@@ -394,15 +402,136 @@ describe("stranded sessions", () => {
       try {
         // Clear keeps the session, which cannot run, so the caller must choose reset.
         await expect(
-          runtime.dispatchSession({ command: { kind: "clear" }, sessionId: stranded.runId }),
+          runtime.dispatchSession({
+            command: { deliveryId: "clear-delivery", kind: "clear" },
+            sessionId: stranded.runId,
+          }),
         ).rejects.toBeInstanceOf(SessionStrandedError);
         await expect(stranded.status).resolves.toBe("running");
 
+        const reader = readSessionEventStream(stranded.runId).getReader();
+        const admitted = reader.read();
         await expect(
-          runtime.dispatchSession({ command: { kind: "reset" }, sessionId: stranded.runId }),
+          runtime.dispatchSession({
+            command: { deliveryId: "reset-delivery", kind: "reset" },
+            sessionId: stranded.runId,
+          }),
         ).resolves.toEqual({ previousSessionId: stranded.runId, status: "reset" });
+        await expect(admitted).resolves.toMatchObject({
+          value: {
+            type: "delivery.admitted",
+            data: { deliveryId: "reset-delivery", source: { control: "reset" } },
+          },
+        });
+        await expect(reader.read()).resolves.toMatchObject({
+          value: {
+            type: "delivery.settled",
+            data: { deliveryId: "reset-delivery", outcome: "applied" },
+          },
+        });
+        await expect(reader.read()).resolves.toMatchObject({
+          value: {
+            type: "session.ended",
+            data: { cause: { deliveryId: "reset-delivery" } },
+          },
+        });
+        await reader.cancel();
         await expect(stranded.status).resolves.toBe("cancelled");
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
+      } finally {
+        await cancelIfActive(stranded);
+      }
+    });
+  });
+
+  it("fails a reset before cancelling when the history read stalls", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-stalled-read" } });
+    await test.run(async () => {
+      const continuationToken = "http:stranded-session-stalled-read";
+      const stranded = await parkStrandedOwner(continuationToken);
+      const runtime = channelRuntime();
+      const world = await getWorld();
+      const getInfo = world.streams.getInfo.bind(world.streams);
+      let stalled!: () => void;
+      const reached = new Promise<void>((resolve) => (stalled = resolve));
+      const stall = vi.spyOn(world.streams, "getInfo").mockImplementation((runId, name) => {
+        if (runId !== stranded.runId) return getInfo(runId, name);
+        stalled();
+        return new Promise(() => {});
+      });
+      vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const reset = runtime.dispatchSession({
+          command: { deliveryId: "reset-delivery", kind: "reset" },
+          sessionId: stranded.runId,
+        });
+        const outcome = expect(reset).rejects.toThrow(
+          `Timed out reading the history of stranded session "${stranded.runId}". Nothing was ended; retry the request.`,
+        );
+        await reached;
+        await vi.advanceTimersByTimeAsync(30_000);
+        await outcome;
+        vi.useRealTimers();
+        stall.mockRestore();
+
+        await expect(stranded.status).resolves.toBe("running");
+        const types: string[] = [];
+        for await (const event of streamSessionEvents(stranded.runId, { follow: false })) {
+          types.push(event.type);
+        }
+        expect(types).not.toContain("session.ended");
+
+        await expect(resetSession(runtime, stranded.runId)).resolves.toBeUndefined();
+        await expect(stranded.status).resolves.toBe("cancelled");
+      } finally {
+        vi.useRealTimers();
+        stall.mockRestore();
+        await cancelIfActive(stranded);
+      }
+    });
+  });
+
+  it("closes the turn and interaction a reset leaves open before the session ends", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-cascade" } });
+    await test.run(async () => {
+      const stranded = await parkStrandedOwner("http:stranded-session-cascade");
+      const runtime = channelRuntime();
+      try {
+        const waiting: SessionEvent[] = [
+          { data: { deliveryId: "d0" }, type: "delivery.admitted" },
+          {
+            data: { cause: { deliveryId: "d0" }, follows: null, turnId: "turn_0" },
+            scope: { turnId: "turn_0" },
+            type: "turn.started",
+          },
+          {
+            data: {
+              interactionId: "question-1",
+              request: { kind: "question", prompt: "Which room should Alice book?" },
+              subject: { turnId: "turn_0" },
+            },
+            scope: { turnId: "turn_0" },
+            type: "interaction.opened",
+          },
+        ];
+        const writer = getRun(stranded.runId).getWritable<Uint8Array>().getWriter();
+        await writer.write(
+          new TextEncoder().encode(encodeLine({ at: "2026-10-01T00:00:00.000Z", facts: waiting })),
+        );
+        writer.releaseLock();
+
+        await resetSession(runtime, stranded.runId);
+
+        const view = emptySessionView();
+        const types: string[] = [];
+        for await (const event of streamSessionEvents(stranded.runId, { follow: false })) {
+          foldReceivedEvent(view, event);
+          types.push(event.type);
+        }
+        expect(types.at(-1)).toBe("session.ended");
+        expect(view.session.status).toBe("ended");
+        expect(view.turns.turn_0).toMatchObject({ outcome: "cancelled", status: "settled" });
+        expect(view.interactions["question-1"]?.status).not.toBe("open");
       } finally {
         await cancelIfActive(stranded);
       }
@@ -447,7 +576,7 @@ describe("stranded sessions", () => {
         const refusal = await httpAddress(runtime, "stranded-session-responses")
           .deliver(
             {
-              inputResponses: [{ optionId: "approve", requestId: "request_1" }],
+              answers: [{ optionId: "approve", interactionId: "request_1" }],
               message: "Alice approves the deploy and adds a note.",
             },
             { auth: null },
@@ -479,7 +608,7 @@ describe("stranded sessions", () => {
           { auth: null },
         );
 
-        expect(session.id).toBe(owner.runId);
+        expect(session.sessionId).toBe(owner.runId);
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("running");
       } finally {
@@ -528,7 +657,7 @@ describe("stranded sessions", () => {
           "Alice asks to move the offsite to Friday.",
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
         await expect(reads.wait()).resolves.toEqual([
           {
@@ -561,30 +690,25 @@ async function transcriptReadingRuntime(name: string) {
       {
         logicalPath: "instructions/replaced-conversation.ts",
         loadNamespace: async () => ({
-          default: defineDynamic({
-            events: {
-              "session.started": async (_event, ctx) => {
-                const predecessor = ctx.session.predecessor;
-                if (predecessor === undefined) return null;
-                const reducer = transcriptReducer({ maxMessages: 40 });
-                let transcript = reducer.initial();
-                for await (const event of sessions.attach(predecessor.sessionId).stream({
-                  follow: false,
-                  startIndex: -2000,
-                })) {
-                  transcript = reducer.reduce(transcript, event);
-                }
-                recorded.push({ ...transcript, predecessor });
-                return transcript.messages.length === 0
-                  ? null
-                  : defineInstructions({
-                      content: transcript.messages
-                        .map((message) => JSON.stringify(message))
-                        .join("\n"),
-                      role: "user",
-                    });
-              },
-            },
+          default: defineDynamic(async (ctx) => {
+            const predecessor = ctx.session.predecessor;
+            if (predecessor === undefined) return null;
+            // The predecessor's transcript is read once, and joins the conversation once.
+            const messages = await ctx.memo(predecessor.sessionId, async () => {
+              const events = [];
+              for await (const event of sessions.attach(predecessor.sessionId).stream({
+                follow: false,
+                startIndex: -2000,
+              })) {
+                events.push(event);
+              }
+              const transcript = transcriptOf(events, { maxMessages: 40 });
+              recorded.push({ ...transcript, predecessor });
+              return transcript.messages.map((message) => JSON.stringify(message));
+            });
+            return messages.length === 0
+              ? null
+              : defineInstructions({ content: messages.join("\n"), role: "user" });
           }),
         }),
       },

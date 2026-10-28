@@ -11,7 +11,7 @@ export default defineEval({
     const turn = await t.send('Reply with exactly the text "score ping" and nothing else.');
     t.succeeded();
 
-    const reply = turn.message ?? "";
+    const reply = turn.reply ?? "";
     t.score({
       score: Math.max(0, 1 - reply.length / 400),
       metadata: { length: reply.length },

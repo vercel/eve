@@ -31,7 +31,7 @@ export default defineEval({
     turn
       .calledTool("web_search", { output: isNativeSearchOutput })
       .label("web_search runs the model vendor's hosted search");
-    turn.noFailedActions();
+    turn.noFailedCalls();
     t.messageIncludes(/developer\.mozilla\.org\/[^\s]*flatMap/iu);
   },
 });

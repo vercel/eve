@@ -1,28 +1,17 @@
-import {
-  experimental_decide as decideWithAiSdk,
-  type Experimental_DecisionModel as DecisionModel,
-  type Experimental_DecisionQuestion as DecisionQuestion,
-} from "ai";
+import { decideWithMetadata } from "#ai/decision-adapter.js";
+import type { DecisionOptions, DecisionQuestion, DecisionResult } from "#ai/decision-types.js";
 
-import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
-import { localGatewayDecisionModel } from "#internal/model-auth/transport.js";
-
-export const DEFAULT_DECISION_MODEL = "typesafe-ai/jev";
-
-/** Decide typed questions about the state you pass to it using eve's model authentication. */
-export function decide<const Questions extends Record<string, DecisionQuestion>>({
-  model = DEFAULT_DECISION_MODEL,
-  ...options
-}: Omit<Parameters<typeof decideWithAiSdk<Questions>>[0], "model"> & {
-  /** Decision model instance or ID. Defaults to TypeSafe Jev. */
-  model?: DecisionModel;
-}) {
-  ensureAiSdkWarningLogger();
-  return decideWithAiSdk({
-    ...options,
-    model:
-      typeof model === "string" && Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") == null
-        ? (localGatewayDecisionModel(model) ?? model)
-        : model,
-  });
+/** Decide typed questions about shared state using eve's model authentication. */
+export async function decide<const Questions extends Readonly<Record<string, DecisionQuestion>>>(
+  options: DecisionOptions<Questions>,
+): Promise<DecisionResult<Questions>> {
+  const result = await decideWithMetadata(options);
+  return {
+    answers: result.answers,
+    usage: {
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      totalTokens: result.usage.totalTokens,
+    },
+  };
 }

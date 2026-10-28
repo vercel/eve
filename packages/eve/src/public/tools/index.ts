@@ -17,24 +17,25 @@ export {
   type ToolModelOutput,
   type ToolModelOutputPart,
 } from "#tools/definition.js";
-export { defineDynamic } from "#dynamic/definition.js";
-export { defineDurableSchema } from "#tools/durable-schema.js";
-export { serializeModelInputSchema } from "#tools/schema.js";
-export { defineDurableCallback } from "#tools/durable-callbacks.js";
+export { defineDynamic } from "#tools/dynamic.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
-export type { DynamicEvents, DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
 export type {
-  DynamicToolEntry,
-  DynamicToolEvents,
-  DynamicToolSet,
-  DynamicToolResult,
-} from "#tools/dynamic.js";
-export { type SessionContext } from "#public/definitions/callback-context.js";
+  DynamicContext,
+  DynamicKey,
+  DynamicModelContext,
+  DynamicSentinel,
+  DynamicTurn,
+  Memo,
+  Occurrence,
+  SessionFrame,
+} from "#dynamic/definition.js";
+export type { DynamicToolEntry, DynamicToolSet, DynamicToolResult } from "#tools/dynamic.js";
 export {
   toolResultFrom,
   type MatchedConnectionResult,
   type MatchedToolResult,
   type ToolResultFromFn,
+  type ToolResultSource,
 } from "#public/tools/result.js";
 
 export {
@@ -56,8 +57,4 @@ export {
   type AgentSessionOptions,
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
-export type {
-  ToolInputRequest,
-  ToolInputRequestOptions,
-  ToolInputResponse,
-} from "#tools/definition.js";
+export type { ToolQuestion, ToolAskOptions, ToolAnswer } from "#tools/definition.js";

@@ -14,7 +14,7 @@ describe("sleep", () => {
   });
 
   it("defines a model-facing tool", () => {
-    const definition = sleep();
+    const definition = sleep;
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toContain("before continuing");
@@ -29,7 +29,7 @@ describe("sleep", () => {
           wake = resolve;
         }),
     );
-    const definition = sleep();
+    const definition = sleep;
     const abortSignal = new AbortController().signal;
     const output = definition.execute({ seconds: 2.5001 }, { abortSignal } as never);
 
@@ -49,7 +49,7 @@ describe("sleep", () => {
       const controller = new AbortController();
       if (timing === "before") controller.abort();
 
-      const output = sleep().execute({ seconds: 600 }, { abortSignal: controller.signal } as never);
+      const output = sleep.execute({ seconds: 600 }, { abortSignal: controller.signal } as never);
       if (timing === "during") controller.abort();
 
       await expect(output).resolves.toEqual({ interrupted: true });

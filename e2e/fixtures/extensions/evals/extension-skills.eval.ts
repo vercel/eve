@@ -18,15 +18,15 @@ export default defineEval({
     );
 
     turn.expectOk();
-    turn.noFailedActions();
-    t.loadedSkill("toolkit__toolkit-guide", { count: 1, output: /# Toolkit triage/u });
+    turn.noFailedCalls();
+    t.calledSkill("toolkit__toolkit-guide", { count: 1, output: /# Toolkit triage/u });
     for (const mount of ["toolkit", "toolkit-alt"]) {
-      t.loadedSkill(`${mount}__incident`, {
+      t.calledSkill(`${mount}__incident`, {
         count: 1,
         output: new RegExp(TOOLKIT_INCIDENT_TOKEN, "u"),
       });
     }
-    t.loadedSkill("local-guide", { count: 1, output: /belongs to the consuming agent/u });
+    t.calledSkill("local-guide", { count: 1, output: /belongs to the consuming agent/u });
     t.messageIncludes(`${TOOLKIT_INCIDENT_TOKEN} ${TOOLKIT_INCIDENT_TOKEN}`);
   },
 });

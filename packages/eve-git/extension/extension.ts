@@ -1,13 +1,13 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-import type { GitHubAuthorize, GitHubConfig } from "./lib/github-shell.ts";
+import type { GitHubAttribution, GitHubAuthorize, GitHubConfig } from "./lib/github-shell.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
 export type { GitHubCoAuthor } from "./lib/github-shell.ts";
 export type { GitHubAuthorize, GitHubAuthorizeRequest } from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
-export type GitHubAttribution = NonNullable<GitHubConfig["attribution"]>;
+export type { GitHubAttribution } from "./lib/github-shell.ts";
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 

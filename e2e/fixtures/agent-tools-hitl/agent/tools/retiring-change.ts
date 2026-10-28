@@ -7,16 +7,13 @@ import { z } from "zod";
  * "retire", for proving an approved call keeps the tools of the step that
  * asked even when a later step would not offer this one.
  */
-export default defineDynamic({
-  events: {
-    "step.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes?.flag === "retire"
-        ? null
-        : defineTool({
-            description: "Apply the retiring fixture change after approval.",
-            inputSchema: z.object({}),
-            approval: always(),
-            execute: () => ({ change: "retiring" }),
-          }),
-  },
-});
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes?.flag === "retire"
+    ? null
+    : defineTool({
+        description: "Apply the retiring fixture change after approval.",
+        inputSchema: z.object({}),
+        approval: always(),
+        execute: () => ({ change: "retiring" }),
+      }),
+);

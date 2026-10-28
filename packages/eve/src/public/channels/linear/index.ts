@@ -2,10 +2,6 @@ export {
   LinearApiError,
   callLinearGraphQL,
   createLinearAgentActivity,
-  createLinearAgentSessionOnComment,
-  createLinearAgentSessionOnIssue,
-  listLinearAgentSessionActivities,
-  updateLinearAgentSession,
   type LinearAgentActivityContent,
   type LinearAgentActivityCreateInput,
   type LinearAgentActivityRecord,
@@ -21,17 +17,11 @@ export {
   type LinearChannelCredentials,
   type LinearWebhookSecret,
 } from "#public/channels/linear/auth.js";
-export { LINEAR_CHANNEL_DEFAULT_ROUTE } from "#public/channels/linear/constants.js";
+
 export { defaultLinearAuth, defaultOnAgentSession } from "#public/channels/linear/defaults.js";
+
 export {
-  linearInputRequestSignal,
-  renderLinearInputRequests,
-} from "#public/channels/linear/hitl.js";
-export {
-  formatLinearContextBlock,
   linearContinuationToken,
-  messageFromLinearAgentSessionEvent,
-  parseLinearWebhookEvent,
   type LinearAgentActivityRef,
   type LinearAgentSessionAction,
   type LinearAgentSessionEvent,
@@ -52,13 +42,8 @@ export {
   type LinearEventContext,
   type LinearHandle,
   type LinearInboundResult,
-  type LinearInboundResultOrPromise,
   type LinearInstrumentationMetadata,
   type LinearReceiveTarget,
   type LinearSessionContext,
 } from "#public/channels/linear/linearChannel.js";
-export {
-  signLinearWebhookBody,
-  type LinearVerifyOptions,
-  type LinearWebhookVerifier,
-} from "#public/channels/linear/verify.js";
+export { type LinearWebhookVerifier } from "#public/channels/linear/verify.js";

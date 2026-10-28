@@ -23,18 +23,18 @@ agent/instrumentation/
   audit.ts  lifecycle instrumentation
 ```
 
-This instrumentation records tool timing and identity without receiving tool
-arguments or results:
+This instrumentation measures the time from a call being requested until it
+settles, including any approval wait, without receiving arguments or results:
 
 ```ts title="agent/instrumentation/audit.ts"
 import { defineInstrumentation } from "eve/instrumentation";
 
 export default defineInstrumentation({
   events: {
-    "tool.call.started": (event, ctx) => {
+    "call.requested": (event, ctx) => {
       ctx.state.set({ name: event.toolName, startedAt: Date.now() });
     },
-    "tool.call.completed": (event, ctx) => {
+    "call.settled": (event, ctx) => {
       const started = ctx.state.get() as { name: string; startedAt: number } | undefined;
       if (started === undefined) return;
 
@@ -76,8 +76,8 @@ export default defineInstrumentation({
     "model.call.started": (event) => {
       console.log("input", event.input);
     },
-    "model.call.completed": (event) => {
-      console.log("output", event.content);
+    "model.call.settled": (event) => {
+      if (event.outcome === "completed") console.log("output", event.content);
     },
   },
 });
@@ -99,8 +99,9 @@ trace. It includes input and output content in these cases:
 
 Return `{ emit: false }` to not sample the trace for this file. Return
 `{ emit: true, recordInputs, recordOutputs }` to choose the two content
-directions explicitly. Inputs include model prompts, tool arguments, channel
-input, and user responses. Outputs include model responses, tool results,
+directions explicitly. Inputs include model prompts, tool arguments, call labels,
+channel input, and user responses. Labels follow the input policy because they can contain
+input-derived text. Outputs include model responses, tool results,
 requests for user input, model provider metadata, and error details. Omitted
 content fields are unavailable to the handler.
 
@@ -123,11 +124,11 @@ export default defineInstrumentation({
     recordOutputs: false,
   }),
   events: {
-    "tool.call.started": async (event) => {
+    "call.requested": async (event) => {
       await sendAuditRecord({
         id: event.idempotencyKey,
         input: redactApiKey(event.input),
-        kind: event.kind,
+        kind: event.capability.kind,
         name: event.toolName,
       });
     },
@@ -151,28 +152,33 @@ Prefer `recordInputs: false` or `recordOutputs: false` when the destination does
 
 ## Lifecycle events
 
-`defineInstrumentation({ events })` supports the following event names. A
-start and its terminal event share an `idempotencyKey`; use it as a stable
-operation key when upserting records across replays.
+Lifecycle events derived from session facts use the same names and outcomes as
+the stream. For example, `turn.settled` carries the turn's `outcome`. Match an
+operation's start and terminal events by their shared `idempotencyKey` when
+upserting records across replays.
 
-| Lifecycle        | Events                                                                                                            | Meaning                                                                                                                                                                                |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session          | `session.started`, `session.waiting`, `session.completed`, `session.failed`                                       | Track a session from creation through suspension or termination. `session.waiting` is resumable; `session.completed` and `session.failed` are terminal.                                |
-| Turn             | `turn.started`, `turn.completed`, `turn.cancelled`, `turn.failed`                                                 | Track one turn. Cancellation is not a failure and commonly leaves the session waiting for another turn.                                                                                |
-| Channel delivery | `channel.delivery.started`, `channel.delivery.completed`, `channel.delivery.cancelled`, `channel.delivery.failed` | Track an inbound channel delivery while eve processes its turn. These events are emitted when the channel provides delivery metadata.                                                  |
-| Step attempt     | `step.attempt.started`, `step.attempt.completed`, `step.attempt.failed`, `step.attempt.metadata`                  | Track each model-step attempt; retries have separate attempts. `step.attempt.metadata` is emitted after a step only when the AI SDK supplies provider metadata.                        |
-| Model call       | `model.call.started`, `model.call.completed`, `model.call.failed`                                                 | Track an individual call to the model provider. Completion includes usage and finish reason; content fields follow the trace policy.                                                   |
-| Tool call        | `tool.call.started`, `tool.call.completed`, `tool.call.failed`                                                    | Track a tool, skill load, local subagent, or remote-agent call through durable settlement. A failed event's `outcome` distinguishes failure, rejection, cancellation, and abandonment. |
-| User input       | `input.requested`, `input.resolved`                                                                               | Track a question, tool approval, or session-limit request and its resolution. The resolution includes an outcome such as `answered`, `approved`, `denied`, or `cancelled`.             |
-| Memory operation | `memory.operation.started`, `memory.operation.completed`, `memory.operation.failed`                               | Track a memory-store search or write. Events include the operation name, phase, and memory slot; completion may include a record count and records.                                    |
+| Lifecycle        | Events                                                 | Meaning                                                                                                                                                                                                          |
+| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session          | `session.started`, `session.ended`                     | Session creation and end. `session.ended.outcome` is `completed` or `failed`.                                                                                                                                    |
+| Turn             | `turn.started`, `turn.settled`                         | Turn work. `outcome` is `completed`, `cancelled`, or `failed`; a cancelled turn is not a failure.                                                                                                                |
+| Delivery         | `delivery.consumed`, `delivery.settled`                | The committed delivery facts. Settlement includes `outcome`: `handled`, `awaiting-input`, `applied`, `ignored`, `refused`, or `failed`. Channel metadata is on consumption when available.                       |
+| Model run        | `model.started`, `model.retried`, `model.settled`      | Each attempt of a model run. `model.retried` ends a failed attempt before another try; `model.settled.outcome` is `completed`, `failed`, `interrupted`, `abandoned`, or `cancelled` when the turn was cancelled. |
+| Provider call    | `model.call.started`, `model.call.settled`             | An individual provider call; one model attempt can make several. Settlement has `outcome: "completed"` or `"failed"`; completion carries usage, finish reason, and optional `providerMetadata`.                  |
+| Call             | `call.requested`, `call.settled`                       | A tool, skill, or agent call, including direct `invokeTool` calls. `capability` identifies its kind and name. Settlement carries `completed`, `failed`, `rejected`, `interrupted`, or `abandoned`.               |
+| User input       | `interaction.opened`, `interaction.settled`            | A question, approval, or budget prompt, keyed by `interactionId`. Settlement includes the interaction's `outcome` and, when recorded, its `answer`.                                                              |
+| Memory operation | `memory.operation.started`, `memory.operation.settled` | A memory search or write, with operation name, phase, and slot. Settlement has `outcome: "completed"` or `"failed"`.                                                                                             |
 
-Each call emits one `tool.call.*` lifecycle to authored providers. SDK execution callbacks do not emit a second lifecycle. Tool calls can remain open across approvals, parked turns, and worker replacement.
+A delivery that pauses for a person settles `awaiting-input`; resumed work belongs to the answer's delivery. OTel attributes a turn to a delivery only when exactly one delivery was consumed. Event `scope` includes session and run coordinates; `turnId` can be absent for compaction or direct calls. Treat `idempotencyKey` as opaque.
 
-For local and remote subagents, `tool.call.completed` and `tool.call.failed` include the child turn's `usage` directly. Token counts are always present when the child reports usage; `usage.costUsd` is present only when the model provider reports a price.
+Use `InstrumentationEvent<"model.call.settled">` from `eve/instrumentation` when typing a
+standalone handler. Model input content is `unknown`: the messages are the provider's request
+messages, not an eve conversation-message schema. Narrow that content before reading it.
 
-When a tool throws and outputs are recorded, `tool.call.failed` carries an `Error` with the thrown error's `name` and `message`, so a provider can classify the failure by `error.name`. It is rebuilt from the durable session record rather than being the object the tool threw, so `instanceof` checks against your own error classes do not match.
+Each call emits one `call.*` lifecycle; SDK callbacks do not duplicate it. A subagent's `call.settled` includes its reported usage. A thrown tool error is reconstructed from the durable record, so don't use `instanceof` to classify it; inspect `error.name` instead.
 
-When upgrading, replace `action.started`, `action.completed`, and `action.failed` handlers with their `tool.call.*` equivalents. Read `event.toolName` instead of `event.name` on start events. The OpenTelemetry trace schema remains version 4.
+When upgrading, use each operation's terminal event and inspect its `outcome` instead of subscribing to separate completion and failure events. See the [v27 event mapping](/docs/concepts/upgrade-to-v27-events#event-mapping). Provider metadata moved to `model.call.settled`. Replace step indices and encoded attempt IDs with `runId` and `attempt`; use `capability` for call kind and name. Channel types and `isChannel` now come from `eve/channels`. Runtime-context resolvers receive `run: { id, attempt }` instead of `step.index`.
+
+The OpenTelemetry trace schema remains version 4: span names, attributes, and span events are unchanged.
 
 Handlers from different files run concurrently and are failure-isolated. Do
 not depend on execution order. Use `flush` to drain buffered records and

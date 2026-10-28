@@ -1,9 +1,18 @@
 import { exportSPKI, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  networkInterfaces: () => ({
+    en0: [{ address: "192.168.1.5", family: "IPv4", internal: false }],
+  }),
+}));
+
 import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-issuer.js";
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import {
@@ -327,8 +336,8 @@ describe("none", () => {
 
 describe("localDev", () => {
   // `localDev()` keys off the deployment (an `eve dev` or `vercel dev`
-  // process), never the inbound request. A spoofable request header such as
-  // `Host` must not be able to authenticate the local-dev principal.
+  // process). A spoofable request header such as `Host` must not be able to
+  // authenticate the local-dev principal; browser headers can only refuse it.
   function requestFor(url: string): Request {
     return new Request(url, { method: "POST" });
   }
@@ -356,6 +365,65 @@ describe("localDev", () => {
     expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
       principalType: "local-dev",
     });
+  });
+
+  it.each([
+    [
+      "a page on another site",
+      "http://127.0.0.1:3000/eve/v1/session",
+      { origin: "https://example.com" },
+    ],
+    ["an opaque origin", "http://127.0.0.1:3000/eve/v1/session", { origin: "null" }],
+    ["a DNS-rebound host name", "http://attacker.example:3000/eve/v1/session/s/stream", {}],
+  ])("refuses %s on an `eve dev` server", (_case, url, headers) => {
+    vi.stubEnv("EVE_DEV", "1");
+    expect(localDev()(new Request(url, { headers, method: "POST" }))).toBeNull();
+  });
+
+  it.each([
+    ["the same loopback host", "http://localhost:3000", "same-site"],
+    ["another loopback host", "http://localhost:3000", "cross-site"],
+  ])("accepts a page on another port of %s", (_case, origin, fetchSite) => {
+    vi.stubEnv("EVE_DEV", "1");
+    const url = fetchSite === "same-site" ? "http://localhost:3001/" : "http://127.0.0.1:3001/";
+    const request = new Request(url, {
+      headers: { origin, "sec-fetch-site": fetchSite },
+      method: "POST",
+    });
+    expect(localDev()(request)).toMatchObject({ principalType: "local-dev" });
+  });
+
+  it.each([
+    ["refuses", "192.168.1.20", null],
+    ["refuses", "2001:db8::20", null],
+    ["accepts", "127.0.0.1", "local-dev"],
+    ["accepts", "::ffff:127.0.0.1", "local-dev"],
+    // `eve dev --host 192.168.1.5`: the developer's own TUI connects from the LAN address.
+    ["accepts", "192.168.1.5", "local-dev"],
+    ["accepts", "::ffff:192.168.1.5", "local-dev"],
+  ])("%s an `eve dev` caller whose socket address is %s", async (_verb, address, principalType) => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "transport-secret");
+    const headers = new Headers();
+    stampDevelopmentClientAddress(headers, address, "transport-secret");
+    const result = await localDev()(
+      new Request("http://localhost:3000/eve/v1/session", { headers }),
+    );
+    expect(result instanceof Response ? result : (result?.principalType ?? null)).toBe(
+      principalType,
+    );
+  });
+
+  it("accepts the developer's own client on `eve dev --host 192.168.1.5`", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "transport-secret");
+    const headers = new Headers({ origin: "http://192.168.1.5:3000" });
+    stampDevelopmentClientAddress(headers, "192.168.1.5", "transport-secret");
+    const request = new Request("http://192.168.1.5:2000/eve/v1/session", {
+      headers,
+      method: "POST",
+    });
+    expect(await localDev()(request)).toMatchObject({ principalType: "local-dev" });
   });
 
   it("rejects a `Host: localhost` request on a production deployment", () => {

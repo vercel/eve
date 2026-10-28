@@ -100,7 +100,7 @@ export default defineConfig({
 
 ## Call the hook
 
-With the plugin in `vite.config.ts`, components call [`useEveAgent`](./overview) from `eve/react` and don't pass a host:
+With the plugin in `vite.config.ts`, components call [`useEveAgent`](./overview) from `eve/react` and don't pass `baseUrl`:
 
 ```tsx title="src/routes/index.tsx"
 import { createFileRoute } from "@tanstack/react-router";
@@ -114,7 +114,7 @@ export const Route = createFileRoute("/")({
 function Chat() {
   const agent = useEveAgent();
   const [draft, setDraft] = useState("");
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isBusy = agent.status === "busy";
   const isInputDisabled = isBusy || agent.status === "resuming";
 
   return (
@@ -127,7 +127,7 @@ function Chat() {
         void agent.send(text);
       }}
     >
-      {agent.data.messages.map((message) => (
+      {agent.messages.map((message) => (
         <article key={message.id}>
           <header>{message.role}</header>
           {message.parts.map((part, index) =>
@@ -170,11 +170,11 @@ eve ships hook bindings for React, Vue, and Svelte. A TanStack Start app that us
   });
   ```
 
-- **Other hosts.** `vite preview` and a self-hosted `node .output/server/index.mjs` don't mount the eve routes. Run the eve service on its own origin and pass `host` directly to `useEveAgent`:
+- **Other hosts.** `vite preview` and a self-hosted `node .output/server/index.mjs` don't mount the eve routes. Run the eve service on its own origin and pass `baseUrl` directly to `useEveAgent`:
 
   ```ts
   const agent = useEveAgent({
-    host: "https://agent.example.com",
+    baseUrl: "https://agent.example.com",
   });
   ```
 

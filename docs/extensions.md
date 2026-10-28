@@ -347,12 +347,13 @@ To retain an extension tool's result type in a consumer hook, import its definit
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
+import { call } from "eve/events";
 import { search } from "@acme/crm/tools";
 
 export default defineHook({
   events: {
-    "action.result"(event) {
-      const match = toolResultFrom(event.data.result, search);
+    "call.settled"(event, ctx) {
+      const match = toolResultFrom(call(ctx.view, event.data.callId), search);
       if (match) console.log(match.output);
     },
   },
@@ -367,7 +368,9 @@ Local `eve dev` also mounts bundled development extensions without creating a pr
 
 ### Compatibility
 
-At build time, eve checks the extension's generated capability metadata. If the extension needs an unsupported capability contract, upgrade eve or install a compatible extension release.
+`eve extension build` records the eve version used to build the extension. When you mount a package, eve checks its distribution before loading extension code. A distribution built with a newer eve release needs that release or later; build with the oldest eve release you want to support and test the same distribution with newer consumers. An unsupported distribution generation needs a rebuilt extension or a compatible release. npm peer ranges do not replace this check.
+
+**Extensions built with the old epoch-based manifest need a rebuild** when you upgrade to the first eve release that uses the new format. Upgrade to a compatible extension release, or rebuild a source-backed workspace extension with that eve release. An installed, source-free extension cannot be rebuilt by the consuming app.
 
 ## What to read next
 

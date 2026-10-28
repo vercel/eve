@@ -2,40 +2,105 @@
 // neither the model nor the tools. Definitions follow durable-harness's
 // /compare page (packages/demo-ui/src/compare-glossary.ts at
 // METRIC_DEFINITIONS.commit in standard.mjs), so a value here means what the
-// same name means there. fixtures/durable-harness/ holds the conformance data.
+// same name means there, except as noted below. fixtures/durable-harness/
+// holds the conformance data.
 //
-// Per-occurrence metrics (per turn, per call, per send) are the attempt's p50,
+// One deliberate difference: /compare subtracts every tool's full duration,
+// so time that concurrent tools share is subtracted once per tool, and a
+// turn's overhead can go negative. Here concurrent tools count once
+// (the time at least one was running), and tool hops are measured per batch
+// (the calls one model step requested), since the next model call waits for
+// the whole batch. For a single tool both give the same value. A compaction's
+// summary run is model work, so compaction time is overhead in none of them.
+//
+// Per-occurrence metrics (per turn, step, batch, or send) are the attempt's p50,
 // with `count` and the raw `samples` so quantiles can be recomputed across
 // attempts. An occurrence the definition does not cover (a tool that ended
 // its turn has no next model call) is left out, never estimated.
-import { notApplicable, selectEvents, timestamp, unavailable } from "./measurements/events.mjs";
-import { hopStart } from "./measurements/marks.mjs";
+import {
+  eventKey,
+  notApplicable,
+  selectEvents,
+  timestamp,
+  unavailable,
+} from "./measurements/events.mjs";
+import { coveredLengthBetween } from "./measurements/intervals.mjs";
+import { hopStart, toolBatches } from "./measurements/marks.mjs";
+
+const spans = (tools) => tools.map((tool) => ({ startAt: tool.start.t, endAt: tool.end.t }));
+
+/** Time at least one of `tools` was running, so concurrent calls count once. */
+function toolTime(tools) {
+  return coveredLengthBetween(spans(tools));
+}
+
+/** Compaction time between two server times, outside `excluding`. */
+function compactionTime(compactions, startAt, endAt, excluding = []) {
+  if (!(endAt > startAt)) return 0;
+  return coveredLengthBetween(compactions, { within: [{ startAt, endAt }], excluding });
+}
+
+/** A root whose marks or compactions can't be read, as the measurement to report. */
+function unreadable(roots) {
+  for (const { marks, timeline } of roots) {
+    if (marks.status !== "ready") return marks;
+    if (timeline.compactions.status !== "ready") return timeline.compactions;
+  }
+  return undefined;
+}
+
+/** The latest end in a batch whose calls all ended, else undefined. */
+function batchEnd(batch) {
+  if (batch.some((tool) => tool.end === undefined)) return undefined;
+  return Math.max(...batch.map((tool) => tool.end.t));
+}
 
 /**
  * Server-clock parts, from the root sessions' marks.
  *
- * @param {{ sessionId: string, marks: ReturnType<typeof import("./measurements/marks.mjs").sessionMarks> }[]} roots
+ * @param {{ sessionId: string, events: object[], index: ReturnType<typeof import("./measurements/session.mjs").indexSession>, marks: ReturnType<typeof import("./measurements/marks.mjs").sessionMarks>, timeline: { compactions: object } }[]} roots
  * @param {Map<string, object[]>} bySession every captured session's events
  */
 export function serverOverheads(roots, bySession) {
-  const broken = roots.find(({ marks }) => marks.status !== "ready");
+  const broken = unreadable(roots);
   if (broken !== undefined) {
     return Object.fromEntries(
-      ["pre_model_ms", "tool_hop_ms", "finalize_ms", "agent_start_ms"].map((name) => [
-        `overhead.${name}`,
-        broken.marks,
-      ]),
+      ["pre_model_ms", "model_start_ms", "tool_hop_ms", "finalize_ms", "agent_start_ms"].map(
+        (name) => [`overhead.${name}`, broken],
+      ),
     );
   }
   const preModel = [];
+  const modelStart = [];
   const toolHop = [];
   const finalize = [];
   const agentStart = [];
   let missingChild = false;
-  for (const { sessionId, marks } of roots) {
+  // Before v27 a step had one start, upgraded to a request and a start at the
+  // same instant, so the work between them was not recorded.
+  const predatesModelStart = roots.some(({ events }) =>
+    events.some((event) => typeof event.meta?.id === "string"),
+  );
+  for (const { index, marks, timeline } of roots) {
+    const compactions = timeline.compactions.intervals;
+    // From the run's request to its provider call: model selection, the step's
+    // tool catalog, and preparing the call.
+    for (const run of index.steps) {
+      const requestedAt = timestamp(run.requested);
+      const startedAt = timestamp(run.started);
+      if (requestedAt === undefined || startedAt === undefined) continue;
+      modelStart.push(
+        startedAt - requestedAt - compactionTime(compactions, requestedAt, startedAt),
+      );
+    }
     for (const turn of marks.turns.values()) {
       const [first] = turn.steps;
-      if (first !== undefined) preModel.push(first.request.t - turn.started.t);
+      if (first !== undefined)
+        preModel.push(
+          first.request.t -
+            turn.started.t -
+            compactionTime(compactions, turn.started.t, first.request.t),
+        );
 
       // A tool that ends its turn finishes the turn's work, so finalization
       // starts at the later of the last model.done and the last tool.end.
@@ -46,22 +111,27 @@ export function serverOverheads(roots, bySession) {
       if (turn.idle !== undefined && workEnds.length > 0)
         finalize.push(turn.idle.t - Math.max(...workEnds));
 
-      for (const tool of turn.tools) {
-        if (tool.end === undefined) continue;
-        const hop = hopStart(turn, tool);
-        const next = turn.steps.find((step) => step.request.t >= tool.end.t);
+      for (const batch of toolBatches(turn)) {
+        const end = batchEnd(batch);
+        if (end === undefined) continue;
+        const hop = hopStart(turn, batch);
+        const next = turn.steps.find((step) => step.request.t >= end);
         if (hop === undefined || next === undefined) continue;
-        toolHop.push(next.request.t - hop - (tool.end.t - tool.start.t));
+        toolHop.push(
+          next.request.t -
+            hop -
+            toolTime(batch) -
+            compactionTime(compactions, hop, next.request.t, spans(batch)),
+        );
       }
     }
 
     const toolStarts = new Map(
       [...marks.turns.values()].flatMap((turn) => turn.tools.map((tool) => [tool.callId, tool])),
     );
-    const events = bySession.get(sessionId) ?? [];
-    for (const started of selectEvents(events, "agent.started")) {
-      const call = toolStarts.get(started.data?.callId);
-      const child = bySession.get(started.data?.sessionId);
+    for (const opened of index.children) {
+      const call = toolStarts.get(opened.callId);
+      const child = bySession.get(opened.sessionId);
       if (call === undefined) continue;
       if (child === undefined) {
         missingChild = true;
@@ -76,6 +146,9 @@ export function serverOverheads(roots, bySession) {
   }
   return {
     "overhead.pre_model_ms": perOccurrence(preModel, "no-model-steps"),
+    "overhead.model_start_ms": predatesModelStart
+      ? unavailable("predates-model-start")
+      : perOccurrence(modelStart, "no-model-steps"),
     "overhead.tool_hop_ms": perOccurrence(toolHop, "no-tool-hops"),
     "overhead.finalize_ms": perOccurrence(finalize, "no-finished-turns"),
     "overhead.agent_start_ms":
@@ -101,28 +174,27 @@ const CLIENT_METRICS = [
  * turn's numbers include creating it. Server times map onto the client clock
  * with the smallest delivery lag (`arrival − meta.at`) the session's marks had.
  *
- * @param {object[]} sessionEntries the artifact's raw `result.sessions`
+ * @param {ReturnType<typeof readClock>} clock
  * @param {{ sessionId: string, marks: object }[]} roots
  */
-export function clientOverheads(sessionEntries, roots) {
-  const clock = readClock(sessionEntries);
+export function clientOverheads(clock, roots) {
   if (clock === undefined) return everyClientMetric(unavailable("missing-client-clock"));
-  const broken = roots.find(({ marks }) => marks.status !== "ready");
-  if (broken !== undefined) return everyClientMetric(broken.marks);
+  const broken = unreadable(roots);
+  if (broken !== undefined) return everyClientMetric(broken);
 
   const firstOutput = [];
   const turnOverhead = [];
   const toolCall = [];
   const notReady = [];
   const create = [];
-  for (const { sessionId, marks } of roots) {
+  for (const { sessionId, marks, timeline } of roots) {
     const sends = clock.sends.get(sessionId) ?? [];
     for (const send of sends) {
       if (send.kind === "prewarm" || send.kind === "create")
         create.push(send.acceptedAt - send.startedAt);
       if (send.kind === "message") notReady.push(send.notReadyMs);
     }
-    const arrival = (event) => clock.arrivals.get(event.meta.id);
+    const arrival = (event) => clock.arrivals.get(eventKey(sessionId, event));
     const lags = marks.carriers
       .map((event) => arrival(event) - timestamp(event))
       .filter((lag) => Number.isFinite(lag));
@@ -138,12 +210,14 @@ export function clientOverheads(sessionEntries, roots) {
         send.kind === "create"
           ? turns[0]
           : send.kind === "message"
-            ? turns.find((candidate) =>
-                candidate.started.via.meta?.deliveryIds?.includes(send.deliveryId),
-              )
+            ? turns.find((candidate) => candidate.deliveries.has(send.deliveryId))
             : undefined;
       if (turn === undefined) continue;
-      const measuredTurn = measureTurn(turn, send.startedAt + send.notReadyMs, arrival, offset);
+      const measuredTurn = measureTurn(turn, send.startedAt + send.notReadyMs, {
+        arrival,
+        offset,
+        compactions: timeline.compactions.intervals,
+      });
       if (measuredTurn === undefined) continue;
       if (measuredTurn.firstOutput !== undefined) firstOutput.push(measuredTurn.firstOutput);
       if (measuredTurn.turn !== undefined) turnOverhead.push(measuredTurn.turn);
@@ -159,7 +233,7 @@ export function clientOverheads(sessionEntries, roots) {
   };
 }
 
-function measureTurn(turn, sent, arrival, offset) {
+function measureTurn(turn, sent, { arrival, offset, compactions }) {
   const idleAt = turn.idle === undefined ? undefined : arrival(turn.idle.via);
   const inWindow = (at) => at !== undefined && at >= sent && (idleAt === undefined || at <= idleAt);
   // Outputs as the client shows them: streamed text, or a tool starting.
@@ -167,7 +241,7 @@ function measureTurn(turn, sent, arrival, offset) {
   for (const step of turn.steps) {
     for (const event of step.outputs ?? []) {
       const at = arrival(event);
-      if (inWindow(at)) outputs.push({ at, event });
+      if (inWindow(at)) outputs.push({ at, step: step.key });
     }
   }
   outputs.sort((a, b) => a.at - b.at);
@@ -197,35 +271,47 @@ function measureTurn(turn, sent, arrival, offset) {
         .filter(({ step }) => step.firstToken !== undefined || step.done !== undefined)
         .at(-1) ?? before.at(-1);
     const modelMs = visibleModelMs(call, firstOut.at);
-    if (modelMs !== undefined) result.firstOutput = firstOut.at - sent - modelMs;
+    if (modelMs !== undefined)
+      result.firstOutput =
+        firstOut.at -
+        sent -
+        modelMs -
+        compactionTime(compactions, turn.started.t, call.step.request.t);
   }
 
   if (idleAt !== undefined && calls.length > 0 && calls.every(({ step }) => step.done)) {
     const modelSum = calls.reduce((sum, { step }) => sum + step.done.t - step.request.t, 0);
-    const toolSum = turn.tools
-      .filter((tool) => inWindow(arrival(tool.start.via)))
-      .reduce((sum, tool) => sum + (tool.end === undefined ? 0 : tool.end.t - tool.start.t), 0);
-    result.turn = idleAt - sent - modelSum - toolSum;
+    const tools = turn.tools.filter(
+      (tool) => tool.end !== undefined && inWindow(arrival(tool.start.via)),
+    );
+    const models = calls.map(({ step }) => ({ startAt: step.request.t, endAt: step.done.t }));
+    const compactionMs = compactionTime(compactions, turn.started.t, turn.idle.t, [
+      ...models,
+      ...spans(tools),
+    ]);
+    result.turn = idleAt - sent - modelSum - toolTime(tools) - compactionMs;
   }
 
-  for (const tool of turn.tools) {
-    const startAt = arrival(tool.start.via);
-    if (tool.end === undefined || !inWindow(startAt)) continue;
-    // Calls requested together start together; the next output is the first
-    // one after their request, so every call of a batch is measured.
-    const nextOut = outputs.find(({ at, event }) => at >= startAt && event !== tool.start.via);
+  for (const batch of toolBatches(turn)) {
+    const batchStep = batch[0].runId;
+    const startAt = arrival(batch[0].start.via);
+    const end = batchEnd(batch);
+    if (end === undefined || !inWindow(startAt)) continue;
+    // The requesting step can still stream between its calls (its later
+    // requests, text flushed before each one); the next output is past it.
+    const nextOut = outputs.find(({ at, step }) => at >= startAt && step !== batchStep);
     if (nextOut === undefined) continue;
     const next =
-      calls.find(({ step, reqAt }) => step.request.t >= tool.end.t && reqAt <= nextOut.at) ??
+      calls.find(({ step, reqAt }) => step.request.t >= end && reqAt <= nextOut.at) ??
       calls.find(({ reqAt }) => reqAt >= startAt && reqAt <= nextOut.at);
     const nextModelMs = visibleModelMs(next, nextOut.at);
     if (nextModelMs === undefined) continue;
-    const exec = tool.end.t - tool.start.t;
-    const hop = hopStart(turn, tool);
+    const hop = hopStart(turn, batch);
+    const compactionMs = compactionTime(compactions, hop ?? end, next.step.request.t, spans(batch));
     result.tools.push(
       hop === undefined
-        ? nextOut.at - (tool.end.t + offset) - nextModelMs
-        : nextOut.at - (hop + offset) - exec - nextModelMs,
+        ? nextOut.at - (end + offset) - nextModelMs - compactionMs
+        : nextOut.at - (hop + offset) - toolTime(batch) - nextModelMs - compactionMs,
     );
   }
   return result;
@@ -235,8 +321,10 @@ function measureTurn(turn, sent, arrival, offset) {
  * Arrival time of every captured event (the earliest, across repeated
  * captures) and every session's sends, or undefined when the artifact
  * predates client timing.
+ *
+ * @param {object[]} sessionEntries the artifact's raw `result.sessions`
  */
-function readClock(sessionEntries) {
+export function readClock(sessionEntries) {
   const withClock = (sessionEntries ?? []).filter(
     (entry) =>
       Array.isArray(entry?.clock?.receivedAt) &&
@@ -248,8 +336,8 @@ function readClock(sessionEntries) {
   for (const entry of withClock) {
     entry.events.forEach((event, index) => {
       const at = entry.clock.receivedAt[index];
-      const id = event?.meta?.id;
-      if (typeof id !== "string" || !Number.isFinite(at)) return;
+      const id = eventKey(entry.sessionId, event);
+      if (id === undefined || !Number.isFinite(at)) return;
       arrivals.set(id, Math.min(arrivals.get(id) ?? Infinity, at));
     });
     const valid = (entry.clock.sends ?? []).filter(
@@ -292,7 +380,7 @@ export function durability(roots, world) {
   let outputBytes = 0;
   let turns = 0;
   let modelSteps = 0;
-  for (const { sessionId, events } of roots) {
+  for (const { sessionId, events, index } of roots) {
     const run = world.get(sessionId);
     if (!Array.isArray(run?.events)) return everyDurabilityMetric(unavailable("missing-world-run"));
     const sessionTurns = selectEvents(events, "turn.started").length;
@@ -313,7 +401,7 @@ export function durability(roots, world) {
       return everyDurabilityMetric(unavailable("empty-world-run"));
     steps += sessionSteps;
     turns += sessionTurns;
-    modelSteps += selectEvents(events, "step.started").length;
+    modelSteps += index.steps.length;
   }
   const perTurn = (value) => (turns === 0 ? notApplicable("no-turns") : measured(value / turns));
   return {

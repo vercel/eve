@@ -1,17 +1,8 @@
 import { PrewarmResponseSchema, type PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import { createClientError } from "#client/client-error.js";
-import type {
-  CancelSessionResult,
-  ClearResult,
-  ClientRedirectPolicy,
-  CompactResult,
-  ResetResult,
-} from "#client/types.js";
+import type { ClientRedirectPolicy } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
-import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
-import { ClearResponseSchema } from "#protocol/clear-session.js";
-import { CompactResponseSchema } from "#protocol/compact-session.js";
-import { ResetResponseSchema } from "#protocol/reset-session.js";
+import { DeliveryResponseSchema, type DeliveryReceipt } from "#protocol/delivery.js";
 import {
   createEveSessionCancelRoutePath,
   createEveSessionClearRoutePath,
@@ -20,153 +11,85 @@ import {
   createEveSessionRoutePath,
 } from "#protocol/routes.js";
 
-interface SessionControlContext {
-  readonly host: string;
-  readonly redirect?: ClientRedirectPolicy;
-  resolveHeaders(): Promise<Headers>;
-}
+const paths = {
+  cancel: createEveSessionCancelRoutePath,
+  clear: createEveSessionClearRoutePath,
+  compact: createEveSessionCompactRoutePath,
+  reset: createEveSessionResetRoutePath,
+};
 
 export async function prewarmClientSession(input: {
-  readonly context: SessionControlContext;
+  readonly context: {
+    readonly baseUrl: string;
+    readonly redirect?: ClientRedirectPolicy;
+    resolveHeaders(): Promise<Headers>;
+  };
   readonly sessionId: string;
   readonly signal?: AbortSignal;
 }): Promise<PrewarmSessionResult> {
-  const { payload } = await postJson({
-    context: input.context,
-    operation: "Prewarm",
-    path: createEveSessionRoutePath(input.sessionId),
-    signal: input.signal,
-  });
+  // An empty body is the route's preparation request; any field makes it an input delivery.
+  const response = await fetch(
+    createClientUrl(input.context.baseUrl, createEveSessionRoutePath(input.sessionId)),
+    {
+      headers: await input.context.resolveHeaders(),
+      method: "POST",
+      signal: input.signal,
+      redirect: input.context.redirect,
+    },
+  );
+  const text = await response.text();
+  if (!response.ok) throw createClientError(response.status, text, response.headers);
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error(`Prewarm route returned invalid JSON (${response.status}).`);
+  }
   const result = PrewarmResponseSchema.safeParse(payload);
   if (!result.success) throw new Error("Prewarm route returned an invalid response.");
   return { status: result.data.status };
 }
 
-export async function cancelClientSession(input: {
-  readonly context: SessionControlContext;
+export async function sendClientControl(input: {
+  readonly context: {
+    readonly baseUrl: string;
+    readonly redirect?: ClientRedirectPolicy;
+    resolveHeaders(): Promise<Headers>;
+  };
+  readonly kind: keyof typeof paths;
+  readonly sessionId: string;
   readonly options?: {
     readonly signal?: AbortSignal;
-    readonly turnId?: string;
+    readonly turnId?: string | null;
+    readonly reason?: string;
   };
-  readonly sessionId: string;
-}): Promise<CancelSessionResult> {
-  const { signal, ...body } = input.options ?? {};
-  const { payload, response } = await postJson({
-    body,
-    context: input.context,
-    operation: "Cancel",
-    path: createEveSessionCancelRoutePath(input.sessionId),
-    signal,
-  });
-  const result = CancelTurnResponseSchema.safeParse(payload);
-  if (
-    !result.success ||
-    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
-  ) {
-    throw new Error(`Cancel route returned an invalid response (${response.status}).`);
-  }
-  return result.data.status === "accepted"
-    ? { sessionId: result.data.sessionId, status: "accepted" }
-    : { status: "no_active_turn" };
-}
-
-export async function clearClientSession(input: {
-  readonly context: SessionControlContext;
-  readonly sessionId: string;
-}): Promise<ClearResult> {
-  const { payload } = await postJson({
-    context: input.context,
-    operation: "Clear",
-    path: createEveSessionClearRoutePath(input.sessionId),
-  });
-  const result = ClearResponseSchema.safeParse(payload);
-  if (
-    !result.success ||
-    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
-  ) {
-    throw new Error("Clear route returned an invalid response.");
-  }
-  return result.data.status === "accepted"
-    ? { sessionId: result.data.sessionId, status: "accepted" }
-    : { status: "no_active_session" };
-}
-
-export async function compactClientSession(input: {
-  readonly context: SessionControlContext;
-  readonly sessionId: string;
-}): Promise<CompactResult> {
-  const { payload } = await postJson({
-    context: input.context,
-    operation: "Compact",
-    path: createEveSessionCompactRoutePath(input.sessionId),
-  });
-  const result = CompactResponseSchema.safeParse(payload);
-  if (
-    !result.success ||
-    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
-  ) {
-    throw new Error("Compact route returned an invalid response.");
-  }
-  return result.data.status === "accepted"
-    ? { sessionId: result.data.sessionId, status: "accepted" }
-    : { status: "no_active_session" };
-}
-
-export async function resetClientSession(input: {
-  readonly context: SessionControlContext;
-  readonly options?: { readonly reason?: string; readonly signal?: AbortSignal };
-  readonly sessionId: string;
-}): Promise<ResetResult> {
-  const { signal, ...body } = input.options ?? {};
-  const { payload } = await postJson({
-    body,
-    context: input.context,
-    operation: "Reset",
-    path: createEveSessionResetRoutePath(input.sessionId),
-    signal,
-  });
-  const result = ResetResponseSchema.safeParse(payload);
-  if (
-    !result.success ||
-    (result.data.status === "reset" && result.data.previousSessionId !== input.sessionId)
-  ) {
-    throw new Error("Reset route returned an invalid response.");
-  }
-  return result.data.status === "reset"
-    ? { previousSessionId: result.data.previousSessionId, status: "reset" }
-    : { status: "no_active_session" };
-}
-
-async function postJson(input: {
-  readonly body?: object;
-  readonly context: SessionControlContext;
-  readonly operation: string;
-  readonly path: string;
-  readonly signal?: AbortSignal;
-}): Promise<{ readonly payload: unknown; readonly response: Response }> {
+}): Promise<DeliveryReceipt> {
+  const { signal, turnId, reason } = input.options ?? {};
+  // Controls reject unknown fields, and option objects passed by variable skip
+  // excess-property checks, so each body carries only its own control fields.
+  const body = input.kind === "cancel" ? { turnId } : input.kind === "reset" ? { reason } : {};
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
   const response = await fetch(
-    createClientUrl(input.context.host, input.path),
-    withRedirectPolicy(
-      {
-        body: input.body === undefined ? undefined : JSON.stringify(input.body),
-        headers,
-        method: "POST",
-        signal: input.signal,
-      },
-      input.context.redirect,
-    ),
+    createClientUrl(input.context.baseUrl, paths[input.kind](input.sessionId)),
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: "POST",
+      signal,
+      redirect: input.context.redirect,
+    },
   );
   const text = await response.text();
   if (!response.ok) throw createClientError(response.status, text, response.headers);
+  let payload: unknown;
   try {
-    return { payload: JSON.parse(text) as unknown, response };
+    payload = JSON.parse(text);
   } catch {
-    throw new Error(`${input.operation} route returned invalid JSON (${response.status}).`);
+    throw new Error(`${input.kind} route returned invalid JSON (${response.status}).`);
   }
-}
-
-function withRedirectPolicy(init: RequestInit, redirect?: ClientRedirectPolicy): RequestInit {
-  return redirect === undefined ? init : { ...init, redirect };
+  const result = DeliveryResponseSchema.safeParse(payload);
+  if (!result.success || result.data.sessionId !== input.sessionId)
+    throw new Error(`${input.kind} route returned an invalid delivery receipt.`);
+  return { sessionId: result.data.sessionId, deliveryId: result.data.deliveryId };
 }

@@ -1,8 +1,9 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { STRUCTURAL_RELOAD_LOG_LINE } from "../../src/internal/nitro/host/dev-watcher-log.js";
 import {
   type ScenarioAppDescriptor,
   useScenarioApp,
@@ -10,14 +11,19 @@ import {
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 import {
+  DEV_SERVER_AGENT_DESCRIPTOR,
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
   TRANSACTIONAL_REBUILD_DESCRIPTOR,
   createInstrumentationSource,
 } from "./dev-server-descriptors.js";
 import {
+  fetchAgentInfo,
   fetchText,
   forceDevelopmentRebuild,
+  hasKnownDevServerFailure,
+  readDevelopmentRevision,
   startEveDev,
+  waitForCondition,
   waitForPath,
   withinDeadline,
 } from "./dev-server-harness.js";
@@ -92,7 +98,7 @@ function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): s
 
 describe("eve dev server workflow generations", () => {
   it(
-    "retries an active child Workflow on its selected generation after promotion",
+    "recovers an interrupted inline turn after promotion and uses the new generation in a fresh session",
     async () => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -112,6 +118,10 @@ describe("eve dev server workflow generations", () => {
           createGenerationMarkerToolSource("generation-two", false),
         );
         await writeFile(
+          join(app.appRoot, "agent", "tools", "get_next_marker.ts"),
+          createGenerationMarkerToolSource("generation-two", false),
+        );
+        await writeFile(
           join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
@@ -121,18 +131,25 @@ describe("eve dev server workflow generations", () => {
         await writeFile(crashWorkerPath, "crash");
         const firstResult = await withinDeadline(
           firstTurn,
-          `Timed out waiting for the selected-generation retry.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+          `Timed out waiting for the interrupted turn to settle.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
-        expect(readCompletedMessages(firstResult.events)).toContain("generation-one");
-        // Providers are installed once by the active host, while durable tool
-        // code can retry from the generation that originally selected it.
-        expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-two");
+        // The crashed call never runs again; the model reads that it may have, and calls again.
+        expect(
+          firstResult.events.flatMap((event) =>
+            event.type === "call.settled" ? [event.data.outcome] : [],
+          ),
+        ).toEqual(["abandoned", "completed"]);
+        expect(firstResult.events.filter((event) => event.type === "turn.settled")).toMatchObject([
+          { data: { outcome: "completed" } },
+        ]);
+        expect(firstResult.events.filter((event) => event.type === "session.ended")).toEqual([]);
 
         const secondResult = await sendDevelopmentMessage({
-          message: "Use get_marker.",
-          session: firstResult.session,
+          message: "Use get_next_marker.",
+          session: createDevelopmentSessionState(),
           serverUrl: server.url,
         });
+        expect(secondResult.session.sessionId).not.toBe(firstResult.session.sessionId);
         expect(readCompletedMessages(secondResult.events)).toContain("generation-two");
         expect(readCompletedMessages(secondResult.events)).toContain("instrumentation-two");
       } finally {
@@ -190,7 +207,95 @@ describe("eve dev server workflow generations", () => {
           body: JSON.stringify({ reason: "Start a new conversation after rebuilding" }),
           signal: AbortSignal.timeout(10_000),
         });
-        expect(reset.status, await reset.text()).toBe(200);
+        expect(reset.status, await reset.text()).toBe(202);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "publishes authored tool removals on a fresh worker without rebuilding the host",
+    async () => {
+      const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const initialRevision = await readDevelopmentRevision(server.url);
+        const initialWorkerId = await fetchText(server.url, "/worker-id");
+        expect((await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name)).toContain(
+          "get_weather",
+        );
+
+        await rm(join(app.appRoot, "agent", "tools", "get_weather.ts"));
+        await forceDevelopmentRebuild(server.url);
+
+        await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
+        await expect(fetchText(server.url, "/worker-id")).resolves.not.toBe(initialWorkerId);
+        expect(server.stdout()).not.toContain(STRUCTURAL_RELOAD_LOG_LINE);
+        expect(
+          (await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name),
+        ).not.toContain("get_weather");
+        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "fails a build that never settles, then builds with the current .env",
+    async () => {
+      const app = await scenarioApp(DEV_SERVER_AGENT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+      const output = () => `${server.stdout()}\n${server.stderr()}`;
+      const toolPath = join(app.appRoot, "agent", "tools", "get_weather.ts");
+      const toolSource = await readFile(toolPath, "utf8");
+
+      try {
+        const initialRevision = await readDevelopmentRevision(server.url);
+
+        await writeFile(toolPath, `await new Promise(() => {});\n${toolSource}`);
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => output().includes("awaits a promise that never settles"),
+          `Timed out waiting for the stalled build to fail.\n\n${output()}`,
+        );
+        await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
+
+        // Converges on the latest files, so intermediate watcher rebuilds cannot make it flaky.
+        const probeDescription = async () =>
+          (await fetchAgentInfo(server.url)).tools.static.find((tool) => tool.name === "env_probe")
+            ?.description;
+        await writeFile(toolPath, toolSource);
+        await writeFile(join(app.appRoot, ".env"), "EVE_SCENARIO_BUILD_VALUE=from-env\n");
+        await writeFile(
+          join(app.appRoot, "agent", "tools", "env_probe.ts"),
+          [
+            'import { defineTool } from "eve/tools";',
+            'import { z } from "zod";',
+            "export default defineTool({",
+            '  description: `build saw ${process.env.EVE_SCENARIO_BUILD_VALUE ?? "nothing"}`,',
+            "  inputSchema: z.object({}),",
+            '  execute: async () => "ok",',
+            "});",
+            "",
+          ].join("\n"),
+        );
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => (await probeDescription()) === "build saw from-env",
+          () => `Timed out waiting for the build to see .env.\n\n${output()}`,
+        );
+
+        await rm(join(app.appRoot, ".env"));
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => (await probeDescription()) === "build saw nothing",
+          () => `Timed out waiting for the build without .env.\n\n${output()}`,
+        );
       } finally {
         await server.stop();
       }
@@ -204,10 +309,10 @@ function readCompletedMessages(
 ): string {
   return events
     .flatMap((event) => {
-      if (event.type !== "message.completed" || !isRecord(event.data)) {
+      if (event.type !== "content.completed" || !isRecord(event.data)) {
         return [];
       }
-      return typeof event.data.message === "string" ? [event.data.message] : [];
+      return typeof event.data.value === "string" ? [event.data.value] : [];
     })
     .join("\n");
 }

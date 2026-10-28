@@ -1,4 +1,4 @@
-export const repositoryFindings = [
+const repositoryNotes = [
   "Application startup loads configuration before registering the catalog, cart, checkout, and order routes. An invalid currency setting prevents the application from accepting requests and identifies the setting that needs correction.",
   "The catalog exposes product identifiers, display names, prices in cents, and availability. Product identifiers remain stable when a display name changes, so a saved cart continues to identify the intended product.",
   "Catalog searches return an empty collection when nothing matches. The storefront distinguishes that state from a failed search and offers a clear way to remove filters without losing the customer's current cart.",
@@ -15,7 +15,7 @@ export const repositoryFindings = [
   "The review covers startup, catalog, cart, checkout, saved orders, and notifications. Release validation should now concentrate on the purchase and cancellation journeys, including retries, without repeating this repository inspection.",
 ];
 
-export const handoffNotes = [
+const handoffEntries = [
   "Repository review is complete for application startup, catalog browsing, cart updates, checkout, order history, and notifications. Carry these findings into release validation; the next reviewer should not repeat the completed inspection.",
   "Start release validation with a catalog containing available and unavailable products. Confirm that filters show an empty state when appropriate and that clearing a filter restores the product list while preserving the current cart contents.",
   "Exercise cart updates with a new product, an existing product, and removal of the final item. Include invalid quantities and confirm that rejected updates leave the last valid cart visible, with an explanation tied to the offending input.",
@@ -31,3 +31,17 @@ export const handoffNotes = [
   "Keep unresolved release checks distinct from completed review work in the handoff. If validation exposes a new defect, record the new observation and affected journey rather than reopening the repository inspection without additional evidence.",
   "After the release checks are recorded, publish the concise handoff with the completed review result and checkpoint status. Link each recorded release check to the journey it covers so later reviewers can trace every result back to this plan.",
 ];
+
+// Each record is about 4,400 tokens, nearly the whole history budget, so the
+// task and a record never fit together: a compaction has to summarize the
+// record into the checkpoint rather than keep it in the tail.
+const RECORD_PASSES = 5;
+
+function repeatPasses(notes: readonly string[]): string[] {
+  return Array.from({ length: RECORD_PASSES }, (_, pass) =>
+    notes.map((note) => (pass === 0 ? note : `${note} (Confirmed again in pass ${pass + 1}.)`)),
+  ).flat();
+}
+
+export const repositoryFindings = repeatPasses(repositoryNotes);
+export const handoffNotes = repeatPasses(handoffEntries);

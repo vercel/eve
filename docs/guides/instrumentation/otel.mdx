@@ -138,7 +138,7 @@ For typed channel metadata, import the channel definition and narrow with
 `isChannel`:
 
 ```ts title="agent/instrumentation/support.ts"
-import { isChannel } from "eve/instrumentation";
+import { isChannel } from "eve/channels";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 import supportChannel from "../channels/support";
@@ -155,7 +155,9 @@ export default otelIntegration({
 });
 ```
 
-The resolver receives the channel, session, final model input, step, and turn.
+The resolver receives the channel, session, final model input, `run: { id, attempt }`, and
+optional turn. Its input type is `InstrumentationModelStartedInput` from `eve/instrumentation`.
+Model input content is `unknown`; narrow provider-specific messages before reading them.
 Keys beginning with `eve.` are reserved. Content excluded by
 `otel({ tracePolicy })` is not available to the resolver.
 

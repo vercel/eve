@@ -154,7 +154,7 @@ async function runCommand(
   signal?.addEventListener("abort", cancel, { once: true });
   try {
     const child = await sandbox.spawn({
-      abortSignal: controller.signal,
+      signal: controller.signal,
       command: launchCommand(command, directory),
     });
     const finished = Promise.all([

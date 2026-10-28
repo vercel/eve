@@ -27,6 +27,10 @@ export const nav = [
     label: "Changelog",
     href: "/changelog",
   },
+  {
+    label: "Deploy",
+    href: "https://vercel.com/new/agent",
+  },
 ];
 
 export const suggestions = [

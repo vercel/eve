@@ -3,17 +3,18 @@ import { describe, expect, it } from "vitest";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
 import type { TargetTools } from "#evals/target.js";
+import { outputOf } from "#evals/output.js";
 
 function assertionsFor(tools: TargetTools | undefined) {
   return createScopedAssertions(new AssertionCollector(tools), {
     timing: "final",
-    select: (result) => result,
+    select: (result) => ({ ...result, output: outputOf(result) }),
   });
 }
 
 describe("tool-name assertions", () => {
   it.each([
-    ["load_skill", 'Tool name "load_skill" was retired; use t.loadedSkill(name).'],
+    ["load_skill", 'Tool name "load_skill" was retired; use t.calledSkill(name).'],
     ["task_wait", 'Tool name "task_wait" was retired; use eve__task_wait.'],
     ["task_cancel", 'Tool name "task_cancel" was retired; use eve__task_cancel.'],
     ["final_output", 'Tool name "final_output" was retired; use eve__reply.'],
@@ -48,11 +49,11 @@ describe("tool-name assertions", () => {
     ],
     [
       "eve__skill",
-      "Calls through eve__skill are reported as skill loads; use t.loadedSkill(name).",
+      "Calls through eve__skill are reported as skill loads; use t.calledSkill(name).",
     ],
     [
       "eve__execute",
-      "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.loadedSkill(name).",
+      "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.calledSkill(name).",
     ],
   ])("always reject %s, which no call is reported under", (name, message) => {
     expect(() => assertionsFor(undefined).notCalledTool(name)).toThrow(message);

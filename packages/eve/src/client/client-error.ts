@@ -1,4 +1,5 @@
 import { isObject } from "#shared/guards.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 
 /**
  * Error thrown when the eve server returns a non-successful HTTP response.
@@ -68,8 +69,11 @@ export function createClientError(
   status: number,
   body: string,
   headers?: ConstructorParameters<typeof Headers>[0],
-): ClientError {
+): ClientError | SessionNotActiveError {
   const parsed = status === 409 ? parseJsonObject(body) : undefined;
+  if (parsed?.code === "session_not_active" || parsed?.code === "session_not_ready") {
+    return new SessionNotActiveError({ retryable: parsed.code === "session_not_ready" });
+  }
   if (parsed?.code !== "session_stranded") return new ClientError(status, body, headers);
   return new ClientSessionStrandedError(status, body, headers, {
     eveVersion: typeof parsed.eveVersion === "string" ? parsed.eveVersion : undefined,

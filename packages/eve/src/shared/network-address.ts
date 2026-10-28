@@ -10,10 +10,9 @@ export const httpServerUrlSchema = z.url({ protocol: /^https?$/ });
  * outbound request to a caller-supplied URL must not target. This is the SSRF
  * blocklist for {@link isReservedIpAddress}.
  *
- * Loopback (`127.0.0.0/8`, `::1`) is intentionally NOT included: it is same-host
- * rather than a network pivot, and local-dev self-callbacks use it. The
- * high-value SSRF target — cloud metadata at `169.254.169.254` — is link-local
- * and IS blocked here.
+ * Loopback (`127.0.0.0/8`, `::1`) is not included so callers can decide
+ * separately whether to allow it; local development servers call back to each
+ * other over loopback (see {@link isBlockedDestinationHost}).
  */
 const reservedRanges = new BlockList();
 reservedRanges.addSubnet("0.0.0.0", 8, "ipv4"); // "this network" / unspecified
@@ -116,4 +115,17 @@ export function isReservedIpAddress(host: string): boolean {
  */
 export function isPrivateOrReservedIpAddress(host: string): boolean {
   return isLoopbackHostname(host) || isReservedIpAddress(host);
+}
+
+/**
+ * Whether a framework request to an untrusted URL must not connect to
+ * `host`, an IP literal, resolved address, or hostname. Hostnames are only
+ * checked for the `localhost` namespace; callers must validate resolved
+ * addresses at connect time.
+ */
+export function isBlockedDestinationHost(
+  host: string,
+  options: { readonly allowLoopback: boolean },
+): boolean {
+  return options.allowLoopback ? isReservedIpAddress(host) : isPrivateOrReservedIpAddress(host);
 }

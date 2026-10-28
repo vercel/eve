@@ -22,13 +22,15 @@ export default defineEval({
     // The next turn must park on the harness-authored prompt before any
     // model call happens.
     await session.send('Reply with exactly the text "limit pong" and nothing else.');
-    const request = session.requireInputRequest({
+    const request = session.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
-      toolName: "session_limit_continuation",
+      optionIds: ["approve", "deny"],
+      kind: "budget",
     });
 
-    const resumed = await session.respond([{ optionId: "continue", requestId: request.requestId }]);
+    const resumed = await session.respond([
+      { optionId: "approve", interactionId: request.interactionId },
+    ]);
     resumed.expectOk();
     t.succeeded();
     t.messageIncludes("limit pong");
@@ -40,23 +42,23 @@ export default defineEval({
     stopFirst.expectOk();
 
     await stopSession.send('Reply with exactly the text "stop pong" and nothing else.');
-    const stopRequest = stopSession.requireInputRequest({
+    const stopRequest = stopSession.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
-      toolName: "session_limit_continuation",
+      optionIds: ["approve", "deny"],
+      kind: "budget",
     });
 
     const stopped = await stopSession.respond([
       {
-        optionId: "stop",
-        requestId: stopRequest.requestId,
+        optionId: "deny",
+        interactionId: stopRequest.interactionId,
       },
     ]);
     stopped.expectOk();
-    stopSession.notEvent("turn.failed");
-    stopSession.notEvent("session.failed");
-    stopSession.notEvent("session.completed");
-    stopSession.event("turn.cancelled");
-    t.check(stopped.status, equals("waiting"));
+    stopSession.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopSession.notEvent("session.ended", { data: { outcome: "failed" } });
+    stopSession.notEvent("session.ended", { data: { outcome: "completed" } });
+    stopSession.event("turn.settled", { data: { outcome: "cancelled" } });
+    t.check(stopped.status, equals("cancelled"));
   },
 });

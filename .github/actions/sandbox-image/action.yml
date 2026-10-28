@@ -1,0 +1,26 @@
+name: "Resolve eve sandbox image"
+description: >-
+  Run against eve's pinned sandbox image. When that image is not published yet,
+  fall back to :latest and say why.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve eve sandbox image
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        node scripts/sandbox-image-tag.mjs --check
+        image="ghcr.io/vercel/eve:$(node scripts/sandbox-image-tag.mjs)"
+        # GHCR is the readiness signal: the release job publishes GHCR first and
+        # VCR right after, and VCR needs credentials this job does not have.
+        if inspect_output="$(docker buildx imagetools inspect --raw "$image" 2>&1)"; then
+          echo "Using pinned sandbox image $image"
+        elif grep -Eq ': not found|manifest unknown' <<<"$inspect_output"; then
+          echo "::warning title=Unpublished sandbox image::$image is not published. This happens when this change edits packages/eve/Dockerfile, because the release workflow publishes the image after the change reaches main. If main already has this Dockerfile, check the latest Release workflow run on main for a failed image publish. This run uses ghcr.io/vercel/eve:latest, so it does not test the pinned image."
+          echo "EVE_SANDBOX_IMAGE_TAG=latest" >>"$GITHUB_ENV"
+        else
+          echo "$inspect_output" >&2
+          exit 1
+        fi

@@ -7,19 +7,19 @@ export default defineEval({
       "Alice and Bob need parallel investigations assigned to the worker.",
     );
     first.expectOk();
-    let session: Pick<EveEvalSession, "sessionId" | "state"> = first.session;
-    let combined = first.message ?? "";
+    let session: Pick<EveEvalSession, "id" | "state"> = first.session;
+    let combined = first.reply ?? "";
     for (let attempt = 0; attempt < 6; attempt++) {
       if (
         combined.includes("child-result:openai/large:1") &&
         combined.includes("child-result:openai/small:1")
       )
         return;
-      if (!session.sessionId || !session.state) throw new Error("Missing parent session cursor.");
-      const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+      if (!session.id || !session.state) throw new Error("Missing parent session cursor.");
+      const live = t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
       const turn = await live.result();
       turn.expectOk();
-      combined += turn.message ?? "";
+      combined += turn.reply ?? "";
       session = live.session;
     }
     throw new Error("Both children must report one independent model selection.");

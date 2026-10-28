@@ -14,13 +14,13 @@ export default defineEval({
     const malicious = await t.send("Call automatic-review for a malicious effect.");
     malicious.expectOk();
     malicious.calledTool("automatic-review", { count: 1, status: "pending" });
-    const request = malicious.session.requireInputRequest({
+    const request = malicious.session.requireInteraction({
       display: "confirmation",
       toolName: "automatic-review",
     });
 
     const approved = await malicious.session.respond([
-      { optionId: "approve", requestId: request.requestId },
+      { optionId: "approve", interactionId: request.interactionId },
     ]);
     approved.expectOk();
     approved.session.calledTool("automatic-review", {

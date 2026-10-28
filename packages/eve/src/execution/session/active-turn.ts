@@ -1,5 +1,8 @@
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
+import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
+import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
@@ -14,6 +17,7 @@ import { createTurnControl, type TurnControl } from "#execution/session/turn-con
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import {
+  isAgentSessionMessage,
   runMessageBatchBudget,
   type WorkflowToolRunMessage,
 } from "#execution/tools/workflow/messages.js";
@@ -24,9 +28,10 @@ import {
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
-import { coalesceDeliveries } from "#harness/messages.js";
+import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 
 export type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
@@ -35,7 +40,7 @@ export type RuntimeEvent =
   | { readonly kind: "steering" }
   /** An `eve__task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
-  /** A delivery or sign-in callback was admitted; a held request may be answered. */
+  /** A delivery or sign-in callback was admitted; a paused turn's request may be answered. */
   | { readonly kind: "input" }
   | "cancelled";
 
@@ -55,6 +60,9 @@ export class ActiveTurn {
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  #cancelledBy: ControlOrigin | undefined;
+  readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
@@ -69,13 +77,19 @@ export class ActiveTurn {
 
   constructor(
     input: SessionExecutionInput,
-    owner: { readonly caller: TurnCaller | undefined; readonly principal: string },
+    owner: {
+      readonly caller: TurnCaller | undefined;
+      /** A clear or a compact runs, not a turn: a cancel, which stops turns, leaves it to finish. */
+      readonly control?: boolean;
+      readonly principal: string;
+    },
     control: TurnControl = createTurnControl(),
   ) {
     this.controller = control.cancellation;
     this.steeringController = control.steering;
     this.input = input;
     this.caller = owner.caller;
+    this.#control = owner.control === true;
     this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
     this.expectedTurnId = activeTurnId(
       turnPosition(storedProjection(readDurableSession(input.cursor.sessionState).state)),
@@ -125,9 +139,9 @@ export class ActiveTurn {
   }
 
   /** Admits everything the pump accepted while the last step ran. */
-  async admitBoundary(): Promise<void> {
+  async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
-    for (const payload of pending) await this.admit(payload);
+    for (const payload of pending) await this.admit(payload, settled);
   }
 
   /**
@@ -157,14 +171,16 @@ export class ActiveTurn {
 
   /**
    * Removes the admitted run messages the session applies at once instead of
-   * in a runtime wait, or only those of `kind`.
+   * in a runtime wait, or only those `only` accepts.
    */
-  takeBoundaryMessages(kind?: "agent-started"): WorkflowToolRunMessage[] {
+  takeBoundaryMessages(
+    only?: (message: WorkflowToolRunMessage) => boolean,
+  ): WorkflowToolRunMessage[] {
     const taken: WorkflowToolRunMessage[] = [];
     const kept: RuntimeEvent[] = [];
     for (const event of this.runtimeResults) {
       const message = asBoundaryMessage(event);
-      if (message === undefined || (kind !== undefined && message.kind !== kind)) kept.push(event);
+      if (message === undefined || (only !== undefined && !only(message))) kept.push(event);
       else taken.push(message);
     }
     this.runtimeResults.splice(0, this.runtimeResults.length, ...kept);
@@ -221,28 +237,26 @@ export class ActiveTurn {
    * responder: an approver need not be the turn's own person. Returns
    * `undefined` when no admitted delivery answers one.
    */
-  async takeInputResponses(
-    requestIds: ReadonlySet<string>,
-  ): Promise<DeliverHookPayload | undefined> {
+  async takeAnswers(requestIds: ReadonlySet<string>): Promise<DeliverHookPayload | undefined> {
     for (const sequence of this.admitted) {
       let delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) continue;
-      const responses = delivery.payloads.flatMap((payload) => payload.inputResponses ?? []);
+      const responses = delivery.payloads.flatMap((payload) => payload.answers ?? []);
       if (responses.length === 0) continue;
-      if (!responses.some((response) => requestIds.has(response.requestId))) {
+      if (!responses.some((response) => requestIds.has(response.interactionId))) {
         // Some channels answer with ids only their `deliver` hook resolves,
         // such as Telegram's compact button callbacks.
         if (this.mappedForHeldRequest.has(sequence)) continue;
         this.mappedForHeldRequest.add(sequence);
         const target = delivery;
         const mapped = await this.input.cursor.advance((state) =>
-          mapHeldInputResponsesStep({ delivery: target, requestIds: [...requestIds], ...state }),
+          mapHeldAnswersStep({ delivery: target, requestIds: [...requestIds], ...state }),
         );
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
       }
       this.admitted.delete(sequence);
-      // Someone else's answers settle the held request, but the rest of their
+      // Someone else's answers settle the paused turn's request, but the rest of their
       // delivery waits for the turn to end, as their messages do.
       const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
         ? undefined
@@ -264,12 +278,12 @@ export class ActiveTurn {
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
     if (payload.kind === "reset" || payload.kind === "session-failure") return true;
-    if (payload.kind !== "cancel") return false;
+    if (payload.kind !== "cancel" || this.#control) return false;
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
   /** Admits one payload; returns whether it was a delivery or sign-in callback. */
-  private async admit(value: SessionInboxPayload): Promise<boolean> {
+  private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
@@ -285,7 +299,22 @@ export class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return false;
       case "cancel":
-        if (this.cancelsThisTurn(value)) this.abort();
+        if (
+          (!settled || value.kind !== "cancel") &&
+          this.cancelsThisTurn(value) &&
+          this.#cancelledBy === undefined
+        ) {
+          this.#cancelledBy ??= admitted.origin;
+          this.abort();
+        } else if (admitted.origin !== undefined) {
+          const control = controlDeliveryOf(admitted.origin);
+          await this.input.cursor.advance((state) =>
+            settleControlDeliveryStep({
+              ...state,
+              settlement: { control, outcome: "ignored", source: "cancel" },
+            }),
+          );
+        }
         return false;
       case "consumed":
         return value.kind === "authorization-callback";
@@ -326,7 +355,12 @@ export class ActiveTurn {
     return steered;
   }
 
-  /** Stops the turn, as `session.cancel()` does; a hook's `ctx.cancel()` uses it too. */
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  get cancelledBy(): ControlOrigin | undefined {
+    return this.#cancelledBy;
+  }
+
+  /** Also used by hooks on workflow reports while the turn waits. */
   abort(): void {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
@@ -338,9 +372,9 @@ function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefi
   // Tasks run beside the turn, so everything their runs send, such as a
   // question, reaches the session at the next boundary rather than at turn end.
   if (event.message.from.taskId !== undefined) return event.message;
-  // An `execute` run can open a session after its call returns, when the turn
-  // may have no wait left to take the message, and publishing it needs none.
-  if (event.message.kind === "agent-started") return event.message;
+  // An `execute` run can open or message a session after its call returns, when
+  // the turn may have no wait left to take the message, and publishing it needs none.
+  if (isAgentSessionMessage(event.message)) return event.message;
   return undefined;
 }
 
@@ -348,15 +382,29 @@ function splitAnswers(delivery: DeliverHookPayload): {
   readonly answers: DeliverHookPayload;
   readonly rest: DeliverHookPayload | undefined;
 } {
-  const answers = delivery.payloads.flatMap((payload) =>
-    payload.inputResponses === undefined ? [] : [{ inputResponses: payload.inputResponses }],
+  const answers = delivery.payloads.flatMap((payload, index) =>
+    payload.answers === undefined ? [] : [{ index, payload: { answers: payload.answers } }],
   );
-  const rest = delivery.payloads.flatMap((payload) => {
-    const { inputResponses: _answers, ...other } = payload;
-    return Object.keys(other).length === 0 ? [] : [other];
+  // Only a message waits for the turn to end. What else a press carries, such as a channel's
+  // state, has nothing left to deliver; queued, it would come back as a delivery the session
+  // already settled.
+  const rest = delivery.payloads.flatMap((payload, index) => {
+    if (payload.message === undefined) return [];
+    const { answers: _answers, ...other } = payload;
+    return [{ index, payload: other }];
   });
+  const selectedAnswers = selectDeliveryPayloads(delivery, answers);
+  const messageIndices = new Set(rest.map(({ index }) => index));
   return {
-    answers: { ...delivery, payloads: answers },
-    rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
+    answers: {
+      ...selectedAnswers,
+      deliveryMetadata: selectedAnswers.deliveryMetadata?.map((entry) => ({
+        ...entry,
+        deliveryId: messageIndices.has(answers[entry.payloadIndex]!.index)
+          ? answersDeliveryId(entry.deliveryId)
+          : entry.deliveryId,
+      })),
+    },
+    rest: rest.length === 0 ? undefined : selectDeliveryPayloads(delivery, rest),
   };
 }

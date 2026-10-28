@@ -1,48 +1,43 @@
-import type { ActionResultError, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import { instrumentationScope } from "#instrumentation/scope.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { contextStorage } from "#context/container.js";
-import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js";
+import { deliveryEvent } from "#instrumentation/channel-delivery.js";
 import type {
-  InstrumentationToolCallFailedEvent,
-  InstrumentationToolCallStartedEvent,
-  InstrumentationAttemptScope,
+  InstrumentationScope,
+  InstrumentationEvent,
   InstrumentationHooks,
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
   InstrumentationParentLineage,
-  InstrumentationPointEvent,
   InstrumentationTraceContext,
-  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
+  attemptIdempotencyKey,
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-  toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
-import {
-  rememberInstrumentationActionScope,
-  rememberInstrumentationInputScope,
-  takeInstrumentationActionScopeForCall,
-  takeInstrumentationInputScope,
-} from "#instrumentation/state.js";
-import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { eventsOf } from "#harness/publication.js";
+import { cascade } from "#harness/session-machine/cascade.js";
+import { currentView, enteredView } from "#harness/session-machine/current.js";
+import { isTerminalType } from "#protocol/session-events/catalog.js";
+import { askedCall, decidingAnswer } from "#protocol/session-projection/reader.js";
+import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
+import { copyView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { HandleEventFn } from "#harness/types.js";
-import {
-  isRuntimeWorkflowToolAction,
-  type RuntimeActionRequest,
-  type RuntimeActionResult,
-} from "#shared/action-types.js";
+import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
+  readonly deliveryInput?: DeliverHookPayload;
   readonly isFrameworkTool?: (name: string) => boolean;
+  readonly functionId?: string;
   readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
-  readonly getAttemptScope?: () => InstrumentationAttemptScope | undefined;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
   readonly parentLineage?: InstrumentationParentLineage;
@@ -51,363 +46,357 @@ export interface CreateInstrumentationHandleEventInput {
   readonly scheduleId?: string;
   readonly sessionId: string;
   readonly title?: string;
-  readonly turnId?: string;
 }
 
-/** Publishes eve-native lifecycle transitions after durable event acceptance. */
+/** Where an attempt is in its session: its turn, its step, and which try at the step it is. */
+export interface AttemptPlace {
+  readonly runId: string;
+  readonly turnId?: string;
+  readonly stepIndex?: number;
+  readonly attempt: number;
+}
+
+/** An attempt's scope: the session it runs in, and its place. */
+export function attemptScopeOf(
+  session: Pick<
+    CreateInstrumentationHandleEventInput,
+    "channelAudience" | "functionId" | "rootSessionId" | "sessionId" | "traceSessionId"
+  >,
+  { runId, attempt, stepIndex, turnId }: AttemptPlace,
+): InstrumentationScope {
+  return instrumentationScope(
+    {
+      runId,
+      attempt,
+      channelAudience: session.channelAudience,
+      functionId: session.functionId,
+      rootSessionId: session.rootSessionId,
+      sessionId: session.sessionId,
+      traceSessionId: session.traceSessionId,
+      turnId,
+    },
+    stepIndex,
+  );
+}
+
+/** What one committed line means to instrumentation, besides the line itself. */
+interface Line {
+  readonly attemptScope: (place: AttemptPlace) => InstrumentationScope;
+  readonly capturesInputs: boolean;
+  readonly capturesOutputs: boolean;
+  readonly settledAtMs?: Readonly<Record<string, number>>;
+  readonly startedAtMs: number;
+  readonly view?: SessionView;
+}
+
+/**
+ * Publishes each committed fact's instrumentation events once the publication folds it. The
+ * events are a function of the fact and the tables after it: a call's or a request's attempt is
+ * its run's current one, the attempt that produced it.
+ */
 export function createInstrumentationHandleEvent(
   input: CreateInstrumentationHandleEventInput,
 ): HandleEventFn | undefined {
   if (input.hooks === undefined) return input.handleEvent;
   if (input.handleEvent === undefined) return undefined;
-
-  const handleEvent = input.handleEvent;
-  const hooks = input.hooks;
-  const publishedActions = new Set<string>();
-  const publishedInputs = new Set<string>();
-  let activeTurnId = input.turnId;
-  return async (event, messages) => {
+  const { handleEvent, hooks } = input;
+  return async (publication, messages) => {
     const startedAtMs = Date.now();
-    await handleEvent(event, messages);
-    const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
-    if (event.type === "turn.started") activeTurnId = event.data.turnId;
-    if (
-      event.type === "turn.cancelled" ||
-      event.type === "turn.completed" ||
-      event.type === "turn.failed" ||
-      event.type === "session.completed" ||
-      event.type === "session.failed"
-    ) {
-      const ctx = contextStorage.getStore();
-      if (ctx !== undefined) {
-        await instrumentChannelDelivery({
-          ctx,
-          error:
-            event.type === "turn.failed" || event.type === "session.failed"
-              ? new Error(event.data.message)
-              : undefined,
-          errorCode:
-            event.type === "turn.failed" || event.type === "session.failed"
-              ? event.data.code
-              : undefined,
-          hooks,
-          includeTurn:
-            event.type === "turn.cancelled" ||
-            event.type === "turn.completed" ||
-            event.type === "turn.failed" ||
-            event.type === "session.failed",
-          outcome:
-            event.type === "turn.failed" || event.type === "session.failed"
-              ? "failed"
-              : event.type === "turn.cancelled"
-                ? "cancelled"
-                : "completed",
-        });
+    const ctx = contextStorage.getStore();
+    const before = ctx === undefined ? undefined : enteredView(ctx);
+    let cancellation: { readonly error: unknown } | undefined;
+    try {
+      await handleEvent(publication, messages);
+    } catch (error) {
+      // Turn hooks cancel after the publication commits; its instrumentation must still settle.
+      if (
+        !isTurnCancellation(error) ||
+        before === undefined ||
+        ctx === undefined ||
+        currentView(ctx).position <= before.position
+      )
+        throw error;
+      cancellation = { error };
+    }
+    // Operational state may already have retired a summary run when its context change settled.
+    const published = eventsOf(publication);
+    const committed =
+      before !== undefined && published.some((event) => isTerminalType(event.type))
+        ? cascade(before, published)
+        : published;
+    const view = before === undefined ? undefined : copyView(before);
+    if (view !== undefined)
+      for (const event of committed)
+        foldReceivedEvent(view, { ...event, meta: { endOfLine: false } });
+    const line: Line = {
+      attemptScope: (place) => attemptScopeOf(input, place),
+      capturesInputs: hooks.capturesInputs ?? hooks.capturesContent ?? false,
+      capturesOutputs: hooks.capturesOutputs ?? hooks.capturesContent ?? false,
+      settledAtMs: ctx?.get(RuntimeActionSettlementTimesKey),
+      startedAtMs,
+      view: view ?? (ctx === undefined ? undefined : currentView(ctx)),
+    };
+    for (const event of committed) {
+      const delivery = deliveryEvent(event, ctx, input);
+      if (delivery !== undefined) await hooks.publish(Object.freeze(delivery));
+      for (const derived of instrumentationEventsOf(event, line, input)) {
+        await hooks.publish(Object.freeze(derived));
       }
     }
-    if (lifecycleEvent !== undefined) await hooks.publish(lifecycleEvent);
-    if (event.type === "actions.requested") {
-      await publishActionStarts(event, input, hooks, publishedActions, startedAtMs);
-    } else if (event.type === "action.result") {
-      await publishActionTerminal(event, input, hooks);
-    } else if (event.type === "input.requested") {
-      await publishInputStarts(event, input, hooks, publishedInputs);
-    }
+    if (cancellation !== undefined) throw cancellation.error;
   };
 }
 
-async function publishInputStarts(
-  event: Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>,
+/** The instrumentation events one fact produces. */
+function instrumentationEventsOf(
+  event: SessionEvent,
+  line: Line,
   input: CreateInstrumentationHandleEventInput,
-  hooks: InstrumentationHooks,
-  published: Set<string>,
-): Promise<void> {
-  const scope = input.getAttemptScope?.();
-  if (scope === undefined) return;
-  const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
-
-  for (const request of event.data.requests) {
-    const idempotencyKey = inputIdempotencyKey(
-      input.sessionId,
-      event.data.turnId,
-      request.requestId,
-    );
-    if (published.has(idempotencyKey)) continue;
-    published.add(idempotencyKey);
-    rememberInstrumentationInputScope(idempotencyKey, scope);
-    await hooks.publish(
-      Object.freeze({
-        action: Object.freeze({
-          callId: request.action.callId,
-          name: request.action.toolName,
-        }),
-        idempotencyKey,
-        kind: request.kind,
-        request: capturesOutputs
-          ? Object.freeze({
-              allowFreeform: request.allowFreeform,
-              display: request.display,
-              options: request.options,
-              prompt: request.prompt,
-            })
-          : undefined,
-        requestId: request.requestId,
-        scope,
-        type: "input.requested",
-      } satisfies InstrumentationInputRequestedEvent),
-    );
-  }
-}
-
-/** Publishes accepted input resolutions against their original request scope. */
-export async function publishInputResolutions(input: {
-  readonly batch: ResolvedInputBatch;
-  readonly hooks: InstrumentationHooks;
-  readonly sessionId: string;
-}): Promise<void> {
-  const capturesInputs = input.hooks.capturesInputs ?? input.hooks.capturesContent;
-  for (const resolved of input.batch.inputs) {
-    const idempotencyKey = inputIdempotencyKey(
-      input.sessionId,
-      input.batch.event.turnId,
-      resolved.request.requestId,
-    );
-    const scope = takeInstrumentationInputScope(idempotencyKey);
-    if (scope === undefined) continue;
-    await input.hooks.publish(
-      Object.freeze({
-        idempotencyKey,
-        kind: resolved.request.kind,
-        outcome: resolved.outcome,
-        requestId: resolved.request.requestId,
-        response:
-          !capturesInputs || resolved.response === undefined
-            ? undefined
-            : Object.freeze({
-                optionId: resolved.response.optionId,
-                text: resolved.response.text,
-              }),
-        scope,
-        type: "input.resolved",
-      } satisfies InstrumentationInputResolvedEvent),
-    );
-  }
-}
-
-async function publishActionStarts(
-  event: Extract<UnstampedMessageStreamEvent, { type: "actions.requested" }>,
-  input: CreateInstrumentationHandleEventInput,
-  hooks: InstrumentationHooks,
-  published: Set<string>,
-  startedAtMs: number,
-): Promise<void> {
-  const scope = input.getAttemptScope?.();
-  if (scope === undefined) return;
-  const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
-
-  for (const action of event.data.actions) {
-    const deferred =
-      isRuntimeWorkflowToolAction(action) ||
-      action.kind === "subagent-call" ||
-      action.kind === "remote-agent-call";
-    const idempotencyKey = actionIdempotencyKey(input.sessionId, event.data.turnId, action.callId);
-    if (published.has(idempotencyKey)) continue;
-    published.add(idempotencyKey);
-    rememberInstrumentationActionScope(
-      idempotencyKey,
-      scope,
-      deferred
-        ? {
-            type: "tool.call.started",
-            callId: action.callId,
-            toolName: actionName(action),
-            frameworkTool: isFrameworkAction(action, input),
-            scope,
-            idempotencyKey: toolCallIdempotencyKey(scope, action.callId, 0),
-            startedAtMs: Date.now(),
-            input: capturesInputs ? action.input : undefined,
-          }
-        : undefined,
-    );
-    await hooks.publish(
-      Object.freeze({
-        callId: action.callId,
-        startedAtMs,
-        idempotencyKey,
-        input: capturesInputs ? action.input : undefined,
-        ...(deferred ? { isWorkflowTool: true } : undefined),
-        kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
-        toolName: actionName(action),
-        frameworkTool: isFrameworkAction(action, input),
-        scope,
-        type: "tool.call.started",
-      } satisfies InstrumentationToolCallStartedEvent),
-    );
-  }
-}
-
-async function publishActionTerminal(
-  event: Extract<UnstampedMessageStreamEvent, { type: "action.result" }>,
-  input: CreateInstrumentationHandleEventInput,
-  hooks: InstrumentationHooks,
-): Promise<void> {
-  const correlation = takeInstrumentationActionScopeForCall(
-    input.sessionId,
-    event.data.result.callId,
-  );
-  if (correlation === undefined) return;
-  const { idempotencyKey, scope } = correlation;
-  const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
-
-  if (event.data.status === "completed") {
-    await hooks.publish(
-      Object.freeze({
-        acceptedAtMs: contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[
-          event.data.result.callId
-        ],
-        idempotencyKey,
-        outcome: "completed",
-        output: Object.freeze(
-          capturesOutputs
-            ? { output: event.data.result.output, type: "result" }
-            : { type: "result" },
-        ),
-        scope,
-        type: "tool.call.completed",
-        usage: actionUsage(event.data.result),
-      }),
-    );
-    return;
-  }
-
-  const error = capturesOutputs
-    ? event.data.error === undefined
-      ? event.data.result.output
-      : toThrownError(event.data.error)
-    : undefined;
-  await hooks.publish(
-    Object.freeze({
-      acceptedAtMs: contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[
-        event.data.result.callId
-      ],
-      error,
-      errorCode: event.data.error?.code,
-      idempotencyKey,
-      outcome: event.data.status,
-      scope,
-      type: "tool.call.failed",
-      usage: actionUsage(event.data.result),
-    } satisfies InstrumentationToolCallFailedEvent),
-  );
-}
-
-function toThrownError({ code, message, name }: ActionResultError): Error {
-  const error = Object.assign(new Error(message), { code });
-  if (name !== undefined) error.name = name;
-  return error;
-}
-
-function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefined {
-  if (
-    result.kind !== "subagent-result" ||
-    result.origin !== "child" ||
-    result.usage === undefined
-  ) {
-    return undefined;
-  }
-  const usage: {
-    -readonly [K in keyof InstrumentationUsage]: InstrumentationUsage[K];
-  } = {
-    inputTokenDetails: {
-      cacheReadTokens: result.usage.cacheReadTokens,
-      cacheWriteTokens: result.usage.cacheWriteTokens,
-    },
-    inputTokens: result.usage.inputTokens,
-    outputTokens: result.usage.outputTokens,
-  };
-  if (result.usage.costUsd !== undefined) usage.costUsd = result.usage.costUsd;
-  return usage;
-}
-
-/** A skill load runs eve's skill loader; any other call is eve's when its tool is. */
-function isFrameworkAction(
-  action: RuntimeActionRequest,
-  input: Pick<CreateInstrumentationHandleEventInput, "isFrameworkTool">,
-): boolean {
-  return action.kind === "load-skill" || input.isFrameworkTool?.(actionName(action)) === true;
-}
-
-function actionName(action: RuntimeActionRequest): string {
-  if (action.kind === "tool-call" || action.kind === "workflow-tool-call") return action.toolName;
-  return action.name;
-}
-
-function toLifecycleEvent(
-  event: UnstampedMessageStreamEvent,
-  input: CreateInstrumentationHandleEventInput,
-  activeTurnId: string | undefined,
-): InstrumentationPointEvent | undefined {
+): InstrumentationEvent[] {
+  const { sessionId } = input;
+  const session = sessionIdempotencyKey(sessionId);
   switch (event.type) {
     case "session.started":
-      return {
-        agentName: input.agentName,
-        channelAudience: input.channelAudience,
-        channelKind: input.channelKind,
-        idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        parentLineage: input.parentLineage,
-        parentTraceContext: input.parentTraceContext,
-        rootSessionId: input.rootSessionId ?? input.sessionId,
-        traceSessionId: input.traceSessionId,
-        scheduleId: input.scheduleId,
-        sessionId: input.sessionId,
-        title: input.title,
-        type: "session.started",
-      };
-    case "session.completed":
-    case "session.waiting":
-      return {
-        idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        sessionId: input.sessionId,
-        turnId: activeTurnId,
-        type: event.type,
-      };
-    case "session.failed":
-      return {
-        error: new Error(event.data.message),
-        idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        sessionId: input.sessionId,
-        turnId: activeTurnId,
-        type: "session.failed",
-      };
+      return [
+        {
+          agentName: input.agentName,
+          channelAudience: input.channelAudience,
+          channelKind: input.channelKind,
+          idempotencyKey: session,
+          parentLineage: input.parentLineage,
+          parentTraceContext: input.parentTraceContext,
+          rootSessionId: input.rootSessionId ?? sessionId,
+          traceSessionId: input.traceSessionId,
+          scheduleId: input.scheduleId,
+          sessionId,
+          title: input.title,
+          type: "session.started",
+        },
+      ];
+    case "session.ended": {
+      // The turn that failed it, when one did; otherwise the session's latest turn.
+      const { cause } = event.data;
+      const turnId =
+        cause !== undefined && "turnId" in cause ? cause.turnId : latestTurnId(line.view);
+      const { outcome } = event.data;
+      return [
+        {
+          error:
+            outcome === "failed"
+              ? new Error(event.data.error?.message ?? "The session failed.")
+              : undefined,
+          idempotencyKey: session,
+          outcome,
+          sessionId,
+          turnId,
+          type: "session.ended",
+        },
+      ];
+    }
     case "turn.started":
-      return {
-        idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        parentLineage: input.parentLineage,
-        parentTraceContext: input.parentTraceContext,
-        rootSessionId: input.rootSessionId ?? input.sessionId,
-        traceSessionId: input.traceSessionId,
-        sequence: event.data.sequence,
-        sessionId: input.sessionId,
-        turnId: event.data.turnId,
-        type: "turn.started",
-      };
-    case "turn.completed":
-    case "turn.cancelled":
-      return {
-        idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        sessionId: input.sessionId,
-        turnId: event.data.turnId,
-        type: event.type,
-      };
-    case "turn.failed":
-      return {
-        error: new Error(event.data.message),
-        idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        sessionId: input.sessionId,
-        turnId: event.data.turnId,
-        type: "turn.failed",
-      };
+      return [
+        {
+          idempotencyKey: turnIdempotencyKey(sessionId, event.data.turnId),
+          parentLineage: input.parentLineage,
+          parentTraceContext: input.parentTraceContext,
+          rootSessionId: input.rootSessionId ?? sessionId,
+          traceSessionId: input.traceSessionId,
+          sequence: turnSequence(event.data.turnId),
+          sessionId,
+          turnId: event.data.turnId,
+          type: "turn.started",
+        },
+      ];
+    case "turn.settled": {
+      const { outcome, turnId } = event.data;
+      return [
+        {
+          error:
+            outcome === "failed"
+              ? new Error(event.data.error?.message ?? "The turn failed.")
+              : undefined,
+          idempotencyKey: turnIdempotencyKey(sessionId, turnId),
+          outcome,
+          sessionId,
+          turnId,
+          type: "turn.settled",
+        },
+      ];
+    }
+    case "model.retried": {
+      const scope = runAttempt(line, event.data.runId);
+      if (scope === undefined) return [];
+      return [
+        {
+          error: new Error(event.data.error.message),
+          idempotencyKey: attemptIdempotencyKey(scope),
+          scope,
+          type: "model.retried",
+        },
+      ];
+    }
+    case "model.settled": {
+      const scope = runAttempt(line, event.data.runId);
+      if (scope === undefined) return [];
+      const { error, outcome } = event.data;
+      const idempotencyKey = attemptIdempotencyKey(scope);
+      // A cancelled turn stops its run on purpose: the attempt is cancelled, not failed.
+      const cancelled =
+        outcome === "interrupted" &&
+        scope.turnId !== undefined &&
+        line.view?.turns[scope.turnId]?.outcome === "cancelled";
+      return [
+        {
+          error: error === undefined ? undefined : new Error(error.message),
+          idempotencyKey,
+          scope,
+          outcome: cancelled ? "cancelled" : outcome,
+          type: "model.settled",
+        },
+      ];
+    }
+    case "call.requested": {
+      const row = line.view?.calls[event.data.callId];
+      const scope = row === undefined ? undefined : runAttempt(line, callRun(line.view!, row));
+      if (scope === undefined) return [];
+      const { callId, capability } = event.data;
+      const name = capability.name;
+      return [
+        {
+          callId,
+          // A skill load runs eve's skill loader; any other call is eve's when its tool is.
+          frameworkTool: capability.kind === "skill" || input.isFrameworkTool?.(name) === true,
+          idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, callId),
+          input: line.capturesInputs ? event.data.input : undefined,
+          capability,
+          scope,
+          startedAtMs: line.startedAtMs,
+          toolName: name,
+          type: "call.requested",
+        },
+      ];
+    }
+    case "call.settled": {
+      const { callId, outcome } = event.data;
+      const row = line.view?.calls[callId];
+      const scope = row === undefined ? undefined : runAttempt(line, callRun(line.view!, row));
+      if (scope === undefined) return [];
+      const idempotencyKey = actionIdempotencyKey(sessionId, scope.turnId, callId);
+      const output = outcome === "completed" ? event.data.output : undefined;
+      const error =
+        outcome === "completed"
+          ? undefined
+          : event.data.error === undefined
+            ? event.data.output
+            : Object.assign(new Error(event.data.error.message), {
+                code: event.data.error.code,
+                name: event.data.error.name ?? "Error",
+              });
+      return [
+        {
+          acceptedAtMs: line.settledAtMs?.[callId],
+          cause: event.data.cause,
+          error: line.capturesOutputs ? error : undefined,
+          errorCode: event.data.error?.code,
+          idempotencyKey,
+          outcome,
+          reason: event.data.reason,
+          output: line.capturesOutputs ? output : undefined,
+          scope,
+          type: "call.settled",
+          usage: row?.usage,
+        },
+      ];
+    }
+    case "interaction.opened": {
+      const row = line.view?.interactions[event.data.interactionId];
+      const scope = row === undefined ? undefined : interactionAttempt(line, row);
+      if (row === undefined || scope === undefined) return [];
+      const { request } = row;
+      const call = askedCall(line.view!, row);
+      return [
+        {
+          call: call === undefined ? undefined : { callId: call.callId, name: call.name },
+          idempotencyKey: inputIdempotencyKey(sessionId, scope.turnId, row.interactionId),
+          interactionId: row.interactionId,
+          kind: request.kind,
+          request: line.capturesOutputs
+            ? {
+                allowFreeform: request.allowFreeform,
+                display: request.display,
+                options: request.options,
+                prompt: request.prompt,
+                title: request.title,
+              }
+            : undefined,
+          scope,
+          type: "interaction.opened",
+        },
+      ];
+    }
+    case "interaction.settled": {
+      const row = line.view?.interactions[event.data.interactionId];
+      const scope = row === undefined ? undefined : interactionAttempt(line, row);
+      if (row === undefined || scope === undefined) return [];
+      const answer = decidingAnswer(row);
+      return [
+        {
+          answer:
+            !line.capturesInputs || answer === undefined
+              ? undefined
+              : { optionId: answer.optionId, text: answer.text },
+          idempotencyKey: inputIdempotencyKey(sessionId, scope.turnId, row.interactionId),
+          interactionId: row.interactionId,
+          kind: row.request.kind,
+          outcome: event.data.outcome,
+          scope,
+          type: "interaction.settled",
+        },
+      ];
+    }
     default:
-      return undefined;
+      return [];
   }
+}
+
+/** A turn's run's current attempt; a context change's run is no step of a turn. */
+function runAttempt(line: Line, runId: string | undefined): InstrumentationScope | undefined {
+  const run = runId === undefined ? undefined : line.view?.runs[runId];
+  if (run?.attempt === undefined) return undefined;
+  const turnId = runTurn(line.view!, run.runId);
+  return line.attemptScope({ runId: run.runId, attempt: run.attempt, stepIndex: run.step, turnId });
+}
+
+/**
+ * The attempt a person's request came from: its call's, or for a request about the turn or a
+ * task, the turn's latest. Sign-ins are connection work, not input.
+ */
+function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
+  const view = line.view!;
+  if (row.request.kind === "sign-in") return undefined;
+  const { subject } = row;
+  if ("callId" in subject) {
+    const call = view.calls[subject.callId];
+    return call === undefined ? undefined : runAttempt(line, callRun(view, call));
+  }
+  if ("taskId" in subject) {
+    const task = view.tasks[subject.taskId];
+    const call = task === undefined ? undefined : view.calls[task.startedBy.callId];
+    return call === undefined ? undefined : runAttempt(line, callRun(view, call));
+  }
+  if (!("turnId" in subject)) return undefined;
+  const runs = Object.values(view.runs).filter(
+    (run) => run.attempt !== undefined && runTurn(view, run.runId) === subject.turnId,
+  );
+  return runAttempt(line, runs.at(-1)?.runId);
+}
+
+function latestTurnId(view: SessionView | undefined): string | undefined {
+  const ids = view === undefined ? [] : Object.keys(view.turns);
+  return ids.at(-1);
+}
+
+function turnSequence(turnId: string): number {
+  const match = /^turn_(\d+)$/.exec(turnId);
+  return match === null ? 0 : Number(match[1]);
 }

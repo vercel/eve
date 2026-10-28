@@ -1,21 +1,19 @@
-import type {
-  MetricReader,
-  PropagatorOrName,
-  SamplerOrName,
-  SpanExporter,
-  SpanProcessor,
-  SpanProcessorOrName,
-} from "#compiled/@vercel/otel/index.js";
-
-import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
-import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
+import { PROVIDER, type InstrumentationProvider } from "#instrumentation/provider.js";
+import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
 import { vercelRuntimeSpanProcessor } from "#tracing/eve/vercel-runtime-span-exporter.js";
-import type { OtelConfiguration } from "#tracing/eve/otel-configuration.js";
+import type {
+  MetricReader,
+  SpanExporter,
+  SpanProcessor,
+  OtelConfiguration,
+  PropagatorOrName as PropagatorSetting,
+  SamplerOrName as SamplerSetting,
+  SpanProcessorOrName as SpanProcessorSetting,
+} from "#tracing/eve/otel-configuration.js";
 import { createLogger, formatError } from "#internal/logging.js";
-const log = createLogger("tracing.export");
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type {
   TraceCaptureContext,
@@ -31,6 +29,8 @@ export type {
   SpanExportDecision,
   SpanExportPolicy,
 } from "#tracing/eve/span-export-policy.js";
+
+const log = createLogger("tracing.export");
 
 /**
  * The process-wide OpenTelemetry settings, declared by `otel()`.
@@ -87,9 +87,9 @@ export interface OtelOptions {
    * along with your exporters. To thin one backend only, drop spans in a
    * processor.
    */
-  readonly sampler?: SamplerOrName;
+  readonly sampler?: SamplerSetting;
   /** Composed into one propagator. All inject; the first to extract wins. Defaults to `auto`. */
-  readonly propagators?: readonly PropagatorOrName[];
+  readonly propagators?: readonly PropagatorSetting[];
   /**
    * OpenTelemetry `Instrumentation` instances passed through to
    * `registerOTel` before the server entry loads. Disabled by default.
@@ -128,7 +128,7 @@ export interface OtelIntegrationOptions extends ManagedTraceOptions {
    * Keys beginning with `eve.` are reserved and dropped. Return `undefined`
    * to contribute nothing.
    */
-  readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
+  readonly runtimeContext?: (input: InstrumentationModelStartedInput) => JsonObject | undefined;
 }
 
 const OTEL_DECLARATION = Symbol.for("eve.instrumentation.otel");
@@ -147,8 +147,8 @@ export interface OtelDeclaration extends InstrumentationProvider {
 export interface OtelIntegration extends InstrumentationProvider {
   readonly [OTEL_INTEGRATION]: true;
   readonly metricReaders: readonly MetricReader[];
-  readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
-  readonly spanProcessors: readonly SpanProcessorOrName[];
+  readonly runtimeContext?: (input: InstrumentationModelStartedInput) => JsonObject | undefined;
+  readonly spanProcessors: readonly SpanProcessorSetting[];
 }
 
 /**
@@ -258,7 +258,7 @@ export interface OtelHarnessSettings {
 
 /** @internal */
 export type RuntimeContextResolver = (
-  input: InstrumentationRuntimeContextInput,
+  input: InstrumentationModelStartedInput,
 ) => JsonObject | undefined;
 
 /** @internal */
@@ -284,7 +284,7 @@ export interface CollectedOtel {
  * @internal
  */
 export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
-  const spanProcessors: SpanProcessorOrName[] = [];
+  const spanProcessors: SpanProcessorSetting[] = [];
   const metricReaders: MetricReader[] = [];
   const runtimeContextResolvers: RuntimeContextResolver[] = [];
   let declaration: OtelDeclaration | undefined;

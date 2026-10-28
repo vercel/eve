@@ -115,11 +115,3 @@ function intersect(left, right) {
 function lengthOf(disjoint) {
   return disjoint.reduce((total, { startAt, endAt }) => total + endAt - startAt, 0);
 }
-
-/** Identity of one model step within a session. */
-export function stepKey(event) {
-  const { turnId, stepIndex } = event.data ?? {};
-  return typeof turnId === "string" && Number.isInteger(stepIndex)
-    ? `${turnId}/${stepIndex}`
-    : undefined;
-}

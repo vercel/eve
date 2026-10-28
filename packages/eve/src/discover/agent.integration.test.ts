@@ -3,15 +3,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
-import {
-  EXTENSION_CAPABILITY_SUPPORT,
-  EXTENSION_CAPABILITY_VERSIONS,
-} from "#compiler/extension-compatibility.js";
 import { projectAgentSources } from "#compiler/project-sources.js";
 import { composeAgentModuleCandidates } from "#compiler/source-graph.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
-  DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+  DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
   DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
   DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
   DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
@@ -39,9 +35,9 @@ import {
 
 const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
-  formatVersion: 1,
-  builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1 },
+  formatVersion: 3,
+  builtWithEve: "0.0.0",
+  contractMajor: 0,
 });
 
 /**
@@ -222,7 +218,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "*/15 * * * *",
-          markdown: "Retry dunning.",
+          content: "Retry dunning.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/billing/dunning/retry.md",
@@ -241,7 +237,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "0 9 * * *",
-          markdown: "Send a morning weather digest.",
+          content: "Send a morning weather digest.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/daily-digest.md",
@@ -1285,24 +1281,19 @@ describe("discoverAgent (memory)", () => {
     );
   });
 
-  it("rejects a mounted extension that requires an unsupported capability version", async () => {
-    // One past the current epoch is unsupported by construction, so the
-    // fixture keeps rejecting after future capability bumps.
-    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
+  it("rejects an epoch-format extension before loading its contributions", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
           eve: { extension: { source: "source", dist: "extension" } },
-          peerDependencies: { eve: "*" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "9.0.0",
-          requires: { extension: 1, tool: unsupportedToolVersion },
+          formatVersion: 2,
+          builtWithEve: "0.82.0",
+          requires: { extension: 2 },
         }),
-        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -1310,23 +1301,62 @@ describe("discoverAgent (memory)", () => {
         "instructions.md": "You are a precise assistant.",
       },
     });
-
     const result = await discoverAgent({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
       source: project.source,
     });
-
-    const incompatible = result.diagnostics.find(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-    );
-    expect(incompatible).toBeDefined();
-    expect(incompatible?.message).toContain(`tool contract v${unsupportedToolVersion}`);
-    expect(incompatible?.message).toContain(
-      `versions: ${EXTENSION_CAPABILITY_SUPPORT.tool.map((version) => `v${version}`).join(", ")}`,
-    );
     expect(result.manifest.resolvedExtensions).toEqual([]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message: expect.stringMatching(
+            /old epoch-based distribution manifest.*Rebuild the extension/,
+          ),
+        }),
+      ]),
+    );
   });
+
+  it.each([
+    { builtWithEve: "0.82.0", rejected: false },
+    { builtWithEve: "999.0.0", rejected: true },
+  ])(
+    "checks a version-based extension build from eve $builtWithEve before mounting",
+    async ({ builtWithEve, rejected }) => {
+      const project = buildMemoryAgentProject({
+        appFiles: {
+          "node_modules/@acme/crm/package.json": JSON.stringify({
+            name: "@acme/crm",
+            eve: { extension: { source: "source", dist: "extension" } },
+          }),
+          "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+            kind: "eve-extension",
+            formatVersion: 3,
+            builtWithEve,
+            contractMajor: 0,
+          }),
+          "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        },
+        agentFiles: {
+          "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+          "instructions.md": "You are a precise assistant.",
+        },
+      });
+      const result = await discoverAgent({
+        agentRoot: project.agentRoot,
+        appRoot: project.appRoot,
+        source: project.source,
+      });
+      expect(result.manifest.resolvedExtensions).toHaveLength(rejected ? 0 : 1);
+      expect(
+        result.diagnostics.some(
+          (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+        ),
+      ).toBe(rejected);
+    },
+  );
 
   it("does not use the npm peer range as the runtime compatibility authority", async () => {
     const project = buildMemoryAgentProject({
@@ -1354,7 +1384,7 @@ describe("discoverAgent (memory)", () => {
 
     expect(
       result.diagnostics.some(
-        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
       ),
     ).toBe(false);
     expect(result.manifest.resolvedExtensions).toHaveLength(1);

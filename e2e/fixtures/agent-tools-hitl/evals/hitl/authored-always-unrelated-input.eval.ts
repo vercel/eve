@@ -17,7 +17,7 @@ export default defineEval({
     const held = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
     const session = held.session;
     held.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    const approval = session.requireInputRequest({
+    const approval = session.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
@@ -27,20 +27,12 @@ export default defineEval({
     );
 
     unrelated.expectOk();
-    unrelated.event("input.resolved", {
+    unrelated.event("interaction.settled", {
       count: 1,
-      data: {
-        resolutions: (resolutions) =>
-          resolutions.some(
-            (resolution) =>
-              resolution.requestId === approval.requestId && resolution.outcome === "ignored",
-          ),
-      },
+      data: { interactionId: approval.interactionId, outcome: "withdrawn" },
     });
-    unrelated.notEvent("action.result", {
-      data: { result: { output: new RegExp(MARKER), toolName: TOOL_NAME } },
-    });
-    unrelated.event("session.waiting", { count: 1 });
+    unrelated.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
+    unrelated.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     t.succeeded();
   },
 });

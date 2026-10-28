@@ -1,6 +1,8 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import type {
+  CompactionConfig,
+  CompactionState,
   HarnessSession,
   HarnessSessionBase,
   SessionAgent,
@@ -18,32 +20,22 @@ const FALLBACK_COMPACTION_THRESHOLD = 100_000;
 export function createCompactionConfig(
   input: {
     readonly contextWindowTokens?: number;
-    readonly lastKnownInputTokens?: number;
-    readonly lastKnownPromptMessageCount?: number;
+    readonly previous?: CompactionState;
     readonly thresholdPercent?: number;
   } = {},
-) {
+): CompactionConfig {
   const thresholdPercent = input.thresholdPercent ?? DEFAULT_COMPACTION_THRESHOLD_PERCENT;
   const threshold =
     input.contextWindowTokens === undefined
       ? FALLBACK_COMPACTION_THRESHOLD
       : Math.max(1, Math.floor(input.contextWindowTokens * thresholdPercent));
 
-  const config = {
+  return {
+    ...input.previous,
     recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
     threshold,
     thresholdPercent,
   };
-
-  if (input.lastKnownInputTokens !== undefined) {
-    return {
-      ...config,
-      lastKnownInputTokens: input.lastKnownInputTokens,
-      lastKnownPromptMessageCount: input.lastKnownPromptMessageCount,
-    };
-  }
-
-  return config;
 }
 
 interface CreateSessionInput {
@@ -132,8 +124,7 @@ export function refreshSessionFromTurnAgent(input: {
     ),
     compaction: createCompactionConfig({
       contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
-      lastKnownInputTokens: input.session.compaction.lastKnownInputTokens,
-      lastKnownPromptMessageCount: input.session.compaction.lastKnownPromptMessageCount,
+      previous: input.session.compaction,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
@@ -163,46 +154,22 @@ export function mintSubagentContinuationToken(suffix?: string): string {
  * informed after rehydration.
  */
 export function projectToDurableSession(session: HarnessSessionBase): DurableSession {
-  const durable: {
-    agent: { system: string };
-    compaction?: {
-      lastKnownInputTokens?: number;
-      lastKnownPromptMessageCount?: number;
-    };
-    continuationToken: string;
-    outputSchema?: HarnessSession["outputSchema"];
-    rootSessionId?: string;
-    sandboxState?: HarnessSession["sandboxState"];
-    sessionId: string;
-    state?: HarnessSession["state"];
-  } = {
+  const {
+    threshold: _threshold,
+    thresholdPercent: _percent,
+    recentWindowSize: _size,
+    ...measured
+  } = session.compaction;
+  return {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
     sessionId: session.sessionId,
+    ...(Object.values(measured).some((value) => value !== undefined) && { compaction: measured }),
+    ...(session.rootSessionId !== undefined && { rootSessionId: session.rootSessionId }),
+    ...(session.outputSchema !== undefined && { outputSchema: session.outputSchema }),
+    ...(session.sandboxState !== undefined && { sandboxState: session.sandboxState }),
+    ...(session.state !== undefined && { state: session.state }),
   };
-
-  if (
-    session.compaction.lastKnownInputTokens !== undefined ||
-    session.compaction.lastKnownPromptMessageCount !== undefined
-  ) {
-    durable.compaction = {
-      lastKnownInputTokens: session.compaction.lastKnownInputTokens,
-      lastKnownPromptMessageCount: session.compaction.lastKnownPromptMessageCount,
-    };
-  }
-  if (session.rootSessionId !== undefined) {
-    durable.rootSessionId = session.rootSessionId;
-  }
-  if (session.outputSchema !== undefined) {
-    durable.outputSchema = session.outputSchema;
-  }
-  if (session.sandboxState !== undefined) {
-    durable.sandboxState = session.sandboxState;
-  }
-  if (session.state !== undefined) {
-    durable.state = session.state;
-  }
-  return durable;
 }
 
 /**
@@ -218,35 +185,16 @@ export function hydrateDurableSession(input: {
   };
 }): HarnessSessionBase {
   const { durable, turnAgent } = input;
-  const tools = createSessionToolDefinitions(turnAgent);
-
-  const session: {
-    -readonly [K in keyof HarnessSessionBase]: HarnessSessionBase[K];
-  } = {
-    agent: createSessionAgent(turnAgent, durable.agent.system, tools),
+  const { agent, compaction, ...saved } = durable;
+  return {
+    ...saved,
+    agent: createSessionAgent(turnAgent, agent.system, createSessionToolDefinitions(turnAgent)),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
-      lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,
-      lastKnownPromptMessageCount: durable.compaction?.lastKnownPromptMessageCount,
+      previous: compaction,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
-    continuationToken: durable.continuationToken,
-    sessionId: durable.sessionId,
   };
-
-  if (durable.rootSessionId !== undefined) {
-    session.rootSessionId = durable.rootSessionId;
-  }
-  if (durable.outputSchema !== undefined) {
-    session.outputSchema = durable.outputSchema;
-  }
-  if (durable.sandboxState !== undefined) {
-    session.sandboxState = durable.sandboxState;
-  }
-  if (durable.state !== undefined) {
-    session.state = durable.state;
-  }
-  return session;
 }
 
 function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolDefinition[] {

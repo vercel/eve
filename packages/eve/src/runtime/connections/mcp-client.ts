@@ -530,19 +530,22 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
 }
 
 /**
- * Returns `true` when a tool name passes the configured filter.
+ * Returns `true` when a tool passes the configured filter. A tool may be known
+ * by more than one name, such as an OpenAPI tool's name and the `operationId`
+ * it was derived from; `allow` admits it when any name is listed, and `block`
+ * hides it when any name is listed.
  */
 export function passesToolFilter(
-  toolName: string,
+  names: readonly string[],
   filter: Readonly<ToolFilterDefinition> | undefined,
 ): boolean {
   if (filter === undefined) {
     return true;
   }
   if ("allow" in filter) {
-    return filter.allow.includes(toolName);
+    return names.some((name) => filter.allow.includes(name));
   }
-  return !filter.block.includes(toolName);
+  return !names.some((name) => filter.block.includes(name));
 }
 
 /**

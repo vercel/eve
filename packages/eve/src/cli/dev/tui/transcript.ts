@@ -1,26 +1,19 @@
+import { sessionTables, snapshotState } from "#protocol/session-projection/session-view.js";
 import {
-  agentCallTurns,
+  agentCallActivity,
   agentToolSession,
-  conversationAuthorizations,
-  isAgentCallContentPending,
   type ConversationState,
-  type ConversationTask,
-  type ConversationTaskCall,
+  taskCalls,
 } from "#client/conversation-state.js";
-import type {
-  EveAuthorizationPart,
-  EveDynamicToolPart,
-  EveMessage,
-} from "#client/message-reducer-types.js";
-import { authorizationKey } from "#client/session-utils.js";
+import type { EveInteractionPart, EveToolPart, EveMessage } from "#client/message-types.js";
+import { activity, callOutputSource } from "#protocol/session-projection/selectors.js";
+import type { TaskRow, CallRow, SessionView } from "#protocol/session-projection/tables.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { Block } from "./blocks.js";
 import type { AgentTUIConversationView, AgentTUIFailure, ToolLabels } from "./conversation-view.js";
 import { FileContentCache } from "./file-content-cache.js";
 import { signInLabel, waitingLabel, type TaskEntry } from "./task-activity.js";
 import { TaskRecords } from "./task-records.js";
-import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import {
   agentDisplayName,
   agentTaskLabel,
@@ -34,7 +27,6 @@ import {
   taskNeedsApproval,
   type AgentActivity,
   authorizationTerminalMessage,
-  childToolCallIds,
   endLine,
   firstLine,
   followUpLine,
@@ -53,6 +45,7 @@ import {
   type ToolState,
 } from "./transcript-parts.js";
 import type { SubagentDisplayMode, TerminalPartDisplayMode } from "./types.js";
+import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 
 export interface TranscriptOptions {
   readonly tools: TerminalPartDisplayMode;
@@ -78,9 +71,6 @@ interface PlacedBlock {
   readonly after: readonly string[];
 }
 
-/** How long a settled agent task waits for its own last events before writing its end line. */
-export const TASK_END_GRACE_MS = 2_000;
-
 const PLACEMENT_ANCHORS = 8;
 
 /**
@@ -97,9 +87,6 @@ export class ConversationTranscript {
   #memo = new Map<string, { readonly key: readonly unknown[]; readonly block: Block }>();
   readonly #fileContents = new FileContentCache();
   /** Server user messages that confirmed an optimistic message keep its block. */
-  readonly #aliases = new Map<string, string>();
-  #optimistic = new Map<string, string>();
-  readonly #confirmed = new Set<string>();
   readonly #tasks = new TaskRecords();
   readonly #nestedTasks = new Map<string, TaskRecord>();
   #placed: PlacedBlock[] = [];
@@ -109,9 +96,6 @@ export class ConversationTranscript {
   reset(): void {
     this.#memo = new Map();
     this.#fileContents.clear();
-    this.#aliases.clear();
-    this.#optimistic = new Map();
-    this.#confirmed.clear();
     this.#tasks.clear();
     this.#nestedTasks.clear();
     this.#placed = [];
@@ -124,17 +108,12 @@ export class ConversationTranscript {
     return this.#working;
   }
 
-  /** Whether a settled agent task is waiting for its own last events. */
-  get finishing(): boolean {
-    return this.#working.some((entry) => entry.finishing === true);
-  }
-
   /** How input requests name the task that asked: as its task lines do. */
   taskLabel(conversation: ConversationState, taskId: string): string | undefined {
-    const task = conversation.tasks[taskId];
+    const task = sessionTables(conversation.view).tasks[taskId];
     if (task === undefined) return undefined;
-    const calls = Object.values(task.calls);
-    const call = calls.findLast((candidate) => candidate.status === "working") ?? calls.at(-1);
+    const calls = taskCalls(conversation.view, taskId);
+    const call = calls.findLast((candidate) => candidate.status !== "settled") ?? calls.at(-1);
     const record = call === undefined ? undefined : this.#tasks.get(call.callId);
     if (record !== undefined)
       return record.kind === "agent" ? agentTaskLabel(record.name) : record.name;
@@ -149,7 +128,14 @@ export class ConversationTranscript {
     for (const record of this.#tasks.values()) {
       if (record.ended) continue;
       record.ended = true;
-      lines.push(endLine(record, { status: "cancelled" }, undefined, options.dot ?? "·"));
+      lines.push(
+        endLine(
+          record,
+          { outcome: "interrupted", status: "settled" },
+          undefined,
+          options.dot ?? "·",
+        ),
+      );
     }
     this.#working = [];
     return lines;
@@ -159,56 +145,87 @@ export class ConversationTranscript {
     const { conversation, working } = view;
     const now = Date.now();
     const blocks: Block[] = [];
-    this.#aliasConfirmedMessages(conversation.messages);
-    const childToolIds = childToolCallIds(conversation);
     const taskCalls = taskCallsById(conversation);
-    const withdrawn = new Set(view.data.withdrawnCallIds);
-    const labels = view.data.toolLabels;
+    const { toolLabels: labels, withdrawn } = view.data;
+    // A turn's failure shows where the turn ended, after its last message.
+    const turnFailures = new Map(
+      view.failures.flatMap((failure) =>
+        failure.turnId === undefined ? [] : [[failure.turnId, failure] as const],
+      ),
+    );
+    const lastOfTurn = new Map<string, number>();
+    for (const [index, message] of conversation.messages.entries()) {
+      const turnId = message.metadata?.turnId;
+      if (turnId !== undefined) lastOfTurn.set(turnId, index);
+    }
+    const shown = new Set<string>();
+    const endTurn = (index: number, turnId: string | undefined): boolean => {
+      if (turnId === undefined || lastOfTurn.get(turnId) !== index) return false;
+      const failure = turnFailures.get(turnId);
+      if (failure === undefined) return false;
+      blocks.push(this.#failureBlock(`failure:${turnId}`, failure, options));
+      shown.add(turnId);
+      return true;
+    };
 
-    for (const message of conversation.messages) {
+    for (const [messageIndex, message] of conversation.messages.entries()) {
       if (message.role === "user") {
         const block = this.#userBlock(message);
         if (block !== undefined) blocks.push(block);
+        endTurn(messageIndex, message.metadata?.turnId);
         continue;
       }
       const tools = message.parts.filter(
-        (part): part is EveDynamicToolPart =>
+        (part): part is EveToolPart =>
           isToolCallRow(part) &&
           // A call still streaming its input shows a placeholder only while the turn runs.
-          (part.state !== "input-streaming" || working) &&
-          !isTaskControlTool(part.toolName) &&
-          !withdrawn.has(part.toolCallId) &&
-          part.toolMetadata?.eve?.inputRequest?.kind !== "session-limit" &&
-          !taskCalls.has(part.toolCallId) &&
-          !childToolIds.has(part.toolCallId) &&
-          !isPanelRoutedTool(part.toolName),
+          (part.state !== "streaming" || working) &&
+          part.kind !== "control" &&
+          !withdrawn(part.callId) &&
+          !taskCalls.has(part.callId) &&
+          !isPanelRoutedTool(part.name),
       );
-      const states = new Map(tools.map((part) => [part, toolState(part, conversation, working)]));
+      const states = new Map(tools.map((part) => [part, toolState(part, view.data.view)]));
       const activeSteps = activeToolSteps(states);
 
       for (const [index, part] of message.parts.entries()) {
         if (part.type === "text" || part.type === "reasoning") {
           const block = this.#contentBlock(message, index, options, working);
           if (block !== undefined) blocks.push(block);
-        } else if (part.type === "authorization") {
-          if (options.connectionAuth !== "hidden") blocks.push(this.#authorizationBlock(part));
-        } else if (part.type === "dynamic-tool") {
-          const taskCall = taskCalls.get(part.toolCallId);
+        } else if (part.type === "interaction") {
+          // A sign-in shows where it was asked; the composer asks the rest.
+          if (part.request.signIn !== undefined && options.connectionAuth !== "hidden")
+            blocks.push(this.#signInBlock(part, part.request.signIn));
+        } else if (part.type === "tool") {
+          const taskCall = taskCalls.get(part.callId);
           if (taskCall !== undefined) {
-            const start = this.#taskStartLine(part, taskCall.task, labels, options, now);
+            const start = this.#taskStartLine(
+              part,
+              taskCall.task,
+              labels,
+              options,
+              now,
+              view.data.view,
+            );
             if (start !== undefined) blocks.push(start);
             continue;
           }
           const state = states.get(part);
           if (state === undefined || options.tools === "hidden") continue;
-          const toolLabels = labels[part.toolCallId];
+          const toolLabels = labels(part.callId);
           blocks.push(
             this.#toolBlock(part, state, activeSteps.has(part.stepIndex), toolLabels, options),
           );
         }
       }
       const turnId = message.metadata?.turnId;
-      if (turnId !== undefined && conversation.turns[turnId]?.status === "cancelled") {
+      if (endTurn(messageIndex, turnId)) continue;
+      if (
+        turnId !== undefined &&
+        !turnFailures.has(turnId) &&
+        lastOfTurn.get(turnId) === messageIndex &&
+        sessionTables(conversation.view).turns[turnId]?.outcome === "cancelled"
+      ) {
         blocks.push(
           this.#memoize(`cancelled:${turnId}`, [], () => ({
             kind: "notice",
@@ -218,8 +235,15 @@ export class ConversationTranscript {
         );
       }
     }
-    for (const [index, failure] of view.failures.entries()) {
-      blocks.push(this.#failureBlock(index, failure, options));
+    // Failures that ended no turn shown above, such as a session's own, go last.
+    let unplaced = 0;
+    for (const failure of view.failures) {
+      if (failure.turnId !== undefined && shown.has(failure.turnId)) continue;
+      const id =
+        failure.turnId === undefined
+          ? `failure:session:${unplaced++}`
+          : `failure:${failure.turnId}`;
+      blocks.push(this.#failureBlock(id, failure, options));
     }
 
     const placed = this.#placeBlocks(blocks);
@@ -252,20 +276,21 @@ export class ConversationTranscript {
 
   /** A call became a task: its row is now the task's start line, or a message to a working one. */
   #taskStartLine(
-    part: EveDynamicToolPart,
-    task: ConversationTask,
-    labels: Readonly<Record<string, ToolLabels>>,
+    part: EveToolPart,
+    task: TaskRow,
+    labels: (callId: string) => ToolLabels | undefined,
     options: TranscriptOptions,
     now: number,
+    view: SessionView,
   ): Block | undefined {
     const visible =
       task.kind === "agent" ? options.subagents !== "hidden" : options.tools !== "hidden";
     if (!visible) return undefined;
-    const label = labels[part.toolCallId]?.start;
-    const record = this.#tasks.record(part, task, label, now);
-    return record.callId === part.toolCallId
+    const label = labels(part.callId)?.start;
+    const record = this.#tasks.record(part, task, label, now, view);
+    return record.callId === part.callId
       ? this.#memoize(`task:${record.callId}:start`, [record], () => startLine(record))
-      : this.#memoize(`task:${part.toolCallId}:message`, [record], () =>
+      : this.#memoize(`task:${part.callId}:message`, [record], () =>
           followUpLine(record, part, label),
         );
   }
@@ -276,18 +301,18 @@ export class ConversationTranscript {
    */
   #taskActivity(
     view: AgentTUIConversationView,
-    taskCalls: ReadonlyMap<string, { task: ConversationTask; call: ConversationTaskCall }>,
+    taskCalls: ReadonlyMap<string, { task: TaskRow; call: CallRow }>,
     options: TranscriptOptions,
     now: number,
   ): Block[] {
     const { conversation, working } = view;
-    const lastTurn = Object.values(conversation.turns).at(-1);
+    const lastTurn = Object.values(sessionTables(conversation.view).turns).at(-1);
     // A cancelled or failed turn gets no end for the tasks still working; they read as stopped.
     const stopping =
       !working &&
       (view.data.sessionFailed ||
-        lastTurn?.status === "cancelled" ||
-        lastTurn?.status === "failed");
+        lastTurn?.outcome === "cancelled" ||
+        lastTurn?.outcome === "failed");
     const arrivals: Block[] = [];
     const entries: TaskEntry[] = [];
     const traversal = { remaining: 128 };
@@ -307,19 +332,22 @@ export class ConversationTranscript {
           if (!this.#placedIds.has(row.id!)) arrivals.push(row);
         }
       }
-      const settled = calls.every((candidate) => candidate.status !== "working");
+      const settled = calls.every((candidate) => candidate.status === "settled");
       if (settled) record.settledAtMs ??= now;
-      const finishing =
-        settled &&
-        activity.pending &&
-        working &&
-        now - (record.settledAtMs ?? now) < TASK_END_GRACE_MS;
+      // A settled agent task waits for its session to settle the call's delivery, while its turn
+      // runs, before writing its end line.
+      const finishing = settled && activity.pending && working;
       if ((settled && !finishing) || (!settled && stopping)) {
         record.ended = true;
         arrivals.push(
           endLine(
             record,
-            settled ? call : { status: "cancelled" },
+            settled
+              ? {
+                  ...call,
+                  output: callOutputSource(sessionTables(conversation.view), call.callId)?.output,
+                }
+              : { outcome: "interrupted", status: "settled" },
             activity.tools,
             options.dot ?? "·",
           ),
@@ -351,8 +379,8 @@ export class ConversationTranscript {
   /** What an agent task has done for these calls: its tool calls, latest words, and finished rows. */
   #agentActivity(
     record: TaskRecord,
-    task: ConversationTask,
-    calls: readonly ConversationTaskCall[],
+    task: TaskRow,
+    calls: readonly CallRow[],
     conversation: ConversationState,
     options: TranscriptOptions,
     traversal: { remaining: number },
@@ -364,18 +392,26 @@ export class ConversationTranscript {
         ? undefined
         : agent.observation.conversation;
     if (agent === undefined || child === undefined) return { tools: [], rows: [], pending: false };
+    // A settled call still waits for its deliveries' content while the child works on them.
+    const sent = calls.flatMap((call) => {
+      const activity = agentCallActivity(conversation, call.callId);
+      return activity.status === "unlinked"
+        ? []
+        : activity.sessions.filter((session) => session.sessionId === agent.sessionId);
+    });
     const pending =
       agent.observation.status === "following" &&
-      calls.some((call) => isAgentCallContentPending(task, call, child));
-    const callTurns = agentCallTurns(task, child);
-    const turnIds = new Set(calls.flatMap((call) => callTurns.get(call.callId) ?? []));
+      sent.some((session) => session.deliveries.some(({ status }) => status !== "settled"));
+    const turnIds = new Set(sent.flatMap((session) => session.turns.map(({ turnId }) => turnId)));
+    // Without delivery links, show generic child activity rather than guessing which call caused it.
+    const unlinked = !sessionTables(conversation.view).children[agent.sessionId]?.deliveries
+      ?.length;
     const messages = child.messages.filter(
       (message) =>
         message.role === "assistant" &&
         message.metadata?.turnId !== undefined &&
-        turnIds.has(message.metadata.turnId),
+        (unlinked || turnIds.has(message.metadata.turnId)),
     );
-    const running = calls.some((call) => call.status === "working") || pending;
     const childTasks = taskCallsById(child);
     const ordered: Array<{ order: number; block: Block; settled: boolean }> = [];
     const tools: Block[] = [];
@@ -388,12 +424,12 @@ export class ConversationTranscript {
     for (const message of messages) {
       for (const part of message.parts) {
         order += 1;
-        if (!isToolCallRow(part) || isTaskControlTool(part.toolName)) continue;
-        const childTask = childTasks.get(part.toolCallId);
-        const state = toolState(part, child, running);
-        const id = `subagent:${record.callId}:tool:${part.toolCallId}`;
+        if (!isToolCallRow(part) || part.kind === "control") continue;
+        const childTask = childTasks.get(part.callId);
+        const state = toolState(part, sessionTables(child.view));
+        const id = `subagent:${record.callId}:tool:${part.callId}`;
         const block = this.#memoize(id, [part, state.status, record.name], () => {
-          const context = this.#presentationContext(part.toolCallId, part, state, options, {
+          const context = this.#presentationContext(part.callId, part, state, options, {
             isSubagent: childTask?.task.kind === "agent",
           });
           return {
@@ -409,7 +445,7 @@ export class ConversationTranscript {
           childTask?.task.kind === "agent"
             ? options.subagents !== "hidden"
             : options.tools !== "hidden";
-        if (childTask?.call.status === "working" && childVisible) {
+        if (childTask !== undefined && childTask.call.status !== "settled" && childVisible) {
           if (shownChildTasks.has(childTask.task.taskId)) continue;
           shownChildTasks.add(childTask.task.taskId);
           if (depth >= 8 || traversal.remaining <= 0) {
@@ -419,7 +455,7 @@ export class ConversationTranscript {
             continue;
           }
           traversal.remaining -= 1;
-          const key = `${record.callId}/${part.toolCallId}`;
+          const key = `${record.callId}/${part.callId}`;
           let nested = this.#nestedTasks.get(key);
           if (nested === undefined) {
             nested = nestedTaskRecord(key, part, childTask.task, block);
@@ -428,7 +464,9 @@ export class ConversationTranscript {
           const activity = this.#agentActivity(
             nested,
             childTask.task,
-            Object.values(childTask.task.calls).filter((call) => call.status === "working"),
+            taskCalls(child.view, childTask.task.taskId).filter(
+              (call) => call.status !== "settled",
+            ),
             child,
             options,
             traversal,
@@ -491,36 +529,10 @@ export class ConversationTranscript {
     return block;
   }
 
-  #aliasConfirmedMessages(messages: readonly EveMessage[]): void {
-    const optimistic = new Map<string, string>();
-    for (const message of messages) {
-      if (message.role === "user" && message.metadata?.optimistic === true) {
-        optimistic.set(message.id, userText(message));
-      }
-    }
-    const vanished = [...this.#optimistic].filter(([id]) => !optimistic.has(id));
-    const pendingTexts = new Set(optimistic.values());
-    for (const message of messages) {
-      if (message.role !== "user" || message.metadata?.optimistic === true) continue;
-      if (this.#confirmed.has(message.id)) continue;
-      const text = userText(message);
-      const match = vanished.findIndex(([, candidate]) => candidate === text);
-      // An early server echo can share a snapshot with its optimistic twin; wait for the swap.
-      if (match === -1 && pendingTexts.has(text)) continue;
-      this.#confirmed.add(message.id);
-      if (match === -1) continue;
-      this.#aliases.set(message.id, vanished[match]![0]);
-      vanished.splice(match, 1);
-    }
-    this.#optimistic = optimistic;
-  }
-
   #userBlock(message: EveMessage): Block | undefined {
-    // A server copy waiting on its optimistic twin's swap would otherwise print twice.
-    if (message.metadata?.optimistic !== true && !this.#confirmed.has(message.id)) return undefined;
     const body = stripTerminalControls(userText(message));
     if (body.trim().length === 0) return undefined;
-    const id = `user:${this.#aliases.get(message.id) ?? message.id}`;
+    const id = `user:${message.id}`;
     return this.#memoize(id, [body], () => ({ kind: "user", body, live: false }));
   }
 
@@ -544,14 +556,14 @@ export class ConversationTranscript {
     );
   }
 
-  #authorizationBlock(part: EveAuthorizationPart): Block {
-    return this.#memoize(`connection-auth:${authorizationKey(part)}`, [part], () => {
-      const state = part.state === "completed" ? part.outcome : part.state;
+  #signInBlock(part: EveInteractionPart, signIn: SignInChallenge): Block {
+    return this.#memoize(`connection-auth:${part.interactionId}`, [part], () => {
+      const state = part.outcome ?? "required";
       const terminalMessage = authorizationTerminalMessage(state);
       return {
         kind: "connection-auth",
-        title: `${stripTerminalControls(part.displayName)} · authorization · ${state}`,
-        ...formatAuthorization(part, terminalMessage),
+        title: `${stripTerminalControls(signIn.displayName ?? signIn.name)} · authorization · ${state}`,
+        ...formatAuthorization(part, signIn, terminalMessage),
         preformatted: true,
         live: terminalMessage === undefined,
       };
@@ -559,7 +571,7 @@ export class ConversationTranscript {
   }
 
   #toolBlock(
-    part: EveDynamicToolPart,
+    part: EveToolPart,
     state: ToolState,
     cohortActive: boolean,
     labels: ToolLabels | undefined,
@@ -567,10 +579,18 @@ export class ConversationTranscript {
   ): Block {
     const live = cohortActive || isActive(state.status);
     return this.#memoize(
-      `tool:${part.toolCallId}`,
-      [part, state.status, live, options.tools, options.subagentNames, labels],
+      `tool:${part.callId}`,
+      [
+        part,
+        state.status,
+        live,
+        options.tools,
+        options.subagentNames,
+        labels?.start,
+        labels?.complete,
+      ],
       () => {
-        const context = this.#presentationContext(part.toolCallId, part, state, options, {
+        const context = this.#presentationContext(part.callId, part, state, options, {
           label: labels?.start,
           completeLabel: labels?.complete,
         });
@@ -584,9 +604,9 @@ export class ConversationTranscript {
     );
   }
 
-  #failureBlock(index: number, failure: AgentTUIFailure, options: TranscriptOptions): Block {
+  #failureBlock(id: string, failure: AgentTUIFailure, options: TranscriptOptions): Block {
     const { message, hint, detail } = failure;
-    return this.#memoize(`failure:${index}`, [message, hint, detail], () => {
+    return this.#memoize(id, [message, hint, detail], () => {
       const block: Block = {
         kind: "error",
         title: "Error",
@@ -607,7 +627,7 @@ export class ConversationTranscript {
   /** Feeds the file-content cache and derives the context a write needs for its diff. */
   #presentationContext(
     callId: string,
-    part: EveDynamicToolPart,
+    part: EveToolPart,
     state: ToolState,
     options: TranscriptOptions,
     extra: {
@@ -626,13 +646,13 @@ export class ConversationTranscript {
     } = {};
     if (
       extra.isSubagent === true ||
-      options.subagentNames?.includes(toolBaseName(part.toolName)) === true
+      options.subagentNames?.includes(toolBaseName(part.name)) === true
     ) {
       context.isSubagent = true;
     }
     if (extra.label !== undefined) context.label = extra.label;
     if (extra.completeLabel !== undefined) context.completeLabel = extra.completeLabel;
-    const write = readWriteFileInput(part.toolName, part.input);
+    const write = readWriteFileInput(part.name, part.input);
     if (write !== undefined) {
       const previous = this.#fileContents.observeWrite({ ...write, callId });
       if (previous !== undefined) context.previousContent = previous;
@@ -648,38 +668,30 @@ export class ConversationTranscript {
  * sign-in names its connections, and a turn parked on its tasks names them.
  */
 export function turnActivity(view: AgentTUIConversationView, tasks: readonly TaskEntry[]): string {
-  const { conversation } = view;
-  const turn =
-    conversation.activeTurnId === undefined
-      ? undefined
-      : conversation.turns[conversation.activeTurnId];
-  const message = view.conversation.messages.findLast(
-    (candidate) => candidate.role === "assistant",
-  );
-  const taskCalls = taskCallsById(conversation);
-  if (
-    message?.parts.some(
-      (part) =>
-        isTerminalToolCallPart(part) &&
-        !isTaskControlTool(part.toolName) &&
-        !taskCalls.has(part.toolCallId) &&
-        (part.state === "input-available" || part.state === "approval-responded"),
-    ) === true
-  )
-    return "Running";
-  if (turn === undefined || turn.waiting === true) {
-    const signIns = conversationAuthorizations(conversation).filter(
-      (part) => part.state === "required" && part.awaitsCallback === true,
-    );
-    if (signIns.length > 0) return signInLabel(signIns.map((part) => part.displayName));
+  const current = activity(view.data.view);
+  switch (current.kind) {
+    case "calling":
+      return "Running";
+    case "compacting":
+      return "Compacting";
+    case "waiting-on-tasks":
+      return waitingLabel(tasks);
+    case "waiting-on-interaction": {
+      const signIns = current.interactions.flatMap((row) =>
+        row.request.signIn === undefined ? [] : [row.request.signIn],
+      );
+      return signIns.length > 0
+        ? signInLabel(signIns.map((signIn) => signIn.displayName ?? signIn.name))
+        : "Waiting for input";
+    }
+    default: {
+      const { previews } = snapshotState(view.conversation.view);
+      return Object.values(previews.parts).some((part) => part.kind === "text") ||
+        Object.keys(previews.calls).length > 0
+        ? "Generating"
+        : "Thinking";
+    }
   }
-  if (turn?.waiting === true && tasks.length > 0) return waitingLabel(tasks);
-  if (message === undefined) return "Thinking";
-  const last = message.parts.findLast((part) => part.type !== "step-start");
-  return (last?.type === "text" && last.state === "streaming") ||
-    (last?.type === "dynamic-tool" && last.state === "input-streaming")
-    ? "Generating"
-    : "Thinking";
 }
 
 function sameKey(left: readonly unknown[], right: readonly unknown[]): boolean {

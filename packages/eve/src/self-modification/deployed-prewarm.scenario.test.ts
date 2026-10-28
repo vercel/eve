@@ -25,7 +25,7 @@ describe("deployed self-modification prewarm", () => {
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/instructions.md": "You are a test agent.\n",
         [DEPLOYED_SELF_MODIFICATION_CONFIG_PATH]: [
-          'import selfModification from "eve/self-modification/remote";',
+          'import selfModification from "eve/extensions/self-modification/remote";',
           "export default selfModification({",
           '  source: { git: { repository: "github.com/acme/agent", directory: "." } },',
           '  target: { branch: "main" },',

@@ -316,7 +316,7 @@ const NAMESPACED: readonly CatalogTool[] = [
   {
     name: "support__refund_request_status",
     description: "Check the status of a customer's refund request.",
-    inputs: { requestId: "Request id" },
+    inputs: { interactionId: "Request id" },
   },
   {
     name: "support__sla_breaches_list",
@@ -349,7 +349,7 @@ const PLAIN: readonly CatalogTool[] = [
   {
     name: "travel_request_status",
     description: "Check the status of a business travel request.",
-    inputs: { requestId: "Request id" },
+    inputs: { interactionId: "Request id" },
   },
   {
     name: "laptop_order_status",

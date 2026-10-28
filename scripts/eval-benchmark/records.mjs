@@ -198,7 +198,15 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
  * that never reached a model step stays, so its failure is recorded.
  */
 function ranOnModel(artifact, modelId) {
-  const models = artifact.result?.derived?.models ?? [];
+  // Runners before eve 0.70.0 derive no `models`; their step events name them.
+  const models =
+    artifact.result?.derived?.models ??
+    (artifact.result?.sessions ?? []).flatMap((session) =>
+      (session.events ?? [])
+        .filter((event) => event.type === "step.started")
+        .map((event) => event.data?.modelId)
+        .filter((id) => typeof id === "string"),
+    );
   return models.length === 0 || models.includes(modelId);
 }
 

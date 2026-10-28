@@ -5,8 +5,13 @@ const STOP_SANDBOX_MARKER_PATH = "/workspace/stopped-by-hook.txt";
 
 export default defineHook({
   events: {
-    async "message.completed"(event, ctx) {
-      if (!event.data.message?.includes(STOP_SANDBOX_TOKEN)) return;
+    async "content.completed"(event, ctx) {
+      if (
+        event.data.kind !== "text" ||
+        typeof event.data.value !== "string" ||
+        !event.data.value.includes(STOP_SANDBOX_TOKEN)
+      )
+        return;
 
       const sandbox = await ctx.getSandbox();
       await sandbox.writeTextFile({

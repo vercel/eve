@@ -133,19 +133,13 @@ test("computer-use accepts interactive actions without approval-only context", (
 
 test("computer-use never requests approval for observations or interactions", async () => {
   const tool = computerUseTool as {
-    approval(ctx: {
-      approvedTools: ReadonlySet<string>;
-      toolInput: unknown;
-      toolName: string;
-    }): Promise<string> | string;
+    approval(ctx: { toolInput: unknown; toolName: string }): Promise<string> | string;
   };
   for (const toolInput of [undefined, { action: "screenshot" }, ...INTERACTIVE_ACTIONS]) {
-    for (const approvedTools of [new Set<string>(), new Set(["code__computer_use"])]) {
-      assert.equal(
-        await tool.approval({ approvedTools, toolInput, toolName: "code__computer_use" }),
-        "not-applicable",
-      );
-    }
+    assert.equal(
+      await tool.approval({ toolInput, toolName: "code__computer_use" }),
+      "not-applicable",
+    );
   }
 });
 

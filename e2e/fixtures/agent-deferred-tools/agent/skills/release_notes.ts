@@ -3,7 +3,7 @@ import { defineSkill } from "eve/skills";
 export default defineSkill({
   description: "Write customer-facing release notes for billing changes.",
   deferred: true,
-  markdown: [
+  content: [
     "# Release notes",
     "",
     "Lead with what customers will notice.",
