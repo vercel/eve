@@ -36,6 +36,7 @@
     "fumadocs-core": "16.2.2",
     "fumadocs-mdx": "14.0.4",
     "fumadocs-ui": "16.2.2",
+    "geist": "1.7.1",
     "lil-gui": "0.21.0",
     "lucide-react": "1.16.0",
     "next": "catalog:",
