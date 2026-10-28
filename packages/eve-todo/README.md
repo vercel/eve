@@ -20,6 +20,18 @@ Mounted as `todo`:
 
 The list lives in `defineState`, so it survives step boundaries, redeploys, and compaction. Because the instruction is a system instruction, it stays outside history: compaction never summarizes it or replays it as a user message.
 
+## Slack
+
+`todoSlackRenderer` from `eve/extensions/todo/slack` shows the checklist on the Slack task card, ahead of eve's task rows. Its source is `packages/eve/src/extensions/todo/slack.ts`; the pure card logic lives in `extension/lib/plan.ts`.
+
+```ts
+// agent/channels/slack.ts
+import { slackChannel } from "eve/channels/slack";
+import { todoSlackRenderer } from "eve/extensions/todo/slack";
+
+export default slackChannel({ renderers: [todoSlackRenderer()] });
+```
+
 ## Validate
 
 ```sh

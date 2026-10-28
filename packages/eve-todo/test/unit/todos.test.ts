@@ -57,8 +57,14 @@ test("the list is bounded", () => {
   const many = Array.from({ length: 51 }, () => ({ content: "Step", status: "pending" }));
   assert.equal(todoList.safeParse(many).success, false);
   assert.equal(
-    todoList.safeParse([{ content: "x".repeat(501), status: "pending" }]).success,
+    todoList.safeParse([{ content: "x".repeat(201), status: "pending" }]).success,
     false,
   );
+  const full = Array.from({ length: 50 }, () => ({
+    content: "x".repeat(200),
+    status: "in_progress",
+  }));
+  // The session view withholds call inputs past 16,384 characters of JSON.
+  assert.ok(JSON.stringify({ todos: full }).length <= 16_384);
   assert.equal(todoList.safeParse([{ content: "  ", status: "pending" }]).success, false);
 });

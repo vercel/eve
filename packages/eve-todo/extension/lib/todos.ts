@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 export const MAX_TODOS = 50;
-export const MAX_CONTENT_LENGTH = 500;
+/**
+ * Keeps a full list's JSON under the 16,384 characters the session view keeps of a call's input,
+ * so channels such as the Slack renderer can still read the latest list.
+ */
+export const MAX_CONTENT_LENGTH = 200;
 
 export const todoStatus = z.enum(["pending", "in_progress", "completed", "cancelled"]);
 

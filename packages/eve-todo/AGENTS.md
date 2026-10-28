@@ -7,7 +7,7 @@ Before writing code, read the installed eve package docs for extensions, tools, 
 ## Boundaries
 
 - Show the list only through the dynamic system instruction in `extension/instructions.ts`. Never write it into history: system instructions stay outside history, so compaction can't turn a finished list into a fresh-looking user message.
-- Keep validation and rendering in `extension/lib/todos.ts`, free of eve runtime imports, so unit tests cover them directly.
+- Keep validation and rendering in `extension/lib/todos.ts` and the Slack card in `extension/lib/plan.ts`, free of eve runtime imports, so unit tests cover them directly. `packages/eve/src/extensions/todo/slack.ts` only wraps `plan.ts` as a Slack renderer.
 
 ## Build and publish
 

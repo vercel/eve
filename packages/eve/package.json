@@ -369,6 +369,12 @@
       "import": "./dist/src/extensions/todo/extension/extension.js",
       "default": "./dist/src/extensions/todo/extension/extension.js"
     },
+    "./extensions/todo/slack": {
+      "eve-source": "./dist/src/extensions/todo/slack.js",
+      "types": "./dist/src/extensions/todo/slack.d.ts",
+      "import": "./dist/src/extensions/todo/slack.js",
+      "default": "./dist/src/extensions/todo/slack.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
