@@ -271,7 +271,7 @@ when you only need the unread suffix from an existing cursor.
 
 Unlike `stream()`, `snapshot()` does not advance the originating
 `ClientSession`. Its returned `session` is the handle's full `ClientSessionState`, including the
-opaque `hint` value, with `streamIndex` set to the exact line after the captured prefix. Persist
+opaque `inbox` value, with `streamIndex` set to the exact line after the captured prefix. Persist
 it as is to restore the conversation later.
 
 ## Follow a subagent

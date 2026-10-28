@@ -28,7 +28,7 @@ interface ClientSessionState {
   sessionId: string;
   streamIndex: number;
   /** Opaque; persist it and pass it back unchanged. eve may extend it. */
-  hint?: string;
+  inbox?: string;
 }
 ```
 
@@ -49,7 +49,7 @@ const response = await session.send("Now shorten it.");
 console.log((await response.result()).message);
 ```
 
-Pass the whole saved state so its optional [`hint`](./overview#faster-sends-with-hint) value
+Pass the whole saved state so its optional [`inbox`](./overview#faster-sends-with-inbox) value
 reaches later sends. `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId`; it never follows or creates a replacement.
 

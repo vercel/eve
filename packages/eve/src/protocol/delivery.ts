@@ -4,8 +4,8 @@ import { z } from "#compiled/zod/index.js";
 export interface DeliveryReceipt {
   readonly sessionId: string;
   readonly deliveryId: string;
-  /** Opaque value to store with the session state; see `ClientSessionState.hint`. */
-  readonly hint?: string;
+  /** Opaque value to store with the session state; see `ClientSessionState.inbox`. */
+  readonly inbox?: string;
 }
 
 export const DeliveryResponseSchema = z.object({
