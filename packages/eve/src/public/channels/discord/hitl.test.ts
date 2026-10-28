@@ -70,6 +70,24 @@ describe("renderInteractionComponents", () => {
     ).toEqual([{ optionId: "weekly", interactionId: "call_1" }]);
   });
 
+  it("refuses a select option id that Discord would truncate", () => {
+    const render = (id: string) =>
+      renderInteractionComponents(
+        request({
+          display: "select",
+          options: [
+            { id, label: "Long" },
+            { id: "b", label: "B" },
+          ],
+        }),
+      );
+
+    expect(() => render("x".repeat(100))).not.toThrow();
+    expect(() => render("x".repeat(101))).toThrow(
+      "discordChannel: select option ids must be at most 100 characters",
+    );
+  });
+
   it("renders freeform requests as a modal-opening button", () => {
     const components = renderInteractionComponents(request({ allowFreeform: true }));
     const customId = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!

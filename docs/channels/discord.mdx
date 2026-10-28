@@ -358,7 +358,7 @@ Typing fires on `turn.started` and `call.requested`, but only when a bot token i
 
 ### Human-in-the-loop (HITL)
 
-HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes.
+HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes. Discord returns a select option's value as the answer and caps it at 100 characters, so a `display: "select"` request with an option `id` longer than 100 characters fails to post with an error instead of returning a truncated id.
 
 A press, select, or modal submission answers as the Discord user who made it, with the same `defaultDiscordAuth` principal a command from them gets by default. Approval response policies compare against that principal. Approvals are requester-only by default, so only the person whose command asked can approve. `onAnswers(ctx, interaction)` decides the answer's `auth`: return `{ auth }` to accept it, or `null` (or throw) to drop it and keep the request pending. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`; it identifies them but doesn't authorize them by itself.
 
