@@ -333,7 +333,14 @@ const WHATSAPP_BEATS: Beat[] = [
         <span className="mt-1 inline-block text-copy-13 text-gray-900">Order #4821</span>
       </>
     ),
-    attachment: <ReplyButtons labels={["Send replacement", "Refund instead"]} />,
+    attachment: (
+      <ReplyButtons
+        buttons={[
+          { label: "Send replacement", icon: <Reply aria-hidden className="size-4" /> },
+          { label: "Refund instead", icon: <IconCoins /> },
+        ]}
+      />
+    ),
     delay: 1600,
   },
   {
@@ -537,14 +544,26 @@ function Quote({ author, children }: { author: string; children: string }) {
   );
 }
 
+// geistcn-assets' coins icon.
+function IconCoins() {
+  return (
+    <svg aria-hidden className="size-4" fill="none" viewBox="0 0 16 16">
+      <path
+        d="M5.5 7c1.38 0 2.67.22 3.64.61q.74.29 1.25.76c.34.31.61.75.61 1.28v3.7c0 .54-.27.98-.6 1.3a4 4 0 0 1-1.26.77A10 10 0 0 1 5.5 16H5.5a10 10 0 0 1-3.63-.58 4 4 0 0 1-1.26-.77c-.33-.32-.6-.76-.6-1.3v-3.7c0-.53.27-.97.6-1.28q.52-.48 1.26-.76A10 10 0 0 1 5.5 7m3.64 4.69c-.97.39-2.26.61-3.64.61a10 10 0 0 1-4-.77v1.82s0 .08.14.22q.22.22.78.46c.75.3 1.83.49 3.07.47h.02a8 8 0 0 0 3.07-.47q.55-.23.78-.46c.14-.14.14-.21.14-.22v-1.82zM5.5 8.5c-1.24 0-2.33.2-3.08.5q-.56.23-.78.46l-.13.15-.01.04.01.04.13.15q.22.22.78.46c.75.3 1.84.5 3.08.5s2.33-.2 3.08-.5q.56-.23.78-.46l.13-.15.01-.04-.01-.04-.13-.15q-.22-.22-.78-.46c-.75-.3-1.84-.5-3.08-.5m5-8.5c1.38 0 2.67.22 3.64.61q.74.29 1.25.76c.34.31.61.75.61 1.28v3.7c0 .55-.25 1-.58 1.33-.3.32-.71.56-1.1.73-.78.34-1.7.51-2.32.51v-1.5c.41 0 1.12-.12 1.71-.38q.44-.2.64-.4c.13-.14.15-.23.15-.29V4.53l-.36.16c-.97.39-2.26.61-3.64.61a10 10 0 0 1-4-.77v.97H5V2.65c0-.53.27-.97.6-1.28Q6.14.89 6.87.6A10 10 0 0 1 10.5 0m0 1.5c-1.24 0-2.33.2-3.08.5q-.56.23-.78.46l-.13.15-.01.04.01.04.13.15q.22.22.78.46c.75.3 1.84.5 3.08.5s2.33-.2 3.08-.5q.56-.23.78-.46l.13-.15.01-.04-.01-.04-.13-.15q-.22-.22-.78-.46c-.75-.3-1.84-.5-3.08-.5"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 /** Reply buttons sit inside the message bubble, one per row under a divider. */
-function ReplyButtons({ labels }: { labels: string[] }) {
-  return labels.map((label) => (
+function ReplyButtons({ buttons }: { buttons: { label: string; icon: ReactNode }[] }) {
+  return buttons.map(({ icon, label }) => (
     <span
       className="flex h-10 items-center justify-center gap-1.5 border-gray-alpha-300 border-t font-medium text-copy-14 text-gray-1000"
       key={label}
     >
-      <Reply aria-hidden className="size-4" />
+      {icon}
       {label}
     </span>
   ));
