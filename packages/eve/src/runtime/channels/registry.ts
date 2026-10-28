@@ -110,8 +110,8 @@ export function createRuntimeAdapterRegistry(input: {
  * Rehydrates one serialized adapter from the runtime-owned registry.
  *
  * Looks up the adapter config by `kind`, then merges the serialized state
- * onto it. The result is a full adapter with behavior functions and
- * restored state.
+ * onto a copy of its seed state. The result is a full adapter with behavior
+ * functions and restored state.
  */
 export function deserializeRuntimeAdapter(
   registry: RuntimeAdapterRegistry,
@@ -130,7 +130,18 @@ export function deserializeRuntimeAdapter(
     );
   }
 
-  return { ...adapterConfig, state: serialized.state };
+  // The seed fills fields added to it after this session started, so
+  // `context(state)` never sees them as `undefined`. Stored values win, but a
+  // stored `undefined` falls back to the seed: JSON drops such keys while
+  // devalue keeps them, and the result must not depend on the serializer.
+  // Clone the seed so in-place mutation of a nested default cannot leak into
+  // the shared registry entry.
+  const state: Record<string, unknown> = structuredClone(adapterConfig.state) ?? {};
+  for (const [key, value] of Object.entries(serialized.state)) {
+    if (value !== undefined) state[key] = value;
+  }
+
+  return { ...adapterConfig, state };
 }
 
 function requireAdapterKind(

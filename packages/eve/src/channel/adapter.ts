@@ -141,9 +141,10 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
   readonly kind: string;
 
   /**
-   * Initial state shape. Auto-serialized at step boundaries via JSON
-   * snapshot. On rehydration, the runtime restores the serialized state
-   * and re-attaches the adapter's behavior functions from the registry.
+   * Initial state shape. Auto-serialized at step boundaries. On rehydration,
+   * the runtime merges the serialized state onto this seed, so fields added
+   * to the seed after a session started take their seed value, and
+   * re-attaches the adapter's behavior functions from the registry.
    */
   readonly state?: Record<string, unknown>;
 
