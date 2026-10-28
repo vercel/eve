@@ -399,15 +399,25 @@ const TEXT_EMOJI = {
   LFG: "bg-pink-700",
 };
 
-function TextEmoji({ name }: { name: keyof typeof TEXT_EMOJI }) {
+function TextEmoji({
+  name,
+  className,
+  delay,
+}: {
+  name: keyof typeof TEXT_EMOJI;
+  className?: string;
+  delay?: number;
+}) {
   return (
     <span
       aria-label={`:${name.toLowerCase()}:`}
       className={cn(
         "inline-flex size-4 items-center justify-center rounded-[4px] font-bold text-[6.5px] text-white leading-none tracking-wide",
         TEXT_EMOJI[name],
+        className,
       )}
       role="img"
+      style={{ animationDelay: delay === undefined ? undefined : `${delay}ms` }}
     >
       {name}
     </span>
@@ -827,15 +837,43 @@ export function SessionTimeline(): JSX.Element {
     } catch {}
   }, []);
 
-  const toggleReaction = (emoji: string) =>
-    setReacted((current) => {
-      const next = new Set(current);
-      if (!next.delete(emoji)) next.add(emoji);
-      try {
-        localStorage.setItem(REACTIONS_KEY, JSON.stringify([...next]));
-      } catch {}
-      return next;
-    });
+  // Adding a reaction pops its emoji and rolls the count up; taking it back only rolls the
+  // count down. Through the Web Animations API, so it runs while the full conversation has its
+  // CSS entrances off.
+  const toggleReaction = (button: HTMLElement, emoji: string) => {
+    const adding = !reacted.has(emoji);
+    const next = new Set(reacted);
+    if (adding) next.add(emoji);
+    else next.delete(emoji);
+    setReacted(next);
+    try {
+      localStorage.setItem(REACTIONS_KEY, JSON.stringify([...next]));
+    } catch {}
+
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
+    button.querySelector("[data-count]")?.animate(
+      reduce
+        ? [{ opacity: 0 }, { opacity: 1 }]
+        : [
+            { opacity: 0, transform: `translateY(${adding ? 6 : -6}px)` },
+            { opacity: 1, transform: "none" },
+          ],
+      { duration: 200, easing: easeOut },
+    );
+    if (adding && !reduce) {
+      button
+        .querySelector("[role=img]")
+        ?.animate(
+          [
+            { transform: "none", easing: easeOut },
+            { transform: "scale(1.25)", offset: 0.4, easing: easeOut },
+            { transform: "none" },
+          ],
+          { duration: 300 },
+        );
+    }
+  };
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
 
@@ -1008,18 +1046,25 @@ export function SessionTimeline(): JSX.Element {
                             aria-label={`:${reaction.emoji.toLowerCase()}: ${count}`}
                             aria-pressed={mine}
                             className={cn(
-                              "flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-95 motion-safe:animate-scale-in motion-reduce:animate-fade-in",
+                              "flex h-7 origin-left cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97] motion-safe:animate-scale-in motion-reduce:animate-fade-in",
                               mine
                                 ? "border-gray-alpha-700 bg-gray-alpha-200"
                                 : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
                             )}
                             key={reaction.emoji}
-                            onClick={() => toggleReaction(reaction.emoji)}
+                            onClick={(event) => toggleReaction(event.currentTarget, reaction.emoji)}
                             style={{ animationDelay: `${index * 60}ms` }}
                             type="button"
                           >
-                            <TextEmoji name={reaction.emoji} />
-                            <span className="text-copy-13">{count}</span>
+                            {/* Arriving in a replay, the emoji pops once the pill is in. */}
+                            <TextEmoji
+                              className="motion-safe:animate-emoji-pop"
+                              delay={150 + index * 60}
+                              name={reaction.emoji}
+                            />
+                            <span className="text-copy-13" data-count>
+                              {count}
+                            </span>
                           </button>
                         );
                       })}
