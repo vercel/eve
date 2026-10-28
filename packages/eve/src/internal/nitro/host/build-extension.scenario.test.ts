@@ -407,7 +407,7 @@ export const next = () => ++count;
     }
     await writeFile(
       join(subagentRoot, "agent.ts"),
-      'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research." });',
+      'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research.", model: "openai/gpt-5.4" });',
     );
     const config = await tryReadExtensionBuildConfig(root);
     const outDir = await buildExtensionPackage(root, config!);

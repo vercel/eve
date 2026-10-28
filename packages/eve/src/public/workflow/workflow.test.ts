@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import * as sdk from "#internal/workflow/index.js";
 import * as sdkRuntime from "#internal/workflow/runtime.js";
@@ -38,20 +38,45 @@ describe("eve/workflow", () => {
 });
 
 describe("eve/workflow/api", () => {
+  it("waits for hook persistence without exposing the SDK record or hiding failures", async () => {
+    const persisted = Promise.withResolvers<Awaited<ReturnType<typeof sdkRuntime.resumeHook>>>();
+    const resume = vi.spyOn(sdkRuntime, "resumeHook").mockReturnValueOnce(persisted.promise);
+    try {
+      const result = api.resumeHook("approval", { approved: true });
+      expect(resume).toHaveBeenCalledWith("approval", { approved: true });
+      persisted.resolve({
+        runId: "run",
+        hookId: "hook",
+        token: "approval",
+        ownerId: "owner",
+        projectId: "project",
+        environment: "test",
+        createdAt: new Date(),
+        metadata: Promise.resolve(undefined),
+      });
+      await expect(result).resolves.toBeUndefined();
+
+      const failure = new Error("Hook persistence failed");
+      resume.mockRejectedValueOnce(failure);
+      await expect(api.resumeHook("approval", { approved: false })).rejects.toBe(failure);
+    } finally {
+      resume.mockRestore();
+    }
+  });
+
   it("re-exports the SDK runtime values", () => {
     expect(api.start).toBe(sdkRuntime.start);
     expect(api.getRun).toBe(sdkRuntime.getRun);
-    expect(api.resumeHook).toBe(sdkRuntime.resumeHook);
   });
 
   it("declares signatures the SDK values satisfy", () => {
     expectTypeOf(sdkRuntime.start).toExtend<typeof api.start>();
     expectTypeOf(sdkRuntime.getRun).toExtend<typeof api.getRun>();
 
-    // resumeHook is cast only to hide the storage record it resolves.
-    expectTypeOf(sdkRuntime.resumeHook<{ approved: boolean }>).toBeCallableWith("approval", {
+    expectTypeOf(api.resumeHook<{ approved: boolean }>).toBeCallableWith("approval", {
       approved: true,
     });
+    expectTypeOf(api.resumeHook).returns.resolves.toBeVoid();
   });
 
   it("keeps SDK-only options out of the public signatures", () => {

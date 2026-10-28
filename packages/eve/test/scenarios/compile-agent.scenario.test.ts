@@ -94,6 +94,7 @@ describe("compiler artifacts", () => {
     const wrapper = compiled.manifest.dynamicTools.find((entry) => entry.slug === "profile")!;
     const script = [
       "const loaded = await import(process.argv[1]);",
+      "const { dynamicEvaluate, isDynamicSentinel } = await import(process.argv[4]);",
       "const modules = loaded.default.nodes.__root__.modules;",
       "const memory = modules[process.argv[2]];",
       "const wrapper = modules[process.argv[3]];",
@@ -101,7 +102,7 @@ describe("compiler artifacts", () => {
       "console.log(JSON.stringify({",
       '  memory: typeof memoryDefinition.provider?.recall?.["turn.started"] === "function",',
       "  memoryFactoryCalls: globalThis.__memoryFactoryCalls,",
-      '  wrapper: typeof wrapper.default?.evaluate === "function",',
+      '  wrapper: isDynamicSentinel(wrapper.default) && typeof dynamicEvaluate(wrapper.default) === "function",',
       "}));",
     ].join("\n");
     const loaded = await runFile(
@@ -113,6 +114,7 @@ describe("compiler artifacts", () => {
         compiled.paths.moduleMapPath,
         memory.sourceId,
         wrapper.sourceId,
+        fileURLToPath(new URL("../../dist/src/dynamic/definition.js", import.meta.url)),
       ],
       { cwd: appRoot },
     );
@@ -835,7 +837,13 @@ describe("compileAgent", () => {
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(
       join(agentRoot, "agent.cjs"),
-      ["module.exports = {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
+      [
+        'const { defineAgent } = require("eve");',
+        "module.exports = defineAgent({",
+        '  model: "openai/gpt-5.4",',
+        "});",
+        "",
+      ].join("\n"),
     );
     await writeFile(
       join(agentRoot, "schedules", "cleanup.cts"),

@@ -243,9 +243,10 @@ async function writeRuntimeLoaderTsconfigAliasFixture(input: {
   await writeFile(
     join(input.agentRoot, "agent.ts"),
     [
+      'import { defineAgent } from "eve";',
       'import { runtimeModelId } from "@/lib/model.ts";',
       "",
-      "export default { model: runtimeModelId };\n",
+      "export default defineAgent({ model: runtimeModelId });\n",
     ].join("\n"),
   );
   await writeFile(

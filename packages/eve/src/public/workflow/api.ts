@@ -1,8 +1,7 @@
 /**
  * Workflow run and hook operations for routes and functions marked with `"use step"`.
  *
- * Each export is the vendored Workflow SDK value under an eve-owned declaration, so the runtime
- * identity stays single while the SDK's wider types stay out of eve's public API.
+ * eve-owned declarations keep the SDK's wider types out of eve's public API.
  */
 import * as runtime from "#internal/workflow/runtime.js";
 
@@ -39,7 +38,6 @@ export const getRun: <T = unknown>(runId: string) => WorkflowRun<T> = runtime.ge
 /** Delivers a payload to the hook with this token; resolves once the payload is persisted. */
 // The SDK also accepts hook records and key overrides and resolves the storage record; eve keeps
 // tokens as the only handle and does not promise that record.
-export const resumeHook = runtime.resumeHook as unknown as <T = unknown>(
-  token: string,
-  payload: T,
-) => Promise<void>;
+export async function resumeHook<T = unknown>(token: string, payload: T): Promise<void> {
+  await runtime.resumeHook(token, payload);
+}

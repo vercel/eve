@@ -161,7 +161,7 @@ describe("application host preparation", () => {
 
     await writeFile(
       agentModulePath,
-      'export default { model: "openai/gpt-5.4" };\n// revision two\n',
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n// revision two\n',
     );
     const nextHost = await prepareDevelopmentApplicationHost(appRoot);
 
