@@ -459,11 +459,12 @@ function Avatar({ author, platform }: { author: Author; platform: keyof typeof A
     <span
       aria-hidden
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium text-label-14",
+        "flex size-8 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium",
         Icon ? AGENT_AVATAR[platform] : "bg-background-100 text-gray-1000",
       )}
     >
-      {Icon ? <Icon className="size-4" /> : author.name[0]}
+      {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
+      {Icon ? <Icon className="size-4" /> : <span className="text-label-13">{author.name[0]}</span>}
     </span>
   );
 }
@@ -504,7 +505,7 @@ function ThreadMessage({
   return (
     <li
       className={cn(
-        "grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+        "grid origin-top-left grid-cols-[2rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
         author.icon && agentEntrance,
         continued ? "pt-2" : "pt-4",
       )}
@@ -552,7 +553,7 @@ function TeamsMessage({
       className={cn(
         "motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
         isAgent
-          ? cn("grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5", agentEntrance)
+          ? cn("grid origin-top-left grid-cols-[2rem_minmax(0,1fr)] gap-x-2.5", agentEntrance)
           : "flex origin-top-right flex-col items-end",
         continued ? "pt-1" : "pt-4",
       )}
@@ -652,8 +653,8 @@ function ReadTicks() {
  */
 function Quote({ author, children }: { author: string; children: string }) {
   return (
-    <span className="-mx-1.5 mb-1 block rounded-[8px] border-gray-700 border-l-4 bg-gray-alpha-100 px-2 py-1">
-      <span className="block font-medium text-copy-13 text-gray-1000">{author}</span>
+    <span className="-mx-1.5 mb-1 block rounded-[8px] border-green-700 border-l-4 bg-green-300 px-2 py-1">
+      <span className="block font-medium text-copy-13 text-green-900">{author}</span>
       <span className="block truncate text-copy-13 text-gray-900">{children}</span>
     </span>
   );
@@ -716,13 +717,13 @@ function Bubble({
         className={cn(
           "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
           // The agent's bubbles share one width, the reply width the Slack and Teams chats use too.
-          outgoing ? "bg-gray-200" : "w-full bg-background-100",
+          outgoing ? "bg-green-200" : "w-full bg-background-100",
         )}
         style={{ borderRadius: bubbleRadius }}
       >
         {tail ? (
           <Tail
-            fill={outgoing ? "var(--ds-gray-200)" : "var(--ds-background-100)"}
+            fill={outgoing ? "var(--ds-green-200)" : "var(--ds-background-100)"}
             flipped={outgoing}
           />
         ) : null}
@@ -1029,7 +1030,7 @@ export function SessionTimeline(): JSX.Element {
               {beats.slice(0, shown).map((beat, i) => {
                 if (beat.kind === "reactions") {
                   return (
-                    <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
+                    <li className="flex gap-1.5 pt-1.5 pl-[2.625rem]" key={i}>
                       {beat.reactions.map((reaction, index) => {
                         const mine = reacted.has(reaction.emoji);
                         const count = reaction.count + (mine ? 1 : 0);
@@ -1096,7 +1097,7 @@ export function SessionTimeline(): JSX.Element {
                   aria-hidden={!typing}
                   className={cn(
                     "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                    platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
+                    platform === "whatsapp" ? "pl-2" : "pl-[2.625rem]",
                     typing ? "opacity-100" : "opacity-0",
                   )}
                 >
