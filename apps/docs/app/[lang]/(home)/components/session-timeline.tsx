@@ -558,15 +558,15 @@ function TeamsMessage({
 // WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
-// The bubbles' corner radius. The tail below is drawn for a 20px corner, so it scales with
-// the radius to keep meeting the corner, with its stroke widened to stay a 1px hairline. At
-// half scale its edge lands on whole device pixels, so it lines up with the bubble's border.
+// The bubbles' corner radius, and the tail's scale: drawn at 24px, it renders at 15px, its
+// stroke widened to stay a 1px hairline. Its curve stays tangent to the bubble's side and
+// bottom at any scale, so it meets the border even though its corner is a little rounder.
 const bubbleRadius = 10;
-const tailScale = bubbleRadius / 20;
+const tailScale = 0.625;
 
 /**
  * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), with the
- * bubble fill as a prop. It overlaps the bubble's bottom corner: a page-colored square hides
+ * bubble fill as a prop. It overlaps the bubble's bottom corner: a window-colored square hides
  * the corner, then the bubble's curve flows into the tail with the same hairline.
  */
 function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
@@ -584,18 +584,16 @@ function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
       viewBox="0 0 24 24"
       width={24 * tailScale}
     >
-      <path d="M0 0H24V24H0z" fill="var(--ds-background-200)" />
-      <g style={{ filter: "drop-shadow(0 1px 2px rgb(0 0 0 / 4%))" }}>
-        <path
-          clipRule="evenodd"
-          d="M27-19C15.954-19 7-10.046 7 1c0 .335.008.669.025 1H7v10a15 15 0 01-3 9c4.116 0 7.845-1.658 10.555-4.342A19.915 19.915 0 0027 21c11.046 0 20-8.954 20-20s-8.954-20-20-20z"
-          fill={fill}
-          fillRule="evenodd"
-          paintOrder="stroke fill"
-          stroke="var(--tail-border)"
-          strokeWidth={2 / tailScale}
-        />
-      </g>
+      <path d="M0 0H24V24H0z" fill="var(--ds-background-100)" />
+      <path
+        clipRule="evenodd"
+        d="M27-19C15.954-19 7-10.046 7 1c0 .335.008.669.025 1H7v10a15 15 0 01-3 9c4.116 0 7.845-1.658 10.555-4.342A19.915 19.915 0 0027 21c11.046 0 20-8.954 20-20s-8.954-20-20-20z"
+        fill={fill}
+        fillRule="evenodd"
+        paintOrder="stroke fill"
+        stroke="var(--tail-border)"
+        strokeWidth={2 / tailScale}
+      />
     </svg>
   );
 }
@@ -680,7 +678,7 @@ function Bubble({
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000 shadow-(--ds-shadow-border-small)",
+          "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
           // The agent's bubbles share one width, the reply width the Slack and Teams chats use too.
           outgoing ? "bg-gray-200" : "w-full bg-background-100",
         )}
