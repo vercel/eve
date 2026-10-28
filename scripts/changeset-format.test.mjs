@@ -114,7 +114,8 @@ test("the Changesets formatter produces readable Markdown without encoded metada
             title: "Edited title without a category",
             user: { login: "Alice" },
             merged_at: "2026-01-01",
-            base: { ref: "main" },
+            base: { ref: "topic-branch" },
+            merge_commit_sha: commit,
           },
         ]),
       ),
@@ -210,7 +211,12 @@ test("version-packages assembles changesets across bump types and preserves old 
   git("commit", "-qm", "Legacy change");
   await write(
     "mock-github.mjs",
-    `globalThis.fetch = async (url) => new Response(JSON.stringify([{number: url.includes(${JSON.stringify(first)}) ? 10 : url.includes(${JSON.stringify(second)}) ? 11 : 12, title: "Edited title", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: "main"}}]), {status: 200});`,
+    `globalThis.fetch = async (url) => {
+      const commit = url.split("/").at(-2);
+      const pull = {number: commit === ${JSON.stringify(first)} ? 10 : commit === ${JSON.stringify(second)} ? 11 : 12, title: "Edited title", user: {login: "Author"}, merged_at: "2026-01-01", base: {ref: commit === ${JSON.stringify(second)} ? "topic-branch" : "main"}, merge_commit_sha: commit};
+      const other = {number: 99, user: {login: "Other"}, merged_at: "2026-01-02", base: {ref: "main"}, merge_commit_sha: "another-commit"};
+      return new Response(JSON.stringify(commit === ${JSON.stringify(second)} ? [other, pull] : [pull]), {status: 200});
+    };`,
   );
   assert.throws(() =>
     execFileSync(process.execPath, ["scripts/check-release-pr-title.mjs"], {

@@ -17,9 +17,9 @@ export async function pullRequestFor(commit, id) {
     throw new Error(
       `GitHub pull request lookup for changeset ${id} failed: HTTP ${response.status}.`,
     );
-  const pulls = (await response.json()).filter(
-    (pull) => pull.merged_at && pull.base?.ref === "main",
-  );
+  const merged = (await response.json()).filter((pull) => pull.merged_at);
+  const matches = merged.filter((pull) => pull.merge_commit_sha === commit);
+  const pulls = matches.length ? matches : merged;
   if (pulls.length !== 1)
     throw new Error(
       `Changeset ${id}: expected one merged pull request for commit ${commit}, found ${pulls.length}.`,
