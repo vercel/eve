@@ -43,4 +43,5 @@ export type {
   AgentBuildDefinition,
   AgentPromptCacheDefinition,
   AgentToolExposure,
+  EveLanguageModel,
 } from "#shared/agent-definition.js";

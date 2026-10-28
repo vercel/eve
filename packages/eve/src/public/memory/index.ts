@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { SessionAuth } from "#context/keys.js";
-import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { SessionFrame } from "#dynamic/definition.js";
@@ -15,7 +14,7 @@ import {
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
 import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
-import type { ToolContext, ToolModelOutput } from "#tools/definition.js";
+import type { ToolDefinition } from "#tools/definition.js";
 
 export interface MemoryNamespaceContext {
   readonly appRoot: string;
@@ -115,16 +114,10 @@ export interface MemoryToolsContext extends Pick<
   };
 }
 
-export interface MemoryToolDefinition {
-  readonly approval?: Approval<never>;
-  readonly description: string;
-  execute(input: never, context: ToolContext): unknown | Promise<unknown> | AsyncIterable<unknown>;
-  readonly inputSchema: unknown;
-  readonly outputSchema?: unknown;
-  readonly toModelOutput?: (output: never) => ToolModelOutput | Promise<ToolModelOutput>;
-}
-
-export type MemoryToolSet = Readonly<Record<string, MemoryToolDefinition>>;
+// A tool's input and output types appear in both parameter and result positions, so only `any`
+// accepts every `defineTool()` result. eve validates input against the tool's schema at runtime.
+/** Tools a memory provider exposes, each created with `defineTool()`, keyed by tool name. */
+export type MemoryToolSet = Readonly<Record<string, ToolDefinition<any, any>>>;
 
 export interface MemoryProvider {
   readonly recall: {

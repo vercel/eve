@@ -1,6 +1,6 @@
 import { createOpenAI } from "#compiled/@ai-sdk/openai/index.js";
 import { createDirectModelFetch } from "#internal/model-auth/transport.js";
-import type { LanguageModel } from "ai";
+import type { EveLanguageModel } from "#shared/agent-definition.js";
 import { DEFAULT_CHATGPT_MODEL_ID, normalizeChatGptModelId } from "#shared/chatgpt-model.js";
 import { MODEL_HELPERS } from "#shared/model-helper.js";
 import { createCodexSubscriptionModel } from "./chatgpt/model.js";
@@ -28,7 +28,7 @@ import { createCodexSubscriptionModel } from "./chatgpt/model.js";
  * });
  * ```
  */
-export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): LanguageModel {
+export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): EveLanguageModel {
   const slug = normalizeChatGptModelId(model);
   if (slug === undefined && model.trim().replace(/^openai\//u, "").length === 0) {
     throw new Error('Expected chatgpt "model" to name an OpenAI model, for example "gpt-5.6-sol".');
@@ -44,7 +44,7 @@ export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): LanguageModel
 }
 
 /** Creates a direct OpenAI model. Uses OPENAI_API_KEY, or /login credentials in local development. */
-export function openai(model: string = MODEL_HELPERS.openai.defaultModel): LanguageModel {
+export function openai(model: string = MODEL_HELPERS.openai.defaultModel): EveLanguageModel {
   const id = model.trim().replace(/^openai\//u, "");
   if (!id || id.includes("/")) throw new Error("Expected an OpenAI model ID.");
   return createOpenAI({

@@ -26,9 +26,9 @@ When `agent.ts` is present, `model` is required.
 
 An `agent.ts` that configures a local agent, root or subagent, must export the value `defineAgent` returns, and a dynamic subagent resolver that selects a local agent must return one. The compiler rejects a plain object export with `Export defineAgent({...}) from "<path>".`
 
-A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider model instance remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
-`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
+`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a model instance. eve types it as `EveLanguageModel` (exported from `eve` and `eve/models`), which every AI SDK language model satisfies.
 
 Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
@@ -45,9 +45,9 @@ export default defineAgent({
 
 For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-6-luna-fast` and cannot run in a deployment.
 
-`/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its `LanguageModel` when you need provider-specific configuration.
+`/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its language model when you need provider-specific configuration.
 
-Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
+Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct model instance.
 
 For every OpenAI or Anthropic model call, eve fills the provider's end-user
 safety identifier from the active turn's
@@ -168,7 +168,7 @@ export default defineAgent({
 });
 ```
 
-The function returns a Gateway model ID, an AI SDK `LanguageModel`, or a selection object. See
+The function returns a Gateway model ID, a model instance such as an AI SDK language model, or a selection object. See
 [Dynamic capabilities](./guides/dynamic-capabilities) for the context and memo rules.
 
 - **When it changes.** eve evaluates before each ordinary model call. A memo keyed by

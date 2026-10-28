@@ -37,7 +37,7 @@ export default linqChannel({
 });
 ```
 
-Set `route` to override the webhook path or `webhookVerifier` to use a different trusted-forwarder verifier. A verifier rejects a webhook by throwing or returning a falsy value such as `null` or `false`.
+Set `route` to override the webhook path or `webhookVerifier` (typed `LinqWebhookVerifier` from `eve/channels/linq`) to use a different trusted-forwarder verifier. A verifier receives the request and its raw body bytes, and rejects a webhook by throwing or returning a falsy value such as `null` or `false`.
 
 ## Tapbacks
 

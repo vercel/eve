@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -90,10 +89,21 @@ export type InternalAgentModelDefinition = {
 };
 
 /**
- * A concrete model handle: an AI Gateway model id string or an AI SDK
- * `LanguageModel` instance.
+ * A language model instance eve calls directly, such as one returned by `anthropic()` or
+ * `openai()` from `eve/models/*`, or by an AI SDK provider. Any AI SDK language model
+ * (specification `v2`, `v3`, or `v4`) is assignable. eve invokes `doGenerate` and `doStream`
+ * itself, so their call options and results stay opaque here.
  */
-export type PublicAgentStaticModelDefinition = string | LanguageModel;
+export interface EveLanguageModel {
+  readonly specificationVersion: "v2" | "v3" | "v4";
+  readonly provider: string;
+  readonly modelId: string;
+  doGenerate(options: never): PromiseLike<unknown>;
+  doStream(options: never): PromiseLike<unknown>;
+}
+
+/** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
+export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;

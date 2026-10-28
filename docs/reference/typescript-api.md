@@ -168,9 +168,9 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | [`eve/sandbox/vercel`](../sandbox/vercel)                                         | `VercelSandbox` and Vercel environment, session, and mount types                                                  |
 | [`eve/sandbox/just-bash`](../sandbox/just-bash)                                   | `JustBashSandbox` and just-bash environment types                                                                 |
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `InstrumentationEvent<K>`, lifecycle provider types            |
-| `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                 |
+| `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy, span processor, and exporter types   |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                     |
-| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`                                                                             |
+| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`, `EveLanguageModel`                                                         |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                               |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                       |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                               |
@@ -190,7 +190,7 @@ have one home, `eve/sessions`; client factories and transport-specific types sta
 `SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session.
 `ChannelContext` from `eve/channels` separates session information from continuation aliasing.
 
-`HistoryMessage` and the sandbox session, process, result, and method-option types are eve-owned. Their declarations do not change with your app's AI SDK peer version. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
+`HistoryMessage`, `EveLanguageModel`, `TokenUsage`, the sandbox session, process, result, and method-option types, the `SpanProcessor`, `SpanProcessorOrName`, and `SpanExporter` types from `eve/instrumentation/otel`, and the Linq and Photon credential and webhook-verifier types are eve-owned. Their declarations do not change with your app's AI SDK, OpenTelemetry, or channel-adapter versions. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
 
 ## Stability policy
 
@@ -218,7 +218,7 @@ integration lives at `eve/internal/scaffold`.
 
 ## Direct provider models
 
-`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return eve-owned model instances using the vendored providers. They accept only an optional model ID. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return `EveLanguageModel` instances using the vendored providers. They accept only an optional model ID. `EveLanguageModel`, exported from `eve` and `eve/models`, is the model instance type `agent.ts` accepts; every AI SDK language model satisfies it, but eve does not promise that its helpers' return values are typed as AI SDK models. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
 
 Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
 
