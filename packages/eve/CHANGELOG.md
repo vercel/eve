@@ -1,5 +1,44 @@
 # eve
 
+## 0.86.0
+
+### Release eve@0.86.0 | 2026-10-28 | minor
+
+### 🚀 Features
+
+- `EVE_CALLBACK_TRUSTED_ORIGINS` now accepts a leading `*.` label, such as `https://*.preview.example.com`, so a remote agent can trust preview parents whose deployment URLs change on every deploy. [#5539](https://github.com/vercel/eve/pull/5539)
+
+  The wildcard matches exactly one subdomain label, and `*.vercel.app` and trailing dots are rejected.
+
+- Hide `eve init --channel-web-nextjs` from `eve init --help` in favor of `eve add channel/web`. [#5474](https://github.com/vercel/eve/pull/5474)
+
+  The flag still works. The README and coding-agent setup instructions now point to `eve add channel/web`, which also sets up sign-in.
+
+- Ship current release notes at `dist/CHANGELOG.md` with a version-pinned link to the full changelog. [#5446](https://github.com/vercel/eve/pull/5446)
+
+### 🐛 Bug Fixes
+
+- The experimental Vercel schedule provider bundles Schedules SDK alpha.19 and identifies eve to the Schedules API with an `x-vss-framework: eve` header. [#5528](https://github.com/vercel/eve/pull/5528)
+
+- A file returned by a tool now becomes a "could not be stored" note when the session's sandbox rejects the write, instead of failing the step and replaying its model call and tools. [#4843](https://github.com/vercel/eve/pull/4843)
+
+- A turn's principal no longer changes while it runs. [#4925](https://github.com/vercel/eve/pull/4925)
+
+  Only the turn's own principal can answer a pending `ctx.ask()` or `ask_question` by typing, whether a workflow tool, a subagent or a remote agent asked; another person's text waits and runs as their own turn instead of answering the question under the asker's auth. A typed answer updates the claims on `ctx.session.auth.current`, so its `delivery.consumed` hook and the rest of the turn see the request that sent it. Someone else's button answer still settles the request as its responder.
+
+### Other Changes
+
+See the [full list of changes](https://github.com/vercel/eve/compare/eve%400.85.0...eve%400.86.0).
+
+### Contributors
+
+- [@benpankow](https://github.com/benpankow)
+- [@chadhietala](https://github.com/chadhietala)
+- [@cmpadden](https://github.com/cmpadden)
+- [@elliotdauber](https://github.com/elliotdauber)
+- [@OwenKephart](https://github.com/OwenKephart)
+- [@ruiconti](https://github.com/ruiconti)
+
 ## 0.85.0
 
 ### Minor Changes
