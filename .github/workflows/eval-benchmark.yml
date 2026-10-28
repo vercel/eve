@@ -208,14 +208,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build eve package
-        run: pnpm build:eve
-
-      - name: Build extension fixtures
-        # Mirrors e2e-local: extension fixtures ship no committed dist/.
+      - name: Prepare fixture dependencies
+        env:
+          FIXTURE_PACKAGE: ${{ matrix.package }}
+          RELEASE: ${{ inputs.release }}
         run: |
-          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
-          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+          if [ -n "$RELEASE" ]; then
+            # Release backfills use the checkout's pre-Turbo task contract.
+            pnpm --filter eve build
+            pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+            pnpm --filter dist-extensions update gizmo-extension gadget-extension
+          else
+            pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
+          fi
 
       - name: Run fixture evals
         working-directory: ${{ matrix.dir }}
@@ -331,13 +336,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build eve package
-        run: pnpm build:eve
-
-      - name: Build extension fixtures
+      - name: Prepare fixture dependencies
+        env:
+          FIXTURE_PACKAGE: ${{ matrix.package }}
+          RELEASE: ${{ inputs.release }}
         run: |
-          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
-          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+          if [ -n "$RELEASE" ]; then
+            # Release backfills use the checkout's pre-Turbo task contract.
+            pnpm --filter eve build
+            pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+            pnpm --filter dist-extensions update gizmo-extension gadget-extension
+          else
+            pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
+          fi
 
       - name: Run fixture evals on the local world
         if: matrix.world == 'local'
@@ -476,9 +487,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build eve package
-        # Full build, not build:js: deployed bundles carry the stamped version.
-        run: pnpm build:eve
+      - name: Prepare fixture dependencies
+        env:
+          FIXTURE_PACKAGE: ${{ matrix.package }}
+        run: pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
 
       - name: Deploy fixture and run evals
         working-directory: ${{ matrix.dir }}

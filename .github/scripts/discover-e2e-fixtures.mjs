@@ -80,13 +80,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
 function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
   const pkg = packageJson ?? {};
   const packageJsonPath = join(dir, "package.json");
-  const packageName = pkg.name;
-  if (
-    typeof packageName !== "string" ||
-    !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(packageName)
-  ) {
-    throw new Error(`${packageJsonPath}: every e2e fixture needs a valid package name.`);
-  }
+  const packageName = validateE2ePackageName(pkg.name, packageJsonPath);
   const selectedWorlds = validateNames(
     pkg.e2e?.worlds ?? worlds.map((world) => world.name),
     `${packageJsonPath}: e2e.worlds`,
@@ -154,6 +148,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   );
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, result.lines);
   else process.stdout.write(result.lines);
+}
+
+export function validateE2ePackageName(packageName, packageJsonPath) {
+  if (
+    typeof packageName !== "string" ||
+    packageName.includes("...") ||
+    !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(packageName)
+  ) {
+    throw new Error(`${packageJsonPath}: every e2e fixture needs a valid package name.`);
+  }
+  return packageName;
 }
 
 export function discoverEvalIds(root) {

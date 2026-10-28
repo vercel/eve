@@ -54,7 +54,7 @@ test("a registered world must retain at least one fixture", () => {
 });
 
 test("fixtures need a valid package name for Turbo filtering", () => {
-  for (const packageJson of [{}, { name: "fixture$(invalid)" }]) {
+  for (const packageJson of [{}, { name: "fixture$(invalid)" }, { name: "fixture...deps" }]) {
     assert.throws(
       () =>
         discoverE2eFixtures({

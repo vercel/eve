@@ -66,6 +66,7 @@
       "env": [
         "AI_GATEWAY_API_KEY",
         "ANTHROPIC_API_KEY",
+        "EVE_E2E_DUMP_CONTEXT",
         "EVE_E2E_MODEL",
         "EVE_E2E_WORKFLOW_WORLD",
         "EVE_SANDBOX_IMAGE_TAG",
