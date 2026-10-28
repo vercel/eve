@@ -5,6 +5,8 @@ description: "The define* helpers, the runtime ctx, and where each one is import
 
 This is the public surface of the `eve` package: the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The package's export map defines the full contract; source files that are not reachable through an exported package subpath are framework internals.
 
+For changes to an existing application, follow [Prepare for 1.0](../guides/prepare-for-1-0).
+
 Identity comes from the filesystem, not a field you set. A tool at `agent/tools/get_weather.ts` is `get_weather`, and a connection at `agent/connections/linear.ts` is `linear`, so no definition carries a `name` or `id`.
 
 Most files look the same: import a helper, default-export the result.
