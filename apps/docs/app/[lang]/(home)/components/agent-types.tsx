@@ -96,9 +96,9 @@ const BRAIN: Author = { name: "company-brain", icon: Brain };
 /**
  * How long each stage of the demo waits before it shows: Dana's question, the agent working,
  * its reply with the first tool running, each tool finishing as the next runs, the answer,
- * the table, then Dana's thumbs-up.
+ * the table, Dana's thumbs-up, her follow-up, then the agent's reply in its thread.
  */
-const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600, 1100];
+const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600, 1100, 1300, 1600];
 
 // Entrances run only in the demo; shown in full, the thread is simply there.
 const fadeIn = "animate-command-fade-in";
@@ -110,128 +110,260 @@ const fadeIn = "animate-command-fade-in";
 function CompanyBrainPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? BRAIN_DEMO.length;
+  const list = useRef<HTMLDivElement>(null);
+  // Which edges have messages scrolled past them, so only those edges fade, as in the hero.
+  const [overflow, setOverflow] = useState({ above: false, below: false });
+
+  const measure = () => {
+    const node = list.current;
+    if (!node) return;
+    const above = node.scrollTop > 1;
+    const below = node.scrollTop + node.clientHeight < node.scrollHeight - 1;
+    setOverflow((o) => (o.above === above && o.below === below ? o : { above, below }));
+  };
+
+  // A demo follows the conversation down as it grows; shown in full, it opens at its start.
+  useLayoutEffect(() => {
+    const node = list.current;
+    if (!node) return;
+    if (demo) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+    else node.scrollTop = 0;
+    measure();
+  }, [demo, shown]);
+
   return (
-    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
-      {shown >= 1 ? (
-        <SlackMessage
-          author={DANA}
-          avatarColor={brainAvatar}
-          className={cn(
-            demo && "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
-          )}
-          continued={false}
-          time="9:41 AM"
-        >
-          <p>
-            <Mention>company-brain</Mention> how are repeat orders trending this quarter?
-          </p>
-        </SlackMessage>
-      ) : null}
-      {shown === 2 ? (
-        <li className={cn("pt-3 pl-[2.375rem]", fadeIn)}>
-          <TypingIndicator author={BRAIN} />
-        </li>
-      ) : null}
-      {shown >= 3 ? (
-        <SlackMessage
-          author={BRAIN}
-          avatarColor={brainAvatar}
-          className={cn(
-            demo &&
-              "origin-top-left [--bubble-from:0.9] motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
-          )}
-          continued={false}
-          time="9:41 AM"
-        >
-          <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
-            {BRAIN_STEPS.map((step, index) => {
-              // Each tool shows running a stage before it finishes.
-              if (shown < 3 + index) return null;
-              const done = shown >= 4 + index;
-              return (
-                <li
-                  className={cn("flex items-baseline gap-3 text-copy-13", demo && fadeIn)}
-                  key={step.tool}
-                >
-                  <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
-                    {step.tool}
-                  </code>
-                  {/* Keyed by state, so the result fades in over the running label. */}
-                  <span
-                    className={cn(
-                      "truncate",
-                      done ? "text-gray-900" : "thinking-loader",
-                      demo && fadeIn,
-                    )}
-                    key={done ? "done" : "running"}
-                  >
-                    {done ? step.result : step.running}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          {shown >= 7 ? (
-            <p className={cn("mt-2", demo && fadeIn)}>
-              Repeat customers placed 44% of orders in October, up from 38% in August.
+    <div
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none]"
+      data-conversation
+      onScroll={measure}
+      ref={list}
+      style={{
+        maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 40px" : "black"}, ${overflow.below ? "black calc(100% - 40px), transparent" : "black"})`,
+      }}
+    >
+      <ol className="m-0 flex list-none flex-col p-0 px-4 pb-3 [--reply-width:34rem]">
+        {shown >= 1 ? (
+          <SlackMessage
+            author={DANA}
+            avatarColor={brainAvatar}
+            className={cn(
+              demo && "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+            )}
+            continued={false}
+            time="9:41 AM"
+          >
+            <p>
+              <Mention>company-brain</Mention> how are repeat orders trending this quarter?
             </p>
-          ) : null}
-          {shown >= 8 ? (
-            <div
-              className={cn(
-                "mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1",
-                demo && fadeIn,
-              )}
-            >
-              <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
-                <thead className="text-gray-900">
-                  <tr className="border-gray-alpha-400 border-b">
-                    <th className="py-1.5 pr-3 font-normal" scope="col">
-                      Month
-                    </th>
-                    <th className="py-1.5 pr-3 text-right font-normal" scope="col">
-                      Orders
-                    </th>
-                    <th className="py-1.5 text-right font-normal" scope="col">
-                      Repeat
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="text-gray-1000">
-                  {BRAIN_ROWS.map((row, index) => (
-                    <tr
+          </SlackMessage>
+        ) : null}
+        {shown === 2 ? (
+          <li className={cn("pt-3 pl-[2.375rem]", fadeIn)}>
+            <TypingIndicator author={BRAIN} />
+          </li>
+        ) : null}
+        {shown >= 3 ? (
+          <SlackMessage
+            author={BRAIN}
+            avatarColor={brainAvatar}
+            className={cn(
+              // Dana's questions run a line each; the agent's answer keeps to its table's width.
+              "[--reply-width:24rem]",
+              demo &&
+                "origin-top-left [--bubble-from:0.9] motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+            )}
+            continued={false}
+            time="9:41 AM"
+          >
+            <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+              {BRAIN_STEPS.map((step, index) => {
+                // Each tool shows running a stage before it finishes.
+                if (shown < 3 + index) return null;
+                const done = shown >= 4 + index;
+                return (
+                  <li
+                    className={cn("flex items-baseline gap-3 text-copy-13", demo && fadeIn)}
+                    key={step.tool}
+                  >
+                    <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
+                      {step.tool}
+                    </code>
+                    {/* Keyed by state, so the result fades in over the running label. */}
+                    <span
                       className={cn(
-                        "border-gray-alpha-400 border-b last:border-b-0",
+                        "truncate",
+                        done ? "text-gray-900" : "thinking-loader",
                         demo && fadeIn,
                       )}
-                      key={row.month}
-                      // Rows follow the card in, 60ms apart; inline, since the animation
-                      // shorthand would reset a class-set delay.
-                      style={demo ? { animationDelay: `${(index + 1) * 60}ms` } : undefined}
+                      key={done ? "done" : "running"}
                     >
-                      <th className="py-1.5 pr-3 font-normal" scope="row">
-                        {row.month}
+                      {done ? step.result : step.running}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {shown >= 7 ? (
+              <p className={cn("mt-2", demo && fadeIn)}>
+                Repeat customers placed 44% of orders in October, up from 38% in August.
+              </p>
+            ) : null}
+            {shown >= 8 ? (
+              <div
+                className={cn(
+                  "mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1",
+                  demo && fadeIn,
+                )}
+              >
+                <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
+                  <thead className="text-gray-900">
+                    <tr className="border-gray-alpha-400 border-b">
+                      <th className="py-1.5 pr-3 font-normal" scope="col">
+                        Month
                       </th>
-                      <td className="py-1.5 pr-3 text-right">{row.orders}</td>
-                      <td className="py-1.5 text-right">{row.repeat}</td>
+                      <th className="py-1.5 pr-3 text-right font-normal" scope="col">
+                        Orders
+                      </th>
+                      <th className="py-1.5 text-right font-normal" scope="col">
+                        Repeat
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </SlackMessage>
-      ) : null}
-      {shown >= 9 ? (
-        <li className="pt-1.5 pl-[2.375rem]">
-          <Reaction count={1} demo={demo} name="+1">
-            <span aria-label=":+1:" className="inline-block text-[14px] leading-none" role="img">
-              👍
-            </span>
-          </Reaction>
-        </li>
-      ) : null}
-    </ol>
+                  </thead>
+                  <tbody className="text-gray-1000">
+                    {BRAIN_ROWS.map((row, index) => (
+                      <tr
+                        className={cn(
+                          "border-gray-alpha-400 border-b last:border-b-0",
+                          demo && fadeIn,
+                        )}
+                        key={row.month}
+                        // Rows follow the card in, 60ms apart; inline, since the animation
+                        // shorthand would reset a class-set delay.
+                        style={demo ? { animationDelay: `${(index + 1) * 60}ms` } : undefined}
+                      >
+                        <th className="py-1.5 pr-3 font-normal" scope="row">
+                          {row.month}
+                        </th>
+                        <td className="py-1.5 pr-3 text-right">{row.orders}</td>
+                        <td className="py-1.5 text-right">{row.repeat}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </SlackMessage>
+        ) : null}
+        {shown >= 9 ? (
+          <li className="pt-1.5 pl-[2.375rem]">
+            <Reaction count={1} demo={demo} name="+1">
+              {/* A fixed box on its own layer, so the glyph scales smoothly in the pop instead of
+                snapping to the pixel grid frame by frame. */}
+              <span
+                aria-label=":+1:"
+                className="inline-flex size-4 items-center justify-center text-[14px] leading-none will-change-transform"
+                role="img"
+              >
+                👍
+              </span>
+            </Reaction>
+          </li>
+        ) : null}
+        {shown >= 10 ? (
+          <SlackMessage
+            author={DANA}
+            avatarColor={brainAvatar}
+            className={cn(
+              demo && "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+            )}
+            continued={false}
+            time="9:44 AM"
+          >
+            <p>
+              <Mention>company-brain</Mention> can you split October by payment method?
+            </p>
+            {shown >= 11 ? <ThreadReply demo={demo} /> : null}
+          </SlackMessage>
+        ) : null}
+      </ol>
+    </div>
+  );
+}
+
+/**
+ * Slack's thread summary under a message, the replier's avatar, "1 reply", and an unread dot,
+ * opening like an accordion onto the reply it hides.
+ */
+function ThreadReply({ demo }: { demo: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [read, setRead] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+
+  // Once open, the conversation scrolls the reply into view as the panel finishes growing.
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      const list = panel.current?.closest("[data-conversation]");
+      list?.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [open]);
+
+  const id = useId();
+  return (
+    <>
+      <button
+        aria-controls={id}
+        aria-expanded={open}
+        className={cn(
+          "-ml-1 mt-1 flex cursor-pointer items-center gap-2 rounded-md p-1 pr-2 transition-colors hover:bg-gray-alpha-100",
+          demo && fadeIn,
+        )}
+        onClick={() => {
+          setOpen(!open);
+          setRead(true);
+        }}
+        type="button"
+      >
+        <span className="flex size-5 items-center justify-center rounded-[5px] bg-teal-700 text-white">
+          <Brain aria-hidden className="size-3" />
+        </span>
+        {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
+        <span className="font-medium text-blue-900">
+          <span className="text-copy-13">1 reply</span>
+        </span>
+        {read ? null : (
+          <span className="flex items-center gap-1 text-red-900">
+            <span aria-hidden className="size-1.5 rounded-full bg-red-800" />
+            <span className="text-copy-13">Unread</span>
+          </span>
+        )}
+      </button>
+      {/* Grows from no height to the reply's, by transitioning the row from 0fr to 1fr. */}
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+        id={id}
+        inert={!open}
+        ref={panel}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <ol className="m-0 mt-1 list-none border-gray-alpha-400 border-l-2 p-0 pl-3">
+            <SlackMessage
+              author={BRAIN}
+              avatarColor={brainAvatar}
+              className="pt-2"
+              continued={false}
+              time="9:44 AM"
+            >
+              <p>Credit card 56%, bank transfer 21%, coupon 14%, and gift card 9%.</p>
+            </SlackMessage>
+          </ol>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -618,9 +750,7 @@ export function AgentTypes(): JSX.Element {
             id={`${baseId}-panel`}
             role="tabpanel"
           >
-            <AppWindow className="h-[30rem] sm:h-[26rem]">
-              {selected.preview(demo?.stage)}
-            </AppWindow>
+            <AppWindow className="h-[30rem]">{selected.preview(demo?.stage)}</AppWindow>
           </div>
         </div>
       </div>
