@@ -48,6 +48,7 @@ import {
   vercelBlobStore,
 } from "../../../scripts/eval-benchmark/publish.mjs";
 import { findBenchmarkModel } from "../lib/benchmark-config.ts";
+import { generatedFixtureFiles } from "../lib/experiment-files.mjs";
 import { loadAuthoringCase } from "../lib/load-authoring-case.ts";
 import { modelPricing, priceRequests } from "./cost.mjs";
 import { analyzeRun, collectRuns } from "./run-analysis.mjs";
@@ -285,8 +286,9 @@ export async function caseCategories(cases, root = evalsRoot) {
 
 /**
  * Each planned case's `case_digest`: sha256 over every file in its directory
- * (CASE.ts, EVAL.ts, and support files) plus the ids of its starting point and
- * setups. Shared setup code and fixtures live outside the case directory; their
+ * (CASE.ts, EVAL.ts, and support files, but not the files run.mjs generates
+ * there, which depend on the last local run) plus the ids of its starting point
+ * and setups. Shared setup code and fixtures live outside the case directory; their
  * ids are bumped whenever their behavior or fixtures change (lib/authoring-case.ts),
  * so including the ids covers them without tying every case to every setup.
  */
@@ -298,6 +300,7 @@ export async function caseDigests(cases, root = evalsRoot) {
       const hash = createHash("sha256");
       for (const file of listFiles(dir)
         .map((path) => relative(dir, path).replaceAll("\\", "/"))
+        .filter((file) => !generatedFixtureFiles.includes(file))
         .sort()) {
         hash
           .update(`file\0${file}\0`)

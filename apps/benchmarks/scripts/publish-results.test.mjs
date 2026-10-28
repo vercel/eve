@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseTranscript } from "@vercel/agent-eval";
 
+import { prepareFixtures } from "../lib/experiment-files.mjs";
 import { caseCategories, caseDigests, publishResults } from "./publish-results.mjs";
 
 const plan = {
@@ -247,8 +248,9 @@ test("records carry a digest of their case that changes with its grader", async 
   assert.match(digest, /^[0-9a-f]{64}$/);
   assert.deepEqual(new Set(records.map((record) => record.case_digest)), new Set([digest]));
 
-  // A copy of the case, next to the real lib/ so its imports resolve, digests the same until
-  // its grader changes. Another case digests differently.
+  // A copy of the case, next to the real lib/ so its imports resolve, digests the same,
+  // even after a local run writes its generated files there, until its grader changes.
+  // Another case digests differently.
   const appRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
   const root = mkdtempSync(join(tmpdir(), "eve-authoring-digest-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -256,6 +258,8 @@ test("records carry a digest of their case that changes with its grader", async 
   const caseId = "author-001-weather-tool";
   cpSync(join(appRoot, "evals", caseId), join(root, "evals", caseId), { recursive: true });
   const copy = async () => (await caseDigests([caseId], join(root, "evals"))).get(caseId);
+  assert.equal(await copy(), digest);
+  await prepareFixtures(join(root, "evals"), { revision: "local" }, [caseId]);
   assert.equal(await copy(), digest);
   appendFileSync(join(root, "evals", caseId, "EVAL.ts"), "\n// a grader change\n");
   assert.notEqual(await copy(), digest);
