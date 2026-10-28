@@ -1,12 +1,12 @@
 ---
 title: "Prepare for 1.0"
-description: "Update session controls, authoring definitions, imports, retry options, and terminal flags for the pre-1.0 API cleanup."
+description: "Update session controls, authoring definitions, imports, public types, client errors, retry options, and terminal flags for the pre-1.0 API cleanup."
 url: /guides/prepare-for-1-0
 ---
 
 Use this checklist when upgrading an existing project to the coordinated pre-1.0 API cleanup release. These changes do not make the release 1.0; the [stability policy](../reference/typescript-api#stability-policy) still distinguishes stable and experimental APIs.
 
-Update agent servers before client applications. New clients call the `/end` endpoint, which older servers do not serve. Then update your authored files, frontend code, and scripts as described below.
+Update agent servers before client applications. New clients call the `/end` endpoint, which older servers do not serve, and accept only [agent-info version 6](#update-agent-info-readers). Then update your authored files, frontend code, and scripts as described below.
 
 ## End a session or start a new conversation
 
@@ -48,6 +48,21 @@ The old field fails validation with migration guidance. The default remains `0.9
 
 `limits.sessionUsage: false` is now accepted when you want to disable the token-usage limit, including an inherited limit. Omitting it keeps the normal default; no migration is required.
 
+## Export defineAgent from agent.ts
+
+Every local `agent.ts`, root or subagent, must export the value `defineAgent` returns. A plain object now fails the build with `Export defineAgent({...}) from "<path>".`:
+
+```diff
+-export default { model: "anthropic/claude-sonnet-5" };
++import { defineAgent } from "eve";
++
++export default defineAgent({ model: "anthropic/claude-sonnet-5" });
+```
+
+A dynamic subagent resolver that selects a local agent must also return `defineAgent({...})`, `defineRemoteAgent(...)`, or `null`.
+
+`DynamicSentinel`, `DisabledToolSentinel`, and `DisabledRouteSentinel` are opaque and no longer expose `kind` or `evaluate`. Create them only with `defineDynamic()`, `disableTool()`, and `disableRoute()`; hand-written objects of the same shape are rejected.
+
 ## Wrap connection definitions
 
 Every connection must use the helper for its protocol. A plain object is no longer assumed to be an MCP connection:
@@ -67,7 +82,20 @@ If both `agent/sandbox.ts` and `agent/sandbox/` exist, move the definition to `a
 
 A standalone `agent/sandbox.ts` remains supported. See [Sandbox layout](../sandbox#define-an-environment).
 
-## Move workspace helper imports
+## Declare the sandbox provider contract
+
+Custom providers must declare the provider contract version they target. `defineSandboxProvider()` throws when `contractVersion` is missing or unsupported:
+
+```diff
+ export const AcmeSandbox = defineSandboxProvider({
+   name: "acme",
++  contractVersion: 1,
+   environment(options) {
+```
+
+Built-in providers already set it. See [Declare the contract version](../sandbox/custom-providers#declare-the-contract-version).
+
+## Move experimental imports
 
 Import workspace helpers from the experimental entry:
 
@@ -77,6 +105,24 @@ Import workspace helpers from the experimental entry:
 ```
 
 Move `WorkspaceAgentDefinition` and `WorkspaceAgentTransport` type imports to the same entry. The `agents/<name>/` workspace layout and `withEve` from `eve/vercel` stay stable; the helper's experimental status does not change them.
+
+Move just-bash `customCommands` and `filesystem` under `experimental`, and import their types, such as `JustBashCommand` and `JustBashFilesystem`, from `eve/experimental/sandbox/just-bash`. `JustBashSandbox` itself, `autoInstall`, and `prepare` stay on `eve/sandbox/just-bash`:
+
+```diff
+ export const environment = JustBashSandbox.environment({
+-  customCommands: [today],
++  experimental: { customCommands: [today] },
+ });
+```
+
+The Discord Gateway relay moves and drops its prefix:
+
+```diff
+-import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";
++import { runDiscordGatewayRelay } from "eve/experimental/channels/discord/gateway";
+```
+
+See [just-bash](../sandbox/just-bash) and [Discord](../channels/discord).
 
 ## Flatten reconnect options
 
@@ -105,20 +151,84 @@ To disable automatic reconnects:
 
 Use the exported `ReconnectOptions` type from `eve/client` instead of `StreamReconnectPolicy`, `ResolvedStreamReconnectPolicy`, or `StreamReconnectRetryPolicy`. The option also applies to client session and event readers. Defaults and cursor recovery are unchanged; following reads keep reconnecting, and server-side readers do not reconnect. See [Streaming](./client/streaming#reconnection).
 
+## Update client error handling and saved state
+
+Every error `eve/client` throws now extends `EveError` and carries a stable snake_case `code`. Import the error classes from `eve/client` and narrow with their static `is()` rather than `instanceof`, so errors from a separately bundled copy of eve still match:
+
+```diff
+-if (error instanceof SessionNotActiveError && error.code === "EVE_SESSION_NOT_ACTIVE") {
++if (SessionNotActiveError.is(error) && error.code === "session_not_active") {
+   // Start a new session.
+ }
+```
+
+`SessionNotActiveError.code` is `session_not_ready` (with `retryable: true`) while a session is still starting, otherwise `session_not_active`; `EVE_SESSION_NOT_ACTIVE` is gone. `ClientError.code` is now `http_error` instead of `undefined` when the response carried no code.
+
+The opaque `inbox` field is now `resume` on `ClientSessionState`, `client.sessions.attach()` options, `initialSession`, and delivery receipts:
+
+```diff
+-const session = client.sessions.attach(saved.sessionId, { streamIndex: saved.streamIndex, inbox: saved.inbox });
++const session = client.sessions.attach(saved.sessionId, saved);
+```
+
+Persist `resume` with the rest of the state and pass it back unchanged. A previously saved `inbox` value is ignored, which only costs a slower lookup on the next send. The HTTP body field stays `inbox`, so this rename does not affect server compatibility. `session.snapshot()` now returns the full state, including `resume`. See [Faster sends with `resume`](./client/overview#faster-sends-with-resume).
+
+## Update agent-info readers
+
+`GET /eve/v1/info` and `client.info()` now use agent-info version 6, which end users can read. It no longer includes skill or schedule markdown, `agent.appRoot`, or `agent.agentRoot`, and instruction `content` is present only when `info.mode` is `"development"`. Read authored files from the agent source instead.
+
+The client now ignores unknown fields and reads unknown enum values as `"unrecognized"`; handle that value when you switch on fields such as `mode` or `sourceKind`. `info()` fails with `AgentInfoResponseError` across the version change in either direction: a new client rejects a version 5 server with a message naming which side to upgrade, and an older client rejects version 6. Upgrade the server first, then promptly upgrade the clients that call `info()`. See [Inspect an agent](./client/overview#inspect-an-agent).
+
 ## Update Workflow imports
 
 Import durable primitives from `eve/workflow`, and run/hook operations from `eve/workflow/api`:
 
 ```diff
 -import { createHook, createWebhook, sleep, FatalError, RetryableError, getWorkflowMetadata } from "workflow";
--import { start, getRun, resumeHook, getHookByToken } from "workflow/api";
+-import { start, getRun, resumeHook } from "workflow/api";
 +import { createHook, createWebhook, sleep, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
-+import { start, getRun, resumeHook, getHookByToken } from "eve/workflow/api";
++import { start, getRun, resumeHook } from "eve/workflow/api";
 ```
 
-Bare `workflow` and `workflow/*` imports in authored modules now fail the build. Only the exports listed above are public; other SDK subpaths and helpers are not supported by these entries. Call `eve/workflow/api` operations from routes or `"use step"` helpers, not replayed workflow bodies. Both entries use eve's bundled SDK; do not install another SDK to make these imports resolve.
+Bare `workflow` and `workflow/*` imports in authored modules now fail the build. Only the exports listed above are public; other SDK subpaths, helpers, and options are not supported by these entries.
+
+Both entries declare eve-owned types instead of the SDK's:
+
+- `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, and resume the hook with `resumeHook(token, payload)`. `resumeHook` accepts only a token, not a hook record or an encryption-key override, and resolves to `void`.
+- `start(workflow, args?)` takes a `"use workflow"` function, not a source string, and no options such as `deploymentId` or `world`; eve routes runs to the agent's own queue and deployment.
+- `start` and `getRun` return a `WorkflowRun` with only `runId`, `status`, `returnValue`, and `cancel()`.
+
+```diff
+-const hook = await getHookByToken(token);
+-await resumeHook(hook, payload);
++await resumeHook(token, payload);
+```
+
+Use `WorkflowHook`, `WorkflowWebhook`, and `WorkflowMetadata` from `eve/workflow`, and `WorkflowRun` and `WorkflowRunStatus` from `eve/workflow/api`, for explicit annotations. Call `eve/workflow/api` operations from routes or `"use step"` helpers, not replayed workflow bodies. Both entries use eve's bundled SDK; do not install another SDK to make these imports resolve.
 
 You can remove `eve/workflow-modules` from tsconfig `types` and reference directives. Existing references remain resolvable through 1.x, but the entry no longer declares bare modules. See [Workflow imports](../tools/workflows#workflow-imports).
+
+## Replace third-party types in eve signatures
+
+eve's public types no longer expose AI SDK, zod, OpenTelemetry, or channel-adapter types. Any AI SDK language model or OpenTelemetry processor still type-checks wherever eve accepts one, so most projects only change annotations:
+
+- `anthropic()` and `openai()` from `eve/models/*`, `chatgpt()`, and `mockModel()` return `EveLanguageModel` instead of the AI SDK `LanguageModel`. Annotate with `EveLanguageModel` from `eve` or `eve/models`. AI SDK functions such as `generateText` no longer accept these values without a cast, and eve does not promise they are AI SDK models; pass a model from an AI SDK provider package when you call the AI SDK directly.
+- `DecisionModel` instances must declare `specificationVersion: "v4"`.
+- `MemoryToolDefinition` is removed. Type memory provider tools as `MemoryToolSet`, a map of `defineTool()` values (`ToolDefinition` from `eve/tools`).
+- Import `SpanProcessor`, `SpanExporter`, and `SpanProcessorOrName` from `eve/instrumentation/otel`, `LinqWebhookVerifier` from `eve/channels/linq`, and `PhotonIMessageWebhookVerifier` and `PhotonProjectCredentials` from `eve/channels/photon`.
+
+```diff
+-import type { LanguageModel } from "ai";
++import type { EveLanguageModel } from "eve/models";
+ import { anthropic } from "eve/models/anthropic";
+
+-const model: LanguageModel = anthropic();
++const model: EveLanguageModel = anthropic();
+```
+
+## Keep custom data out of channel state bookkeeping
+
+Built-in channel state types no longer include the default handlers' bookkeeping, such as Slack `taskCards` and `threadStatus`, Chat SDK streaming fields, `pendingSignIns`, posted prompt cards, `shownPromptId`, and `undeliveredReplyErrorId`. Addressing, identity, and audience fields are unchanged. Keep custom handler data in your own state keys instead of reading or writing these fields.
 
 ## Remove unsupported Slack card imports
 
@@ -164,6 +274,6 @@ Model-effort `--reasoning` on `eve init` and `eve set model` is unchanged. `--as
 
 ## Check the resulting project
 
-Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Test any proactive Slack messages and durable workflow waits your project defines.
+Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it, and call `client.info()` if your clients use it. Test any proactive Slack messages, durable workflow waits, and custom sandbox providers your project defines.
 
 Review [run-data retention](../agent-config#run-data-retention) before depending on a completed transcript remaining readable. This cleanup does not change the retention default: outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends. Backend support determines whether deletion occurs; the current override remains experimental.
