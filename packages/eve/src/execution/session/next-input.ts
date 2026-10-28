@@ -33,7 +33,7 @@ export type NextTurnInstruction =
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader &
-    Partial<Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">>;
+    Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -75,7 +75,7 @@ export async function nextTurnDelivery(input: {
       if (preemptible.length > 0) {
         // Behind an awaited handover, older input is queued but unreadable: wait for it, so the
         // message gives way to it as it would to anything readable.
-        if (inbox.awaitingHandover === true && inbox.whenHandoverSettled !== undefined) {
+        if (inbox.awaitingHandover) {
           await inbox.whenHandoverSettled();
           continue;
         }

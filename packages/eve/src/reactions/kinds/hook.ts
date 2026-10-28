@@ -113,8 +113,11 @@ async function runHandler(call: {
     const { turnPolicy = "steer", ...rest } = options;
     const projection = currentProjection(ctx);
     const turnId = latestTurnIdOf(projection);
+    // The commit that admits a turn's delivery, before the turn opens: the message is about it.
+    const opening =
+      call.input.cancelBeforeTurn !== undefined && activeTurnIdOf(projection) === undefined;
     // A person's cancel stops hooks too: none starts a turn after it until another turn starts.
-    if (activeTurnIdOf(projection) === undefined && personCancelled(ctx, turnId)) {
+    if (!opening && activeTurnIdOf(projection) === undefined && personCancelled(ctx, turnId)) {
       return { reason: "cancelled", recorded: false };
     }
     const key = `${idempotencyKey}:send:${sends++}`;
@@ -129,7 +132,9 @@ async function runHandler(call: {
         // A yielding message is queued; the session admits it only once nothing else waits.
         turnPolicy: turnPolicy === "yield" ? "queue" : turnPolicy,
       }),
-      ...(turnPolicy === "yield" && { preemptible: { turnId } }),
+      ...(turnPolicy === "yield" && {
+        preemptible: opening ? { opening: true as const, turnId } : { turnId },
+      }),
       type: "send",
     });
     return { deliveryId, recorded: true };

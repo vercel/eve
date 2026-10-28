@@ -1,5 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import { principalOf } from "#execution/session/principal.js";
+import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
 // Read by the session owner between steps, so it imports nothing a workflow body can't load.
 
@@ -9,10 +9,11 @@ export const REACTIONS_STATE_KEY = "eve.reactions";
 export interface PendingSend {
   readonly delivery: DeliverHookPayload;
   /**
-   * Set for a preemptible message: the session's latest turn when the hook sent it, absent
-   * before the first turn. Once another turn starts, the message is dropped.
+   * Set for a yielding message: the turn it waits on, the session's latest when the hook sent it,
+   * or none before the first turn. Once another turn starts, the message is dropped. `opening`
+   * marks one sent while a delivery opens a turn, which waits on that turn once it starts.
    */
-  readonly preemptible?: { readonly turnId: string | undefined };
+  readonly preemptible?: { readonly turnId: string | undefined; readonly opening?: true };
 }
 
 function storedSends(serializedContext: Readonly<Record<string, unknown>>): readonly PendingSend[] {
@@ -35,10 +36,10 @@ export function pendingHookSends(
 }
 
 /**
- * The preemptible messages that start the session's next turn once nothing else waits: the first
- * one sent since `latestTurnId` started, and those after it that act for the same principal, so
- * they share the turn. One for another principal would start a turn after it, so it waits, and is
- * dropped once the turn starts.
+ * The yielding messages that start the session's next turn once nothing else waits: the first one
+ * sent since `latestTurnId` started, and those after it that the queue puts in the same turn, for
+ * the same principal. Any other would start a turn after it, so it waits, and is dropped once the
+ * turn starts. The queue gives each anonymous message its own turn, so only the first goes.
  */
 export function pendingPreemptibleSends(
   serializedContext: Readonly<Record<string, unknown>>,
@@ -50,5 +51,6 @@ export function pendingPreemptibleSends(
   const [first] = waiting;
   if (first === undefined) return [];
   const principal = principalOf(first.auth);
+  if (principal === ANONYMOUS_PRINCIPAL) return [first];
   return waiting.filter(({ auth }) => principalOf(auth) === principal);
 }

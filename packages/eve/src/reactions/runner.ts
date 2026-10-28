@@ -66,7 +66,12 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
   const onCommit = reactions.filter(
     (reaction): reaction is CommitReaction => reaction.timing === "commit",
   );
-  if (onCommit.length === 0 || input.written.length === 0) return;
+  if (input.written.length === 0) return;
+  // Hooks' messages are cleaned up even once no hook remains to send more.
+  if (onCommit.length === 0) {
+    dropHookSends(ctx, input.written);
+    return;
+  }
   let cancelBeforeTurn: (() => void) | undefined;
   const beforeTurn = input.cancelBeforeTurn;
   const context: CommitContext = {
@@ -400,10 +405,11 @@ function actOnCancels(
 }
 
 /**
- * A hook's message leaves the state once its `delivery.admitted` is written. A person can always
- * stop a hook's loop: a cancel, a clear, a reset, or a turn a person cancelled drops every message
- * still waiting. A preemptible message is dropped once any other turn starts. A compaction keeps
- * them all.
+ * A hook's message leaves the state once the session has admitted it: its `delivery.admitted` is
+ * in this commit, or its delivery already in the session's view, as after a retried step. A
+ * person can always stop a hook's loop: a cancel, a clear, a reset, or a turn a person cancelled
+ * drops every message still waiting. A yielding message is dropped once any other turn starts,
+ * except one sent as a delivery opened that turn, which waits on it. A compaction keeps them all.
  */
 function dropHookSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
   const { sends, ...state } = readReactionsState(ctx);
@@ -412,18 +418,39 @@ function dropHookSends(ctx: ContextContainer, written: readonly WrittenEvent[]):
     writeReactionsState(ctx, state);
     return;
   }
-  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
+  const projection = currentProjection(ctx);
+  const latestTurnId = latestTurnIdOf(projection);
   const admitted = new Set(
     written.flatMap(({ event }) =>
       event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
     ),
   );
-  const pending = sends.filter(
-    ({ delivery, preemptible }) =>
-      !(delivery.deliveryMetadata ?? []).some(({ deliveryId }) => admitted.has(deliveryId)) &&
-      (preemptible === undefined || preemptible.turnId === latestTurnId),
-  );
-  if (pending.length === sends.length) return;
+  const started = written.find(({ event }) => event.type === "turn.started")?.event.data as
+    | { readonly turnId: string }
+    | undefined;
+  let changed = false;
+  const pending = sends.flatMap((send) => {
+    const { delivery, preemptible } = send;
+    if (
+      (delivery.deliveryMetadata ?? []).some(
+        ({ deliveryId }) =>
+          admitted.has(deliveryId) || projection.view.deliveries[deliveryId] !== undefined,
+      )
+    ) {
+      changed = true;
+      return [];
+    }
+    if (preemptible?.opening === true && started !== undefined) {
+      changed = true;
+      return [{ ...send, preemptible: { turnId: started.turnId } }];
+    }
+    if (preemptible !== undefined && preemptible.turnId !== latestTurnId) {
+      changed = true;
+      return [];
+    }
+    return [send];
+  });
+  if (!changed) return;
   writeReactionsState(ctx, pending.length === 0 ? state : { ...state, sends: pending });
 }
 

@@ -40,8 +40,9 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
  *   turn's next step boundary. It steers the running turn or queues behind it, and starts a turn
  *   when none runs.
  * - `"yield"`: queued, but it gives way. It's admitted only once nothing else waits, and dropped
- *   if any other turn starts first, such as a person's message. A goal loop uses it so a person's
- *   message always wins.
+ *   if any other turn starts first, such as a person's message. Sent while a delivery is being
+ *   admitted, it waits on the turn that delivery opens. A goal loop uses it so a person's message
+ *   always wins.
  */
 export type HookTurnPolicy = TurnPolicy | "yield";
 
@@ -61,7 +62,8 @@ export type HookSendOptions = Pick<SessionSendOptions, "auth" | "context"> & {
  * What `ctx.send()` did, decided when it's called. `recorded` means eve recorded the message under
  * `deliveryId`; it doesn't mean the message ran. A person's cancel, clear, or reset can still drop
  * it, and so can another turn starting first, for `"yield"`. The session's `delivery.admitted` for
- * `deliveryId` confirms it took the message, and `delivery.consumed` that a turn read it.
+ * `deliveryId` confirms it took the message, and `delivery.consumed` that a turn read it. A dropped
+ * message leaves nothing on the stream.
  * `cancelled`: a person cancelled the session's latest turn, so hooks can't start another until a
  * new turn starts.
  */

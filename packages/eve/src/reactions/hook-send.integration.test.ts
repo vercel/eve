@@ -340,6 +340,41 @@ describe("hook ctx.send()", () => {
     expect(inputs).toEqual(["Alice asks for the report.", "Keep going (1).", "Keep going (2)."]);
   }, 90_000);
 
+  it("follows the turn a delivery opens when a hook yields from its admission", async () => {
+    const results: unknown[] = [];
+    const { inputs, log } = await runSession({
+      drive: async ({ log }) => {
+        await until(log, "turn:completed", 2);
+        await settle();
+      },
+      hooks: {
+        reviewer: defineHook({
+          events: {
+            "delivery.admitted": (event, ctx) => {
+              // Only Alice's message, not the hook's own.
+              const { source } = event.data;
+              if (source !== undefined && "hook" in source && source.hook !== undefined) return;
+              results.push(
+                ctx.send("Review what you wrote.", {
+                  auth: ctx.session.auth.current,
+                  turnPolicy: "yield",
+                }),
+              );
+            },
+          },
+        }),
+      },
+      name: "hook-send-yield-from-admission",
+    });
+
+    expect(results).toEqual([{ deliveryId: expect.stringMatching(/^hook-/u), recorded: true }]);
+    expect(inputs).toEqual(["Alice asks for the report.", "Review what you wrote."]);
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual([
+      "turn:completed",
+      "turn:completed",
+    ]);
+  }, 90_000);
+
   it("drops a yielding message for a message that was waiting when the turn settled", async () => {
     const { held, release } = gate();
     let settled = 0;

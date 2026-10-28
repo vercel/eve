@@ -26,7 +26,14 @@ import { takeTurnFailure } from "./intents.js";
 import { takeUserInstructionMessages } from "./kinds/instructions.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { evaluateValues, isReactionFailedError, restoreReactions, runReactions } from "./runner.js";
-import { MEMOS_CAP, forgetSessionLive, memoBytes, readReactionsState, slotsOf } from "./state.js";
+import {
+  MEMOS_CAP,
+  forgetSessionLive,
+  memoBytes,
+  readReactionsState,
+  slotsOf,
+  writeReactionsState,
+} from "./state.js";
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
 
@@ -789,6 +796,76 @@ describe("runReactions", () => {
       });
       expect(results).toEqual([{ reason: "cancelled", recorded: false }]);
       expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("drops a message the session already admitted, as after a retried step", async () => {
+      const { ctx, deliveryId, projection } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      // The retried step adopted the admission without handing it to this commit.
+      foldLine(
+        projection.view,
+        {
+          at: "2026-01-01T00:00:02.000Z",
+          facts: [
+            {
+              data: { deliveryId, source: { channel: "http", hook: "reviewer" } },
+              type: "delivery.admitted",
+            },
+          ],
+        },
+        projection.view.position,
+      );
+      await commit(ctx, { written: written(3, "usage.recorded", {}) });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("cleans up once no hook remains to send more", async () => {
+      const { ctx, deliveryId, projection } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      const bare = session(noTools, []);
+      bare.set(ChannelKey, { kind: "http" } as never);
+      writeReactionsState(bare, readReactionsState(ctx));
+      enterSessionProjectionAt(bare, projection);
+      await commit(bare, {
+        written: written(2, "delivery.admitted", {
+          deliveryId,
+          source: { channel: "http", hook: "reviewer" },
+        }),
+      });
+      expect(readReactionsState(bare).sends).toBeUndefined();
+    });
+
+    it("waits on the turn a delivery opens when a hook yields from its admission", async () => {
+      const ctx = session(noTools, [
+        hook("reviewer", {
+          "delivery.admitted": (_event, ctx) =>
+            ctx.send("Review what you wrote.", { auth: ALICE, turnPolicy: "yield" }),
+        }),
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts: [started("turn-1"), settled("turn-1")] },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, {
+        cancelBeforeTurn: () => {},
+        written: written(1, "delivery.admitted", {
+          deliveryId: "d_alice",
+          source: { channel: "http" },
+        }),
+      });
+      expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({
+        opening: true,
+        turnId: "turn-1",
+      });
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:02.000Z", facts: [started("turn-2")] },
+        projection.view.position,
+      );
+      await commit(ctx, { written: written(2, "turn.started", started("turn-2").data) });
+      expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({ turnId: "turn-2" });
     });
 
     it("requires auth", async () => {

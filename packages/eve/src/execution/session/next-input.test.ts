@@ -5,7 +5,11 @@ import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import type {
+  SessionInbox,
+  SessionInboxHandle,
+  SessionInboxPayload,
+} from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { pendingPreemptibleSends } from "#reactions/hook-send.js";
 
@@ -31,10 +35,14 @@ interface ScriptedRead {
 }
 
 /** Scripted inbox: serves reads in order. */
-function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
+function createMockInbox(
+  reads: readonly ScriptedRead[],
+): SessionInbox & Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled"> {
   const remaining = [...reads];
 
   return {
+    awaitingHandover: false,
+    whenHandoverSettled: async () => {},
     claimedTokens: [],
     takeLeading: () => [],
     async claimSessionHook() {},
@@ -93,7 +101,7 @@ type WaitInput = {
   >[0][K];
 };
 
-function waitInput(inbox: SessionInbox): WaitInput {
+function waitInput(inbox: ReturnType<typeof createMockInbox>): WaitInput {
   const cursor = createCursor(inbox);
   return {
     hasWorkingTasks: () => false,
