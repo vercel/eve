@@ -125,71 +125,54 @@ function HarnessTools() {
   );
 }
 
-// Back to front, in the template thumbnail's window from vercel.com/docs, each covering the
-// one behind it but for a sliver. Sizes are front's px values in `em` (1em = 16px at a
-// 350px frame), so the windows scale with the frame.
-const BARS = [45, 60, 50, 75, 65, 90, 80, 100];
+// The template thumbnail's window from vercel.com/docs, three times, each covering the one
+// behind it but for a sliver. Sizes are front's px values in `em` (1em = 16px at a 350px
+// frame), so the windows scale with the frame. Every window shares the thumbnail's bar and
+// fading block; only their arrangement changes.
+const bar = "h-[1.3125em] shrink-0 rounded-[3px] bg-gray-200";
+const block = "mt-px h-[3.625em] rounded-[3px] bg-linear-to-b from-gray-200 to-background-100";
 
-// Each skeleton differs from its left edge, since the back windows show only that much.
-function DashboardSkeleton() {
+function PageSkeleton() {
   return (
     <>
-      <div className="grid shrink-0 grid-cols-3 gap-[0.375em]">
-        <span className="h-[2em] rounded-[3px] bg-gray-200" />
-        <span className="h-[2em] rounded-[3px] bg-gray-200" />
-        <span className="h-[2em] rounded-[3px] bg-gray-200" />
-      </div>
-      <div className="flex h-[3.625em] shrink-0 items-end gap-[0.25em] [mask-image:linear-gradient(to_bottom,black_55%,transparent)]">
-        {BARS.map((height, i) => (
-          <span
-            className="flex-1 rounded-t-[3px] bg-gray-200"
-            key={i}
-            style={{ height: `${height}%` }}
-          />
-        ))}
-      </div>
+      <div className={cn(bar, "w-3/4")} />
+      <div className={block} />
     </>
   );
 }
 
-function ListSkeleton() {
+// A narrow sidebar, so the split shows in the sliver a back window leaves visible.
+function DashboardSkeleton() {
   return (
-    <div className="flex shrink-0 flex-col gap-[0.5em] [mask-image:linear-gradient(to_bottom,black_40%,transparent)]">
-      {["w-3/4", "w-1/2", "w-2/3", "w-1/2"].map((width, i) => (
-        <div className="flex items-center gap-[0.5em]" key={i}>
-          <span className="size-[1.3125em] shrink-0 rounded-[3px] bg-gray-200" />
-          <span className={cn("h-[0.5em] rounded-full bg-gray-200", width)} />
-        </div>
-      ))}
-    </div>
+    <>
+      <div className={cn(bar, "w-3/4")} />
+      <div className="grid grid-cols-[1.75em_1fr] gap-[0.375em]">
+        <div className={block} />
+        <div className={block} />
+      </div>
+    </>
   );
 }
 
 function ChatSkeleton() {
   return (
     <>
-      <span className="h-[1.3125em] w-1/2 shrink-0 self-end rounded-[0.65em] bg-gray-200" />
-      <div className="flex shrink-0 gap-[0.5em] [mask-image:linear-gradient(to_bottom,black_30%,transparent)]">
-        <span className="size-[1.3125em] shrink-0 rounded-full bg-gray-200" />
-        <div className="flex flex-1 flex-col gap-[0.4em] pt-[0.4em]">
-          <span className="h-[0.5em] w-full rounded-full bg-gray-200" />
-          <span className="h-[0.5em] w-5/6 rounded-full bg-gray-200" />
-          <span className="mt-[0.2em] h-[2.25em] w-full rounded-[3px] bg-gray-200" />
-        </div>
-      </div>
+      <div className={cn(bar, "w-1/2 self-end rounded-full")} />
+      <div className={block} />
     </>
   );
 }
 
+// Back to front, so Next.js is the window fully in view.
 const APPS = [
-  { name: "Next.js", Logo: SiNextdotjs, left: "8%", Skeleton: DashboardSkeleton },
-  { name: "Nuxt", Logo: SiNuxt, left: "24%", Skeleton: ListSkeleton },
-  { name: "SvelteKit", Logo: SiSvelte, left: "40%", Skeleton: ChatSkeleton },
+  { name: "SvelteKit", Logo: SiSvelte, left: "8%", Skeleton: PageSkeleton },
+  { name: "Nuxt", Logo: SiNuxt, left: "24%", Skeleton: DashboardSkeleton },
+  { name: "Next.js", Logo: SiNextdotjs, left: "40%", Skeleton: ChatSkeleton },
 ];
 
 function AgentUi() {
   return (
-    <Visual caption="Three agent apps in overlapping windows: a dashboard built with Next.js, a list built with Nuxt, and a chat built with SvelteKit.">
+    <Visual caption="Three agent apps in overlapping windows: a chat built with Next.js in front, a dashboard built with Nuxt, and a page built with SvelteKit.">
       <div aria-hidden className="absolute inset-0 select-none text-[4.57cqw]">
         {APPS.map(({ Logo, Skeleton, left, name }) => (
           <div
