@@ -110,9 +110,9 @@ Use the exported `ReconnectOptions` type from `eve/client` instead of `StreamRec
 Import durable primitives from `eve/workflow`, and run/hook operations from `eve/workflow/api`:
 
 ```diff
--import { createHook, createWebhook, sleep, FatalError, getWorkflowMetadata } from "workflow";
+-import { createHook, createWebhook, sleep, FatalError, RetryableError, getWorkflowMetadata } from "workflow";
 -import { start, getRun, resumeHook, getHookByToken } from "workflow/api";
-+import { createHook, createWebhook, sleep, FatalError, getWorkflowMetadata } from "eve/workflow";
++import { createHook, createWebhook, sleep, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
 +import { start, getRun, resumeHook, getHookByToken } from "eve/workflow/api";
 ```
 
