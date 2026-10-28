@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 
 import { board } from "@vercel/board";
 import { oidcTokens, vercelProject } from "@vercel/board/access";
-import { a2 } from "@vercel/board/backend-a2";
+import { a2, memoryBlob } from "@vercel/board/backend-a2";
 import { memory } from "@vercel/board/backend-a2/store-memory";
 import { generateKeyPair, SignJWT } from "jose";
 
@@ -13,6 +13,7 @@ import {
   defineBoardPostTool,
   defineBoardReadTool,
   defineBoardReplyTool,
+  defineBoardTypingTool,
 } from "../../extension/lib/tools.ts";
 
 const URL_ = "https://board.example.com/api/board";
@@ -30,7 +31,7 @@ async function startBoard() {
   const team = board({
     access: [vercelProject({ can: "all", environments: ["production"], project: "prj_eve" })],
     authenticate: oidcTokens({ vercel: { issuer: ISSUER, jwks: async () => publicKey } }),
-    backend: a2({ store: memory() }),
+    backend: a2({ blob: memoryBlob(), store: memory() }),
     project: { id: "prj_board" },
     url: URL_,
   });
@@ -54,10 +55,14 @@ async function startBoard() {
 
 type Executable = { execute(input: unknown, ctx: unknown): Promise<unknown> };
 const settings = () => ({ url: URL_, profile: "helper" });
+const files = new Map([["/workspace/after.png", new Uint8Array([137, 80, 78, 71])]]);
 const run = (tool: unknown, input: unknown, callId: string) =>
   (tool as Executable).execute(input, {
     abortSignal: new AbortController().signal,
     callId,
+    getSandbox: async () => ({
+      readBinaryFile: async ({ path }: { path: string }) => files.get(path) ?? null,
+    }),
     session: { id: "session-1", auth: { current: null, initiator: null } },
   }) as Promise<Record<string, any>>;
 
@@ -102,4 +107,41 @@ test("the board tools explain a missing board URL", async () => {
     ),
     /set BOARD_URL, or pass `url` to the board channel or extension/u,
   );
+});
+
+test("a reply attaches files from the sandbox and warns about mentions that notified no one", async () => {
+  await startBoard();
+  const root = await run(
+    defineBoardPostTool(settings),
+    { channel: "dev", text: "Fix the header" },
+    "call-1",
+  );
+  const reply = defineBoardReplyTool(settings);
+
+  const shot = await run(reply, { id: root.id, attach: ["/workspace/after.png"] }, "call-2");
+  assert.deepEqual(shot.attachments, ["after.png"]);
+  assert.equal(shot.warning, undefined);
+
+  // A bad path uploads nothing and posts nothing.
+  await assert.rejects(
+    run(
+      reply,
+      { id: root.id, text: "and", attach: ["/workspace/after.png", "/nope.txt"] },
+      "call-3",
+    ),
+    /There is no file at \/nope\.txt in the sandbox/u,
+  );
+
+  const mention = await run(reply, { id: root.id, text: "Done, @nobody" }, "call-4");
+  assert.deepEqual(mention.unknownMentions, ["nobody"]);
+  assert.match(mention.warning, /@nobody matched no one/u);
+
+  assert.deepEqual(
+    await run(defineBoardTypingTool(settings), { id: root.id, status: "Checking" }, "call-5"),
+    {
+      ok: true,
+    },
+  );
+  const thread = await run(defineBoardReadTool(settings), { id: root.id }, "call-6");
+  assert.equal(thread.replies.length, 2);
 });

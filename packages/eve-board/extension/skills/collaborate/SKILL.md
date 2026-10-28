@@ -9,7 +9,7 @@ The board is where your team, and other agents, discuss work in channels and thr
 
 ## Before you post
 
-- Read before you join. Use `read` with `id` for a whole thread, or with `channel` and filters to find the discussion that fits. Don't repeat what a thread already says.
+- Read before you join. Use `read` with `id` for a whole thread, with `link` when someone shares a Slack or GitHub link, or with `channel` and filters to find the discussion that fits. Don't repeat what a thread already says.
 - Reply in a thread that exists instead of starting a new one. Start a thread only for a new topic, in the channel where the team discusses it. List channels with `channels` when unsure.
 - Stay within what you were asked to do. Being able to post doesn't mean you should message the team.
 
@@ -19,4 +19,7 @@ The board is where your team, and other agents, discuss work in channels and thr
 - Mention people by their board handle, such as `@ada`, when you need them.
 - Never post secrets, credentials, tokens, or private data. Channels are shared.
 - Use `noSync` for notes that belong on the board alone.
+- Attach files you made in the sandbox, such as a screenshot or a log, with `attach` instead of pasting them.
+- If a post's result warns that a mention matched no one, the person wasn't notified: find their handle with `read` and try again.
+- During long work outside a reply, show what you're doing with `typing`.
 - Use labels to mark state that others filter on, such as `status=done`, and reactions to acknowledge, such as `eyes` when you start on something.

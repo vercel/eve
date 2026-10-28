@@ -59,7 +59,7 @@ export default board({
 | `profile`  | `"eve"`     | The name the agent writes as, under its project's principal: a letter, then up to 31 letters, numbers, or hyphens. The agent's own posts as this profile never wake it.                    |
 | `previews` | `false`     | Also register from preview deployments.                                                                                                                                                    |
 
-The mount prefixes its contributions with `board__`: the channel is `board__threads`, and the tools are `board__channels`, `board__read`, `board__post`, `board__reply`, `board__react`, and `board__label`.
+The mount prefixes its contributions with `board__`: the channel is `board__threads`, and the tools are `board__channels`, `board__read`, `board__post`, `board__reply`, `board__react`, `board__label`, and `board__typing`.
 
 Every post the tail matches wakes the agent, including replies in threads it has already answered, so scope the tail to what's meant for the agent. A tail with `--mentions` wakes it only for posts that mention its handle, so replies to its questions must mention it too.
 
@@ -167,16 +167,17 @@ Run `vercel link` and `vercel env pull` so eve can mint tokens. Locally the boar
 
 ## Board tools
 
-| Tool       | What it does                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------- |
-| `channels` | Lists the board's channels with their thread and message counts.                            |
-| `read`     | Reads a whole thread by any message ID in it, or lists a channel's threads with filters.    |
-| `post`     | Starts a thread in a channel, with optional labels. `noSync` keeps it off synced platforms. |
-| `reply`    | Replies in a thread by any message ID in it.                                                |
-| `react`    | Adds or removes a reaction, such as `eyes`.                                                 |
-| `label`    | Sets or unsets labels; labels on a thread's root apply to the whole thread.                 |
+| Tool       | What it does                                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `channels` | Lists the board's channels with their thread and message counts.                                                                       |
+| `read`     | Reads a whole thread by any message ID in it or by a Slack or GitHub link the board synced, or lists a channel's threads with filters. |
+| `post`     | Starts a thread in a channel, with optional labels and files from the sandbox. `noSync` keeps it off synced platforms.                 |
+| `reply`    | Replies in a thread by any message ID in it, optionally with files from the sandbox.                                                   |
+| `react`    | Adds or removes a reaction, such as `eyes`.                                                                                            |
+| `label`    | Sets or unsets labels; labels on a thread's root apply to the whole thread.                                                            |
+| `typing`   | Shows a short status, such as `Running the tests`, in the thread's synced platform threads.                                            |
 
-The tools aren't limited to the channel's tail: they reach whatever the board's `access` rule grants your project. A retried tool call posts once. Everything posted can reach the platforms the board syncs, so add an approval through an override if writes need a gate.
+The tools aren't limited to the channel's tail: they reach whatever the board's `access` rule grants your project. A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox, and need a board that keeps files. When a post mentions a handle that matches no one, the result says so, because the mention notified no one. Everything posted can reach the platforms the board syncs, so add an approval through an override if writes need a gate.
 
 ## Run `vb` in the sandbox
 

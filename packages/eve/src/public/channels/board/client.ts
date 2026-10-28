@@ -132,7 +132,18 @@ export interface BoardPostOptions {
   readonly noSync?: boolean;
   /** An idempotency key: the same `id` from the same profile never posts twice. */
   readonly id?: string;
+  /** Attachment IDs from {@link BoardClient.upload}, at most 10. `text` may be empty with them. */
+  readonly attachments?: readonly string[];
 }
+
+/** A message the caller just wrote. */
+export interface BoardWrittenMessage extends BoardMessage {
+  /** Handles the text mentioned that matched no one on the board, so they notified no one. */
+  readonly unknownMentions?: readonly string[];
+}
+
+/** The most one upload request carries; the board takes larger files only as direct uploads. */
+export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
 
 /** HTTP transport overrides, used by tests and proxies. */
 export interface BoardApiOptions {
@@ -185,8 +196,14 @@ export interface BoardClient {
     readonly wait?: number;
   }): Promise<readonly BoardMatch[]>;
   ack(match: BoardMatch, outcome?: { readonly error?: string }): Promise<void>;
-  post(channel: string, options: BoardPostOptions): Promise<BoardMessage>;
-  reply(id: string, options: BoardPostOptions): Promise<BoardMessage>;
+  post(channel: string, options: BoardPostOptions): Promise<BoardWrittenMessage>;
+  reply(id: string, options: BoardPostOptions): Promise<BoardWrittenMessage>;
+  /** Stores a file for a later post to attach, up to {@link BOARD_UPLOAD_LIMIT}. */
+  upload(file: {
+    readonly data: Uint8Array;
+    readonly name: string;
+    readonly type?: string;
+  }): Promise<BoardAttachment>;
   react(id: string, emoji: string, options?: { readonly remove?: boolean }): Promise<void>;
   label(
     id: string,
@@ -194,6 +211,8 @@ export interface BoardClient {
   ): Promise<void>;
   typing(id: string, status?: string): Promise<void>;
   thread(id: string): Promise<BoardThread>;
+  /** The thread a synced platform's link names, such as a Slack permalink or a GitHub comment. */
+  linked(url: string): Promise<BoardThread>;
   threads(query?: BoardThreadsQuery): Promise<readonly BoardThreadSummary[]>;
   channels(): Promise<readonly BoardChannelSummary[]>;
   download(attachmentId: string): Promise<Response>;
@@ -215,12 +234,18 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
     };
   }
 
-  async function send(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
+  async function send(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    raw?: { readonly data: Uint8Array; readonly headers: Record<string, string> },
+  ): Promise<Response> {
     const response = await fetchImpl(`${base}${path}`, {
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: raw !== undefined ? raw.data : body === undefined ? undefined : JSON.stringify(body),
       headers: {
         ...(await headers()),
         ...(body !== undefined && { "content-type": "application/json" }),
+        ...raw?.headers,
       },
       method,
     });
@@ -231,6 +256,13 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
   let me: Promise<{ principal: string; actor: string }> | undefined;
   const json = async <T>(method: "GET" | "POST", path: string, body?: unknown) =>
     (await (await send(method, path, body)).json()) as T;
+  const write = async (body: Record<string, unknown>): Promise<BoardWrittenMessage> => {
+    const { message, unknownMentions } = await json<{
+      message: BoardMessage;
+      unknownMentions?: string[];
+    }>("POST", "/messages", body);
+    return unknownMentions === undefined ? message : { ...message, unknownMentions };
+  };
 
   return {
     url: base,
@@ -263,13 +295,20 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
         ...(outcome.error !== undefined && { error: outcome.error.slice(0, 1000) }),
       });
     },
-    async post(channel, post) {
-      return (await json<{ message: BoardMessage }>("POST", "/messages", { channel, ...post }))
-        .message;
-    },
-    async reply(id, post) {
-      return (await json<{ message: BoardMessage }>("POST", "/messages", { re: id, ...post }))
-        .message;
+    post: (channel, post) => write({ channel, ...post }),
+    reply: (id, post) => write({ re: id, ...post }),
+    async upload(file) {
+      if (file.data.byteLength > BOARD_UPLOAD_LIMIT) {
+        throw new Error(`${file.name} is over 4 MB, the most one board upload takes.`);
+      }
+      const response = await send("POST", "/attachments", undefined, {
+        data: file.data,
+        headers: {
+          "content-type": file.type ?? "application/octet-stream",
+          "x-board-filename": encodeURIComponent(file.name),
+        },
+      });
+      return ((await response.json()) as { attachment: BoardAttachment }).attachment;
     },
     async react(id, emoji, reaction = {}) {
       await send("POST", `/messages/${encodeURIComponent(id)}/reactions`, {
@@ -288,6 +327,7 @@ export function createBoardClient(options: BoardClientOptions): BoardClient {
       );
     },
     thread: (id) => json("GET", `/messages/${encodeURIComponent(id)}`),
+    linked: (url) => json("GET", `/links?${new URLSearchParams({ url })}`),
     async threads(query = {}) {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) {

@@ -289,6 +289,7 @@ describe("mounted extension via authored-source loader", () => {
       "board__react",
       "board__read",
       "board__reply",
+      "board__typing",
     ]);
     expect(manifest.skills.map((skill) => skill.name)).toContain("board__collaborate");
   });

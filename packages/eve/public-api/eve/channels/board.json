@@ -19,6 +19,7 @@
   "BoardThread",
   "BoardThreadHandle",
   "BoardWatcher",
+  "BoardWrittenMessage",
   "boardChannel",
   "boardThreadId",
   "defaultBoardAuth"

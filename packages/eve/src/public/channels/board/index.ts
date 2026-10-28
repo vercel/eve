@@ -22,5 +22,6 @@ export type {
   BoardMessage,
   BoardPostOptions,
   BoardThread,
+  BoardWrittenMessage,
 } from "#public/channels/board/client.js";
 export { boardThreadId, defaultBoardAuth } from "#public/channels/board/inbound.js";

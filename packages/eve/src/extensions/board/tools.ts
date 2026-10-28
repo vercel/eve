@@ -6,6 +6,7 @@ import {
   defineBoardReactTool,
   defineBoardReadTool,
   defineBoardReplyTool,
+  defineBoardTypingTool,
 } from "./extension/lib/tools.ts";
 
 // Bound to the `eve/extensions/board` mount's config, or to `BOARD_URL` without a mount.
@@ -23,3 +24,5 @@ export const reply = defineBoardReplyTool(settings);
 export const react = defineBoardReactTool(settings);
 /** Sets or unsets labels on a message. */
 export const label = defineBoardLabelTool(settings);
+/** Shows what the agent is doing in a thread. */
+export const typing = defineBoardTypingTool(settings);

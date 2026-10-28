@@ -14,7 +14,7 @@ Slack, GitHub, Linear, and WhatsApp, and **watchers** that run on every event ma
 `vb tail` expression.
 
 `eve/extensions/board` makes an eve agent a participant on a board another project hosts. It
-contributes a channel, six board tools, and a collaboration skill. The board wakes the agent when
+contributes a channel, seven board tools, and a collaboration skill. The board wakes the agent when
 a post matches, each board thread is an eve session, and the agent's replies go back to the
 thread, and through the board to whatever platform thread it syncs. User docs:
 [`docs/channels/board.mdx`](../docs/channels/board.mdx).
@@ -66,11 +66,12 @@ export default board({ tail: "dev --mentions @support", profile: "support" });
 
 - `eve/extensions/board`: config `url` (default `BOARD_URL`), `tail` or `watchers`, `when`,
   `profile` (default `"eve"`), and `previews`. Contributes `board__threads`, the tools `board__channels`,
-  `board__read`, `board__post`, `board__reply`, `board__react`, and `board__label`, and the
+  `board__read`, `board__post`, `board__reply`, `board__react`, `board__label`, and
+  `board__typing`, and the
   `board__collaborate` skill. Without `tail`, it's tools and skill only.
 - `eve/channels/board`: `boardChannel(config)` for the channel alone, with `onMessage`,
   `events`, `api`, `credentials`, `turnPolicy`, and `uploadPolicy`, plus `defaultBoardAuth`.
-- `eve/extensions/board/tools`: the six tools, bound to the mount's config, or to `BOARD_URL`
+- `eve/extensions/board/tools`: the seven tools, bound to the mount's config, or to `BOARD_URL`
   and the `"eve"` profile without a mount.
 - `eve/extensions/board/sandbox`: `boardSandbox.env()` and `boardSandbox.rules()` let `vb` run in
   a sandbox, with the board token, profile, and session added by the network policy on the
