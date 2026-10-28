@@ -166,6 +166,20 @@ export class ActiveTurn {
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     // Steps that ran while the turn waited, such as a workflow tool's progress, can send too.
     this.admitHookSends();
+    // A person's message and a hook's never share a step's input, or the model couldn't tell the
+    // hook's words from theirs. A person's go first; a hook's wait for the next step.
+    let steering = await this.collectSteering({ ...options, fromHooks: false });
+    if (steering.length === 0 && !this.controller.signal.aborted) {
+      steering = await this.collectSteering({ ...options, fromHooks: true });
+    }
+    this.resetSteering();
+    if (steering.length === 0) return undefined;
+    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
+    if (delivery.caller !== undefined) this.caller = delivery.caller;
+    return delivery;
+  }
+
+  private async collectSteering(options: SteeringOptions): Promise<DeliverHookPayload[]> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
@@ -178,11 +192,7 @@ export class ActiveTurn {
       }
       if (routed.kind === "turn") steering.push(routed.delivery);
     }
-    this.resetSteering();
-    if (steering.length === 0) return undefined;
-    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
-    if (delivery.caller !== undefined) this.caller = delivery.caller;
-    return delivery;
+    return steering;
   }
 
   /**

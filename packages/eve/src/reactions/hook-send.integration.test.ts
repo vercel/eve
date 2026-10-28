@@ -65,6 +65,9 @@ function lookupFirst(index: number): ReturnType<typeof textStreamResult> {
     : textStreamResult("Done.");
 }
 
+/** The running session's log, for tools defined in a test. */
+const logRef: { log?: string[] } = {};
+
 /**
  * Runs a session with the given hooks, whose model replies "Done." to every call unless
  * `respond` says otherwise.
@@ -73,6 +76,8 @@ async function runSession(input: {
   readonly name: string;
   readonly hooks: Readonly<Record<string, HookDefinition>>;
   readonly respond?: (index: number) => ReturnType<typeof textStreamResult>;
+  /** Tools beside `lookup` and `publish`, or in their place. */
+  readonly tools?: Readonly<Record<string, unknown>>;
   /** Holds a model call, the first by default, until `held` resolves. */
   readonly held?: Promise<void>;
   readonly heldCall?: number;
@@ -83,6 +88,7 @@ async function runSession(input: {
   }) => Promise<void>;
 }): Promise<{ readonly log: string[]; readonly inputs: string[]; readonly prompts: string[] }> {
   const log: string[] = [];
+  logRef.log = log;
   const inputs: string[] = [];
   const prompts: string[] = [];
   const model = markMockModel(
@@ -126,7 +132,7 @@ async function runSession(input: {
         loadNamespace: async () => ({ default: hook }),
         logicalPath: `hooks/${name}.ts`,
       })),
-      ...Object.entries({ lookup, publish }).map(([name, tool]) => ({
+      ...Object.entries({ lookup, publish, ...input.tools }).map(([name, tool]) => ({
         loadNamespace: async () => ({ default: tool }),
         logicalPath: `tools/${name}.ts`,
       })),
@@ -207,6 +213,66 @@ describe("hook ctx.send()", () => {
       "principal:alice",
       'admitted:{"channel":"http","hook":"reviewer"}',
       "principal:alice",
+    ]);
+  }, 90_000);
+
+  it("keeps a hook's steering apart from a person's, so the model can tell them apart", async () => {
+    const { held: lookupHeld, release } = gate();
+    let lookups = 0;
+    const { inputs, log, prompts } = await runSession({
+      drive: async ({ inbox, log }) => {
+        await until(log, "lookup:started", 1);
+        // Alice steers while the tool runs; the hook steers once its call settles.
+        await resumeHook(inbox, {
+          auth: ALICE,
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          kind: "send",
+          payload: { message: "Alice also wants charts." },
+          turnPolicy: "steer",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        release();
+        await until(log, "turn:completed", 2);
+        await settle();
+      },
+      hooks: {
+        reviewer: defineHook({
+          events: {
+            "call.settled": (_event, ctx) => {
+              ctx.send("Also include the appendix.", { auth: ctx.session.auth.current });
+            },
+          },
+        }),
+      },
+      name: "hook-send-steer-apart",
+      respond: lookupFirst,
+      tools: {
+        lookup: defineTool({
+          description: "Look up the report.",
+          execute: async () => {
+            lookups += 1;
+            logRef.log?.push("lookup:started");
+            await lookupHeld;
+            return { found: true, lookups };
+          },
+          inputSchema: {},
+        }),
+      },
+    });
+
+    // Alice's message steers the turn's next call; the hook's waits for the next step, which this
+    // turn doesn't take, so it starts its own turn, with the note ahead of it.
+    expect(inputs).toEqual([
+      "Alice asks for the report.",
+      "Alice also wants charts.",
+      "Also include the appendix.",
+    ]);
+    expect(prompts[1]).not.toContain("sent automatically");
+    expect(prompts[1]).not.toContain("Also include the appendix.");
+    expect(prompts[2]).toContain("sent automatically, not by a person");
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual([
+      "turn:completed",
+      "turn:completed",
     ]);
   }, 90_000);
 
