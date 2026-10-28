@@ -87,7 +87,7 @@ const BRAIN: Author = { name: "Company brain", icon: Brain };
 /** The hero's Slack thread, with the company brain on its own avatar color. */
 function CompanyBrainPreview() {
   return (
-    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:34rem]">
+    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
       <SlackMessage author={DANA} avatarColor={brainAvatar} continued={false} time="9:41 AM">
         <p>How are repeat orders trending this quarter?</p>
       </SlackMessage>
@@ -105,7 +105,7 @@ function CompanyBrainPreview() {
         <p className="mt-2">
           Repeat customers placed 44% of orders in October, up from 38% in August.
         </p>
-        <div className="mt-2 max-w-[24rem] rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1">
+        <div className="mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1">
           <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
             <thead className="text-gray-900">
               <tr className="border-gray-alpha-400 border-b">
