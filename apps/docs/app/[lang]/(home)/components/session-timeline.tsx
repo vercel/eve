@@ -890,7 +890,7 @@ export function SessionTimeline(): JSX.Element {
     // control below its bottom-right.
     <figure
       aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
-      className="relative m-0 mx-auto mb-16 w-full max-w-[30rem]"
+      className="relative m-0 mb-16 ml-auto w-full max-w-[30rem]"
     >
       <div className="flex flex-col overflow-hidden material-large">
         <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
