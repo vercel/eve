@@ -457,7 +457,7 @@ describe("stageToolResultMedia", () => {
 
   // #4839: a sandbox that opens but rejects the write (a cached handle to a
   // dead VM, a sandbox past its timeout) throws out of the step the same way.
-  it.fails("replaces a returned file with a note when the sandbox rejects the write", async () => {
+  it("replaces a returned file with a note when the sandbox rejects the write", async () => {
     const sandbox = mockSandbox();
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, {
