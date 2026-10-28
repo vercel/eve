@@ -1,3 +1,4 @@
+import { Button } from "@vercel/geistdocs/components/button";
 import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -71,5 +72,112 @@ export function SlackMessage({
         {children}
       </div>
     </li>
+  );
+}
+
+export function TypingIndicator({ author }: { author: Author | undefined }) {
+  return (
+    <p aria-hidden className="flex h-5 items-center gap-1.5 px-1 text-copy-13 text-gray-900">
+      {author ? (
+        <>
+          {/* geistcn's LoadingDots (size lg): three blinking dots, staggered 0.2s apart. */}
+          <span className="inline-flex items-center">
+            {[0, 200, 400].map((delay) => (
+              <span
+                className="mx-px inline-block size-1 rounded-full bg-gray-900 motion-safe:animate-blink"
+                key={delay}
+                style={{ animationDelay: `${delay}ms` }}
+              />
+            ))}
+          </span>
+          {/* vercel.com/sandbox's in-progress shimmer, over the whole label. */}
+          <span className="thinking-loader">
+            <span className="font-medium">{author.name}</span>{" "}
+            {author.icon ? "is working" : "is typing"}
+          </span>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+// geistcn-assets' play-circle icon, as on vercel.com/sandbox's "Play demo" button.
+function IconPlayCircle() {
+  return (
+    <svg aria-hidden fill="none" height={16} viewBox="0 0 16 16" width={16}>
+      <path
+        clipRule="evenodd"
+        d="M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M6 11l5.5-3L6 5z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+// geistcn-assets' stop-circle icon, red as on vercel.com/sandbox's "Stop demo" button.
+function IconStopCircle() {
+  return (
+    <svg
+      aria-hidden
+      className="text-red-700"
+      fill="none"
+      height={16}
+      viewBox="0 0 16 16"
+      width={16}
+    >
+      <path
+        clipRule="evenodd"
+        d="M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-5.5-2.5h-5v5h5z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Every label stacked in one grid cell with only the current one visible, so a button keeps
+ * the width of its longest label and the dock doesn't resize between choices.
+ */
+function StableLabel({ current, labels }: { current: string; labels: string[] }) {
+  return (
+    <span className="grid">
+      {labels.map((label) => (
+        <span
+          aria-hidden={label !== current}
+          className={cn("col-start-1 row-start-1 text-left", label !== current && "invisible")}
+          key={label}
+        >
+          {label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** vercel.com/sandbox's "Play demo" button, which turns into "Stop demo" while playing. */
+export function DemoButton({
+  playing,
+  onClick,
+  className,
+}: {
+  playing: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <Button
+      className={className}
+      onClick={onClick}
+      prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
+      size="small"
+      variant="tertiary"
+    >
+      <StableLabel
+        current={playing ? "Stop demo" : "Play demo"}
+        labels={["Play demo", "Stop demo"]}
+      />
+    </Button>
   );
 }

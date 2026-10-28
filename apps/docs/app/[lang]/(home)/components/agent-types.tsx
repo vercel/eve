@@ -8,6 +8,7 @@ import {
   type JSX,
   type KeyboardEvent,
   type ReactNode,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -17,7 +18,7 @@ import { analyticsEvents } from "@/lib/analytics/events";
 import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { type Author, SlackMessage } from "./chat";
+import { type Author, DemoButton, SlackMessage, TypingIndicator } from "./chat";
 import { AppWindow, HomeSection, PrefetchLink } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
@@ -70,9 +71,17 @@ function SoftwareFactoryPreview() {
 const brainAvatar = "bg-teal-700";
 
 const BRAIN_STEPS = [
-  { tool: "list_models", result: "Found customers, orders, and payments" },
-  { tool: "get_model", result: "Read the docs for the orders model" },
-  { tool: "query_sql", result: "Ran 1 query, returned 3 rows" },
+  {
+    tool: "list_models",
+    running: "Finding models",
+    result: "Found customers, orders, and payments",
+  },
+  {
+    tool: "get_model",
+    running: "Reading the orders model",
+    result: "Read the docs for the orders model",
+  },
+  { tool: "query_sql", running: "Running a query", result: "Ran 1 query, returned 3 rows" },
 ];
 
 const BRAIN_ROWS = [
@@ -84,56 +93,133 @@ const BRAIN_ROWS = [
 const DANA: Author = { name: "Dana" };
 const BRAIN: Author = { name: "Company brain", icon: Brain };
 
-/** The hero's Slack thread, with the company brain on its own avatar color. */
-function CompanyBrainPreview() {
+/**
+ * How long each stage of the demo waits before it shows: Dana's question, the agent working,
+ * its reply with the first tool running, each tool finishing as the next runs, the answer,
+ * then the table.
+ */
+const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600];
+
+// Entrances run only in the demo; shown in full, the thread is simply there.
+const fadeIn = "animate-command-fade-in";
+
+/**
+ * The hero's Slack thread, with the company brain on its own avatar color. In the demo it
+ * builds up stage by stage (`stage` counts the stages shown); otherwise it shows in full.
+ */
+function CompanyBrainPreview({ stage }: { stage?: number }) {
+  const demo = stage !== undefined;
+  const shown = stage ?? BRAIN_DEMO.length;
   return (
     <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
-      <SlackMessage author={DANA} avatarColor={brainAvatar} continued={false} time="9:41 AM">
-        <p>How are repeat orders trending this quarter?</p>
-      </SlackMessage>
-      <SlackMessage author={BRAIN} avatarColor={brainAvatar} continued={false} time="9:41 AM">
-        <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
-          {BRAIN_STEPS.map((step) => (
-            <li className="flex items-baseline gap-3 text-copy-13" key={step.tool}>
-              <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
-                {step.tool}
-              </code>
-              <span className="truncate text-gray-900">{step.result}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-2">
-          Repeat customers placed 44% of orders in October, up from 38% in August.
-        </p>
-        <div className="mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1">
-          <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
-            <thead className="text-gray-900">
-              <tr className="border-gray-alpha-400 border-b">
-                <th className="py-1.5 pr-3 font-normal" scope="col">
-                  Month
-                </th>
-                <th className="py-1.5 pr-3 text-right font-normal" scope="col">
-                  Orders
-                </th>
-                <th className="py-1.5 text-right font-normal" scope="col">
-                  Repeat
-                </th>
-              </tr>
-            </thead>
-            <tbody className="text-gray-1000">
-              {BRAIN_ROWS.map((row) => (
-                <tr className="border-gray-alpha-400 border-b last:border-b-0" key={row.month}>
-                  <th className="py-1.5 pr-3 font-normal" scope="row">
-                    {row.month}
-                  </th>
-                  <td className="py-1.5 pr-3 text-right">{row.orders}</td>
-                  <td className="py-1.5 text-right">{row.repeat}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SlackMessage>
+      {shown >= 1 ? (
+        <SlackMessage
+          author={DANA}
+          avatarColor={brainAvatar}
+          className={cn(
+            demo && "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+          )}
+          continued={false}
+          time="9:41 AM"
+        >
+          <p>How are repeat orders trending this quarter?</p>
+        </SlackMessage>
+      ) : null}
+      {shown === 2 ? (
+        <li className={cn("pt-3 pl-[2.375rem]", fadeIn)}>
+          <TypingIndicator author={BRAIN} />
+        </li>
+      ) : null}
+      {shown >= 3 ? (
+        <SlackMessage
+          author={BRAIN}
+          avatarColor={brainAvatar}
+          className={cn(
+            demo &&
+              "origin-top-left [--bubble-from:0.9] motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+          )}
+          continued={false}
+          time="9:41 AM"
+        >
+          <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+            {BRAIN_STEPS.map((step, index) => {
+              // Each tool shows running a stage before it finishes.
+              if (shown < 3 + index) return null;
+              const done = shown >= 4 + index;
+              return (
+                <li
+                  className={cn("flex items-baseline gap-3 text-copy-13", demo && fadeIn)}
+                  key={step.tool}
+                >
+                  <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
+                    {step.tool}
+                  </code>
+                  {/* Keyed by state, so the result fades in over the running label. */}
+                  <span
+                    className={cn(
+                      "truncate",
+                      done ? "text-gray-900" : "thinking-loader",
+                      demo && fadeIn,
+                    )}
+                    key={done ? "done" : "running"}
+                  >
+                    {done ? step.result : step.running}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {shown >= 7 ? (
+            <p className={cn("mt-2", demo && fadeIn)}>
+              Repeat customers placed 44% of orders in October, up from 38% in August.
+            </p>
+          ) : null}
+          {shown >= 8 ? (
+            <div
+              className={cn(
+                "mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1",
+                demo && fadeIn,
+              )}
+            >
+              <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
+                <thead className="text-gray-900">
+                  <tr className="border-gray-alpha-400 border-b">
+                    <th className="py-1.5 pr-3 font-normal" scope="col">
+                      Month
+                    </th>
+                    <th className="py-1.5 pr-3 text-right font-normal" scope="col">
+                      Orders
+                    </th>
+                    <th className="py-1.5 text-right font-normal" scope="col">
+                      Repeat
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="text-gray-1000">
+                  {BRAIN_ROWS.map((row, index) => (
+                    <tr
+                      className={cn(
+                        "border-gray-alpha-400 border-b last:border-b-0",
+                        demo && fadeIn,
+                      )}
+                      key={row.month}
+                      // Rows follow the card in, 60ms apart; inline, since the animation
+                      // shorthand would reset a class-set delay.
+                      style={demo ? { animationDelay: `${(index + 1) * 60}ms` } : undefined}
+                    >
+                      <th className="py-1.5 pr-3 font-normal" scope="row">
+                        {row.month}
+                      </th>
+                      <td className="py-1.5 pr-3 text-right">{row.orders}</td>
+                      <td className="py-1.5 text-right">{row.repeat}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </SlackMessage>
+      ) : null}
     </ol>
   );
 }
@@ -283,7 +369,10 @@ interface UseCase {
   cta: string;
   /** What the agent does, a short title and line each. */
   features: { title: string; text: string }[];
-  preview: ReactNode;
+  /** Stage delays for a "Play demo" replay, for an example that has one. */
+  demo?: number[];
+  /** The example; `stage` is set while a demo plays or after it ends. */
+  preview: (stage?: number) => ReactNode;
 }
 
 const USE_CASES: UseCase[] = [
@@ -298,7 +387,8 @@ const USE_CASES: UseCase[] = [
       { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
       { title: "Read-only SQL", text: "Queries DuckDB or MotherDuck, and never writes to them." },
     ],
-    preview: <CompanyBrainPreview />,
+    demo: BRAIN_DEMO,
+    preview: (stage) => <CompanyBrainPreview stage={stage} />,
   },
   {
     id: "software-factory",
@@ -317,7 +407,7 @@ const USE_CASES: UseCase[] = [
         text: "Every task ends in a reviewed draft on your repository.",
       },
     ],
-    preview: <SoftwareFactoryPreview />,
+    preview: () => <SoftwareFactoryPreview />,
   },
   {
     id: "agentic-apps",
@@ -330,7 +420,7 @@ const USE_CASES: UseCase[] = [
       { title: "Voice", text: "Calls that run tools and ask for approval." },
       { title: "iMessage", text: "Threads that share memory with web and Slack." },
     ],
-    preview: <AgenticAppsPreview />,
+    preview: () => <AgenticAppsPreview />,
   },
 ];
 
@@ -427,6 +517,27 @@ export function AgentTypes(): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const baseId = useId();
   const selected = USE_CASES[selectedIndex];
+  // The demo's stage while it plays, kept after it ends; unset shows the example in full.
+  const [demo, setDemo] = useState<{ stage: number; playing: boolean }>();
+
+  useEffect(() => {
+    const delays = selected.demo;
+    if (!demo?.playing || !delays) return;
+    if (demo.stage >= delays.length) {
+      setDemo({ stage: demo.stage, playing: false });
+      return;
+    }
+    const timer = setTimeout(
+      () => setDemo({ stage: demo.stage + 1, playing: true }),
+      delays[demo.stage],
+    );
+    return () => clearTimeout(timer);
+  }, [demo, selected]);
+
+  const select = (index: number) => {
+    setSelectedIndex(index);
+    setDemo(undefined);
+  };
 
   return (
     <HomeSection
@@ -453,7 +564,7 @@ export function AgentTypes(): JSX.Element {
       <div className="flex flex-col gap-6">
         {/* Pulled out by the list's padding, so the selected pill lines up with the window. */}
         <div className="-ml-1">
-          <UseCaseTabs baseId={baseId} onSelect={setSelectedIndex} selectedIndex={selectedIndex} />
+          <UseCaseTabs baseId={baseId} onSelect={select} selectedIndex={selectedIndex} />
         </div>
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-x-6">
           {/* Every use case's text shares one grid cell, so the column keeps the tallest one's
@@ -479,6 +590,14 @@ export function AgentTypes(): JSX.Element {
                     </li>
                   ))}
                 </ul>
+                {useCase.demo ? (
+                  // Pulled out by its padding and icon inset, so the icon lines up with the text.
+                  <DemoButton
+                    className="-ml-2 self-start"
+                    onClick={() => setDemo(demo?.playing ? undefined : { stage: 0, playing: true })}
+                    playing={Boolean(demo?.playing)}
+                  />
+                ) : null}
               </div>
             ))}
           </div>
@@ -488,7 +607,9 @@ export function AgentTypes(): JSX.Element {
             id={`${baseId}-panel`}
             role="tabpanel"
           >
-            <AppWindow className="h-[30rem] sm:h-[26rem]">{selected.preview}</AppWindow>
+            <AppWindow className="h-[30rem] sm:h-[26rem]">
+              {selected.preview(demo?.stage)}
+            </AppWindow>
           </div>
         </div>
       </div>
