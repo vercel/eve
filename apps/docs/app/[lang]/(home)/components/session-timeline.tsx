@@ -475,16 +475,17 @@ function BubbleTail({ outgoing }: { outgoing: boolean }) {
     <svg
       aria-hidden
       className={cn(
-        "absolute bottom-0 h-4 w-2.5",
-        outgoing ? "-right-[9px] text-gray-200" : "-left-[9px] text-background-100",
+        "absolute bottom-0 h-3.5 w-2",
+        outgoing ? "-right-[7.5px] text-gray-200" : "-left-[7.5px] text-background-100",
       )}
-      viewBox="0 0 10 16"
+      viewBox="0 0 8 14"
     >
+      {/* The side curves in and flares out to a point flush with the bubble's flat bottom. */}
       <path
         d={
           outgoing
-            ? "M0 0C0 9 3 13.5 9.5 15.6 5.5 16.5 2 15.7 0 14Z"
-            : "M10 0C10 9 7 13.5.5 15.6 4.5 16.5 8 15.7 10 14Z"
+            ? "M0 0C0 7 2.5 11 7 13Q7.6 13.3 7.3 13.7 7.1 14 6.5 14H0Z"
+            : "M8 0C8 7 5.5 11 1 13Q.4 13.3.7 13.7.9 14 1.5 14H8Z"
         }
         fill="currentColor"
       />
@@ -551,7 +552,7 @@ function Bubble({
       className={cn(
         "flex motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
         outgoing ? "justify-end pr-2" : "justify-start pl-2",
-        continued ? "pt-0.5" : "pt-3",
+        continued ? "pt-1.5" : "pt-4",
       )}
     >
       <span className="sr-only">{author.name}</span>
