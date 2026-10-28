@@ -752,9 +752,23 @@ describe("runReactions", () => {
       expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
-    it.each(["cancel", "reset"])("drops every message when a %s arrives", async (kind) => {
-      const { ctx } = await sent({ auth: ALICE, turnPolicy: "queue" });
+    const droppedAs = (ctx: ContextContainer) =>
+      readReactionsState(ctx).sends?.map(({ dropped }) => dropped);
+
+    it.each([
+      ["cancel", "cancelled"],
+      ["reset", "reset"],
+    ])("drops every message when a %s arrives, until it's recorded", async (kind, reason) => {
+      const { ctx, deliveryId } = await sent({ auth: ALICE, turnPolicy: "queue" });
       await commit(ctx, { written: control(2, kind) });
+      expect(droppedAs(ctx)).toEqual([reason]);
+      // Recording the drop admits the delivery, which ends it.
+      await commit(ctx, {
+        written: written(3, "delivery.admitted", {
+          deliveryId,
+          source: { channel: "http", hook: "reviewer" },
+        }),
+      });
       expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
@@ -768,7 +782,7 @@ describe("runReactions", () => {
           selects: null,
         }),
       });
-      expect(readReactionsState(ctx).sends).toBeUndefined();
+      expect(droppedAs(ctx)).toEqual(["cleared"]);
     });
 
     it("drops a yielding message once another turn starts", async () => {
@@ -783,10 +797,10 @@ describe("runReactions", () => {
         projection.view.position,
       );
       await commit(ctx, { written: written(2, "turn.started", started("turn-2").data) });
-      expect(readReactionsState(ctx).sends).toBeUndefined();
+      expect(droppedAs(ctx)).toEqual(["preempted"]);
     });
 
-    it("refuses a message after a turn a person cancelled", async () => {
+    it("refuses a message after a cancel no hook asked for", async () => {
       const { ctx, results } = sessionWith([started("turn-1"), settled("turn-1", "cancelled")], {
         auth: ALICE,
         turnPolicy: "queue",

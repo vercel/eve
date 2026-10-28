@@ -109,6 +109,9 @@ async function runSession(input: {
         log.push(`admitted:${JSON.stringify(event.data.source ?? null)}`);
         log.push(`principal:${event.data.principal?.id ?? "none"}`);
       },
+      "delivery.settled": (event) => {
+        log.push(`settled:${event.data.outcome}:${event.data.reason ?? ""}`);
+      },
       "interaction.opened": () => {
         log.push("interaction:opened");
       },
@@ -378,7 +381,7 @@ describe("hook ctx.send()", () => {
   it("drops a yielding message for a message that was waiting when the turn settled", async () => {
     const { held, release } = gate();
     let settled = 0;
-    const { inputs } = await runSession({
+    const { inputs, log } = await runSession({
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
         // Bob asks while the first turn still runs; his message waits behind it.
@@ -414,6 +417,9 @@ describe("hook ctx.send()", () => {
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Bob asks for the appendix."]);
+    // The dropped message is recorded, so a watcher can tell it from one still waiting.
+    expect(log).toContain('admitted:{"channel":"http","hook":"until-done"}');
+    expect(log).toContain("settled:ignored:preempted");
   }, 90_000);
 
   it("shares one turn among yielding messages for one principal, and drops the rest", async () => {
@@ -466,10 +472,15 @@ describe("hook ctx.send()", () => {
     expect(inputs[1]).toContain("Keep working on the report.");
     expect(inputs[1]).toContain("Fix the lint errors.");
     expect(inputs[1]).not.toContain("Audit it.");
+    // Bob's message is recorded as preempted once Alice's turn starts.
     expect(log.filter((entry) => entry.startsWith("admitted:"))).toEqual([
       'admitted:{"channel":"http"}',
       'admitted:{"channel":"http","hook":"goal"}',
       'admitted:{"channel":"http","hook":"lint"}',
+      'admitted:{"channel":"http","hook":"zz-audit"}',
+    ]);
+    expect(log.filter((entry) => entry.startsWith("settled:ignored"))).toEqual([
+      "settled:ignored:preempted",
     ]);
   }, 90_000);
 
@@ -574,6 +585,9 @@ describe("hook ctx.send()", () => {
 
     expect(inputs).toEqual(["Alice asks for the report.", "Alice asks for the report."]);
     expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:cancelled"]);
+    expect(log.filter((entry) => entry.startsWith("settled:ignored"))).toEqual([
+      "settled:ignored:cancelled",
+    ]);
   }, 90_000);
 
   it("drops a hook's message when the history is cleared before it's admitted", async () => {
@@ -604,6 +618,7 @@ describe("hook ctx.send()", () => {
 
     expect(inputs).toEqual(["Alice asks for the report."]);
     expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(1);
+    expect(log).toContain("settled:ignored:cleared");
   }, 90_000);
 
   it("lets a hook cancel a turn and send a correction", async () => {

@@ -60,12 +60,14 @@ export type HookSendOptions = Pick<SessionSendOptions, "auth" | "context"> & {
 
 /**
  * What `ctx.send()` did, decided when it's called. `recorded` means eve recorded the message under
- * `deliveryId`; it doesn't mean the message ran. A person's cancel, clear, or reset can still drop
- * it, and so can another turn starting first, for `"yield"`. The session's `delivery.admitted` for
- * `deliveryId` confirms it took the message, and `delivery.consumed` that a turn read it. A dropped
- * message leaves nothing on the stream.
- * `cancelled`: a person cancelled the session's latest turn, so hooks can't start another until a
- * new turn starts.
+ * `deliveryId`; it doesn't mean the message ran. A cancel that no hook asked for, such as
+ * `session.cancel()`, a clear, or a reset can still drop it, and so can another turn starting
+ * first, for `"yield"`. Every recorded message ends in a `delivery.settled` for `deliveryId`: an
+ * outcome such as `handled` once a turn ran it, or `ignored` with a `reason` of `"cancelled"`,
+ * `"cleared"`, `"reset"`, or `"preempted"` if it was dropped. Messages still waiting when the
+ * session ends end with it.
+ * `cancelled`: a cancel that no hook asked for stopped the session's latest turn, so hooks can't
+ * start another until a new turn starts.
  */
 export type HookSendResult =
   | { readonly recorded: true; readonly deliveryId: string }
@@ -102,8 +104,8 @@ export interface HookContext extends SessionContext, Omit<SessionFrame, "session
   cancel(reason?: string): void;
   /**
    * Sends `message` into the session from any event, as `options.turnPolicy` says; see
-   * {@link HookTurnPolicy}. It never steers a turn that waits on its person, and a person's cancel,
-   * clear, or reset drops it: a person can always stop a hook's loop. Unlike `session.send()`, it
+   * {@link HookTurnPolicy}. It never steers a turn that waits on its person, and a cancel that no
+   * hook asked for, a clear, or a reset drops it, so a hook's loop can always be stopped. Unlike `session.send()`, it
    * returns synchronously with the delivery's id, and there's no receipt to await: the session
    * admits the message after the handler returns. The model is told it was sent automatically, not
    * by a person, and it never answers a pending question. Like other hook effects, it's lost if

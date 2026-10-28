@@ -92,7 +92,7 @@ interface HookContext extends SessionContext {
   readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
   readonly memo: Memo;
   cancel(reason?: string): void;
-  send(message: MessageContent, options?: HookSendOptions): HookSendResult;
+  send(message: MessageContent, options: HookSendOptions): HookSendResult;
 }
 ```
 
@@ -303,11 +303,18 @@ The message is [`MessageContent`](./client/messages). `options` takes `auth`, `c
 
 `"steer"` and `"queue"` messages are admitted like a person's messages with the same policy, at the running turn's next step boundary. Unlike a person's message, a hook's doesn't interrupt a turn that waits on its tool calls or tasks: it waits for them. Only the turn's own principal steers it, so a message with another principal's `auth` queues instead. A `"yield"` message gives way: it's admitted only once nothing else waits, and dropped if any other turn starts first, such as a person's message. Sent while a delivery is being admitted, from `session.started` or that delivery's `delivery.admitted`, it waits on the turn that delivery opens. Use it for loops like the one above, so a person's message always wins and the hook decides again after their turn. `"yield"` messages for the same principal share one turn.
 
-A person can always stop a hook's messages. A cancel, a clear, or a reset drops every hook message that hasn't run yet, and after a person cancels a turn, `ctx.send()` refuses to start another until a new turn starts. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in, and never answers one: it waits until they act. A hook can `ctx.cancel()` a turn and send a correction from its `turn.settled` handler.
+A hook's loop can always be stopped. A cancel that no hook asked for, such as `session.cancel()`, a clear, or a reset drops every hook message that hasn't run yet, and after such a cancel stops a turn, `ctx.send()` refuses to start another until a new turn starts. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in, and never answers one: it waits until they act. A hook can `ctx.cancel()` a turn and send a correction from its `turn.settled` handler.
 
 The model is told the message was sent automatically, not by a person, without naming the hook. A hook's message never shares a step's input or a turn with a person's message, so the note always applies to the whole message: when a person and a hook steer at the same moment, the person's message goes first and the hook's waits for the next step, or starts its own turn if the turn ends first. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. eve doesn't limit how many messages a hook sends, so bound loops yourself, as the example does.
 
-`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ recorded: true, deliveryId }`, or `{ recorded: false, reason: "cancelled" }` after a turn a person cancelled. `recorded` means eve recorded the message, not that it ran: a person's cancel, clear, or reset can still drop it, and so can another turn starting first, for `"yield"`. To know what happened, watch the session's stream for `deliveryId`: `delivery.admitted` means the session took the message, and `delivery.consumed` means a turn read it, with that turn's `turnId`. A dropped message leaves nothing on the stream, so a `deliveryId` with no `delivery.admitted` was either dropped or is still waiting. A `"yield"` message that hasn't been admitted by the time another turn starts was dropped.
+`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ recorded: true, deliveryId }`, or `{ recorded: false, reason: "cancelled" }` after such a cancel. `recorded` means eve recorded the message, not that it ran: a cancel, clear, or reset can still drop it, and so can another turn starting first, for `"yield"`.
+
+Every recorded message ends in a `delivery.settled` for its `deliveryId` on the session's stream:
+
+- once a turn ran it, an outcome such as `handled`, with the turn's `turnId`;
+- if it was dropped, `outcome: "ignored"`, with `reason` set to `"cancelled"`, `"cleared"`, `"reset"`, or `"preempted"` (a `"yield"` message another turn started ahead of).
+
+A dropped message is recorded at the session's next step boundary, or once its turn ends. Its `delivery.admitted` names the hook in `source.hook`, so a handler that reacts to deliveries sees dropped messages too. Messages still waiting when the session ends end with it.
 
 ## Subagent isolation
 

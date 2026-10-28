@@ -109,7 +109,7 @@ export class SessionInputQueue {
     return admission;
   }
 
-  /** Drops the hooks' messages still waiting: a person's cancel, clear, or reset stops them. */
+  /** Drops the hooks' messages still waiting: a cancel, clear, or reset stops them. */
   dropHookDeliveries(): void {
     this.retain((entry) => entry.kind !== "delivery" || !isHookDelivery(entry.delivery));
   }

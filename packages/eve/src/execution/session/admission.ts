@@ -75,7 +75,7 @@ export async function admitSessionInboxPayload(
     }
     case "clear":
     case "compact":
-      // A person's clear stops hooks' messages; a compaction keeps them.
+      // A clear stops hooks' messages; a compaction keeps them.
       if (command.kind === "clear") input.queue.dropHookDeliveries();
       input.queue.enqueueControl(command.kind, controlOrigin(command));
       return { kind: "consumed" };

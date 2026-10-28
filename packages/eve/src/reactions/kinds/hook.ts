@@ -116,8 +116,12 @@ async function runHandler(call: {
     // The commit that admits a turn's delivery, before the turn opens: the message is about it.
     const opening =
       call.input.cancelBeforeTurn !== undefined && activeTurnIdOf(projection) === undefined;
-    // A person's cancel stops hooks too: none starts a turn after it until another turn starts.
-    if (!opening && activeTurnIdOf(projection) === undefined && personCancelled(ctx, turnId)) {
+    // A cancel no hook asked for stops hooks too: none starts a turn until another turn starts.
+    if (
+      !opening &&
+      activeTurnIdOf(projection) === undefined &&
+      cancelledOutsideHooks(ctx, turnId)
+    ) {
       return { reason: "cancelled", recorded: false };
     }
     const key = `${idempotencyKey}:send:${sends++}`;
@@ -185,8 +189,11 @@ async function runHandler(call: {
   }
 }
 
-/** The session's latest turn settled cancelled, and no hook's cancel stopped it. */
-function personCancelled(ctx: ContextContainer, turnId: string | undefined): boolean {
+/**
+ * The session's latest turn settled cancelled, and no hook's cancel stopped it: `session.cancel()`,
+ * from a person, a client, or the server, or the session ending.
+ */
+function cancelledOutsideHooks(ctx: ContextContainer, turnId: string | undefined): boolean {
   if (turnId === undefined) return false;
   const turn = currentProjection(ctx).view.turns[turnId];
   return (

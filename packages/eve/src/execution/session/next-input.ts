@@ -1,6 +1,11 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingHookSends, pendingPreemptibleSends } from "#reactions/hook-send.js";
+import {
+  droppedHookSends,
+  pendingHookSends,
+  pendingPreemptibleSends,
+} from "#reactions/hook-send.js";
+import { settleDroppedHookSendsStep } from "#execution/session/settle-dropped-hook-sends-step.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -45,6 +50,7 @@ export async function nextTurnDelivery(input: {
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
+    await settleDroppedHookSends(cursor);
     // Hooks' steer and queue messages are input like a person's; their keys admit each once.
     for (const delivery of pendingHookSends(cursor.serializedContext))
       queue.enqueueDelivery(delivery);
@@ -54,6 +60,8 @@ export async function nextTurnDelivery(input: {
     if (selected?.kind === "control") {
       // Hooks' messages sent after a clear or reset was queued still wait behind it; it drops them.
       if (selected.control === "clear" || selected.control === "reset") queue.dropHookDeliveries();
+      // A reset ends the session, so the messages still waiting are recorded as dropped first.
+      if (selected.control === "reset") await settleDroppedHookSends(cursor, { reset: true });
       return selected.origin === undefined
         ? { kind: selected.control }
         : { kind: selected.control, origin: selected.origin };
@@ -124,4 +132,13 @@ export async function nextTurnDelivery(input: {
         source: "cancel",
       });
   }
+}
+
+/** Records the hooks' messages the session dropped, each settled `ignored` with its reason. */
+export async function settleDroppedHookSends(
+  cursor: SessionStateCursor,
+  options?: { readonly reset?: boolean },
+): Promise<void> {
+  if (droppedHookSends(cursor.serializedContext, options).length === 0) return;
+  await cursor.advance((state) => settleDroppedHookSendsStep({ ...state, ...options }));
 }

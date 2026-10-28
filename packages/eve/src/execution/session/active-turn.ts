@@ -28,6 +28,7 @@ import {
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { pendingHookSends } from "#reactions/hook-send.js";
+import { settleDroppedHookSends } from "#execution/session/next-input.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -144,6 +145,7 @@ export class ActiveTurn {
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload, settled);
     this.admitHookSends();
+    await settleDroppedHookSends(this.input.cursor);
   }
 
   /**

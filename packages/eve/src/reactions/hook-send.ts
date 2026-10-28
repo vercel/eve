@@ -5,9 +5,14 @@ import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.j
 
 export const REACTIONS_STATE_KEY = "eve.reactions";
 
+/** Why a hook's message was dropped, as its `delivery.settled` `reason` records it. */
+export type HookSendDropReason = "cancelled" | "cleared" | "reset" | "preempted";
+
 /** A message a hook sent with `ctx.send()` that the session hasn't admitted yet. */
 export interface PendingSend {
   readonly delivery: DeliverHookPayload;
+  /** Set once it was dropped, until the session records that on the stream. */
+  readonly dropped?: HookSendDropReason;
   /**
    * Set for a yielding message: the turn it waits on, the session's latest when the hook sent it,
    * or none before the first turn. Once another turn starts, the message is dropped. `opening`
@@ -30,9 +35,23 @@ function storedSends(serializedContext: Readonly<Record<string, unknown>>): read
 export function pendingHookSends(
   serializedContext: Readonly<Record<string, unknown>>,
 ): readonly DeliverHookPayload[] {
-  return storedSends(serializedContext).flatMap(({ delivery, preemptible }) =>
-    preemptible === undefined ? [delivery] : [],
+  return storedSends(serializedContext).flatMap(({ delivery, dropped, preemptible }) =>
+    preemptible === undefined && dropped === undefined ? [delivery] : [],
   );
+}
+
+/**
+ * The hooks' messages to record as dropped, each with its reason. With `reset`, every message
+ * still waiting is dropped too, since the reset ends the session before it could run.
+ */
+export function droppedHookSends(
+  serializedContext: Readonly<Record<string, unknown>>,
+  options?: { readonly reset?: boolean },
+): readonly { readonly delivery: DeliverHookPayload; readonly reason: HookSendDropReason }[] {
+  return storedSends(serializedContext).flatMap(({ delivery, dropped }) => {
+    const reason = dropped ?? (options?.reset === true ? "reset" : undefined);
+    return reason === undefined ? [] : [{ delivery, reason }];
+  });
 }
 
 /**
@@ -45,8 +64,10 @@ export function pendingPreemptibleSends(
   serializedContext: Readonly<Record<string, unknown>>,
   latestTurnId: string | undefined,
 ): readonly DeliverHookPayload[] {
-  const waiting = storedSends(serializedContext).flatMap(({ delivery, preemptible }) =>
-    preemptible !== undefined && preemptible.turnId === latestTurnId ? [delivery] : [],
+  const waiting = storedSends(serializedContext).flatMap(({ delivery, dropped, preemptible }) =>
+    dropped === undefined && preemptible !== undefined && preemptible.turnId === latestTurnId
+      ? [delivery]
+      : [],
   );
   const [first] = waiting;
   if (first === undefined) return [];
