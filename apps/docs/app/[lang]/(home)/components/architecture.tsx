@@ -275,7 +275,7 @@ export function ArchitectureDiagram() {
           </div>
 
           {/* Channel */}
-          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[240px] lg:shrink-0">
+          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[360px] lg:shrink-0">
             <GradientBorder />
             <div className="flex flex-col gap-1">
               <SectionLabel>Channel</SectionLabel>
@@ -289,7 +289,7 @@ export function ArchitectureDiagram() {
               <IconMessage className="mt-0.5 shrink-0 text-gray-1000" size={18} />
               <div className="flex flex-1 flex-col gap-2">
                 <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 lg:grid-cols-1">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
                   {CHANNELS.map((channel) => (
                     <span key={channel} className="text-gray-1000 text-copy-14">
                       {channel}
