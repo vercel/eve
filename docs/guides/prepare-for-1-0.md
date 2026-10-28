@@ -25,7 +25,7 @@ Ending permanently retires the session and leaves the handle on the retired ID. 
 import { Client } from "eve/client";
 
 const client = new Client({ baseUrl: "https://agent.example" });
-const session = await client.sessions.create();
+const { session } = await client.sessions.create();
 await session.send("Start a new conversation.");
 ```
 
@@ -116,7 +116,7 @@ Import durable primitives from `eve/workflow`, and run/hook operations from `eve
 +import { start, getRun, resumeHook, getHookByToken } from "eve/workflow/api";
 ```
 
-Bare `workflow` and `workflow/*` imports in authored modules now fail the build. Call `eve/workflow/api` operations from routes or `"use step"` helpers, not replayed workflow bodies. Both entries use eve's bundled SDK; do not install another SDK to make these imports resolve.
+Bare `workflow` and `workflow/*` imports in authored modules now fail the build. Only the exports listed above are public; other SDK subpaths and helpers are not supported by these entries. Call `eve/workflow/api` operations from routes or `"use step"` helpers, not replayed workflow bodies. Both entries use eve's bundled SDK; do not install another SDK to make these imports resolve.
 
 You can remove `eve/workflow-modules` from tsconfig `types` and reference directives. Existing references remain resolvable through 1.x, but the entry no longer declares bare modules. See [Workflow imports](../tools/workflows#workflow-imports).
 
