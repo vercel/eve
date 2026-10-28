@@ -23,16 +23,7 @@ import {
 import type { JSX, ReactNode } from "react";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import {
-  FeatureCard,
-  GrayBadge,
-  Label,
-  RuledList,
-  ruledRow,
-  Visual,
-  pct,
-  view,
-} from "./control-visual";
+import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "./control-visual";
 import { HomeSection } from "./section";
 
 // The visibility radar from vercel.com's enterprise page: a guard at the center, dashed rings,
@@ -41,13 +32,9 @@ import { HomeSection } from "./section";
 // chip at the bottom of the outer ring stays inside the frame.
 const radar = { x: 160, y: 90, guard: 32 };
 
-function ringPointAt(cx: number, cy: number, r: number, degrees: number) {
-  const radians = (degrees * Math.PI) / 180;
-  return { x: cx + r * Math.cos(radians), y: cy + r * Math.sin(radians) };
-}
-
 function ringPoint(r: number, degrees: number) {
-  return ringPointAt(radar.x, radar.y, r, degrees);
+  const radians = (degrees * Math.PI) / 180;
+  return { x: radar.x + r * Math.cos(radians), y: radar.y + r * Math.sin(radians) };
 }
 
 const radarRings = [
@@ -197,21 +184,26 @@ function TenantCapabilities() {
   );
 }
 
-// One run along a line that fades out at both ends: deterministic steps are your TypeScript,
-// square and in sequence, and the agentic step at the center sends the line around a loop.
-const run = { y: 96, x0: 28, x1: 292 };
-const deterministicSteps = [60, 106, 214, 260];
-const loop = { x: 160, r: 26, from: -150, to: -30 };
+// Three runs, each along a line that fades out at both ends: fully agentic, fully
+// deterministic, and both in one run. Deterministic steps are your TypeScript in square chips;
+// agentic steps are round, each in a ring for its loop.
+type Step = "agent" | "code";
+const RUNS: Step[][] = [
+  ["agent", "agent", "agent", "agent"],
+  ["code", "code", "code", "code"],
+  ["code", "agent", "code", "code"],
+];
+const runY = (i: number) => 42 + i * 48;
+const stepX = (i: number) => 70 + i * 60;
+const run = { x0: 28, x1: 292, ring: 15 };
 
 const chip =
   "absolute flex -translate-1/2 items-center justify-center bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)";
 
-function DeterminismRun() {
-  const from = ringPointAt(loop.x, run.y, loop.r, loop.from);
-  const to = ringPointAt(loop.x, run.y, loop.r, loop.to);
+function DeterminismRuns() {
   return (
     <Visual
-      caption="A workflow run: steps of your TypeScript code in sequence, with one agentic step in the middle that loops until it's done."
+      caption="Three runs: a fully agentic loop of model steps, a deterministic workflow of TypeScript steps, and a workflow with one agentic step among its TypeScript steps."
       scene={
         <>
           <defs>
@@ -220,58 +212,51 @@ function DeterminismRun() {
               id="determinism-run"
               x1={run.x0}
               x2={run.x1}
-              y1={run.y}
-              y2={run.y}
+              y1="0"
+              y2="0"
             >
               <stop stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
               <stop offset="0.14" stopColor="var(--ds-gray-alpha-500)" />
               <stop offset="0.86" stopColor="var(--ds-gray-alpha-500)" />
               <stop offset="1" stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
             </linearGradient>
-            <linearGradient
-              gradientUnits="userSpaceOnUse"
-              id="determinism-loop"
-              x1={from.x}
-              x2={to.x}
-              y1={from.y}
-              y2={to.y}
-            >
-              <stop stopColor="var(--ds-gray-1000)" stopOpacity="0" />
-              <stop offset="0.5" stopColor="var(--ds-gray-1000)" />
-              <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
-            </linearGradient>
           </defs>
-          <path
-            d={`M${run.x0} ${run.y}H${loop.x - loop.r}M${loop.x + loop.r} ${run.y}H${run.x1}`}
-            stroke="url(#determinism-run)"
-          />
-          <circle cx={loop.x} cy={run.y} r={loop.r} stroke="var(--ds-gray-alpha-500)" />
-          <path
-            d={`M${from.x} ${from.y}A${loop.r} ${loop.r} 0 0 1 ${to.x} ${to.y}`}
-            stroke="url(#determinism-loop)"
-            strokeLinecap="round"
-          />
+          {RUNS.map((steps, i) => (
+            <g key={i}>
+              <path d={`M${run.x0} ${runY(i)}H${run.x1}`} stroke="url(#determinism-run)" />
+              {steps.map((step, j) =>
+                step === "agent" ? (
+                  <circle
+                    cx={stepX(j)}
+                    cy={runY(i)}
+                    fill="var(--ds-background-200)"
+                    key={j}
+                    r={run.ring}
+                    stroke="var(--ds-gray-alpha-500)"
+                  />
+                ) : null,
+              )}
+            </g>
+          ))}
         </>
       }
     >
-      {deterministicSteps.map((x) => (
-        <span
-          className={cn(chip, "size-[6.5cqw] rounded-[1.2cqw] [&>svg]:size-[55%]")}
-          key={x}
-          style={{ left: pct(x, view.width), top: pct(run.y, view.height) }}
-        >
-          <IconAcronymTs />
-        </span>
-      ))}
-      <span
-        className={cn(chip, "size-[8cqw] rounded-full [&>svg]:size-[50%]")}
-        style={{ left: pct(loop.x, view.width), top: pct(run.y, view.height) }}
-      >
-        <IconSparkles />
-      </span>
-      <Label x={loop.x} y={run.y - loop.r - 14}>
-        Agent
-      </Label>
+      {RUNS.flatMap((steps, i) =>
+        steps.map((step, j) => (
+          <span
+            className={cn(
+              chip,
+              step === "agent"
+                ? "size-[6.5cqw] rounded-full [&>svg]:size-[50%]"
+                : "size-[6.5cqw] rounded-[1.2cqw] [&>svg]:size-[55%]",
+            )}
+            key={`${i}-${j}`}
+            style={{ left: pct(stepX(j), view.width), top: pct(runY(i), view.height) }}
+          >
+            {step === "agent" ? <IconSparkles /> : <IconAcronymTs />}
+          </span>
+        )),
+      )}
     </Visual>
   );
 }
@@ -302,7 +287,7 @@ const PRIMARY: {
     text: "Fully agentic loops, deterministic workflows, or both in one run. You choose per task.",
     href: "/docs/tools/workflows",
     icon: <IconRoute aria-hidden size={16} />,
-    visual: <DeterminismRun />,
+    visual: <DeterminismRuns />,
   },
 ];
 
