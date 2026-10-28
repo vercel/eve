@@ -105,6 +105,40 @@ export function SlackMessage({
   );
 }
 
+// The bubbles' corner radius, and the tail's scale: drawn at 24px, it renders at 15px. Its
+// curve stays tangent to the bubble's side and bottom at any scale, so it meets the bubble's
+// edges even though its corner is a little rounder.
+export const bubbleRadius = 10;
+const tailScale = 0.625;
+
+/**
+ * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), filled with
+ * the text color `className` sets to match the bubble. It overlaps the bubble's bottom corner: a
+ * window-colored square hides the corner, then the bubble's curve flows into the tail.
+ */
+export function Tail({ className, flipped }: { className: string; flipped?: boolean }) {
+  return (
+    <svg
+      aria-hidden
+      className={cn("absolute", flipped && "-scale-x-100", className)}
+      fill="none"
+      height={24 * tailScale}
+      overflow="hidden"
+      style={{ bottom: -3 * tailScale, [flipped ? "right" : "left"]: -7 * tailScale }}
+      viewBox="0 0 24 24"
+      width={24 * tailScale}
+    >
+      <path d="M0 0H24V24H0z" fill="var(--ds-background-100)" />
+      <path
+        clipRule="evenodd"
+        d="M27-19C15.954-19 7-10.046 7 1c0 .335.008.669.025 1H7v10a15 15 0 01-3 9c4.116 0 7.845-1.658 10.555-4.342A19.915 19.915 0 0027 21c11.046 0 20-8.954 20-20s-8.954-20-20-20z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 export function TypingIndicator({ author }: { author: Author | undefined }) {
   return (
     <p aria-hidden className="flex h-5 items-center gap-1.5 px-1 text-copy-13 text-gray-900">

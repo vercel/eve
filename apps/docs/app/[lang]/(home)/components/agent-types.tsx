@@ -25,7 +25,9 @@ import {
   Mention,
   Reaction,
   SlackMessage,
+  Tail,
   TypingIndicator,
+  bubbleRadius,
 } from "./chat";
 import { AppWindow, HomeSection, PrefetchLink } from "./section";
 
@@ -493,16 +495,24 @@ function WebAppClient() {
               </span>
             ))}
           </span>
-          {/* Fades out downward, and to the right before the chat's 15rem plus a 1rem gap. */}
-          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_22rem),transparent_calc(100%_-_16rem))] @[20rem]:block" />
+          {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. */}
+          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[20rem]:block" />
         </div>
-        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-3 rounded-lg p-1.5 material-menu sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
+        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
-          {/* The popover's 8px corners less its 6px padding, so the bubbles nest concentrically. */}
-          <p className="ml-auto rounded-[2px] bg-gray-1000 px-3 py-1.5 text-copy-13 text-background-100">
+          {/* The hero's WhatsApp bubble shape, in this chat's colors. */}
+          <p
+            className="relative ml-auto bg-gray-1000 px-3 py-2 text-copy-13 text-background-100"
+            style={{ borderRadius: bubbleRadius }}
+          >
+            <Tail className="text-gray-1000" flipped />
             Where's my order #4821?
           </p>
-          <p className="rounded-[2px] bg-gray-alpha-200 px-3 py-1.5 text-copy-13 text-gray-1000">
+          <p
+            className="relative bg-gray-alpha-200 px-3 py-2 text-copy-13 text-gray-1000"
+            style={{ borderRadius: bubbleRadius }}
+          >
+            <Tail className="text-gray-alpha-200" />
             It shipped yesterday and arrives Thursday.
           </p>
         </div>
@@ -546,9 +556,16 @@ function VoiceClient() {
   );
 }
 
-// iMessage's own colors, so the thread reads as iMessage rather than a generic chat.
-const sentBubbleClassName = "ml-auto bg-[#007AFF] text-white dark:bg-[#0A84FF]";
-const receivedBubbleClassName = "bg-[#E9E9EB] text-black dark:bg-[#26252A] dark:text-white";
+// iMessage's own colors, so the thread reads as iMessage rather than a generic chat. Each tail
+// takes its bubble's fill as its text color.
+const sentBubble = {
+  bubble: "ml-auto bg-[#007AFF] text-white dark:bg-[#0A84FF]",
+  tail: "text-[#007AFF] dark:text-[#0A84FF]",
+};
+const receivedBubble = {
+  bubble: "bg-[#E9E9EB] text-black dark:bg-[#26252A] dark:text-white",
+  tail: "text-[#E9E9EB] dark:text-[#26252A]",
+};
 
 const IMESSAGE_THREAD: { sent: boolean; text: string }[] = [
   { sent: true, text: "Dinner with Sam on Friday?" },
@@ -568,17 +585,20 @@ function IMessageClient() {
         <span className="text-label-12 text-gray-1000">Planner</span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-3 text-copy-13">
-        {IMESSAGE_THREAD.map((message) => (
-          <p
-            className={`max-w-[85%] text-pretty rounded-[18px] px-3 py-1.5 ${
-              message.sent ? sentBubbleClassName : receivedBubbleClassName
-            }`}
-            key={message.text}
-          >
-            <span className="sr-only">{message.sent ? "You: " : "Agent: "}</span>
-            {message.text}
-          </p>
-        ))}
+        {IMESSAGE_THREAD.map((message) => {
+          const colors = message.sent ? sentBubble : receivedBubble;
+          return (
+            <p
+              className={`relative max-w-[85%] text-pretty px-3 py-1.5 ${colors.bubble}`}
+              key={message.text}
+              style={{ borderRadius: bubbleRadius }}
+            >
+              <Tail className={colors.tail} flipped={message.sent} />
+              <span className="sr-only">{message.sent ? "You: " : "Agent: "}</span>
+              {message.text}
+            </p>
+          );
+        })}
       </div>
       <div className="flex shrink-0 items-center gap-2 p-2.5 pt-0">
         <span

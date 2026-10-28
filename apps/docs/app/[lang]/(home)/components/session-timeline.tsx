@@ -27,7 +27,9 @@ import {
   Mention,
   Reaction,
   SlackMessage,
+  Tail,
   TypingIndicator,
+  bubbleRadius,
 } from "./chat";
 import { monochromeLogo } from "./control-visual";
 import { AppWindow } from "./section";
@@ -480,40 +482,6 @@ function TeamsMessage({
 // WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
-// The bubbles' corner radius, and the tail's scale: drawn at 24px, it renders at 15px. Its
-// curve stays tangent to the bubble's side and bottom at any scale, so it meets the bubble's
-// edges even though its corner is a little rounder.
-const bubbleRadius = 10;
-const tailScale = 0.625;
-
-/**
- * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), with the
- * bubble fill as a prop. It overlaps the bubble's bottom corner: a window-colored square hides
- * the corner, then the bubble's curve flows into the tail.
- */
-function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
-  return (
-    <svg
-      aria-hidden
-      className={cn("absolute", flipped && "-scale-x-100")}
-      fill="none"
-      height={24 * tailScale}
-      overflow="hidden"
-      style={{ bottom: -3 * tailScale, [flipped ? "right" : "left"]: -7 * tailScale }}
-      viewBox="0 0 24 24"
-      width={24 * tailScale}
-    >
-      <path d="M0 0H24V24H0z" fill="var(--ds-background-100)" />
-      <path
-        clipRule="evenodd"
-        d="M27-19C15.954-19 7-10.046 7 1c0 .335.008.669.025 1H7v10a15 15 0 01-3 9c4.116 0 7.845-1.658 10.555-4.342A19.915 19.915 0 0027 21c11.046 0 20-8.954 20-20s-8.954-20-20-20z"
-        fill={fill}
-        fillRule="evenodd"
-      />
-    </svg>
-  );
-}
-
 function ReadTicks() {
   return (
     <svg aria-label="Read" className="h-2.5 w-4" fill="none" role="img" viewBox="0 0 16 10">
@@ -604,7 +572,7 @@ function Bubble({
         style={{ borderRadius: bubbleRadius }}
       >
         {tail ? (
-          <Tail fill={outgoing ? "var(--ds-green-300)" : "var(--ds-gray-100)"} flipped={outgoing} />
+          <Tail className={outgoing ? "text-green-300" : "text-gray-100"} flipped={outgoing} />
         ) : null}
         {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
             shares the last line when it fits and takes its own line when it doesn't. */}
