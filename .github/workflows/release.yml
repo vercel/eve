@@ -188,6 +188,7 @@ jobs:
       # converges, so a failed move heals on the next push.
       - name: Point latest sandbox image tags at the released eve image
         if: github.ref == 'refs/heads/main'
+        timeout-minutes: 20
         env:
           PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.published-packages }}
         run: |
@@ -195,7 +196,7 @@ jobs:
 
           version="$(jq -r '.[]? | select(.name == "eve") | .version' <<<"${PUBLISHED_PACKAGES:-[]}")"
           if [[ -z "$version" ]]; then
-            version="$(npm view eve version)"
+            version="$(npm view --prefer-online eve version)"
           fi
           # npm has taken over 10 minutes to serve a version that publish just
           # reported, and the publish step can leave a stale packument in the
@@ -233,6 +234,11 @@ jobs:
               echo "${image}:latest already serves ${tag}."
             else
               docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${tag}"
+              moved="$(docker buildx imagetools inspect --raw "${image}:latest" | sha256sum)"
+              if [[ "$moved" != "$wanted" ]]; then
+                echo "::error::${image}:latest does not match ${image}:${tag} byte for byte after retagging." >&2
+                exit 1
+              fi
               echo "Moved ${image}:latest to ${tag} (eve@${version})."
             fi
           done
