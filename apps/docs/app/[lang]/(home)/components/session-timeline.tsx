@@ -537,64 +537,73 @@ function IconPlayCircle() {
   );
 }
 
+// geistcn-assets' stop-circle icon, red as on vercel.com/sandbox's "Stop demo" button.
+function IconStopCircle() {
+  return (
+    <svg
+      aria-hidden
+      className="text-red-700"
+      fill="none"
+      height={16}
+      viewBox="0 0 16 16"
+      width={16}
+    >
+      <path
+        clipRule="evenodd"
+        d="M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-5.5-2.5h-5v5h5z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 /**
- * A replayed agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
- * platform's way. It plays once in view; reduced motion shows the whole conversation at once.
+ * An agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
+ * platform's way. It shows in full; "Play demo" replays it message by message and "Stop demo"
+ * returns to the full conversation, as on vercel.com/sandbox.
  */
 export function SessionTimeline(): JSX.Element {
-  const rootRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const [platform, setPlatform] = useState<Platform>("slack");
-  const [shown, setShown] = useState(1);
-  const [inView, setInView] = useState(false);
-  // Reduced motion shows the whole transcript at once, so there is nothing to replay.
-  const [animated, setAnimated] = useState(true);
+  // While playing, how many beats are in; otherwise the whole conversation shows.
+  const [playing, setPlaying] = useState(false);
+  const [count, setCount] = useState(0);
 
   const conversation = CONVERSATIONS.find((c) => c.id === platform) ?? CONVERSATIONS[0];
   const beats = conversation.beats;
+  const shown = playing ? count : beats.length;
+  const next = playing ? beats[count] : undefined;
 
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setShown(Number.POSITIVE_INFINITY);
-      setAnimated(false);
+    if (!playing) return;
+    if (!next) {
+      setPlaying(false);
       return;
     }
-    const root = rootRef.current;
-    if (!root) return;
-    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
-      threshold: 0.3,
-    });
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, []);
-
-  const next = beats[shown];
-  const done = shown >= beats.length;
-
-  useEffect(() => {
-    if (!inView || !next) return;
-    const timer = setTimeout(() => setShown((count) => count + 1), next.delay);
+    const timer = setTimeout(() => setCount((n) => n + 1), next.delay);
     return () => clearTimeout(timer);
-  }, [inView, next]);
+  }, [playing, next]);
 
   useEffect(() => {
-    listRef.current?.scrollTo({
-      top: listRef.current.scrollHeight,
-      behavior: animated ? "smooth" : "auto",
-    });
-  }, [shown, platform, animated]);
+    const list = listRef.current;
+    if (!list) return;
+    // Jump to the end when the whole conversation appears; follow along smoothly while playing.
+    list.scrollTo({ top: list.scrollHeight, behavior: playing ? "smooth" : "auto" });
+  }, [shown, platform, playing]);
+
+  const play = () => {
+    setCount(0);
+    setPlaying(true);
+  };
 
   const pick = (id: string) => {
     setPlatform(id as Platform);
-    if (animated) setShown(1);
+    setPlaying(false);
   };
 
   return (
-    <figure
-      aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
-      className="m-0"
-      ref={rootRef}
-    >
+    <figure aria-label="Example eve sessions in Slack, Teams, and WhatsApp" className="m-0">
       {/* No frame: the conversation sits on the page, fills from the bottom like a chat, and
           fades out toward the top as older messages scroll up. */}
       <ol
@@ -672,17 +681,15 @@ export function SessionTimeline(): JSX.Element {
           </DropdownMenuContent>
         </DropdownMenu>
         <TypingIndicator author={next?.kind === "message" ? AUTHORS[next.author] : undefined} />
-        {done && animated ? (
-          <Button
-            className="ml-auto motion-safe:animate-in motion-safe:fade-in"
-            onClick={() => setShown(0)}
-            prefix={<IconPlayCircle />}
-            size="small"
-            variant="tertiary"
-          >
-            Play demo
-          </Button>
-        ) : null}
+        <Button
+          className="ml-auto"
+          onClick={playing ? () => setPlaying(false) : play}
+          prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
+          size="small"
+          variant="tertiary"
+        >
+          {playing ? "Stop demo" : "Play demo"}
+        </Button>
       </figcaption>
     </figure>
   );
