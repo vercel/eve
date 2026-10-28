@@ -125,56 +125,20 @@ function HarnessTools() {
   );
 }
 
-// The template thumbnail's window from vercel.com/docs, three times, each covering the one
-// behind it but for a sliver. Sizes are front's px values in `em` (1em = 16px at a 350px
-// frame), so the windows scale with the frame. Every window shares the thumbnail's bar and
-// fading block; only their arrangement changes.
-const bar = "h-[1.3125em] shrink-0 rounded-[3px] bg-gray-200";
-const block = "mt-px h-[3.625em] rounded-[3px] bg-linear-to-b from-gray-200 to-background-100";
-
-function PageSkeleton() {
-  return (
-    <>
-      <div className={cn(bar, "w-3/4")} />
-      <div className={block} />
-    </>
-  );
-}
-
-// A narrow sidebar, so the split shows in the sliver a back window leaves visible.
-function DashboardSkeleton() {
-  return (
-    <>
-      <div className={cn(bar, "w-3/4")} />
-      <div className="grid grid-cols-[1.75em_1fr] gap-[0.375em]">
-        <div className={block} />
-        <div className={block} />
-      </div>
-    </>
-  );
-}
-
-function ChatSkeleton() {
-  return (
-    <>
-      <div className={cn(bar, "w-1/2 self-end rounded-full")} />
-      <div className={block} />
-    </>
-  );
-}
-
-// Back to front, so Next.js is the window fully in view.
+// The template thumbnail's window from vercel.com/docs, three times, back to front, each
+// covering the one behind it but for a sliver. Sizes are front's px values in `em` (1em =
+// 16px at a 350px frame), so the windows scale with the frame.
 const APPS = [
-  { name: "SvelteKit", Logo: SiSvelte, left: "8%", Skeleton: PageSkeleton },
-  { name: "Nuxt", Logo: SiNuxt, left: "24%", Skeleton: DashboardSkeleton },
-  { name: "Next.js", Logo: SiNextdotjs, left: "40%", Skeleton: ChatSkeleton },
+  { name: "SvelteKit", Logo: SiSvelte, left: "8%" },
+  { name: "Nuxt", Logo: SiNuxt, left: "24%" },
+  { name: "Next.js", Logo: SiNextdotjs, left: "40%" },
 ];
 
 function AgentUi() {
   return (
-    <Visual caption="Three agent apps in overlapping windows: a chat built with Next.js in front, a dashboard built with Nuxt, and a page built with SvelteKit.">
+    <Visual caption="Three agent apps in overlapping windows, built with Next.js in front, Nuxt, and SvelteKit.">
       <div aria-hidden className="absolute inset-0 select-none text-[4.57cqw]">
-        {APPS.map(({ Logo, Skeleton, left, name }) => (
+        {APPS.map(({ Logo, left, name }) => (
           <div
             className="absolute top-[17%] flex min-h-full w-[52%] flex-col gap-[0.625em] rounded-t-[0.625em] border border-gray-300 bg-background-100 px-[0.75em] pt-[0.25em]"
             key={name}
@@ -194,7 +158,8 @@ function AgentUi() {
                 <Logo className="size-[0.9em] shrink-0 overflow-visible fill-background-100 stroke-current [paint-order:stroke_fill] [stroke-width:1px] [vector-effect:non-scaling-stroke] [&_path]:[vector-effect:non-scaling-stroke]" />
                 {name}
               </div>
-              <Skeleton />
+              <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
+              <div className="mt-px h-[3.625em] shrink-0 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100" />
             </div>
           </div>
         ))}
