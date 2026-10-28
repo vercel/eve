@@ -36,7 +36,7 @@ export const homeMetadata: Metadata = {
 };
 
 export const HomeContent = () => (
-  <div className="mx-auto w-full max-w-[1152px] px-4 sm:px-6">
+  <div className="mx-auto w-full max-w-[1448px] px-6">
     <JsonLd data={webSiteStructuredData(tagline)} />
     <Hero tagline={tagline} />
     <AgentTypes />
