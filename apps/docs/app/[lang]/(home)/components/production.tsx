@@ -1,11 +1,9 @@
 import { SiImessage } from "@icons-pack/react-simple-icons";
 import {
-  IconAgents,
   IconCheck,
   IconChevronRightSmall,
   IconClock,
   IconLinked,
-  IconSandbox,
   IconShieldCheck,
   IconThumbUp,
   IconUser,
@@ -283,12 +281,6 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     href: "/docs/concepts/execution-model-and-durability",
   },
   {
-    title: "Sandboxes",
-    icon: <IconSandbox size={16} />,
-    text: "An isolated environment per session for running code.",
-    href: "/docs/sandbox",
-  },
-  {
     title: "Human in the loop",
     icon: <IconThumbUp size={16} />,
     text: "Pause for approval. Resume durably when it arrives.",
@@ -299,12 +291,6 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     icon: <IconCheck size={16} />,
     text: "Test agent behavior before and after every change.",
     href: "/docs/evals/overview",
-  },
-  {
-    title: "Subagents",
-    icon: <IconAgents size={16} />,
-    text: "Delegate to focused agents with their own tools and context.",
-    href: "/docs/subagents",
   },
   {
     title: "Connections",
@@ -351,26 +337,23 @@ export function Production(): JSX.Element {
         ))}
       </div>
 
-      {/* Hairlines come from the 1px gaps showing the list's background, so only the seams
-          between items are drawn and the outer edges stay open. Cells match the page background. */}
-      <ul className="mt-16 grid list-none gap-px bg-gray-alpha-400 p-0 sm:-mx-6 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="m-0 mt-24 grid list-none gap-x-6 gap-y-12 p-0 md:grid-cols-12 lg:gap-y-24">
         {SECONDARY.map((feature) => (
-          <li className="flex flex-col gap-1.5 bg-background-200 py-8 sm:px-6" key={feature.title}>
-            <span aria-hidden className="mb-2 flex text-gray-900">
-              {feature.icon}
-            </span>
-            <Link
-              className="group inline-flex w-fit items-center text-heading-16 text-gray-1000"
-              href={feature.href}
-              prefetch={true}
-            >
-              {feature.title}
-              <IconChevronRightSmall
-                className="text-gray-700 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-1000"
-                size={16}
-              />
+          <li className="min-w-0 md:col-span-6 lg:col-span-4" key={feature.title}>
+            <Link className="group flex flex-col gap-3" href={feature.href} prefetch={true}>
+              <h3 className="flex items-center gap-3 font-[450] text-copy-16 text-gray-1000 [&>svg:first-child]:shrink-0">
+                {feature.icon}
+                {feature.title}
+                <IconChevronRightSmall
+                  aria-hidden
+                  className="-ml-1 -translate-x-px transition-transform group-hover:translate-x-0"
+                  size={14}
+                />
+              </h3>
+              <p className="max-w-[34ch] text-pretty text-copy-16 text-gray-900 transition-colors group-hover:text-gray-1000 lg:text-copy-18">
+                {feature.text}
+              </p>
             </Link>
-            <p className="text-copy-14 text-gray-900">{feature.text}</p>
           </li>
         ))}
       </ul>
