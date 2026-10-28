@@ -72,6 +72,6 @@ const fullSha =
     : undefined;
 const ref = gitRevision && selected === 0 ? (fullSha ?? gitRevision) : `refs/tags/${tag}`;
 const fullHistory = `https://raw.githubusercontent.com/vercel/eve/${ref}/${directory}/CHANGELOG.md`;
-const content = `${releaseHeading}\n\n${preview}${entry}\n\nFor upgrades across versions, review the [full changelog through this version](${fullHistory}).\n`;
+const content = `${releaseHeading}\n\n${preview}${entry}\n\nFor an upgrade across multiple releases, review each version between the installed and target versions in the [target version's changelog](${fullHistory}).\n`;
 await mkdir(join(packageRoot, "dist"), { recursive: true });
 await writeFile(join(packageRoot, "dist", "CHANGELOG.md"), content);
