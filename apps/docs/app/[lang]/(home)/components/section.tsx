@@ -24,15 +24,18 @@ export function HomeSection({
 }): JSX.Element {
   return (
     <section aria-labelledby={`${id}-title`} className={cn("py-16 sm:py-24", className)} id={id}>
-      <div className="flex max-w-[44rem] flex-col gap-4">
-        <h2
-          className="text-balance text-heading-32 text-gray-1000 sm:text-heading-40"
-          id={`${id}-title`}
-        >
-          {title}
-        </h2>
-        {lede ? <p className="text-pretty text-copy-18 text-gray-900">{lede}</p> : null}
-        {action}
+      {/* An action sits beside the heading on wider screens, and below it when stacked. */}
+      <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+        <div className="flex max-w-[44rem] flex-col gap-4">
+          <h2
+            className="text-balance text-heading-32 text-gray-1000 sm:text-heading-40"
+            id={`${id}-title`}
+          >
+            {title}
+          </h2>
+          {lede ? <p className="text-pretty text-copy-18 text-gray-900">{lede}</p> : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="mt-12 sm:mt-16">{children}</div>
     </section>

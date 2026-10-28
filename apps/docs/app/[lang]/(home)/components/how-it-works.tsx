@@ -1,24 +1,21 @@
-import { IconChevronRightSmall, IconFolderOpen } from "@vercel/geistdocs/assets/icons";
-import Link from "next/link";
+import { IconFolderOpen } from "@vercel/geistdocs/assets/icons";
+import { Button } from "@vercel/geistdocs/components/button";
 import type { JSX } from "react";
 import { FileTree } from "./file-tree";
-import { HomeSection } from "./section";
+import { HomeSection, PrefetchLink } from "./section";
 
 export function HowItWorks(): JSX.Element {
   return (
     <HomeSection
       action={
-        <Link
-          className="group inline-flex w-fit items-center text-copy-14 text-gray-1000"
+        <Button
+          className="w-fit rounded-full text-base"
+          Component={PrefetchLink}
           href="/templates/eve-coding-agent-template"
-          prefetch={true}
+          size="large"
         >
           Explore the coding agent template
-          <IconChevronRightSmall
-            className="text-gray-900 transition-transform group-hover:translate-x-0.5"
-            size={16}
-          />
-        </Link>
+        </Button>
       }
       id="how-it-works"
       lede="An instructions.md file is all you need to run an agent. Skills, tools, channels, and the rest are optional building blocks you add as it grows."
