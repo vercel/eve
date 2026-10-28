@@ -29,10 +29,7 @@
   "RemoteAgentUrl",
   "SessionFrame",
   "SessionUsageLimit",
-  "WorkspaceAgentDefinition",
-  "WorkspaceAgentTransport",
   "defineAgent",
   "defineDynamic",
-  "defineRemoteAgent",
-  "defineWorkspaceAgent"
+  "defineRemoteAgent"
 ]
