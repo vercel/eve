@@ -28,7 +28,11 @@ type Beat =
       attachment?: ReactNode;
       delay: number;
     }
-  | { kind: "reactions"; reactions: { emoji: string; count: number }[]; delay: number };
+  | {
+      kind: "reactions";
+      reactions: { emoji: keyof typeof TEXT_EMOJI; count: number }[];
+      delay: number;
+    };
 
 function Mention({ children }: { children: string }) {
   return (
@@ -182,22 +186,30 @@ const BEATS: Beat[] = [
   {
     kind: "reactions",
     reactions: [
+      { emoji: "ACK", count: 1 },
       { emoji: "LFG", count: 2 },
-      { emoji: "ITG", count: 1 },
     ],
     delay: 900,
   },
 ];
 
-/** A Slack custom emoji in the style of Vercel's text emoji: a short word on a black tile. */
-function TextEmoji({ children }: { children: string }) {
+// Vercel's custom Slack emoji: a short word in white on a colored tile.
+const TEXT_EMOJI = {
+  ACK: "bg-purple-800",
+  LFG: "bg-pink-700",
+};
+
+function TextEmoji({ name }: { name: keyof typeof TEXT_EMOJI }) {
   return (
     <span
-      aria-label={`:${children.toLowerCase()}:`}
-      className="inline-flex h-4 items-center rounded-[3px] bg-gray-1000 px-1 font-bold text-[9px] text-background-100 leading-none tracking-wide"
+      aria-label={`:${name.toLowerCase()}:`}
+      className={cn(
+        "inline-flex size-[18px] items-center justify-center rounded-[4px] font-bold text-[7px] text-white leading-none tracking-wide",
+        TEXT_EMOJI[name],
+      )}
       role="img"
     >
-      {children}
+      {name}
     </span>
   );
 }
@@ -348,7 +360,7 @@ export function SessionTimeline(): JSX.Element {
                       className="flex items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 py-0.5 pr-2 pl-1 text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
                       key={reaction.emoji}
                     >
-                      <TextEmoji>{reaction.emoji}</TextEmoji>
+                      <TextEmoji name={reaction.emoji} />
                       {reaction.count}
                     </span>
                   ))}
