@@ -283,24 +283,31 @@ export default defineHook({
       attempts.update((n) => n + 1);
       ctx.send(
         `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
-        { auth: ctx.session.auth.current, turnPolicy: "queue", preemptible: true },
+        { auth: ctx.session.auth.current, turnPolicy: "yield" },
       );
     },
   },
 });
 ```
 
-The message is [`MessageContent`](./client/messages). `options` takes `auth`, `context`, and `turnPolicy`, as `session.send()` does, plus `preemptible`:
+The message is [`MessageContent`](./client/messages). `options` takes `auth`, `context`, and `turnPolicy`, as `session.send()` does:
 
 - `auth` is required and names who the message acts for. Pass `ctx.session.auth.current` to act as the session's current identity, a principal to act for them, or `null` for no caller. The message's `delivery.admitted` records that principal, and `source: { channel, hook }` names the hook that sent it.
-- `turnPolicy` defaults to `"steer"`. The message is admitted like a person's message with the same policy, at the running turn's next step boundary: `"steer"` joins the running turn, and `"queue"` waits behind it and then starts its own turn. With no turn running, either starts one. Only the turn's own principal steers it, so a message with another principal's `auth` queues instead.
-- `preemptible: true`, with `"queue"`, makes the message give way. It's admitted only once nothing else waits, and dropped if any other turn starts first, such as a person's message. Use it for loops like the one above, so a person's message always wins and the hook decides again after their turn. Preemptible messages for the same principal share one turn.
+- `turnPolicy` defaults to `"steer"`, and takes one more value than `session.send()`, `"yield"`:
+
+| `turnPolicy`        | While a turn runs                                                   | While no turn runs                              |
+| ------------------- | ------------------------------------------------------------------- | ----------------------------------------------- |
+| `"steer"` (default) | Joins the running turn at its next step, like a person's steering   | Starts a turn                                   |
+| `"queue"`           | Waits behind the running turn, then starts its own, like a person's | Starts a turn                                   |
+| `"yield"`           | Waits behind the running turn, unless anything else comes first     | Starts a turn, unless anything else comes first |
+
+`"steer"` and `"queue"` messages are admitted like a person's messages with the same policy, at the running turn's next step boundary. Only the turn's own principal steers it, so a message with another principal's `auth` queues instead. A `"yield"` message gives way: it's admitted only once nothing else waits, and dropped if any other turn starts first, such as a person's message. Use it for loops like the one above, so a person's message always wins and the hook decides again after their turn. `"yield"` messages for the same principal share one turn.
 
 A person can always stop a hook's messages. A cancel, a clear, or a reset drops every hook message that hasn't run yet, and after a person cancels a turn, `ctx.send()` refuses to start another until a new turn starts. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in, and never answers one: it waits until they act. A hook can `ctx.cancel()` a turn and send a correction from its `turn.settled` handler.
 
 The model is told the message was sent automatically, not by a person, without naming the hook. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. eve doesn't limit how many messages a hook sends, so bound loops yourself, as the example does.
 
-`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ sent: true, deliveryId }`, where `deliveryId` is the id the message's `delivery.admitted` will carry, or `{ sent: false, reason: "cancelled" }` after a turn a person cancelled.
+`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ recorded: true, deliveryId }`, or `{ recorded: false, reason: "cancelled" }` after a turn a person cancelled. `recorded` means eve recorded the message, not that it ran: a person's cancel, clear, or reset can still drop it, and so can another turn starting first, for `"yield"`. To know what happened, watch the session's stream for `deliveryId`: `delivery.admitted` means the session took the message, and `delivery.consumed` means a turn read it, with that turn's `turnId`.
 
 ## Subagent isolation
 

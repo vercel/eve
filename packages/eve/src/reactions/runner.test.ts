@@ -713,8 +713,8 @@ describe("runReactions", () => {
       );
       await commit(ctx, { written: written(1, "turn.settled", settled("turn-1").data) });
       const [result] = results;
-      expect(result).toEqual({ deliveryId: expect.stringMatching(/^hook-/u), sent: true });
-      return { ctx, deliveryId: result!.sent ? result!.deliveryId : "", projection };
+      expect(result).toEqual({ deliveryId: expect.stringMatching(/^hook-/u), recorded: true });
+      return { ctx, deliveryId: result!.recorded ? result!.deliveryId : "", projection };
     }
 
     it("records the message with the principal it acts for and the hook that sent it", async () => {
@@ -764,11 +764,10 @@ describe("runReactions", () => {
       expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
-    it("drops a preemptible message once another turn starts", async () => {
+    it("drops a yielding message once another turn starts", async () => {
       const { ctx, projection } = await sent({
         auth: ALICE,
-        preemptible: true,
-        turnPolicy: "queue",
+        turnPolicy: "yield",
       });
       expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({ turnId: "turn-1" });
       foldLine(
@@ -788,31 +787,26 @@ describe("runReactions", () => {
       await commit(ctx, {
         written: written(1, "turn.settled", settled("turn-1", "cancelled").data),
       });
-      expect(results).toEqual([{ reason: "cancelled", sent: false }]);
+      expect(results).toEqual([{ reason: "cancelled", recorded: false }]);
       expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
-    it("requires auth, and a queued turn policy to preempt", async () => {
+    it("requires auth", async () => {
       const errors: string[] = [];
       const ctx = session(noTools, [
         hook("reviewer", {
           "turn.settled": (_event, ctx) => {
-            for (const options of [{}, { auth: ALICE, preemptible: true }]) {
-              try {
-                ctx.send("Summarize it.", options as never);
-              } catch (error) {
-                errors.push((error as Error).message);
-              }
+            try {
+              ctx.send("Summarize it.", {} as never);
+            } catch (error) {
+              errors.push((error as Error).message);
             }
           },
         }),
       ]);
       ctx.set(ChannelKey, { kind: "http" } as never);
       await commit(ctx, { written: written(1, "turn.settled", settled("turn-1").data) });
-      expect(errors).toEqual([
-        expect.stringContaining("without auth"),
-        expect.stringContaining("Only a queued message can be preempted"),
-      ]);
+      expect(errors).toEqual([expect.stringContaining("without auth")]);
     });
   });
 });

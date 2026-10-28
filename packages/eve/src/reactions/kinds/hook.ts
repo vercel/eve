@@ -110,17 +110,12 @@ async function runHandler(call: {
         `Hook "${label}" called ctx.send() without auth. Pass ctx.session.auth.current to act as the session's current identity, or null for no caller.`,
       );
     }
-    const { preemptible = false, turnPolicy = "steer", ...rest } = options;
-    if (preemptible && turnPolicy !== "queue") {
-      throw new TypeError(
-        `Hook "${label}" called ctx.send() with preemptible and turnPolicy "${turnPolicy}". Only a queued message can be preempted.`,
-      );
-    }
+    const { turnPolicy = "steer", ...rest } = options;
     const projection = currentProjection(ctx);
     const turnId = latestTurnIdOf(projection);
     // A person's cancel stops hooks too: none starts a turn after it until another turn starts.
     if (activeTurnIdOf(projection) === undefined && personCancelled(ctx, turnId)) {
-      return { reason: "cancelled", sent: false };
+      return { reason: "cancelled", recorded: false };
     }
     const key = `${idempotencyKey}:send:${sends++}`;
     const deliveryId = `hook-${digestOf(key)}`;
@@ -131,12 +126,13 @@ async function runHandler(call: {
         idempotencyKey: key,
         message,
         slug: call.slug,
-        turnPolicy,
+        // A yielding message is queued; the session admits it only once nothing else waits.
+        turnPolicy: turnPolicy === "yield" ? "queue" : turnPolicy,
       }),
-      ...(preemptible && { preemptible: { turnId } }),
+      ...(turnPolicy === "yield" && { preemptible: { turnId } }),
       type: "send",
     });
-    return { deliveryId, sent: true };
+    return { deliveryId, recorded: true };
   };
   const hookContext: HookContext = {
     ...base,

@@ -9,6 +9,7 @@
   "HookEventType",
   "HookSendOptions",
   "HookSendResult",
+  "HookTurnPolicy",
   "Memo",
   "Occurrence",
   "SessionFrame",

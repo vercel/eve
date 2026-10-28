@@ -198,7 +198,7 @@ describe("hook ctx.send()", () => {
     });
 
     // One turn: the model's call after the tool result reads the hook's message.
-    expect(results).toEqual([{ deliveryId: expect.stringMatching(/^hook-/u), sent: true }]);
+    expect(results).toEqual([{ deliveryId: expect.stringMatching(/^hook-/u), recorded: true }]);
     expect(inputs).toEqual(["Alice asks for the report.", "Also include the appendix."]);
     expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:completed"]);
     // The source names the hook; the principal is who the message acts for.
@@ -247,7 +247,7 @@ describe("hook ctx.send()", () => {
     expect(prompts[2]).toContain("The summary goes first.");
   }, 90_000);
 
-  it("follows a completed turn with a preemptible message until the hook stops", async () => {
+  it("follows a completed turn with a yielding message until the hook stops", async () => {
     let settled = 0;
     const { inputs } = await runSession({
       drive: async ({ log }) => {
@@ -262,20 +262,19 @@ describe("hook ctx.send()", () => {
               if (settled > 2) return;
               ctx.send(`Keep going (${settled}).`, {
                 auth: ctx.session.auth.current,
-                preemptible: true,
-                turnPolicy: "queue",
+                turnPolicy: "yield",
               });
             },
           },
         }),
       },
-      name: "hook-send-preemptible-continues",
+      name: "hook-send-yield-continues",
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Keep going (1).", "Keep going (2)."]);
   }, 90_000);
 
-  it("drops a preemptible message for a message that was waiting when the turn settled", async () => {
+  it("drops a yielding message for a message that was waiting when the turn settled", async () => {
     const { held, release } = gate();
     let settled = 0;
     const { inputs } = await runSession({
@@ -303,21 +302,20 @@ describe("hook ctx.send()", () => {
               if (settled === 1) {
                 ctx.send("Keep going.", {
                   auth: ctx.session.auth.current,
-                  preemptible: true,
-                  turnPolicy: "queue",
+                  turnPolicy: "yield",
                 });
               }
             },
           },
         }),
       },
-      name: "hook-send-preempted",
+      name: "hook-send-yield-preempted",
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Bob asks for the appendix."]);
   }, 90_000);
 
-  it("shares one turn among preemptible messages for one principal, and drops the rest", async () => {
+  it("shares one turn among yielding messages for one principal, and drops the rest", async () => {
     const settled: Record<string, number> = { audit: 0, goal: 0, lint: 0 };
     const { inputs, log } = await runSession({
       drive: async ({ log }) => {
@@ -331,8 +329,7 @@ describe("hook ctx.send()", () => {
               if ((settled.goal! += 1) === 1) {
                 ctx.send("Keep working on the report.", {
                   auth: ctx.session.auth.current,
-                  preemptible: true,
-                  turnPolicy: "queue",
+                  turnPolicy: "yield",
                 });
               }
             },
@@ -344,8 +341,7 @@ describe("hook ctx.send()", () => {
               if ((settled.lint! += 1) === 1) {
                 ctx.send("Fix the lint errors.", {
                   auth: ctx.session.auth.current,
-                  preemptible: true,
-                  turnPolicy: "queue",
+                  turnPolicy: "yield",
                 });
               }
             },
@@ -356,13 +352,13 @@ describe("hook ctx.send()", () => {
           events: {
             "turn.settled": (_event, ctx) => {
               if ((settled.audit! += 1) === 1) {
-                ctx.send("Audit it.", { auth: BOB, preemptible: true, turnPolicy: "queue" });
+                ctx.send("Audit it.", { auth: BOB, turnPolicy: "yield" });
               }
             },
           },
         }),
       },
-      name: "hook-send-preemptible-shares",
+      name: "hook-send-yield-shares",
     });
 
     expect(inputs).toHaveLength(2);
@@ -442,7 +438,7 @@ describe("hook ctx.send()", () => {
       "turn:completed",
       "turn:cancelled",
     ]);
-    expect(results.at(-1)).toEqual({ reason: "cancelled", sent: false });
+    expect(results.at(-1)).toEqual({ reason: "cancelled", recorded: false });
   }, 90_000);
 
   it("drops a hook's queued message when a person cancels the turn it waits behind", async () => {
@@ -527,8 +523,7 @@ describe("hook ctx.send()", () => {
               if (event.data.outcome !== "cancelled") return;
               ctx.send("Fix the code without editing test files.", {
                 auth: ctx.session.auth.current,
-                preemptible: true,
-                turnPolicy: "queue",
+                turnPolicy: "yield",
               });
             },
           },

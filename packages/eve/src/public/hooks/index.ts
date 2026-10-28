@@ -16,6 +16,7 @@ export {
   type HookEventType,
   type HookSendOptions,
   type HookSendResult,
+  type HookTurnPolicy,
   type StreamEventHook,
   type StreamEventHooks,
   defineHook,
