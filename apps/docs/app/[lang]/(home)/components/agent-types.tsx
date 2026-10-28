@@ -282,6 +282,8 @@ interface UseCase {
   /** Template slug, or null to send people to the full gallery. */
   template: string | null;
   cta: string;
+  /** What the agent does, a short title and line each. */
+  features: { title: string; text: string }[];
   preview: ReactNode;
 }
 
@@ -292,6 +294,11 @@ const USE_CASES: UseCase[] = [
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
     cta: "Use the company brain template",
+    features: [
+      { title: "Answers in Slack", text: "Only for the people and channels you allow." },
+      { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
+      { title: "Read-only SQL", text: "Queries DuckDB or MotherDuck, and never writes to them." },
+    ],
     preview: <CompanyBrainPreview />,
   },
   {
@@ -300,6 +307,17 @@ const USE_CASES: UseCase[] = [
     text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
     template: "eve-software-factory-template",
     cta: "Use the software factory template",
+    features: [
+      { title: "GitHub and Linear", text: "Picks up tasks where your team already files them." },
+      {
+        title: "Four stations",
+        text: "Classifier, analyst, implementer, and reviewer subagents work each task.",
+      },
+      {
+        title: "Draft pull requests",
+        text: "Every task ends in a reviewed draft on your repository.",
+      },
+    ],
     preview: <SoftwareFactoryPreview />,
   },
   {
@@ -308,6 +326,11 @@ const USE_CASES: UseCase[] = [
     text: "Agents inside your product, over web, voice, or iMessage, with memory for every user.",
     template: null,
     cta: "Browse app templates",
+    features: [
+      { title: "Web chat", text: "Inside your app, with long-term memory for each user." },
+      { title: "Voice", text: "Calls that run tools and ask for approval." },
+      { title: "iMessage", text: "Threads that share memory with web and Slack." },
+    ],
     preview: <AgenticAppsPreview />,
   },
 ];
@@ -434,20 +457,30 @@ export function AgentTypes(): JSX.Element {
           <UseCaseTabs baseId={baseId} onSelect={setSelectedIndex} selectedIndex={selectedIndex} />
         </div>
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-x-6">
-          {/* Every description shares one grid cell, so it keeps the tallest one's height and
-              switching tabs never shifts the layout. Beside the window, from its top and a column
-              clear of it, on wide screens; above it when stacked. */}
-          <div className="grid lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:max-w-[44ch]">
+          {/* Every use case's text shares one grid cell, so the column keeps the tallest one's
+              height and switching tabs never shifts the layout. Beside the window, from its top
+              and a column clear of it, on wide screens; above it when stacked. */}
+          <div className="grid lg:col-span-4 lg:col-start-9 lg:row-start-1">
             {USE_CASES.map((useCase) => (
-              <p
+              <div
                 className={cn(
-                  "col-start-1 row-start-1 text-pretty text-copy-14 text-gray-900",
+                  "col-start-1 row-start-1 flex flex-col gap-8",
                   useCase !== selected && "invisible",
                 )}
                 key={useCase.id}
               >
-                {useCase.text}
-              </p>
+                <p className="text-pretty text-copy-18 text-gray-1000">{useCase.text}</p>
+                <ul className="m-0 flex list-none flex-col gap-5 p-0">
+                  {useCase.features.map((feature) => (
+                    <li className="flex flex-col gap-1" key={feature.title}>
+                      <span className="font-[450] text-copy-16 text-gray-1000">
+                        {feature.title}
+                      </span>
+                      <span className="text-pretty text-copy-16 text-gray-900">{feature.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
           </div>
           <div
