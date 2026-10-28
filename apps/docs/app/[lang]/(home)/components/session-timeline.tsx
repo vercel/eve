@@ -780,7 +780,7 @@ export function SessionTimeline(): JSX.Element {
               <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
                 {beat.reactions.map((reaction) => (
                   <span
-                    className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[5px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
+                    className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
                     key={reaction.emoji}
                   >
                     <TextEmoji name={reaction.emoji} />
