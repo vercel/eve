@@ -528,6 +528,8 @@ interface UseCase {
   cta: string;
   /** What the agent does, a short title and line each. */
   features: { title: string; text: string }[];
+  /** Where the example runs, shown above its description. */
+  channel?: ReactNode;
   /** Stage delays for a "Play demo" replay, for an example that has one. */
   demo?: number[];
   /** The example; `stage` is set while a demo plays or after it ends. */
@@ -541,6 +543,12 @@ const USE_CASES: UseCase[] = [
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
     cta: "Use the company brain template",
+    channel: (
+      <>
+        {logos.slack({ "aria-hidden": true, className: "size-4" })}
+        #analytics
+      </>
+    ),
     features: [
       { title: "Answers in Slack", text: "Only for the people and channels you allow." },
       { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
@@ -738,7 +746,14 @@ export function AgentTypes(): JSX.Element {
                 )}
                 key={useCase.id}
               >
-                <p className="text-pretty text-copy-18 text-gray-1000">{useCase.text}</p>
+                <div className="flex flex-col gap-3">
+                  {useCase.channel ? (
+                    <p className="flex items-center gap-2 text-copy-14 text-gray-1000">
+                      {useCase.channel}
+                    </p>
+                  ) : null}
+                  <p className="text-pretty text-copy-18 text-gray-1000">{useCase.text}</p>
+                </div>
                 <ul className="m-0 flex list-none flex-col gap-5 p-0">
                   {useCase.features.map((feature) => (
                     <li className="flex flex-col gap-1" key={feature.title}>
