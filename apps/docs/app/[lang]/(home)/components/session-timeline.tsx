@@ -440,14 +440,14 @@ function Avatar({ author, round }: { author: Author; round: boolean }) {
 }
 
 /**
- * A message's card or buttons follow its text by 60ms rather than arriving with it, so a
- * message reads as one entrance instead of two things appearing at once.
+ * A message's card or buttons fade in a beat after its bubble, like vercel.com/sandbox's agent
+ * actions (200ms ease-out), so a message reads as one entrance instead of two at once.
  */
 function Attachment({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
     <div
-      className="motion-safe:animate-message-in motion-reduce:animate-fade-in"
+      className="animate-command-fade-in"
       // Inline, since the animation shorthand would reset a class-set delay.
       style={{ animationDelay: "60ms" }}
     >
@@ -471,7 +471,7 @@ function ThreadMessage({
   return (
     <li
       className={cn(
-        "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-message-in motion-reduce:animate-fade-in",
+        "grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
         continued ? "pt-2" : "pt-4",
       )}
     >
@@ -516,8 +516,10 @@ function TeamsMessage({
   return (
     <li
       className={cn(
-        "motion-safe:animate-message-in motion-reduce:animate-fade-in",
-        isAgent ? "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5" : "flex flex-col items-end",
+        "motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+        isAgent
+          ? "grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5"
+          : "flex origin-top-right flex-col items-end",
         continued ? "pt-1" : "pt-4",
       )}
     >
@@ -670,8 +672,8 @@ function Bubble({
   return (
     <li
       className={cn(
-        "flex motion-safe:animate-message-in motion-reduce:animate-fade-in",
-        outgoing ? "justify-end pr-2" : "justify-start pl-2",
+        "flex motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+        outgoing ? "origin-top-right justify-end pr-2" : "origin-top-left justify-start pl-2",
         continued ? "pt-1.5" : "pt-4",
       )}
     >
@@ -724,8 +726,9 @@ function TypingIndicator({ author }: { author: Author | undefined }) {
               />
             ))}
           </span>
-          <span>
-            <span className="font-medium text-gray-1000">{author.name}</span>{" "}
+          {/* vercel.com/sandbox's in-progress shimmer, over the whole label. */}
+          <span className="thinking-loader">
+            <span className="font-medium">{author.name}</span>{" "}
             {author.icon ? "is working" : "is typing"}
           </span>
         </>
@@ -841,7 +844,7 @@ export function SessionTimeline(): JSX.Element {
 
   // Before paint: the full conversation opens at its start; a replay snaps to its end, so the
   // newest line always settles clear of the dock, then glides there from where the content was
-  // (a FLIP), on the same curve and duration as the message entrance.
+  // (a FLIP), on the same 300ms ease-in-out as the bubble entrance.
   useLayoutEffect(() => {
     const list = listRef.current;
     const content = contentRef.current;
@@ -853,7 +856,7 @@ export function SessionTimeline(): JSX.Element {
       if (delta > 0 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         content.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], {
           duration: 300,
-          easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+          easing: "ease-in-out",
         });
       }
     } else {

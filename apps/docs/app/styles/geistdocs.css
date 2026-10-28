@@ -30,18 +30,21 @@ body:has([data-nights-route]) {
 }
 
 /* geistcn's loading-dots blink (packages/geistcn/src/styles/animations.css), and the home
-   conversation's entrances, following Emil Kowalski's animation guidance: ease-out with his
-   strong curve, transform and opacity only, no scale below 0.95. */
+   conversation's motion, matching vercel.com/sandbox's agent chat (vercel-marketing
+   sandbox/components/chat.tsx and globals.css): bubbles scale in from 75% at their corner
+   over 300ms ease-in-out, actions fade in over 200ms ease-out, and in-progress text shimmers. */
 @theme {
   --animate-blink: blink 1.4s infinite both;
-  --animate-message-in: message-in 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-bubble-in: bubble-in 300ms ease-in-out both;
+  --animate-command-fade-in: fade-in 200ms ease-out both;
   --animate-scale-in: scale-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  --animate-fade-in: fade-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-fade-in: fade-in 200ms ease-out both;
+  --animate-thinking-loader: thinking-loader 1.5s linear infinite;
 
-  @keyframes message-in {
+  @keyframes bubble-in {
     from {
       opacity: 0;
-      transform: translateY(8px);
+      transform: scale(0.75);
     }
   }
 
@@ -58,6 +61,15 @@ body:has([data-nights-route]) {
     }
   }
 
+  @keyframes thinking-loader {
+    0% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0% 50%;
+    }
+  }
+
   @keyframes blink {
     0% {
       opacity: 0.2;
@@ -68,6 +80,26 @@ body:has([data-nights-route]) {
     100% {
       opacity: 0.2;
     }
+  }
+}
+
+/* vercel.com/sandbox's thinking-loader: a light band sweeping across in-progress text. */
+.thinking-loader {
+  background: linear-gradient(
+      to right,
+      var(--ds-gray-900) 33%,
+      var(--ds-gray-500) 50%,
+      var(--ds-gray-900) 66%
+    )
+    0% 50% / 300% 100% no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .thinking-loader {
+    animation: var(--animate-thinking-loader);
   }
 }
 
