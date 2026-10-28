@@ -155,6 +155,12 @@ Every error `eve/client` throws now extends `EveError` and carries a stable snak
 
 `session.snapshot()` now returns the full `ClientSessionState`, including the opaque `inbox` value, instead of only `sessionId` and `streamIndex`. Persist it as is and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](./client/overview#faster-sends-with-inbox).
 
+## Read agent info with an operator credential
+
+`GET /eve/v1/info` and `client.info()` now serve only operators: `service` and `runtime` principals, such as Vercel OIDC, `jwtHmac()`, or `jwtEcdsa()` callers, and local development through `localDev()`. Other callers, including web chat end users, get `403` with code `info_forbidden`. If a browser app calls `client.info()`, move that call to your server or hardcode what it shows. To give another operator credential access, authenticate it with an auth function that returns `principalType: "service"`. `eve eval` and `eve remote` against a deployment need such a credential too.
+
+The response is still agent-info version 5. The client now ignores unknown fields and reads unknown enum values as `"unrecognized"`; handle that value when you switch on fields such as `mode` or `sourceKind`. See [Inspect an agent](./client/overview#inspect-an-agent).
+
 ## Update Workflow imports
 
 Import durable primitives from `eve/workflow`, and run/hook operations from `eve/workflow/api`:
@@ -250,6 +256,6 @@ Model-effort `--reasoning` on `eve init` and `eve set model` is unchanged. `--as
 
 ## Check the resulting project
 
-Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it. Test any proactive Slack messages and durable workflow waits your project defines.
+Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it, and call `client.info()` with an operator credential if your tooling uses it. Test any proactive Slack messages and durable workflow waits your project defines.
 
 Review [run-data retention](../agent-config#run-data-retention) before depending on a completed transcript remaining readable. This cleanup does not change the retention default: outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends. Backend support determines whether deletion occurs; the current override remains experimental.
