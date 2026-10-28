@@ -720,14 +720,14 @@ function Bubble({
           // People's green bubbles stand off the white window without a border.
           outgoing
             ? "bg-green-300"
-            : "w-full bg-background-100 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
+            : "w-full bg-background-200 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
         )}
         style={{ borderRadius: bubbleRadius }}
       >
         {tail ? (
           <Tail
             bordered={!outgoing}
-            fill={outgoing ? "var(--ds-green-300)" : "var(--ds-background-100)"}
+            fill={outgoing ? "var(--ds-green-300)" : "var(--ds-background-200)"}
             flipped={outgoing}
           />
         ) : null}
