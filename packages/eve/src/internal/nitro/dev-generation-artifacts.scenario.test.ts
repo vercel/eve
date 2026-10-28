@@ -671,7 +671,7 @@ export default defineExtension();
     };
     expect(deploy.default.execute.workflowId).toBe("workflow//./agent/tools/deploy//execute");
     await expect(deploy.default.execute({ service: "api" })).rejects.toThrow(
-      /use start\(execute\) from workflow\/api/u,
+      /use start\(execute\) from eve\/workflow\/api/u,
     );
 
     // A helper the step imports is part of the workflow source graph; an
