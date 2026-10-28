@@ -1,10 +1,10 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { AuthKey, HistoryStateKey } from "#context/keys.js";
+import { AuthKey } from "#context/keys.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import {
   type CompactionConfig,
   type HarnessSession,
@@ -32,7 +32,6 @@ import {
   getInputTokenCount,
   shouldCompact,
 } from "#harness/compaction/engine.js";
-import { contextStorage } from "#context/container.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, Usage } from "#protocol/session-events/envelope.js";
@@ -199,18 +198,6 @@ function summaryFailed(
       type: "context.settled",
     },
   ];
-}
-
-export function replaceSessionHistory(
-  session: HarnessSession,
-  history: HarnessModelMessage[],
-): HarnessSession {
-  contextStorage.getStore()?.delete(HistoryStateKey);
-  return {
-    ...session,
-    history,
-    compaction: withoutPromptMeasurement(session.compaction),
-  };
 }
 
 /**
@@ -460,7 +447,7 @@ async function compactOnce(input: {
     await publish(settled, messages);
   }
 
-  return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
+  return { compacted: true, messages, session: changeHistory(session, { rewrite: messages }) };
 }
 
 /**
