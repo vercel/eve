@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Frame } from "./section";
 
 interface FileTreeItem {
   /** Category name (unused by this layout). */
@@ -22,7 +23,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const board = (
-    <div className="overflow-hidden rounded-xl border border-gray-alpha-400 bg-background-100">
+    <Frame>
       <div className="grid grid-cols-[240px_1fr]">
         {/* Sidebar: the building blocks; click any to view it. */}
         <div className="border-r">
@@ -79,7 +80,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
           ))}
         </div>
       </div>
-    </div>
+    </Frame>
   );
 
   // Mobile: the sidebar/code-panel split is cramped on a phone, so each file
@@ -88,7 +89,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
     <div>
       <div className="space-y-4">
         {items.map((item, i) => (
-          <div key={item.name} className="overflow-hidden rounded-xl border bg-background-100">
+          <Frame key={item.name}>
             <div className="flex h-12 items-center border-b px-4">
               <span className="font-medium text-gray-1000 text-sm">{item.fileName}</span>
               {i > 0 ? (
@@ -97,7 +98,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             </div>
             <p className="border-b px-4 py-3 text-gray-900 text-copy-14">{item.description}</p>
             <div className="pb-2 [&>div]:mb-0">{item.code}</div>
-          </div>
+          </Frame>
         ))}
       </div>
     </div>

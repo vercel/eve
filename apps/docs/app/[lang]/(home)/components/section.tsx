@@ -1,5 +1,11 @@
-import type { JSX, ReactNode } from "react";
+import Link from "next/link";
+import type { ComponentProps, JSX, ReactNode } from "react";
 import { cn } from "@/lib/utils";
+
+// Button's props have no `prefetch`, so the link component sets it.
+export const PrefetchLink = (props: ComponentProps<typeof Link>) => (
+  <Link {...props} prefetch={true} />
+);
 
 export function HomeSection({
   id,

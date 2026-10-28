@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  IconArrowUp,
-  IconBookmark,
-  IconChevronRightSmall,
-  IconClock,
-  IconMessage,
-  IconPlusCircle,
-  IconSparkles,
-} from "@vercel/geistdocs/assets/icons";
+import { IconChevronRightSmall, IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import { type JSX, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
@@ -16,16 +8,16 @@ import { analyticsEvents } from "@/lib/analytics/events";
 import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { Frame, FrameHeader, HomeSection } from "./section";
+import { Frame, FrameHeader, HomeSection, PrefetchLink } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
 const navLogoClassName = "size-4 shrink-0 grayscale";
 
 const FACTORY_STATIONS = [
   { name: "classifier", result: "Feature request, medium scope" },
-  { name: "implementer", result: "Opened #318 from eve/eng-142" },
-  { name: "reviewer", result: "Left 2 comments, fixed both, approved" },
-  { name: "merger", result: "Checks passed, merged to main" },
+  { name: "analyst", result: "Mapped the checkout flow and wrote a plan" },
+  { name: "implementer", result: "Pushed eve/eng-142 and opened draft #318" },
+  { name: "reviewer", result: "Left 2 comments, both addressed" },
 ];
 
 function SoftwareFactoryPreview() {
@@ -63,89 +55,80 @@ function SoftwareFactoryPreview() {
         </ol>
         <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-600 px-4 py-3">
           {logos.github({ "aria-hidden": true, className: logoClassName })}
-          <span className="truncate text-copy-14 text-gray-1000">Merged #318 into main</span>
+          <span className="truncate text-copy-14 text-gray-1000">
+            Draft #318 is ready for your review
+          </span>
         </div>
       </div>
     </>
   );
 }
 
-const BRAIN_NAV: { label: string; icon: ReactNode }[] = [
-  { label: "New chat", icon: <IconPlusCircle size={14} /> },
-  { label: "Automations", icon: <IconClock size={14} /> },
-  { label: "Memory", icon: <IconBookmark size={14} /> },
-  { label: "Skills", icon: <IconSparkles size={14} /> },
+const BRAIN_STEPS = [
+  { tool: "list_models", result: "Found customers, orders, and payments" },
+  { tool: "get_model", result: "Read the docs for the orders model" },
+  { tool: "query_sql", result: "Ran 1 query, returned 3 rows" },
 ];
 
-const BRAIN_CHATS = ["Daily update", "Write a changelog", "Summarize user interviews"];
-
-const BRAIN_UPDATE = [
-  { heading: "Shipped", item: "Usage-based billing, live for 10% of workspaces (PLAT-212)" },
-  { heading: "In progress", item: "Enterprise SSO, design review moved to Thursday" },
-  { heading: "Blocked", item: "iOS 2.4 is waiting on App Store review" },
+const BRAIN_ROWS = [
+  { month: "August", orders: 412, repeat: "38%" },
+  { month: "September", orders: 455, repeat: "41%" },
+  { month: "October", orders: 498, repeat: "44%" },
 ];
 
 function CompanyBrainPreview() {
   return (
-    <div className="grid min-h-0 flex-1 sm:grid-cols-[11rem_minmax(0,1fr)]">
-      <div className="hidden min-h-0 flex-col gap-4 border-gray-alpha-400 border-r p-2 sm:flex">
-        <span className="px-2 pt-1.5 font-medium text-copy-14 text-gray-1000">acme</span>
-        <ul className="flex list-none flex-col gap-0.5 p-0">
-          {BRAIN_NAV.map((item) => (
-            <li
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-copy-13 text-gray-1000"
-              key={item.label}
-            >
-              <span className="flex text-gray-900">{item.icon}</span>
-              {item.label}
+    <>
+      <FrameHeader>
+        {logos.slack({ "aria-hidden": true, className: logoClassName })}
+        <span className="text-gray-1000">#analytics</span>
+        <span className="ml-auto">Example run</span>
+      </FrameHeader>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-5 sm:p-6">
+        <p className="ml-auto w-fit rounded-xl bg-gray-alpha-200 px-3 py-1 text-copy-13 text-gray-1000">
+          How are repeat orders trending this quarter?
+        </p>
+        <ul className="flex list-none flex-col gap-1 p-0">
+          {BRAIN_STEPS.map((step) => (
+            <li className="flex items-baseline gap-3 text-copy-13" key={step.tool}>
+              <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
+                {step.tool}
+              </code>
+              <span className="truncate text-gray-900">{step.result}</span>
             </li>
           ))}
         </ul>
-        <ul className="flex list-none flex-col gap-0.5 p-0">
-          {BRAIN_CHATS.map((title, i) => (
-            <li
-              className={`truncate rounded-md px-2 py-1.5 text-copy-13 ${
-                i === 0 ? "bg-gray-alpha-200 text-gray-1000" : "text-gray-900"
-              }`}
-              key={title}
-            >
-              {title}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="flex min-h-0 min-w-0 flex-col">
-        <FrameHeader>
-          <span className="text-gray-1000">Daily update</span>
-        </FrameHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-5 pt-4">
-          <span className="ml-auto rounded-full bg-gray-alpha-200 px-3 py-1 text-copy-13 text-gray-1000">
-            Run my daily update
-          </span>
-          <p className="flex items-center gap-1.5 text-copy-13 text-gray-900">
-            Read Linear, GitHub, and #product
-          </p>
-          <div className="flex flex-col gap-1.5 text-copy-14">
-            <p className="font-medium text-gray-1000">Daily update · Tue, Oct 21</p>
-            {BRAIN_UPDATE.map((section) => (
-              <p className="text-gray-900" key={section.heading}>
-                <span className="text-gray-1000">{section.heading}</span> {section.item}
-              </p>
+        <p className="text-copy-14 text-gray-1000">
+          Repeat customers placed 44% of orders in October, up from 38% in August.
+        </p>
+        <table className="w-full max-w-[26rem] border-collapse rounded-lg text-left text-copy-13 tabular-nums">
+          <thead className="text-gray-900">
+            <tr className="border-gray-alpha-400 border-b">
+              <th className="py-1.5 pr-3 font-normal" scope="col">
+                Month
+              </th>
+              <th className="py-1.5 pr-3 text-right font-normal" scope="col">
+                Orders
+              </th>
+              <th className="py-1.5 text-right font-normal" scope="col">
+                Repeat
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-gray-1000">
+            {BRAIN_ROWS.map((row) => (
+              <tr className="border-gray-alpha-400 border-b last:border-b-0" key={row.month}>
+                <th className="py-1.5 pr-3 font-normal" scope="row">
+                  {row.month}
+                </th>
+                <td className="py-1.5 pr-3 text-right">{row.orders}</td>
+                <td className="py-1.5 text-right">{row.repeat}</td>
+              </tr>
             ))}
-          </div>
-        </div>
-        <div className="p-3 pt-2">
-          <div className="flex items-center gap-2 rounded-xl border border-gray-alpha-400 bg-background-200 py-2 pr-2 pl-3.5">
-            <span className="truncate text-copy-13 text-gray-900">
-              Ask anything, or press / for a skill
-            </span>
-            <span className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full bg-gray-1000 text-background-100">
-              <IconArrowUp size={12} />
-            </span>
-          </div>
-        </div>
+          </tbody>
+        </table>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -300,16 +283,16 @@ const USE_CASES: UseCase[] = [
   {
     id: "company-brain",
     name: "Company brain",
-    text: "Build a chat app for your whole company, with shared skills, memory, and automations.",
+    text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
     cta: "Use the company brain template",
-    logo: <IconMessage className="shrink-0" size={16} />,
+    logo: logos.slack({ "aria-hidden": true, className: navLogoClassName }),
     preview: <CompanyBrainPreview />,
   },
   {
     id: "software-factory",
     name: "Software factory",
-    text: "Build an agent that turns issues into merged pull requests, from planning and implementation to review.",
+    text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
     template: "eve-software-factory-template",
     cta: "Use the software factory template",
     logo: logos.github({ "aria-hidden": true, className: navLogoClassName }),
@@ -409,6 +392,7 @@ export function AgentTypes(): JSX.Element {
           <Frame className="flex h-[30rem] flex-col sm:h-[24rem]">{selected.preview}</Frame>
           <Button
             className="w-fit self-end rounded-full"
+            Component={PrefetchLink}
             href={selected.template ? templatePath(selected.template) : canonicalRoutes.templates}
             onClick={() =>
               track(analyticsEvents.templateOpened, {

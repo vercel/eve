@@ -226,7 +226,7 @@ function MessageRow({
   return (
     <li
       className={cn(
-        "grid animate-in grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 fade-in slide-in-from-bottom-2 duration-300",
+        "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
         continued ? "pt-2" : "pt-4",
       )}
     >
@@ -257,7 +257,7 @@ function TypingIndicator({ member }: { member: Member | undefined }) {
           <span className="flex gap-0.5">
             {[0, 150, 300].map((delay) => (
               <span
-                className="size-1 animate-bounce rounded-full bg-gray-900"
+                className="size-1 rounded-full bg-gray-900 motion-safe:animate-bounce"
                 key={delay}
                 style={{ animationDelay: `${delay}ms` }}
               />
@@ -306,8 +306,11 @@ export function SessionTimeline(): JSX.Element {
   }, [inView, next]);
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [shown]);
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: animated ? "smooth" : "auto",
+    });
+  }, [shown, animated]);
 
   const replay = () => setShown(0);
 
@@ -320,7 +323,7 @@ export function SessionTimeline(): JSX.Element {
           <span className="ml-auto flex items-center gap-3">
             {done && animated ? (
               <button
-                className="flex animate-in items-center gap-1 text-gray-900 transition-colors fade-in hover:text-gray-1000"
+                className="flex items-center gap-1 text-gray-900 transition-colors hover:text-gray-1000 motion-safe:animate-in motion-safe:fade-in"
                 onClick={replay}
                 type="button"
               >
@@ -358,7 +361,7 @@ export function SessionTimeline(): JSX.Element {
                   <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
                     {beat.reactions.map((reaction) => (
                       <span
-                        className="flex animate-in items-center gap-1 rounded-full border border-gray-alpha-400 bg-gray-alpha-100 px-2 py-0.5 text-copy-13 text-gray-1000 tabular-nums zoom-in-75 fade-in"
+                        className="flex items-center gap-1 rounded-full border border-gray-alpha-400 bg-gray-alpha-100 px-2 py-0.5 text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
                         key={reaction.emoji}
                       >
                         {reaction.emoji} {reaction.count}

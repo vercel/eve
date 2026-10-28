@@ -13,7 +13,7 @@ import { Production } from "./production";
 import { WhyEve } from "./why-eve";
 
 const tagline =
-  "eve is an open source agent framework for durable, long-running work. Build, govern, and evolve enterprise grade agents that can scale.";
+  "eve is an open-source agent framework for durable, long-running work. Build, govern, and evolve enterprise-grade agents that can scale.";
 const titleMetadata = pageTitleMetadata(siteTitle);
 
 export const homeMetadata: Metadata = {

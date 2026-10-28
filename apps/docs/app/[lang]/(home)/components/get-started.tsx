@@ -2,14 +2,11 @@
 
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
-import Link from "next/link";
-import { type ComponentProps, type JSX, useState } from "react";
+import { type JSX, useState } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 import { EveLogoShader } from "./eve-logo-shader";
 import { type InstallAudience, InstallSwitcher } from "./install-switcher";
-
-// Button's props have no `prefetch`, so the link component sets it.
-const PrefetchLink = (props: ComponentProps<typeof Link>) => <Link {...props} prefetch={true} />;
+import { PrefetchLink } from "./section";
 
 export function GetStarted(): JSX.Element {
   const [audience, setAudience] = useState<InstallAudience>("humans");
