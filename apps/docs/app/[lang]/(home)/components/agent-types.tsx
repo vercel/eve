@@ -474,20 +474,24 @@ function WebAppClient() {
         </span>
       }
     >
-      <div className="relative min-h-0 flex-1 p-3">
-        {/* The agent UI skeleton from "Own your agent UI": an outlined heading and bars, and
-            blocks that fade into the window. The order rows fade out behind the chat. */}
+      <div className="@container relative min-h-0 flex-1 p-3">
+        {/* An orders dashboard in the skeleton style of "Own your agent UI": real heading and
+            figures, gray bars for everything else. The order rows fade out behind the chat, and
+            the KPI cards only show once the window is wide enough to keep them clear of it. */}
         <div aria-hidden className="hidden select-none flex-col gap-2 sm:flex">
-          <span className="font-bold text-[24px] text-gray-700 leading-8 tracking-[-0.01em] [-webkit-text-fill-color:var(--ds-background-100)] [-webkit-text-stroke:1px_currentColor] [paint-order:stroke_fill]">
-            Orders
-          </span>
-          <span className="h-5 w-3/4 rounded-[3px] bg-gray-200" />
-          <span className="mt-1 grid grid-cols-3 gap-2">
-            {[0, 1, 2].map((tile) => (
+          <span className="font-medium text-[20px] text-gray-1000 leading-7">Orders</span>
+          <span className="h-3 w-1/2 rounded-[3px] bg-gray-200" />
+          <span className="mt-1 hidden grid-cols-3 gap-2 @[20rem]:grid">
+            {["1,284", "$48.2k", "96%"].map((metric) => (
               <span
-                className="h-14 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100"
-                key={tile}
-              />
+                className="flex flex-col gap-2 rounded-md border border-gray-alpha-400 p-2.5"
+                key={metric}
+              >
+                <span className="font-medium text-copy-16 text-gray-1000 tabular-nums">
+                  {metric}
+                </span>
+                <span className="h-2 w-2/3 rounded-[3px] bg-gray-200" />
+              </span>
             ))}
           </span>
           <span className="flex flex-col gap-2 [mask-image:linear-gradient(to_bottom,black,transparent)]">
