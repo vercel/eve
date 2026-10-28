@@ -40,7 +40,8 @@ describe("loadAuthoredModuleNamespace", () => {
 } }`;
       const app = await createApp({
         files: {
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/tools/probe.ts": `import { defineTool } from "eve/tools";\nexport default ${kind === "defineTool" ? `defineTool(${definition})` : definition};`,
         },
         name: "legacy-workflow-tool",
@@ -58,7 +59,7 @@ describe("loadAuthoredModuleNamespace", () => {
   it("rejects a named workflow channel handler during compilation", async () => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/channels/probe.ts": `import { defineChannel, POST } from "eve/channels";
 export default defineChannel({ routes: [POST("/probe", handler)] });
@@ -94,7 +95,8 @@ async function handler() {
     async (_kind, execute, helper) => {
       const app = await createApp({
         files: {
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
 export default defineWorkflowTool({ description: "Probe", inputSchema: {}, ${execute} });
 ${helper}`,
@@ -117,7 +119,8 @@ ${helper}`,
   ])("validates a workflow tool through its compiled definition: %s", async (binding, definer) => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/tools/probe.ts": `${binding}
 import { run } from "../lib/run";
 export default ${definer}({ description: "Probe", inputSchema: {}, execute: run });`,
@@ -140,7 +143,7 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
   it("compiles a workflow tool that calls agent through an imported helper", async () => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
 import { delegate } from "../lib/delegate";
@@ -177,7 +180,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     async (path, kind, binding, definition) => {
       const app = await createApp({
         files: {
-          "agent/agent.ts": `export default { model: "openai/gpt-5.4" };
+          "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
           [`agent/${path}`]: `${binding}\nimport { handler } from "../lib/handler";\nexport default ${definition};\n`,
           "agent/lib/handler.ts": `export async function handler() {
@@ -1179,10 +1182,11 @@ export const result = true;
     const app = await createApp({
       files: {
         "agent/agent.ts": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "anthropic/claude-sonnet-5",',
           '  build: { externalDependencies: ["external-only"] },',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/tools/read_external.ts": [
@@ -1277,17 +1281,19 @@ export const result = true;
     const app = await createApp({
       files: {
         "agent/agent.ts": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "anthropic/claude-sonnet-5",',
           '  build: { externalDependencies: ["external-only"] },',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/signal-gatherer/agent.ts": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  description: "Gather abuse signals.",',
           '  model: "anthropic/claude-sonnet-5",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/signal-gatherer/tools/read_external.ts": [
@@ -1392,7 +1398,8 @@ export const result = true;
   ])("compiles %s authored tool exports", async (_kind, exportStatement) => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/tools/legacy.cjs": [
           'const tool = { description: "Legacy tool.", execute() { return "ok"; } };',
           exportStatement,
@@ -1418,7 +1425,8 @@ export const result = true;
     const esModuleFlag = 'Object.defineProperty(exports, "__esModule", { value: true });';
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Use the legacy tool.",
         "agent/sandbox/sandbox.cjs": [
           'const { DefaultSandbox, defineSandbox } = require("eve/sandbox");',
@@ -1479,7 +1487,8 @@ export const result = true;
       ].join("\n");
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/lib/shared.ts": [
           `globalThis.${evaluationsKey} = (globalThis.${evaluationsKey} ?? 0) + 1;`,
           'export const shared = "shared";',
@@ -1488,7 +1497,7 @@ export const result = true;
         "agent/tools/first.ts": tool("../lib/shared"),
         "agent/tools/second.ts": tool("../lib/shared"),
         "agent/subagents/helper/agent.ts":
-          'export default { description: "Help.", model: "openai/gpt-5.4" };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Help.", model: "openai/gpt-5.4" });',
         "agent/subagents/helper/tools/third.ts": tool("../../../lib/shared"),
       },
       name: "shared-authored-module",
@@ -1770,10 +1779,10 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
 
   it("compiles root and subagent tool ids that match the generation bundle", async () => {
     const { generation, manifest } = await compileMember({
-      "agents/assistant/agent/agent.ts": `export default { model: "openai/gpt-5.4" };
+      "agents/assistant/agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
       "agents/assistant/agent/tools/plan.ts": workflowTool,
-      "agents/assistant/agent/subagents/reviewer/agent.ts": `export default { description: "Review plans.", model: "openai/gpt-5.4" };
+      "agents/assistant/agent/subagents/reviewer/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ description: "Review plans.", model: "openai/gpt-5.4" });
 `,
       "agents/assistant/agent/subagents/reviewer/tools/approve.ts": workflowTool,
     });
@@ -1795,7 +1804,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
 
   it("compiles workflow modules from the shared package but not from sibling packages", async () => {
     const { generation, manifest, project } = await compileMember({
-      "agents/assistant/agent/agent.ts": `export default { model: "openai/gpt-5.4" };
+      "agents/assistant/agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
       "agents/assistant/agent/tools/plan.ts": `import { defineWorkflowTool } from "eve/tools";
 import "../../../../packages/shared/index";

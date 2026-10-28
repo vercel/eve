@@ -153,13 +153,16 @@ describe("compiler artifacts", () => {
 
     await writeFile(
       join(agentRoot, "agent.mjs"),
-      'export default { model: "openai/gpt-6-luna-fast" };\n',
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-6-luna-fast" });\n',
     );
     const authoredConfig = await compileAgent({ startPath: appRoot });
     expect(authoredConfig.manifest.config.model?.id).toBe("openai/gpt-6-luna-fast");
     expect(authoredConfig.manifest.config.reasoning).toBeUndefined();
 
-    await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      "import { defineAgent } from 'eve';\nexport default defineAgent({});\n",
+    );
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
       'The "model" field is required.',
     );
@@ -205,7 +208,10 @@ describe("compiler artifacts", () => {
     await mkdir(join(agentRoot, "channels"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(
       join(agentRoot, "channels", "support.mjs"),
       [
@@ -449,7 +455,10 @@ describe("compiler artifacts", () => {
     await mkdir(join(reviewerRoot, "tools"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(
       join(agentRoot, "instructions.mjs"),
       'export default { content: "Root instructions prompt." };\n',
@@ -468,7 +477,7 @@ describe("compiler artifacts", () => {
     );
     await writeFile(
       join(reviewerRoot, "agent.mjs"),
-      'export default { model: "openai/gpt-5.4", description: "Review one draft." };\n',
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Review one draft." });\n',
     );
     await writeFile(
       join(reviewerRoot, "instructions.mjs"),
@@ -617,7 +626,8 @@ describe("compileAgent", () => {
   it("narrows authored channel metadata without generated declarations", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
         "agent/channels/support.ts": [
           'import { defineChannel, POST } from "eve/channels";',
           "",
@@ -869,7 +879,10 @@ describe("compileAgent", () => {
     await mkdir(join(agentRoot, "skills"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(
       join(agentRoot, "skills", "research.mjs"),
@@ -930,7 +943,10 @@ describe("compileAgent", () => {
     );
 
     await mkdir(join(agentRoot, "tools", "billing"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(
       join(agentRoot, "tools", "ping.ts"),
@@ -971,7 +987,10 @@ describe("compileAgent", () => {
     await mkdir(join(agentRoot, "schedules"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(
       join(agentRoot, "schedules", "daily-digest.mjs"),
@@ -1036,17 +1055,21 @@ describe("compileAgent", () => {
     await mkdir(subagentRoot, {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(join(subagentRoot, "instructions.md"), "Research tasks deeply.");
     await writeFile(
       join(subagentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         '  description: "Investigate one task in depth.",',
         "  tools: [],",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1070,10 +1093,11 @@ describe("compileAgent", () => {
     await writeFile(
       join(agentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         '  workspace: { kind: "sandbox" },',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1097,10 +1121,11 @@ describe("compileAgent", () => {
     await writeFile(
       join(agentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         "  experimental: { codeMode: true },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1118,10 +1143,11 @@ describe("compileAgent", () => {
     await writeFile(
       join(agentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         "  experimental: { subagentPersistentSessions: true },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1141,16 +1167,20 @@ describe("compileAgent", () => {
     await mkdir(subagentRoot, {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(join(subagentRoot, "instructions.md"), "Research tasks deeply.");
     await writeFile(
       join(subagentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         '  description: "Investigate one task in depth.",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1178,7 +1208,10 @@ describe("compileAgent", () => {
     await mkdir(join(researcherRoot, "subagents"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(
       join(agentRoot, "subagents", "weather.ts"),
@@ -1194,10 +1227,11 @@ describe("compileAgent", () => {
     await writeFile(
       join(researcherRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         '  description: "Investigate one task in depth.",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1260,16 +1294,20 @@ describe("compileAgent", () => {
     await mkdir(join(subagentRoot, "sandbox"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
     await writeFile(join(subagentRoot, "instructions.md"), "Research tasks deeply.");
     await writeFile(
       join(subagentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         '  description: "Investigate one task in depth.",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1318,7 +1356,10 @@ describe("compileAgent", () => {
   it("fails fast on discovery errors after writing inspectable artifacts", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-compile-fast-fail-", APP_ROOT_OPTIONS);
 
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     // No instructions.md or instructions.ts authored — discovery should fail
     // with DISCOVER_REQUIRED_INSTRUCTIONS_MISSING.
 

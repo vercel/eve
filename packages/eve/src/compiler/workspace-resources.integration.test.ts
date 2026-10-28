@@ -14,7 +14,8 @@ describe("materializeWorkspaceResources", () => {
   it("keeps nested relative symlinks in workspace files and skill packages relative", async () => {
     const app = await createAppRoot("eve-workspace-resource-symlinks-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Help with notes.",
         "agent/sandbox/workspace/data/notes.txt": "seed",
         "agent/skills/review/SKILL.md": [

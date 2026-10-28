@@ -13,8 +13,12 @@ const context = {
   channel: { kind: "http" as const, metadata: {} },
 };
 
-async function run<T>(definition: { evaluate: (ctx: never) => unknown }): Promise<T> {
-  return (await definition.evaluate(context as never)) as T;
+// A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
+async function run<T>(definition: unknown): Promise<T> {
+  const evaluate = (definition as Record<symbol, (ctx: never) => unknown>)[
+    Symbol.for("eve.dynamic")
+  ]!;
+  return (await evaluate(context as never)) as T;
 }
 
 async function resolve() {

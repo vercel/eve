@@ -260,14 +260,15 @@ describe("mounted extension installed under node_modules", () => {
     });
     const app = await createAppRoot("eve-mounted-extension-installed-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/subagents/manager/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Manage CRM reviews.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/manager/extensions/nested.mjs": [
@@ -441,7 +442,7 @@ describe("mounted extension installed under node_modules", () => {
     ).toBe(true);
     const app = await createAppRoot("eve-mounted-extension-chunks-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": [
@@ -450,10 +451,11 @@ describe("mounted extension installed under node_modules", () => {
           "",
         ].join("\n"),
         "agent/subagents/manager/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Manage CRM reviews.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/manager/extensions/crm.mjs": [
