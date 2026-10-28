@@ -21,7 +21,15 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@vercel/geistdocs/components/dropdown-menu";
-import { type ComponentType, type JSX, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ComponentType,
+  type JSX,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
 
@@ -787,7 +795,8 @@ function StableLabel({ current, labels }: { current: string; labels: string[] })
  * returns to the full conversation, as on vercel.com/sandbox.
  */
 export function SessionTimeline(): JSX.Element {
-  const listRef = useRef<HTMLOListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLOListElement>(null);
   const [platform, setPlatform] = useState<Platform>("slack");
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
@@ -803,9 +812,10 @@ export function SessionTimeline(): JSX.Element {
   const shown = playing ? count : beats.length;
   const next = playing ? beats[count] : undefined;
 
-  // After a message lands, the typing indicator waits a beat before coming back, so the message
-  // reads as taking its place instead of the indicator flickering below it.
+  // After a message lands, the typing indicator waits a beat before fading back in, so the
+  // message reads as taking its place. It keeps its last author while it fades out.
   const [typing, setTyping] = useState(false);
+  const [typingAuthor, setTypingAuthor] = useState<Author>();
 
   useEffect(() => {
     if (!playing) return;
@@ -815,7 +825,13 @@ export function SessionTimeline(): JSX.Element {
       return;
     }
     setTyping(false);
-    const show = setTimeout(() => setTyping(true), Math.min(500, next.delay * 0.4));
+    const show = setTimeout(
+      () => {
+        setTypingAuthor(next.kind === "message" ? AUTHORS[next.author] : undefined);
+        setTyping(next.kind === "message");
+      },
+      Math.min(500, next.delay * 0.4),
+    );
     const timer = setTimeout(() => setCount((n) => n + 1), next.delay);
     return () => {
       clearTimeout(show);
@@ -823,19 +839,30 @@ export function SessionTimeline(): JSX.Element {
     };
   }, [playing, next]);
 
-  useEffect(() => {
+  // Before paint: the full conversation opens at its start; a replay snaps to its end, so the
+  // newest line always settles clear of the dock, then glides there from where the content was
+  // (a FLIP), on the same curve and duration as the message entrance.
+  useLayoutEffect(() => {
     const list = listRef.current;
-    if (!list) return;
-    // The full conversation opens at its start; a replay follows new messages and the typing
-    // indicator to the end, so neither slips behind the dock, and stays there once it finishes.
-    // Jumping rather than scrolling smoothly keeps the newest line from passing under the dock
-    // mid-scroll; new messages already slide in on their own.
-    if (playing || ended) list.scrollTo({ top: list.scrollHeight });
-    else list.scrollTo({ top: 0 });
+    const content = contentRef.current;
+    if (!list || !content) return;
+    if (playing || ended) {
+      const from = list.scrollTop;
+      list.scrollTop = list.scrollHeight;
+      const delta = list.scrollTop - from;
+      if (delta > 0 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        content.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], {
+          duration: 300,
+          easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+        });
+      }
+    } else {
+      list.scrollTop = 0;
+    }
     measure(list);
-  }, [shown, typing, platform, playing, ended]);
+  }, [shown, platform, playing, ended]);
 
-  const measure = (list: HTMLOListElement) => {
+  const measure = (list: HTMLElement) => {
     const above = list.scrollTop > 1;
     const below = list.scrollTop + list.clientHeight < list.scrollHeight - 1;
     setOverflow((o) => (o.above === above && o.below === below ? o : { above, below }));
@@ -865,8 +892,8 @@ export function SessionTimeline(): JSX.Element {
       {/* No frame: the conversation sits on the page and fades out only at an edge that has
           messages scrolled past it. In full it opens at its start; a replay fills from the
           bottom like a chat. */}
-      <ol
-        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-12 [scrollbar-width:none] [&>li:first-child]:mt-auto"
+      <div
+        className="-mx-1 h-[26rem] overflow-y-auto overscroll-contain px-1 [scrollbar-width:none]"
         key={platform}
         onScroll={(event) => measure(event.currentTarget)}
         ref={listRef}
@@ -874,65 +901,74 @@ export function SessionTimeline(): JSX.Element {
           maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
         }}
       >
-        {beats.slice(0, shown).map((beat, i) => {
-          if (beat.kind === "reactions") {
+        <ol
+          className="m-0 flex min-h-full list-none flex-col p-0 pb-12 [&>li:first-child]:mt-auto"
+          ref={contentRef}
+        >
+          {beats.slice(0, shown).map((beat, i) => {
+            if (beat.kind === "reactions") {
+              return (
+                <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
+                  {beat.reactions.map((reaction, index) => (
+                    <span
+                      className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-scale-in motion-reduce:animate-fade-in"
+                      style={{ animationDelay: `${index * 60}ms` }}
+                      key={reaction.emoji}
+                    >
+                      <TextEmoji name={reaction.emoji} />
+                      {reaction.count}
+                    </span>
+                  ))}
+                </li>
+              );
+            }
+            const author = AUTHORS[beat.author];
+            if (platform === "whatsapp") {
+              return (
+                <Bubble
+                  attachment={beat.attachment}
+                  author={author}
+                  continued={beat.author === authorOf(beats[i - 1])}
+                  tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
+                  key={i}
+                  time={beat.time}
+                >
+                  {beat.body}
+                </Bubble>
+              );
+            }
+            const continued = beat.author === authorOf(beats[i - 1]);
+            if (platform === "teams") {
+              return (
+                <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
+                  <p>{beat.body}</p>
+                  <Attachment>{beat.attachment}</Attachment>
+                </TeamsMessage>
+              );
+            }
             return (
-              <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
-                {beat.reactions.map((reaction, index) => (
-                  <span
-                    className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-scale-in motion-reduce:animate-fade-in"
-                    style={{ animationDelay: `${index * 60}ms` }}
-                    key={reaction.emoji}
-                  >
-                    <TextEmoji name={reaction.emoji} />
-                    {reaction.count}
-                  </span>
-                ))}
-              </li>
-            );
-          }
-          const author = AUTHORS[beat.author];
-          if (platform === "whatsapp") {
-            return (
-              <Bubble
-                attachment={beat.attachment}
-                author={author}
-                continued={beat.author === authorOf(beats[i - 1])}
-                tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
-                key={i}
-                time={beat.time}
-              >
-                {beat.body}
-              </Bubble>
-            );
-          }
-          const continued = beat.author === authorOf(beats[i - 1]);
-          if (platform === "teams") {
-            return (
-              <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
-                <p>{beat.body}</p>
+              <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
+                <p className="text-gray-1000">{beat.body}</p>
                 <Attachment>{beat.attachment}</Attachment>
-              </TeamsMessage>
+              </ThreadMessage>
             );
-          }
-          return (
-            <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
-              <p className="text-gray-1000">{beat.body}</p>
-              <Attachment>{beat.attachment}</Attachment>
-            </ThreadMessage>
-          );
-        })}
-        {typing && next?.kind === "message" ? (
-          <li
-            className={cn(
-              "pt-3 animate-fade-in",
-              platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
-            )}
-          >
-            <TypingIndicator author={AUTHORS[next.author]} />
-          </li>
-        ) : null}
-      </ol>
+          })}
+          {/* During a replay the typing indicator keeps a reserved row and only fades, so its
+            coming and going never changes the conversation's height. */}
+          {playing || ended ? (
+            <li
+              aria-hidden={!typing}
+              className={cn(
+                "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
+                platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
+                typing ? "opacity-100" : "opacity-0",
+              )}
+            >
+              <TypingIndicator author={typingAuthor} />
+            </li>
+          ) : null}
+        </ol>
+      </div>
       {/* A floating dock: the only raised element, overlapping the conversation's bottom so
           messages fade out behind it. */}
       <figcaption className="relative z-10 mx-auto -mt-9 flex w-fit items-center gap-1 rounded-full border border-gray-alpha-400 bg-background-100 p-1 shadow-sm">
