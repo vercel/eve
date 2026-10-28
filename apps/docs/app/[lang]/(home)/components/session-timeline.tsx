@@ -12,15 +12,8 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
-import { IconBox, IconCheck, IconChevronDownSmall } from "@vercel/geistdocs/assets/icons";
+import { IconBox, IconCheck } from "@vercel/geistdocs/assets/icons";
 import { Button } from "@vercel/geistdocs/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@vercel/geistdocs/components/dropdown-menu";
 import {
   type ComponentType,
   type JSX,
@@ -888,140 +881,138 @@ export function SessionTimeline(): JSX.Element {
   };
 
   return (
+    // Laid out like vercel.com/sandbox's hero: the conversation in a browser window, the channel
+    // picker overlapping its bottom-left corner like the sandbox's agent window, and the demo
+    // control below its bottom-right.
     <figure
       aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
-      className="m-0 mx-auto w-full max-w-[30rem]"
+      className="relative m-0 mx-auto mb-16 w-full max-w-[30rem]"
     >
-      {/* No frame: the conversation sits on the page and fades out only at an edge that has
-          messages scrolled past it. In full it opens at its start; a replay fills from the
-          bottom like a chat. */}
-      <div
-        className="-mx-1 h-[26rem] overflow-y-auto overscroll-contain px-1 [scrollbar-width:none]"
-        key={platform}
-        onScroll={(event) => measure(event.currentTarget)}
-        ref={listRef}
-        style={{
-          maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
-        }}
-      >
-        <ol
-          className="m-0 flex min-h-full list-none flex-col p-0 pb-12 [&>li:first-child]:mt-auto"
-          ref={contentRef}
+      <div className="flex flex-col overflow-hidden material-large">
+        <header className="relative flex h-9 shrink-0 items-center justify-center shadow-[0_0_0_1px_var(--ds-gray-alpha-200)]">
+          <span aria-hidden className="absolute left-3 flex gap-1">
+            <span className="size-2 rounded-full bg-gray-alpha-400" />
+            <span className="size-2 rounded-full bg-gray-alpha-400" />
+            <span className="size-2 rounded-full bg-gray-alpha-400" />
+          </span>
+          <span className="text-gray-800 text-label-13">{conversation.label}</span>
+        </header>
+        {/* The conversation fades out only at an edge with messages scrolled past it. In full it
+            opens at its start; a replay fills from the bottom like a chat. */}
+        <div
+          className="h-[26rem] overflow-y-auto overscroll-contain px-4 [scrollbar-width:none]"
+          key={platform}
+          onScroll={(event) => measure(event.currentTarget)}
+          ref={listRef}
+          style={{
+            maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 35%" : "black"}, ${overflow.below ? "black 65%, transparent" : "black"})`,
+          }}
         >
-          {beats.slice(0, shown).map((beat, i) => {
-            if (beat.kind === "reactions") {
+          <ol
+            className="m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-28 [&>li:first-child]:mt-auto"
+            ref={contentRef}
+          >
+            {beats.slice(0, shown).map((beat, i) => {
+              if (beat.kind === "reactions") {
+                return (
+                  <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
+                    {beat.reactions.map((reaction, index) => (
+                      <span
+                        className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-scale-in motion-reduce:animate-fade-in"
+                        style={{ animationDelay: `${index * 60}ms` }}
+                        key={reaction.emoji}
+                      >
+                        <TextEmoji name={reaction.emoji} />
+                        {reaction.count}
+                      </span>
+                    ))}
+                  </li>
+                );
+              }
+              const author = AUTHORS[beat.author];
+              if (platform === "whatsapp") {
+                return (
+                  <Bubble
+                    attachment={beat.attachment}
+                    author={author}
+                    continued={beat.author === authorOf(beats[i - 1])}
+                    tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
+                    key={i}
+                    time={beat.time}
+                  >
+                    {beat.body}
+                  </Bubble>
+                );
+              }
+              const continued = beat.author === authorOf(beats[i - 1]);
+              if (platform === "teams") {
+                return (
+                  <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
+                    <p>{beat.body}</p>
+                    <Attachment>{beat.attachment}</Attachment>
+                  </TeamsMessage>
+                );
+              }
               return (
-                <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
-                  {beat.reactions.map((reaction, index) => (
-                    <span
-                      className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-scale-in motion-reduce:animate-fade-in"
-                      style={{ animationDelay: `${index * 60}ms` }}
-                      key={reaction.emoji}
-                    >
-                      <TextEmoji name={reaction.emoji} />
-                      {reaction.count}
-                    </span>
-                  ))}
-                </li>
-              );
-            }
-            const author = AUTHORS[beat.author];
-            if (platform === "whatsapp") {
-              return (
-                <Bubble
-                  attachment={beat.attachment}
-                  author={author}
-                  continued={beat.author === authorOf(beats[i - 1])}
-                  tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
-                  key={i}
-                  time={beat.time}
-                >
-                  {beat.body}
-                </Bubble>
-              );
-            }
-            const continued = beat.author === authorOf(beats[i - 1]);
-            if (platform === "teams") {
-              return (
-                <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
-                  <p>{beat.body}</p>
+                <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
+                  <p className="text-gray-1000">{beat.body}</p>
                   <Attachment>{beat.attachment}</Attachment>
-                </TeamsMessage>
+                </ThreadMessage>
               );
-            }
-            return (
-              <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
-                <p className="text-gray-1000">{beat.body}</p>
-                <Attachment>{beat.attachment}</Attachment>
-              </ThreadMessage>
-            );
-          })}
-          {/* During a replay the typing indicator keeps a reserved row and only fades, so its
+            })}
+            {/* During a replay the typing indicator keeps a reserved row and only fades, so its
             coming and going never changes the conversation's height. */}
-          {playing || ended ? (
-            <li
-              aria-hidden={!typing}
-              className={cn(
-                "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
-                typing ? "opacity-100" : "opacity-0",
-              )}
-            >
-              <TypingIndicator author={typingAuthor} />
-            </li>
-          ) : null}
-        </ol>
+            {playing || ended ? (
+              <li
+                aria-hidden={!typing}
+                className={cn(
+                  "pt-3 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
+                  platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
+                  typing ? "opacity-100" : "opacity-0",
+                )}
+              >
+                <TypingIndicator author={typingAuthor} />
+              </li>
+            ) : null}
+          </ol>
+        </div>
       </div>
-      {/* A floating dock: the only raised element, overlapping the conversation's bottom so
-          messages fade out behind it. */}
-      <figcaption className="relative z-10 mx-auto -mt-9 flex w-fit items-center gap-1 rounded-full border border-gray-alpha-400 bg-background-100 p-1 shadow-sm">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              aria-label={`Conversation: ${conversation.label}`}
-              className="rounded-full"
-              prefix={conversation.logo("size-4")}
-              size="small"
-              suffix={<IconChevronDownSmall className="text-gray-900" />}
-              variant="tertiary"
+      {/* The channel picker stays open, so every conversation is one click away. */}
+      <div
+        aria-label="Channel"
+        className="absolute -bottom-6 -left-2 z-10 flex w-60 flex-col p-1.5 material-menu md:-left-6 lg:-bottom-12 lg:-left-12"
+        role="radiogroup"
+      >
+        {CONVERSATIONS.map((c) => {
+          const selected = c.id === platform;
+          return (
+            <button
+              aria-checked={selected}
+              className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-3 text-left text-gray-1000 transition-colors hover:bg-gray-alpha-100 [&>svg]:size-4 [&>svg]:shrink-0"
+              key={c.id}
+              onClick={() => pick(c.id)}
+              role="radio"
+              type="button"
             >
-              <StableLabel
-                current={conversation.label}
-                labels={CONVERSATIONS.map((c) => c.label)}
-              />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-56" side="top">
-            <DropdownMenuRadioGroup onValueChange={pick} value={platform}>
-              {CONVERSATIONS.map((c) => (
-                // The check sits on the right, so the item's own left indicator is hidden.
-                <DropdownMenuRadioItem
-                  className="group gap-2.5 pl-2 text-label-14 [&>span:first-child]:hidden"
-                  key={c.id}
-                  value={c.id}
-                >
-                  {c.logo("size-4")}
-                  {c.label}
-                  <IconCheck className="ml-auto opacity-0 group-data-[state=checked]:opacity-100" />
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <span aria-hidden className="h-4 w-px bg-gray-alpha-400" />
-        <Button
-          className="rounded-full"
-          onClick={playing ? stop : play}
-          prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
-          size="small"
-          variant="tertiary"
-        >
-          <StableLabel
-            current={playing ? "Stop demo" : "Play demo"}
-            labels={["Play demo", "Stop demo"]}
-          />
-        </Button>
-      </figcaption>
+              {c.logo("size-4")}
+              <span className="text-label-14">{c.label}</span>
+              {selected ? <IconCheck className="ml-auto text-gray-1000" size={16} /> : null}
+            </button>
+          );
+        })}
+      </div>
+      <Button
+        className="absolute top-full right-0 mt-4"
+        onClick={playing ? stop : play}
+        prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
+        size="small"
+        variant="tertiary"
+      >
+        <StableLabel
+          current={playing ? "Stop demo" : "Play demo"}
+          labels={["Play demo", "Stop demo"]}
+        />
+      </Button>
     </figure>
   );
 }
