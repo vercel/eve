@@ -9,6 +9,7 @@ on:
       - synchronize
       - labeled
     paths:
+      - ".github/actions/sandbox-image/**"
       - ".github/workflows/bundle-analysis.yml"
       - ".nvmrc"
       - "apps/docs/lib/evals/eve-code-benchmark.json"
@@ -16,6 +17,7 @@ on:
       - "apps/fixtures/weather-agent/**"
       - "docs/**"
       - "e2e/fixtures/agent-tools-sandbox/**"
+      - "e2e/fixtures/e2e-config/**"
       - "package.json"
       - "packages/eve/**"
       - "packages/eve-catalog/**"
@@ -33,6 +35,7 @@ on:
       - "scripts/nitro-bundle-report-budget.mjs"
       - "scripts/nitro-bundle-report.mjs"
       - "scripts/package-publish-report.mjs"
+      - "scripts/sandbox-image-tag.mjs"
 
 concurrency:
   group: weather-agent-bundle-analysis-${{ github.event.pull_request.number || github.ref }}
