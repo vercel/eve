@@ -23,8 +23,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { SiWhatsapp } from "@icons-pack/react-simple-icons";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
+import { monochromeLogo } from "./control-visual";
 
 type Platform = "slack" | "teams" | "whatsapp";
 
@@ -374,19 +376,21 @@ const CONVERSATIONS: {
   {
     id: "slack",
     label: "Software Factory",
-    logo: (className) => logos.slack({ "aria-hidden": true, className }),
+    logo: (className) =>
+      logos.slack({ "aria-hidden": true, className: cn(className, monochromeLogo) }),
     beats: SLACK_BEATS,
   },
   {
     id: "teams",
     label: "Operations",
-    logo: (className) => logos.teams({ "aria-hidden": true, className }),
+    logo: (className) =>
+      logos.teams({ "aria-hidden": true, className: cn(className, monochromeLogo) }),
     beats: TEAMS_BEATS,
   },
   {
     id: "whatsapp",
     label: "Customer Support",
-    logo: (className) => logos.whatsapp({ "aria-hidden": true, className }),
+    logo: (className) => <SiWhatsapp aria-hidden className={className} />,
     beats: WHATSAPP_BEATS,
   },
 ];
