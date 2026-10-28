@@ -221,7 +221,7 @@ export function WhyEve(): JSX.Element {
     <HomeSection
       id="why-eve"
       lede="Customize at every layer, from the harness to the UI to every agent run."
-      title="Why use eve?"
+      title="Own your intelligence"
     >
       <div className="grid gap-x-8 gap-y-14 lg:grid-cols-12">
         <Reason
@@ -237,22 +237,22 @@ export function WhyEve(): JSX.Element {
         <Reason
           href="/docs/guides/frontend/overview"
           linkLabel="Build a chat UI"
-          title="Build rich agent UIs"
+          title="Own your agent UI"
           visual={<AgentUi />}
           visualLabel="A data agent answering in chat with a rendered bar chart of weekly signups"
         >
-          Works natively with Next.js, Nuxt, SvelteKit, and TanStack. Stream chat, render real UI,
-          and ship agent and app in one deploy.
+          Build rich agent UIs natively in Next.js, Nuxt, SvelteKit, and TanStack. Ship agent and
+          app in one deploy.
         </Reason>
         <Reason
           href="/docs/observability/instrumentation"
           linkLabel="Set up tracing"
-          title="Govern and observe every run"
+          title="Own your data"
           visual={<AgentRun />}
           visualLabel="An example agent run with step timings and token usage, in the style of Vercel Agent Runs"
         >
-          Every session, model call, and tool call recorded, with OpenTelemetry traces. Credentials
-          never reach the model.
+          Govern and observe every run with OpenTelemetry traces of each model and tool call.
+          Credentials never reach the model.
         </Reason>
       </div>
     </HomeSection>
