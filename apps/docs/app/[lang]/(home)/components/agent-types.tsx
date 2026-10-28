@@ -44,13 +44,19 @@ const FACTORY_STATIONS = [
     result: "Pushed eve/eng-142, 6 checks passed",
   },
   { name: "reviewer", running: "Reviewing the change", result: "Approved after 1 fix" },
+  {
+    name: "open_pr",
+    running: "Opening a draft pull request",
+    result: "Opened draft #318 on acme/storefront",
+  },
 ];
 
 /**
  * How long each stage of the demo waits before it shows: Sam's report, the foreman working,
- * its reply with the ticket, each station running then finishing, then the draft pull request.
+ * its reply with the ticket, each station running then finishing, opening the pull request,
+ * then its card.
  */
-const FACTORY_DEMO = [500, 700, 1200, 1000, 900, 900, 1100, 900, 600];
+const FACTORY_DEMO = [500, 700, 1200, 1000, 900, 900, 1100, 900, 1000, 600];
 
 const SAM: Author = { name: "Sam" };
 const FOREMAN: Author = { name: "foreman", icon: Factory };
@@ -66,7 +72,7 @@ const foremanAvatar = "bg-purple-700";
 function SoftwareFactoryPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? FACTORY_DEMO.length;
-  const reviewing = shown >= 9;
+  const reviewing = shown >= 10;
   return (
     <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
       {shown >= 1 ? (
