@@ -602,9 +602,9 @@ const tailScale = 0.625;
 /**
  * The chat-bubble tail from vercel.com/agents (front's marketing-shared `ai/tail`), with the
  * bubble fill as a prop. It overlaps the bubble's bottom corner: a window-colored square hides
- * the corner, then the bubble's curve flows into the tail with the same hairline.
+ * the corner, then the bubble's curve flows into the tail, with the same hairline when bordered.
  */
-function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
+function Tail({ fill, flipped, bordered }: { fill: string; flipped?: boolean; bordered: boolean }) {
   return (
     <svg
       aria-hidden
@@ -626,7 +626,7 @@ function Tail({ fill, flipped }: { fill: string; flipped?: boolean }) {
         fill={fill}
         fillRule="evenodd"
         paintOrder="stroke fill"
-        stroke="var(--tail-border)"
+        stroke={bordered ? "var(--tail-border)" : undefined}
         strokeWidth={2 / tailScale}
       />
     </svg>
@@ -653,7 +653,7 @@ function ReadTicks() {
  */
 function Quote({ author, children }: { author: string; children: string }) {
   return (
-    <span className="-mx-1.5 mb-1 block rounded-[8px] border-green-700 border-l-4 bg-green-300 px-2 py-1">
+    <span className="-mx-1.5 mb-1 block rounded-[8px] border-green-700 border-l-4 bg-green-400 px-2 py-1">
       <span className="block font-medium text-copy-13 text-green-900">{author}</span>
       <span className="block truncate text-copy-13 text-gray-900">{children}</span>
     </span>
@@ -715,15 +715,19 @@ function Bubble({
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
+          "relative max-w-[min(80%,20rem)] text-copy-14 text-gray-1000",
           // The agent's bubbles share one width, the reply width the Slack and Teams chats use too.
-          outgoing ? "bg-green-200" : "w-full bg-background-100",
+          // People's green bubbles stand off the white window without a border.
+          outgoing
+            ? "bg-green-300"
+            : "w-full bg-background-100 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
         )}
         style={{ borderRadius: bubbleRadius }}
       >
         {tail ? (
           <Tail
-            fill={outgoing ? "var(--ds-green-200)" : "var(--ds-background-100)"}
+            bordered={!outgoing}
+            fill={outgoing ? "var(--ds-green-300)" : "var(--ds-background-100)"}
             flipped={outgoing}
           />
         ) : null}
