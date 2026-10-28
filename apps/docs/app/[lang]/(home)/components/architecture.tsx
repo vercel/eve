@@ -199,7 +199,7 @@ export function ArchitectureDiagram() {
     >
       <div>
         {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
-        <div className="flex items-center gap-4 text-copy-14">
+        <div className="flex items-center justify-center gap-4 text-copy-14">
           <button
             type="button"
             onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
