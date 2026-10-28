@@ -8,7 +8,6 @@ import {
   SiWhatsapp,
 } from "@icons-pack/react-simple-icons";
 import {
-  IconAcronymTs,
   IconAgents,
   IconCheck,
   IconLinked,
@@ -185,8 +184,8 @@ function TenantCapabilities() {
 }
 
 // Three runs, each along a line that fades out at both ends: fully agentic, fully
-// deterministic, and both in one run. Deterministic steps are your TypeScript in square chips;
-// agentic steps are round, each in a ring for its loop.
+// deterministic, and both in one run. Deterministic steps are your code, in square chips;
+// agentic steps are round.
 type Step = "agent" | "code";
 const RUNS: Step[][] = [
   ["agent", "agent", "agent", "agent"],
@@ -195,7 +194,22 @@ const RUNS: Step[][] = [
 ];
 const runY = (i: number) => 42 + i * 48;
 const stepX = (i: number) => 70 + i * 60;
-const run = { x0: 28, x1: 292, ring: 15 };
+const run = { x0: 28, x1: 292 };
+
+// A `</>` code glyph in the docs icons' 16px, 1.5px-stroke style; the set doesn't include one.
+function CodeGlyph() {
+  return (
+    <svg aria-hidden fill="none" viewBox="0 0 16 16">
+      <path
+        d="M5 4.5 1.5 8 5 11.5M11 4.5 14.5 8 11 11.5M9.25 2.75l-2.5 10.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
 
 const chip =
   "absolute flex -translate-1/2 items-center justify-center bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)";
@@ -203,7 +217,7 @@ const chip =
 function DeterminismRuns() {
   return (
     <Visual
-      caption="Three runs: a fully agentic loop of model steps, a deterministic workflow of TypeScript steps, and a workflow with one agentic step among its TypeScript steps."
+      caption="Three runs: a fully agentic loop of model steps, a deterministic workflow of code steps, and a workflow with one agentic step among its code steps."
       scene={
         <>
           <defs>
@@ -221,22 +235,8 @@ function DeterminismRuns() {
               <stop offset="1" stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {RUNS.map((steps, i) => (
-            <g key={i}>
-              <path d={`M${run.x0} ${runY(i)}H${run.x1}`} stroke="url(#determinism-run)" />
-              {steps.map((step, j) =>
-                step === "agent" ? (
-                  <circle
-                    cx={stepX(j)}
-                    cy={runY(i)}
-                    fill="var(--ds-background-200)"
-                    key={j}
-                    r={run.ring}
-                    stroke="var(--ds-gray-alpha-500)"
-                  />
-                ) : null,
-              )}
-            </g>
+          {RUNS.map((_, i) => (
+            <path d={`M${run.x0} ${runY(i)}H${run.x1}`} key={i} stroke="url(#determinism-run)" />
           ))}
         </>
       }
@@ -248,12 +248,12 @@ function DeterminismRuns() {
               chip,
               step === "agent"
                 ? "size-[6.5cqw] rounded-full [&>svg]:size-[50%]"
-                : "size-[6.5cqw] rounded-[1.2cqw] [&>svg]:size-[55%]",
+                : "size-[6.5cqw] rounded-[1.2cqw] [&>svg]:size-[50%]",
             )}
             key={`${i}-${j}`}
             style={{ left: pct(stepX(j), view.width), top: pct(runY(i), view.height) }}
           >
-            {step === "agent" ? <IconSparkles /> : <IconAcronymTs />}
+            {step === "agent" ? <IconSparkles /> : <CodeGlyph />}
           </span>
         )),
       )}
