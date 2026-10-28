@@ -180,33 +180,6 @@ When upgrading, use each operation's terminal event and inspect its `outcome` in
 
 The OpenTelemetry trace schema remains version 4: span names, attributes, and span events are unchanged.
 
-### Find a turn's first model run
-
-A turn can make several model runs: after tool calls, and when a message steers the turn. Identify the first by its run ID, not by the shape of its input. A steering message makes a later run's input end with a user message, just like the first run's.
-
-- A retry repeats `model.started` with the same `runId` and a higher `attempt`, so retries of the first run still count as first.
-- Tool continuations and steering start new runs in the same turn.
-
-In a hook, ask the session view, which works on any instance:
-
-```ts
-import { runs } from "eve/events";
-import { defineHook } from "eve/hooks";
-
-export default defineHook({
-  events: {
-    "model.started"(event, ctx) {
-      const turnId = runs(ctx.view).find((run) => run.runId === event.data.runId)?.turnId;
-      if (turnId === undefined) return;
-      const isFirstRun = runs(ctx.view, { turnId })[0]?.runId === event.data.runId;
-      if (isFirstRun) console.log("first model run", turnId, event.data.attempt);
-    },
-  },
-});
-```
-
-In instrumentation handlers, `scope.runId`, `scope.attempt`, and `scope.turnId` carry the same identities. Remembering the first `runId` seen for each `(sessionId, turnId)` works within one instance; use the hook when another instance can handle the turn's later runs.
-
 Handlers from different files run concurrently and are failure-isolated. Do
 not depend on execution order. Use `flush` to drain buffered records and
 `shutdown` to release resources.
