@@ -1,4 +1,10 @@
-import { SiAnthropic, SiNextdotjs, SiNuxt, SiSvelte } from "@icons-pack/react-simple-icons";
+import {
+  SiAnthropic,
+  SiGooglegemini,
+  SiNuxt,
+  SiSvelte,
+  SiVercel,
+} from "@icons-pack/react-simple-icons";
 import {
   IconCheck,
   IconCross,
@@ -6,20 +12,10 @@ import {
   IconShieldCheck,
   IconWrench,
 } from "@vercel/geistdocs/assets/icons";
-import { Database, KeyRound, UserRound } from "lucide-react";
-import type { JSX } from "react";
+import { LogoNextJs } from "@vercel/geistdocs/assets/logos";
+import type { ComponentProps, JSX } from "react";
 import { cn } from "@/lib/utils";
-import {
-  FeatureCard,
-  GrayBadge,
-  Label,
-  LimitLine,
-  RuledList,
-  ruledRow,
-  Visual,
-  pct,
-  view,
-} from "./control-visual";
+import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "./control-visual";
 import { HomeSection } from "./section";
 
 const TOOLS = [
@@ -64,7 +60,7 @@ const sliver = 22;
 const APPS = [
   { name: "SvelteKit", Logo: SiSvelte, left: 5, back: true },
   { name: "Nuxt", Logo: SiNuxt, left: 5 + sliver, back: true },
-  { name: "Next.js", Logo: SiNextdotjs, left: 5 + 2 * sliver, back: false },
+  { name: "Next.js", Logo: LogoNextJs, left: 5 + 2 * sliver, back: false },
 ];
 
 function AgentUi() {
@@ -91,9 +87,14 @@ function AgentUi() {
             </div>
             <div className="flex flex-col gap-[0.5em]">
               {/* The fill hides overlapping contours and the inner half of the stroke, leaving
-                  a 0.5px outer outline. The logo gets the same treatment as the name. */}
+                  a 0.5px outer outline. Back windows' logos get the same treatment as the name;
+                  the front window shows the filled Next.js mark as the visual's accent. */}
               <div className="flex items-center gap-[0.35em] whitespace-nowrap font-bold text-[1.25em] text-gray-700 tracking-[-0.01em] [-webkit-text-fill-color:var(--ds-background-100)] [-webkit-text-stroke:1px_currentColor] [paint-order:stroke_fill]">
-                <Logo className="size-[0.9em] shrink-0 overflow-visible fill-background-100 stroke-current [paint-order:stroke_fill] [stroke-width:1px] [vector-effect:non-scaling-stroke] [&_path]:[vector-effect:non-scaling-stroke]" />
+                {back ? (
+                  <Logo className="size-[0.9em] shrink-0 overflow-visible fill-background-100 stroke-current [paint-order:stroke_fill] [stroke-width:1px] [vector-effect:non-scaling-stroke] [&_path]:[vector-effect:non-scaling-stroke]" />
+                ) : (
+                  <Logo className="size-[0.9em] shrink-0 text-gray-1000" />
+                )}
                 {name}
               </div>
               <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
@@ -118,78 +119,196 @@ function AgentUi() {
   );
 }
 
-// Your runtime and the model on either side of a divider: credentials, run data, and user
-// access stay on your side with the agent, and one line crosses to the model.
-const divider = { x: 232, y1: 28, y2: 156 };
-const midY = 92;
-const agentNode = { x: 144, width: 56, height: 24 };
-const modelX = 272;
-// Where the kept items' badges end, right-aligned, and their lines to the agent begin.
-const keptEnd = 118;
-const KEPT = [
-  { name: "credentials", Icon: KeyRound, y: midY - 30 },
-  { name: "run data", Icon: Database, y: midY },
-  { name: "access", Icon: UserRound, y: midY + 30 },
+// The installed simple-icons React package has no OpenAI mark, so its path comes from
+// simple-icons directly.
+function SiOpenai(props: ComponentProps<"svg">) {
+  return (
+    <svg fill="currentColor" viewBox="0 0 24 24" {...props}>
+      <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" />
+    </svg>
+  );
+}
+
+const PROVIDERS = [
+  { name: "OpenAI", Logo: SiOpenai },
+  { name: "Anthropic", Logo: SiAnthropic },
+  { name: "Google Gemini", Logo: SiGooglegemini },
 ];
+
+// Your data drifts through the channel from right to left as rounded squares, in focus inside
+// your runtime's frame: they grow and darken toward its middle and shrink and fade outside it.
+// The models stack above and Vercel, the host, below, each running past its edge of the frame
+// and fading out before it, like the Next.js window; the data passes between them and touches
+// neither.
+const center = { x: 160, y: 86 };
+const stack = { x: 52, width: 216 };
+const modelBottom = 50;
+const hostTop = 122;
+
+// Viewfinder corners framing the channel between the stacks, each arm fading out from its
+// corner.
+const capture = { x1: stack.x, x2: stack.x + stack.width, y1: modelBottom + 8, y2: hostTop - 8 };
+const arm = { x: 24, y: 14 };
+const ARMS = [
+  [capture.x1, capture.y1, 1, 1],
+  [capture.x2, capture.y1, -1, 1],
+  [capture.x1, capture.y2, 1, -1],
+  [capture.x2, capture.y2, -1, -1],
+].flatMap(([x, y, dx, dy]) => [
+  { id: `why-eve-arm-${x}-${y}-x`, x1: x, y1: y, x2: x + dx * arm.x, y2: y },
+  { id: `why-eve-arm-${x}-${y}-y`, x1: x, y1: y, x2: x, y2: y + dy * arm.y },
+]);
+
+// A seeded random scatter: the same squares on every render, placed loosely enough that no two
+// line up, never overlapping, and clear of the frame's corners.
+function seededRandom(seed: number) {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const particleCount = 60;
+const PARTICLES: { x: number; y: number; size: number; opacity: number; angle: number }[] = [];
+const random = seededRandom(7);
+for (let attempt = 0; PARTICLES.length < particleCount && attempt < 2000; attempt++) {
+  const x = -4 + random() * (view.width + 8);
+  const y = center.y + 5 * Math.sin((x / view.width) * Math.PI * 1.4 + 0.4) + (random() - 0.5) * 42;
+  const focus = Math.exp(-(((x - center.x) / 72) ** 2));
+  const size = (2.5 + 7.5 * focus) * (0.8 + random() * 0.4);
+  const nearCorner =
+    Math.min(Math.abs(x - capture.x1), Math.abs(x - capture.x2)) < arm.x + size &&
+    Math.min(Math.abs(y - capture.y1), Math.abs(y - capture.y2)) < arm.y + size;
+  const clear = PARTICLES.every(
+    (other) => Math.hypot(other.x - x, other.y - y) > (other.size + size) * 0.65 + 1,
+  );
+  if (nearCorner || !clear) continue;
+  PARTICLES.push({
+    x: Math.round(x * 100) / 100,
+    y: Math.round(y * 100) / 100,
+    size: Math.round(size * 100) / 100,
+    opacity: Math.round((0.1 + 0.9 * focus) * 100) / 100,
+    angle: Math.round((random() - 0.5) * 60),
+  });
+}
 
 function DataBoundary() {
   return (
     <Visual
-      caption="On your side of the line: the agent with its credentials, run data, and per-user access. Across it: the model, Anthropic here."
+      caption="Data drifts through your runtime from right to left as rounded squares, in focus inside its frame. The models from OpenAI, Anthropic, and Google Gemini stack above and Vercel, the host, below; the data touches neither."
       scene={
         <>
-          {KEPT.map(({ name, y }) => (
-            <path
-              d={`M${keptEnd + 4} ${y}C${keptEnd + 18} ${y} ${agentNode.x - 14} ${midY} ${agentNode.x} ${midY}`}
-              key={name}
-              stroke="var(--ds-gray-alpha-400)"
-            />
-          ))}
+          <defs>
+            <linearGradient
+              gradientUnits="userSpaceOnUse"
+              id="why-eve-model-fade"
+              x1={0}
+              x2={0}
+              y1={modelBottom}
+              y2={0}
+            >
+              <stop stopColor="white" />
+              <stop offset="0.3" stopColor="white" />
+              <stop offset="1" stopColor="white" stopOpacity="0" />
+            </linearGradient>
+            <mask id="why-eve-model">
+              <rect fill="url(#why-eve-model-fade)" height={view.height} width={view.width} />
+            </mask>
+            <linearGradient
+              gradientUnits="userSpaceOnUse"
+              id="why-eve-host-fade"
+              x1={0}
+              x2={0}
+              y1={hostTop}
+              y2={view.height}
+            >
+              <stop stopColor="white" />
+              <stop offset="0.3" stopColor="white" />
+              <stop offset="1" stopColor="white" stopOpacity="0" />
+            </linearGradient>
+            <mask id="why-eve-host">
+              <rect fill="url(#why-eve-host-fade)" height={view.height} width={view.width} />
+            </mask>
+            {ARMS.map(({ id, x1, x2, y1, y2 }) => (
+              <linearGradient
+                gradientUnits="userSpaceOnUse"
+                id={id}
+                key={id}
+                x1={x1}
+                x2={x2}
+                y1={y1}
+                y2={y2}
+              >
+                <stop stopColor="var(--ds-gray-1000)" />
+                <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+              </linearGradient>
+            ))}
+          </defs>
           <rect
-            fill="var(--ds-gray-200)"
-            height={agentNode.height}
-            rx={4}
-            stroke="var(--ds-gray-alpha-500)"
-            width={agentNode.width}
-            x={agentNode.x}
-            y={midY - agentNode.height / 2}
+            fill="var(--ds-background-100)"
+            height={modelBottom + 8}
+            mask="url(#why-eve-model)"
+            rx={8}
+            stroke="var(--ds-gray-alpha-400)"
+            width={stack.width}
+            x={stack.x}
+            y={-8}
           />
-          <path
-            d={`M${agentNode.x + agentNode.width} ${midY}H${modelX - 16}`}
-            stroke="var(--ds-gray-alpha-600)"
+          <rect
+            fill="var(--ds-background-100)"
+            height={view.height - hostTop + 8}
+            mask="url(#why-eve-host)"
+            rx={8}
+            stroke="var(--ds-gray-alpha-400)"
+            width={stack.width}
+            x={stack.x}
+            y={hostTop}
           />
-          <LimitLine id="why-eve-runtime" x={divider.x} y1={divider.y1} y2={divider.y2} />
+          <g fill="var(--ds-gray-1000)">
+            {PARTICLES.map(({ angle, opacity, size, x, y }) => (
+              <rect
+                fillOpacity={opacity}
+                height={size}
+                key={`${x}-${y}`}
+                rx={size * 0.22}
+                transform={`rotate(${angle} ${x} ${y})`}
+                width={size}
+                x={x - size / 2}
+                y={y - size / 2}
+              />
+            ))}
+          </g>
+          {ARMS.map(({ id, x1, x2, y1, y2 }) => (
+            <path d={`M${x1} ${y1}L${x2} ${y2}`} key={id} stroke={`url(#${id})`} />
+          ))}
         </>
       }
     >
       <div className="select-none text-[4.4cqw]">
-        {KEPT.map(({ Icon, name, y }) => (
-          <span
-            className="absolute -translate-x-full -translate-y-1/2"
-            key={name}
-            style={{ left: pct(keptEnd, view.width), top: pct(y, view.height) }}
-          >
-            <GrayBadge icon={<Icon aria-hidden />}>{name}</GrayBadge>
-          </span>
-        ))}
         <span
-          className="absolute -translate-1/2 font-mono text-[0.625em] text-gray-1000 leading-none"
+          className="absolute flex -translate-1/2 items-center gap-[1.25em] text-gray-1000"
           style={{
-            left: pct(agentNode.x + agentNode.width / 2, view.width),
-            top: pct(midY, view.height),
+            left: pct(stack.x + stack.width / 2, view.width),
+            top: pct(modelBottom / 2, view.height),
           }}
         >
-          agent
+          {PROVIDERS.map(({ Logo, name }) => (
+            <Logo aria-label={name} className="size-[1em]" key={name} role="img" />
+          ))}
         </span>
-        <SiAnthropic
-          aria-hidden
-          className="absolute size-[1.5em] -translate-1/2 text-gray-1000"
-          style={{ left: pct(modelX, view.width), top: pct(midY, view.height) }}
+        <SiVercel
+          aria-label="Vercel"
+          className="absolute size-[0.75em] -translate-1/2 text-gray-1000"
+          role="img"
+          style={{
+            left: pct(stack.x + stack.width / 2, view.width),
+            top: pct((hostTop + view.height) / 2, view.height),
+          }}
         />
       </div>
-      <Label x={(keptEnd + agentNode.x + agentNode.width) / 2 - 24} y={divider.y1}>
-        Your runtime
-      </Label>
     </Visual>
   );
 }
@@ -229,8 +348,8 @@ export function WhyEve(): JSX.Element {
           title="Own your data"
           visual={<DataBoundary />}
         >
-          You own the runtime and decide where run data lives. Each user reaches only what they're
-          granted, and credentials never reach the model.
+          Your agent runs in a runtime you own, right next to your data. Vercel never sees it, you
+          decide who gets access, and nothing is stored.
         </FeatureCard>
       </ul>
     </HomeSection>
