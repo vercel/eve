@@ -32,11 +32,25 @@ import { AppWindow, HomeSection, PrefetchLink } from "./section";
 const logoClassName = "size-3.5 shrink-0 grayscale";
 
 const FACTORY_STATIONS = [
-  { name: "classifier", result: "Bug, small scope" },
-  { name: "analyst", result: "Traced it to the cart merge on sign-in" },
-  { name: "implementer", result: "Pushed eve/eng-142, 6 checks passed" },
-  { name: "reviewer", result: "Approved after 1 fix" },
+  { name: "classifier", running: "Classifying the report", result: "Bug, small scope" },
+  {
+    name: "analyst",
+    running: "Tracing the cause",
+    result: "Traced it to the cart merge on sign-in",
+  },
+  {
+    name: "implementer",
+    running: "Writing the fix",
+    result: "Pushed eve/eng-142, 6 checks passed",
+  },
+  { name: "reviewer", running: "Reviewing the change", result: "Approved after 1 fix" },
 ];
+
+/**
+ * How long each stage of the demo waits before it shows: Sam's report, the foreman working,
+ * its reply with the ticket, each station running then finishing, then the draft pull request.
+ */
+const FACTORY_DEMO = [500, 700, 1200, 1000, 900, 900, 1100, 900, 600];
 
 const SAM: Author = { name: "Sam" };
 const FOREMAN: Author = { name: "foreman", icon: Factory };
@@ -46,37 +60,62 @@ const foremanAvatar = "bg-purple-700";
 
 /**
  * A bug a teammate reports in Slack becomes a Linear ticket, which the factory picks up on its
- * own and works through its stations into a draft pull request.
+ * own and works through its stations into a draft pull request. In the demo it builds up
+ * stage by stage (`stage` counts the stages shown); otherwise it shows in full.
  */
-function SoftwareFactoryPreview() {
+function SoftwareFactoryPreview({ stage }: { stage?: number }) {
+  const demo = stage !== undefined;
+  const shown = stage ?? FACTORY_DEMO.length;
+  const reviewing = shown >= 9;
   return (
     <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
-      <SlackMessage author={SAM} avatarColor={foremanAvatar} continued={false} time="10:02 AM">
-        <p>Saved carts disappear after I sign in at checkout.</p>
-      </SlackMessage>
-      <SlackMessage author={FOREMAN} avatarColor={foremanAvatar} continued={false} time="10:02 AM">
-        <p>Filed it and picked it up.</p>
-        <Card
-          icon={logos.linear({ "aria-hidden": true })}
-          meta="Reported by Sam · In progress"
-          title="ENG-142 Saved carts disappear after sign-in"
-        />
-        <ul className="m-0 mt-2 flex list-none flex-col gap-0.5 p-0">
-          {FACTORY_STATIONS.map((station) => (
-            <li className="flex items-baseline gap-3 text-copy-13" key={station.name}>
-              <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
-                {station.name}
-              </code>
-              <span className="truncate text-gray-900">{station.result}</span>
-            </li>
-          ))}
-        </ul>
-        <Card
-          icon={<GitPullRequestDraft />}
-          meta="acme/storefront#318 · draft, ready for review"
-          title="fix(cart): keep guest items after sign-in"
-        />
-      </SlackMessage>
+      {shown >= 1 ? (
+        <SlackMessage
+          author={SAM}
+          avatarColor={foremanAvatar}
+          className={cn(demo && messageIn)}
+          continued={false}
+          time="10:02 AM"
+        >
+          <p>Saved carts disappear after I sign in at checkout.</p>
+        </SlackMessage>
+      ) : null}
+      {shown === 2 ? (
+        <li className={cn("pt-3 pl-[2.375rem]", fadeIn)}>
+          <TypingIndicator author={FOREMAN} />
+        </li>
+      ) : null}
+      {shown >= 3 ? (
+        <SlackMessage
+          author={FOREMAN}
+          avatarColor={foremanAvatar}
+          className={cn(demo && agentMessageIn)}
+          continued={false}
+          time="10:02 AM"
+        >
+          <p>Filed it and picked it up.</p>
+          <Card
+            icon={logos.linear({ "aria-hidden": true })}
+            meta={`Reported by Sam · ${reviewing ? "In review" : "In progress"}`}
+            title="ENG-142 Saved carts disappear after sign-in"
+          />
+          <RunSteps
+            className="mt-2"
+            demo={demo}
+            ran={demo ? shown - 4 : undefined}
+            steps={FACTORY_STATIONS}
+          />
+          {reviewing ? (
+            <div className={cn(demo && fadeIn)}>
+              <Card
+                icon={<GitPullRequestDraft />}
+                meta="acme/storefront#318 · draft, ready for review"
+                title="fix(cart): keep guest items after sign-in"
+              />
+            </div>
+          ) : null}
+        </SlackMessage>
+      ) : null}
     </ol>
   );
 }
@@ -86,16 +125,16 @@ const brainAvatar = "bg-teal-700";
 
 const BRAIN_STEPS = [
   {
-    tool: "list_models",
+    name: "list_models",
     running: "Finding models",
     result: "Found customers, orders, and payments",
   },
   {
-    tool: "get_model",
+    name: "get_model",
     running: "Reading the orders model",
     result: "Read the docs for the orders model",
   },
-  { tool: "query_sql", running: "Running a query", result: "Ran 1 query, returned 3 rows" },
+  { name: "query_sql", running: "Running a query", result: "Ran 1 query, returned 3 rows" },
 ];
 
 const BRAIN_ROWS = [
@@ -120,6 +159,51 @@ const FOLLOW_UP = 10;
 
 // Entrances run only in the demo; shown in full, the thread is simply there.
 const fadeIn = "animate-command-fade-in";
+// The hero's message entrances: people's from 75%, the agent's wider replies from 90%.
+const messageIn = "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in";
+const agentMessageIn = `${messageIn} [--bubble-from:0.9]`;
+
+/**
+ * Tools or stations that each show running, shimmering, a stage before they finish. `ran`
+ * counts the demo's stages since the first one started; unset, they're all done.
+ */
+function RunSteps({
+  steps,
+  ran = Number.POSITIVE_INFINITY,
+  demo,
+  className,
+}: {
+  steps: { name: string; running: string; result: string }[];
+  ran?: number;
+  demo: boolean;
+  className?: string;
+}) {
+  return (
+    <ul className={cn("m-0 flex list-none flex-col gap-0.5 p-0", className)}>
+      {steps.map((step, index) => {
+        if (ran < index) return null;
+        const done = ran >= index + 1;
+        return (
+          <li
+            className={cn("flex items-baseline gap-3 text-copy-13", demo && fadeIn)}
+            key={step.name}
+          >
+            <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
+              {step.name}
+            </code>
+            {/* Keyed by state, so the result fades in over the running label. */}
+            <span
+              className={cn("truncate", done ? "text-gray-900" : "thinking-loader", demo && fadeIn)}
+              key={done ? "done" : "running"}
+            >
+              {done ? step.result : step.running}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 /**
  * The hero's Slack thread, with the company brain on its own avatar color. In the demo it
@@ -165,9 +249,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
           <SlackMessage
             author={DANA}
             avatarColor={brainAvatar}
-            className={cn(
-              demo && "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
-            )}
+            className={cn(demo && messageIn)}
             continued={false}
             time="9:41 AM"
           >
@@ -188,40 +270,17 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             className={cn(
               // Dana's questions run a line each; the agent's answer keeps to its table's width.
               "[--reply-width:24rem]",
-              demo &&
-                "origin-top-left [--bubble-from:0.9] motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+              demo && agentMessageIn,
             )}
             continued={false}
             time="9:41 AM"
           >
-            <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
-              {BRAIN_STEPS.map((step, index) => {
-                // Each tool shows running a stage before it finishes.
-                if (shown < 3 + index) return null;
-                const done = shown >= 4 + index;
-                return (
-                  <li
-                    className={cn("flex items-baseline gap-3 text-copy-13", demo && fadeIn)}
-                    key={step.tool}
-                  >
-                    <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
-                      {step.tool}
-                    </code>
-                    {/* Keyed by state, so the result fades in over the running label. */}
-                    <span
-                      className={cn(
-                        "truncate",
-                        done ? "text-gray-900" : "thinking-loader",
-                        demo && fadeIn,
-                      )}
-                      key={done ? "done" : "running"}
-                    >
-                      {done ? step.result : step.running}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+            <RunSteps
+              className="mt-1"
+              demo={demo}
+              ran={demo ? shown - 3 : undefined}
+              steps={BRAIN_STEPS}
+            />
             {shown >= 7 ? (
               <p className={cn("mt-2", demo && fadeIn)}>
                 Repeat customers placed 44% of orders in October, up from 38% in August.
@@ -292,9 +351,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
           <SlackMessage
             author={DANA}
             avatarColor={brainAvatar}
-            className={cn(
-              demo && "origin-top-left motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
-            )}
+            className={cn(demo && messageIn)}
             continued={false}
             time="9:44 AM"
           >
@@ -580,7 +637,8 @@ const USE_CASES: UseCase[] = [
         text: "Every task ends in a reviewed draft on your repository.",
       },
     ],
-    preview: () => <SoftwareFactoryPreview />,
+    demo: FACTORY_DEMO,
+    preview: (stage) => <SoftwareFactoryPreview stage={stage} />,
   },
   {
     id: "agentic-apps",
