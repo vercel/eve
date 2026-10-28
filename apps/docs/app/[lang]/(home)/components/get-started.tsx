@@ -4,28 +4,19 @@ import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import type { JSX } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
-import { EveLogoShader } from "./eve-logo-shader";
 import { PrefetchLink } from "./section";
 
 export function GetStarted(): JSX.Element {
   return (
-    <section
-      aria-labelledby="get-started-title"
-      className="relative isolate pt-16 pb-24 sm:pb-40 md:pt-48"
-    >
-      <div className="relative z-10 flex flex-col gap-8 text-heading-40 sm:text-heading-48 md:flex-row md:items-center md:justify-between lg:text-heading-56">
-        {/* The shader sizes itself in em and centers on the heading. On desktop it's scaled
-            down to about the heading's width, so it stays behind it on the left. */}
-        <div className="relative">
-          <div className="md:text-[0.62em]">
-            <EveLogoShader />
-          </div>
-          <h2 className="relative text-balance text-gray-1000" id="get-started-title">
-            Build your first agent today
-          </h2>
-        </div>
-        {/* The row sets heading type for the shader; the actions take back their own. */}
-        <div className="relative flex flex-wrap gap-3 leading-normal tracking-normal">
+    <section aria-labelledby="get-started-title" className="pt-16 pb-24 sm:pt-24 sm:pb-40">
+      <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
+        <h2
+          className="text-balance text-heading-40 text-gray-1000 sm:text-heading-48 lg:text-heading-56"
+          id="get-started-title"
+        >
+          Build your first agent today
+        </h2>
+        <div className="flex flex-wrap gap-3">
           <Button
             className="w-fit rounded-full text-base"
             href="https://vercel.com/new/agent"
