@@ -420,15 +420,20 @@ function authorOf(beat: Beat | undefined): AuthorKey | undefined {
   return beat?.kind === "message" ? beat.author : undefined;
 }
 
-function Avatar({ author, round }: { author: Author; round: boolean }) {
+// Agent avatars take each platform's accent: Slack's aubergine purple, Teams' blue-violet.
+const AGENT_AVATAR = {
+  slack: "border-transparent bg-purple-700 text-white",
+  teams: "border-transparent bg-blue-700 text-white",
+};
+
+function Avatar({ author, platform }: { author: Author; platform: keyof typeof AGENT_AVATAR }) {
   const Icon = author.icon;
   return (
     <span
       aria-hidden
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center border border-gray-alpha-400 font-medium text-label-14",
-        round ? "rounded-full" : "rounded-md",
-        Icon ? "bg-black text-white" : "bg-background-100 text-gray-1000",
+        "flex size-9 shrink-0 items-center justify-center rounded-md border border-gray-alpha-400 font-medium text-label-14",
+        Icon ? AGENT_AVATAR[platform] : "bg-background-100 text-gray-1000",
       )}
     >
       {Icon ? <Icon className="size-4" /> : author.name[0]}
@@ -472,7 +477,7 @@ function ThreadMessage({
         continued ? "pt-2" : "pt-4",
       )}
     >
-      {continued ? <span /> : <Avatar author={author} round={false} />}
+      {continued ? <span /> : <Avatar author={author} platform="slack" />}
       <div className="min-w-0 max-w-[20rem] text-copy-14 text-gray-1000">
         {continued ? (
           <span className="sr-only">{author.name}</span>
@@ -520,7 +525,7 @@ function TeamsMessage({
         continued ? "pt-1" : "pt-4",
       )}
     >
-      {isAgent ? continued ? <span /> : <Avatar author={author} round={false} /> : null}
+      {isAgent ? continued ? <span /> : <Avatar author={author} platform="teams" /> : null}
       <div className={cn("min-w-0", isAgent ? "flex flex-col items-start" : "contents")}>
         {continued ? (
           <span className="sr-only">{author.name}</span>
