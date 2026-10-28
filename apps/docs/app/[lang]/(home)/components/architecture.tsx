@@ -191,14 +191,14 @@ export function ArchitectureDiagram() {
   const selfHosted = mode === "self-hosted";
 
   return (
-    <section className="py-24 px-4">
+    <section className="py-16 sm:py-24" id="self-host">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40 text-balance">
           Built on open-source SDKs, yours to self-host
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900 text-balance">
-          Swap any backend and self-host the whole runtime, with zero managed-infrastructure
-          dependencies.
+          Swap any backend and self-host the whole runtime with no managed infrastructure, or deploy
+          on Vercel for fully native support.
         </p>
 
         {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
@@ -212,7 +212,7 @@ export function ArchitectureDiagram() {
               selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
             )}
           >
-            Managed
+            Vercel Managed
           </button>
           <Toggle
             checked={selfHosted}
