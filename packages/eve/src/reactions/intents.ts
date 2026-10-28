@@ -1,48 +1,67 @@
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { coalesceDeliveries } from "#harness/messages.js";
 import type { Reaction } from "./reaction.js";
 import { readReactionsState, writeReactionsState, type PendingIntent } from "./state.js";
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one. A follow-up targets the next turn, for
+// the turn that settled. Repeated requests add nothing.
 
 /** A command a hook asked for, before it's queued. */
-export interface Command {
-  readonly type: "cancel";
-  readonly reason?: string;
-}
+export type Command =
+  | { readonly type: "cancel"; readonly reason?: string }
+  | { readonly type: "follow-up"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
 /**
- * Adds cancellations to the session's queue. Requests between turns are dropped.
+ * Adds a hook's commands to the session's queue. Cancels between turns are dropped; each hook's
+ * follow-up joins the turn's one follow-up delivery.
  */
 export function queueCommands(
   ctx: ContextContainer,
-  reactionId: string,
+  reaction: Pick<Reaction, "id" | "label">,
   occurrence: string,
   commands: readonly Command[],
 ): void {
   if (commands.length === 0) return;
   const state = readReactionsState(ctx);
   const intents = [...(state.intents ?? [])];
+  let { followUp } = state;
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
+    if (command.type === "follow-up") {
+      // A hook joins the turn's follow-up; `ctx.followUp()` already refused one it can't join.
+      const queued = followUp?.turnId === command.turnId ? followUp : undefined;
+      followUp = {
+        delivery:
+          queued === undefined
+            ? command.delivery
+            : coalesceDeliveries([queued.delivery, command.delivery]),
+        turnId: command.turnId,
+      };
+      changed = true;
+      continue;
+    }
     if (turnId === undefined || state.cancelledTurnId === turnId) continue;
     if (intents.some((queued) => queued.type === "cancel" && queued.turnId === turnId)) continue;
     intents.push({
       occurrence,
-      reactionId,
+      reactionId: reaction.id,
       type: command.type,
       ...(command.reason !== undefined && { reason: command.reason }),
       turnId,
     });
     changed = true;
   }
-  if (changed) writeReactionsState(ctx, { ...state, intents });
+  if (changed) {
+    writeReactionsState(ctx, { ...state, intents, ...(followUp !== undefined && { followUp }) });
+  }
 }
 
 /** Removes and returns the waiting intents that match, because the session acted on them. */

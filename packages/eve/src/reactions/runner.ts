@@ -4,7 +4,7 @@ import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { currentProjection } from "#harness/session-machine/current.js";
-import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -92,6 +92,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
+  dropYieldedFollowUps(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -394,8 +395,40 @@ function actOnCancels(
   if (first === undefined || cancelTurn === undefined) return;
   const hook = reactions.find(({ id }) => id === first.reactionId)?.label ?? first.reactionId;
   takeIntents(ctx, (intent) => intent.type === "cancel");
-  writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledTurnId: first.turnId });
+  writeReactionsState(ctx, {
+    ...readReactionsState(ctx),
+    cancelledBy: first.reactionId,
+    cancelledTurnId: first.turnId,
+  });
   cancelTurn({ hook, ...(first.reason !== undefined && { reason: first.reason }) });
+}
+
+/**
+ * A hook's follow-up yields: once another turn starts, a cancel or reset arrives, or the history
+ * is cleared, the session no longer follows up the turn it was queued for, and it's dropped.
+ * A compaction keeps it: the conversation it follows up is still there, summarized.
+ */
+function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+  const { followUp, ...state } = readReactionsState(ctx);
+  if (followUp === undefined) return;
+  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
+  if (followUp.turnId === latestTurnId && !written.some(({ event }) => stopsFollowUps(event))) {
+    return;
+  }
+  writeReactionsState(ctx, state);
+}
+
+function stopsFollowUps(event: WrittenEvent["event"]): boolean {
+  if (event.type === "context.settled") {
+    return event.data.kind === "clear" && event.data.outcome === "completed";
+  }
+  if (event.type !== "delivery.admitted") return false;
+  const { source } = event.data;
+  return (
+    source !== undefined &&
+    "control" in source &&
+    (source.control === "cancel" || source.control === "reset")
+  );
 }
 
 function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): ReactionsState {
