@@ -7,7 +7,9 @@ import { mountRefNamespace } from "#discover/extensions.js";
 import type { AgentSourceManifest, LocalSubagentSourceRef } from "#discover/manifest.js";
 import type {
   CompiledAgentDefinition,
+  CompiledChannelDefinition,
   CompiledExtensionMount,
+  CompiledReceiveOnlyChannelDefinition,
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
@@ -204,7 +206,8 @@ export function createCompiledRemoteAgent(input: {
 
 export function compileChannelRoutes(
   state: FinalizedNodeSourceState,
-  channels: readonly import("#compiler/manifest.js").CompiledChannelDefinition[],
+  channels: readonly CompiledChannelDefinition[],
+  receiveOnly: readonly CompiledReceiveOnlyChannelDefinition[],
   diagnostics: CompilerDiagnostic[],
   nodeId: string,
 ) {
@@ -213,6 +216,7 @@ export function compileChannelRoutes(
     channels,
     diagnostics,
     nodeId,
+    receiveOnly,
     sources: Object.fromEntries(
       state.orderedCandidates.map((candidate) => [
         candidate.sourceId,
@@ -221,6 +225,9 @@ export function compileChannelRoutes(
     ),
   });
   for (const channel of channelRoutes.effective) {
+    state.evaluation.requireRuntimeEntry(channel.sourceId);
+  }
+  for (const channel of channelRoutes.receiveOnly) {
     state.evaluation.requireRuntimeEntry(channel.sourceId);
   }
   return channelRoutes;
