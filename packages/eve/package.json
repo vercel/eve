@@ -483,12 +483,6 @@
       "default": "./dist/src/public/channels/linear/index.js"
     },
     "./package.json": "./package.json",
-    "./internal/self-modification/agent": {
-      "eve-source": "./dist/src/self-modification/agent.js",
-      "types": "./dist/src/self-modification/agent.d.ts",
-      "import": "./dist/src/self-modification/agent.js",
-      "default": "./dist/src/self-modification/agent.js"
-    },
     "./internal/self-modification/sandbox": {
       "eve-source": "./dist/src/self-modification/sandbox.js",
       "types": "./dist/src/self-modification/sandbox.d.ts",

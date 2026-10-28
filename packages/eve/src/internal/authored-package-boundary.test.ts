@@ -70,7 +70,7 @@ describe("createGenerationPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({
@@ -134,7 +134,7 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({

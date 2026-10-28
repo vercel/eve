@@ -1732,8 +1732,7 @@ export function registryHandoffAddress(
 ): string | undefined {
   const isPackagedChild =
     subagentName === "self-modification__agent" && toolName === "registry_add";
-  const isLegacyRoot = subagentName === undefined && toolName === "selfmod__registry_add";
-  if ((!isPackagedChild && !isLegacyRoot) || typeof output !== "object" || output === null) {
+  if (!isPackagedChild || typeof output !== "object" || output === null) {
     return undefined;
   }
   const result = output as { address?: unknown; status?: unknown };

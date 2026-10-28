@@ -2043,16 +2043,6 @@ importers:
         specifier: npm:typescript@6.0.3
         version: typescript@6.0.3
 
-  packages/eve-self-modification:
-    dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../eve
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
   packages/tracing:
     devDependencies:
       '@ai-sdk/harness':
