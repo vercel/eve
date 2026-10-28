@@ -1,5 +1,5 @@
 import { Button } from "@vercel/geistdocs/components/button";
-import type { ComponentType, ReactNode } from "react";
+import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /** Agents get an icon avatar and an "Agent" badge; people get their initial. */
@@ -24,6 +24,10 @@ export function ChatAvatar({ author, color }: { author: Author; color: string })
       )}
     </span>
   );
+}
+
+export function Mention({ children }: { children: string }) {
+  return <span className="rounded bg-gray-alpha-200 px-0.5 text-gray-1000">@{children}</span>;
 }
 
 export function AgentBadge() {
@@ -179,5 +183,92 @@ export function DemoButton({
         labels={["Play demo", "Stop demo"]}
       />
     </Button>
+  );
+}
+
+/**
+ * A reaction being added pops its emoji and rolls its count up; one taken back only rolls the
+ * count down. Through the Web Animations API, so it runs while a conversation has its CSS
+ * entrances off.
+ */
+function animateReaction(button: Element, adding: boolean, delay = 0) {
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
+  button.querySelector("[data-count]")?.animate(
+    reduce
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [
+          { opacity: 0, transform: `translateY(${adding ? 6 : -6}px)` },
+          { opacity: 1, transform: "none" },
+        ],
+    { delay, duration: 200, easing: easeOut, fill: "backwards" },
+  );
+  if (adding && !reduce) {
+    button
+      .querySelector("[role=img]")
+      ?.animate(
+        [
+          { transform: "none", easing: easeOut },
+          { transform: "scale(1.25)", offset: 0.4, easing: easeOut },
+          { transform: "none" },
+        ],
+        { delay, duration: 300 },
+      );
+  }
+}
+
+/**
+ * A Slack reaction the visitor can toggle: a click adds one to the count, a second takes it
+ * back. In a demo it lands the way a click adds one, once its pill has scaled in; `index`
+ * staggers a row of them 60ms apart.
+ */
+export function Reaction({
+  name,
+  count,
+  demo,
+  index = 0,
+  children,
+}: {
+  /** The emoji's shortcode, without colons. */
+  name: string;
+  count: number;
+  demo: boolean;
+  index?: number;
+  /** The emoji, with `role="img"` so it pops. */
+  children: ReactNode;
+}) {
+  const [mine, setMine] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const total = count + (mine ? 1 : 0);
+
+  // Only on mount: a reaction arriving in a demo, not one re-rendered after.
+  useEffect(() => {
+    if (demo && button.current) animateReaction(button.current, true, 150 + index * 60);
+  }, []);
+
+  return (
+    <button
+      aria-label={`:${name}: ${total}`}
+      aria-pressed={mine}
+      className={cn(
+        "flex h-7 origin-left cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]",
+        demo && "motion-safe:animate-scale-in motion-reduce:animate-fade-in",
+        mine
+          ? "border-gray-alpha-700 bg-gray-alpha-200"
+          : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
+      )}
+      onClick={(event) => {
+        setMine(!mine);
+        animateReaction(event.currentTarget, !mine);
+      }}
+      ref={button}
+      style={{ animationDelay: `${index * 60}ms` }}
+      type="button"
+    >
+      {children}
+      <span className="text-copy-13" data-count>
+        {total}
+      </span>
+    </button>
   );
 }

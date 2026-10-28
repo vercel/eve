@@ -18,7 +18,7 @@ import { analyticsEvents } from "@/lib/analytics/events";
 import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { type Author, DemoButton, SlackMessage, TypingIndicator } from "./chat";
+import { type Author, DemoButton, Mention, Reaction, SlackMessage, TypingIndicator } from "./chat";
 import { AppWindow, HomeSection, PrefetchLink } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
@@ -96,9 +96,9 @@ const BRAIN: Author = { name: "Company brain", icon: Brain };
 /**
  * How long each stage of the demo waits before it shows: Dana's question, the agent working,
  * its reply with the first tool running, each tool finishing as the next runs, the answer,
- * then the table.
+ * the table, then Dana's thumbs-up.
  */
-const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600];
+const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600, 1100];
 
 // Entrances run only in the demo; shown in full, the thread is simply there.
 const fadeIn = "animate-command-fade-in";
@@ -122,7 +122,9 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
           continued={false}
           time="9:41 AM"
         >
-          <p>How are repeat orders trending this quarter?</p>
+          <p>
+            <Mention>Company brain</Mention> how are repeat orders trending this quarter?
+          </p>
         </SlackMessage>
       ) : null}
       {shown === 2 ? (
@@ -219,6 +221,15 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             </div>
           ) : null}
         </SlackMessage>
+      ) : null}
+      {shown >= 9 ? (
+        <li className="pt-1.5 pl-[2.375rem]">
+          <Reaction count={1} demo={demo} name="+1">
+            <span aria-label=":+1:" className="inline-block text-[14px] leading-none" role="img">
+              👍
+            </span>
+          </Reaction>
+        </li>
       ) : null}
     </ol>
   );

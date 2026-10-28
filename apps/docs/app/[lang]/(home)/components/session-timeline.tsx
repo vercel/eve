@@ -23,6 +23,8 @@ import {
   type Author,
   ChatAvatar,
   DemoButton,
+  Mention,
+  Reaction,
   SlackMessage,
   TypingIndicator,
 } from "./chat";
@@ -57,10 +59,6 @@ type Beat =
       reactions: { emoji: keyof typeof TEXT_EMOJI; count: number }[];
       delay: number;
     };
-
-function Mention({ children }: { children: string }) {
-  return <span className="rounded bg-gray-alpha-200 px-0.5 text-gray-1000">@{children}</span>;
-}
 
 function Card({
   icon,
@@ -409,37 +407,6 @@ function TextEmoji({ name }: { name: keyof typeof TEXT_EMOJI }) {
   );
 }
 
-/**
- * A reaction being added pops its emoji and rolls its count up; one taken back only rolls the
- * count down. Through the Web Animations API, so it runs while the full conversation has its
- * CSS entrances off.
- */
-function animateReaction(button: Element, adding: boolean, delay = 0) {
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
-  button.querySelector("[data-count]")?.animate(
-    reduce
-      ? [{ opacity: 0 }, { opacity: 1 }]
-      : [
-          { opacity: 0, transform: `translateY(${adding ? 6 : -6}px)` },
-          { opacity: 1, transform: "none" },
-        ],
-    { delay, duration: 200, easing: easeOut, fill: "backwards" },
-  );
-  if (adding && !reduce) {
-    button
-      .querySelector("[role=img]")
-      ?.animate(
-        [
-          { transform: "none", easing: easeOut },
-          { transform: "scale(1.25)", offset: 0.4, easing: easeOut },
-          { transform: "none" },
-        ],
-        { delay, duration: 300 },
-      );
-  }
-}
-
 function authorOf(beat: Beat | undefined): AuthorKey | undefined {
   return beat?.kind === "message" ? beat.author : undefined;
 }
@@ -700,18 +667,6 @@ export function SessionTimeline(): JSX.Element {
   // A replay that runs to the end stays at the end, clear of the dock; stopping it or switching
   // channels returns to the conversation's start.
   const [ended, setEnded] = useState(false);
-  // Reactions the visitor added, keyed by emoji, toggled like Slack's: a click adds one to the
-  // count, a second click takes it back.
-  const [reacted, setReacted] = useState<Set<string>>(new Set());
-
-  const toggleReaction = (button: HTMLElement, emoji: string) => {
-    const adding = !reacted.has(emoji);
-    const next = new Set(reacted);
-    if (adding) next.add(emoji);
-    else next.delete(emoji);
-    setReacted(next);
-    animateReaction(button, adding);
-  };
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
 
@@ -748,15 +703,6 @@ export function SessionTimeline(): JSX.Element {
     };
   }, [playing, next]);
 
-  // In a replay, a reaction lands the way a click adds one, once its pill is in.
-  const reactionsIn = (playing || ended) && beats[shown - 1]?.kind === "reactions";
-  useEffect(() => {
-    if (!reactionsIn) return;
-    contentRef.current
-      ?.querySelectorAll("button[aria-pressed]")
-      .forEach((button, index) => animateReaction(button, true, 150 + index * 60));
-  }, [reactionsIn]);
-
   // Before paint: the full conversation opens at its start; a replay snaps to its end, so the
   // newest line always settles clear of the dock, then glides there from where the content was
   // (a FLIP), on the same 300ms ease-in-out as the bubble entrance.
@@ -787,7 +733,6 @@ export function SessionTimeline(): JSX.Element {
   };
 
   const play = () => {
-    setReacted(new Set());
     setCount(0);
     setEnded(false);
     setPlaying(true);
@@ -878,31 +823,17 @@ export function SessionTimeline(): JSX.Element {
                 if (beat.kind === "reactions") {
                   return (
                     <li className="flex gap-1.5 pt-1.5 pl-[2.375rem]" key={i}>
-                      {beat.reactions.map((reaction, index) => {
-                        const mine = reacted.has(reaction.emoji);
-                        const count = reaction.count + (mine ? 1 : 0);
-                        return (
-                          <button
-                            aria-label={`:${reaction.emoji.toLowerCase()}: ${count}`}
-                            aria-pressed={mine}
-                            className={cn(
-                              "flex h-7 origin-left cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97] motion-safe:animate-scale-in motion-reduce:animate-fade-in",
-                              mine
-                                ? "border-gray-alpha-700 bg-gray-alpha-200"
-                                : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
-                            )}
-                            key={reaction.emoji}
-                            onClick={(event) => toggleReaction(event.currentTarget, reaction.emoji)}
-                            style={{ animationDelay: `${index * 60}ms` }}
-                            type="button"
-                          >
-                            <TextEmoji name={reaction.emoji} />
-                            <span className="text-copy-13" data-count>
-                              {count}
-                            </span>
-                          </button>
-                        );
-                      })}
+                      {beat.reactions.map((reaction, index) => (
+                        <Reaction
+                          count={reaction.count}
+                          demo={playing || ended}
+                          index={index}
+                          key={reaction.emoji}
+                          name={reaction.emoji.toLowerCase()}
+                        >
+                          <TextEmoji name={reaction.emoji} />
+                        </Reaction>
+                      ))}
                     </li>
                   );
                 }
