@@ -8,6 +8,7 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-todo/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-format.ts",
@@ -15,6 +16,7 @@
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
+        "!src/extensions/todo/extension/**",
         "!src/computer-use/extension/**"
       ],
       "outputs": ["$TURBO_EXTENDS$", "docs/**"]
@@ -25,16 +27,19 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-todo/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
+        "!src/extensions/todo/extension/**",
         "!src/computer-use/extension/**"
       ],
       "outputs": [
         ".generated/compiled/**",
         "src/extensions/code/extension/**",
         "src/extensions/git/extension/**",
+        "src/extensions/todo/extension/**",
         "src/computer-use/extension/**"
       ]
     },
@@ -44,10 +49,12 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-todo/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
+        "!src/extensions/todo/extension/**",
         "!src/computer-use/extension/**"
       ],
       "outputs": ["dist/**"]
@@ -58,10 +65,12 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-todo/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
+        "!src/extensions/todo/extension/**",
         "!src/computer-use/extension/**"
       ]
     },
@@ -74,10 +83,12 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-todo/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
+        "!src/extensions/todo/extension/**",
         "!src/computer-use/extension/**"
       ]
     },

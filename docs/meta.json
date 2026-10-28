@@ -22,6 +22,7 @@
     "install-integrations",
     "extensions",
     "code-extension",
+    "todo-extension",
     "protocols/acp",
     "guides/client",
     "guides/frontend",

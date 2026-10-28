@@ -2046,6 +2046,22 @@ importers:
         specifier: npm:typescript@6.0.3
         version: typescript@6.0.3
 
+  packages/eve-todo:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.5.4
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   packages/tracing:
     devDependencies:
       '@ai-sdk/harness':
