@@ -3,7 +3,7 @@ import {
   type WorkflowToolContext,
   type WorkflowToolDefinition,
 } from "eve/tools";
-import { createHook, FatalError, getWorkflowMetadata, sleep } from "workflow";
+import { createHook, FatalError, getWorkflowMetadata, sleep } from "eve/workflow";
 import { z } from "zod";
 import { publishVerificationGate } from "../../../lib/verification-gate.js";
 

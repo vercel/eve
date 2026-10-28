@@ -273,7 +273,7 @@ describe("eve build process output", () => {
       join(appRoot, "agent", "tools", "deploy_service.mjs"),
       [
         'import { defineWorkflowTool } from "eve/tools";',
-        'import { sleep } from "workflow";',
+        'import { sleep } from "eve/workflow";',
         'import { hashPlan } from "../lib/plan.mjs";',
         "",
         "export default defineWorkflowTool({",

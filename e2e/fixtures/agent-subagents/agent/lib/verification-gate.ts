@@ -1,4 +1,4 @@
-import { getRun } from "workflow/api";
+import { getRun } from "eve/workflow/api";
 
 export const verificationNamespace = (key: string) => `nested-verification.${key}`;
 

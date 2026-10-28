@@ -34,6 +34,7 @@ type AstNode = {
   typeParameters?: AstNode | null;
   value?: unknown;
   arguments?: AstNode[];
+  callee?: AstNode;
   source?: AstNode;
 };
 
@@ -68,17 +69,27 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
-  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("eve/workflow")) {
+  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("workflow")) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
   const program = (await parseWithNitroRolldownAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];
-  if (body.some((node) => node.source?.value === "eve/workflow")) {
-    throw new Error(
-      `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(target, input) or ctx.ask(request) in its executor.`,
-    );
-  }
+  visit(program as AstNode, (node) => {
+    const specifier =
+      node.source?.value ??
+      (node.type === "CallExpression" && node.callee?.name === "require"
+        ? node.arguments?.[0]?.value
+        : undefined);
+    if (
+      typeof specifier === "string" &&
+      (specifier === "workflow" || specifier.startsWith("workflow/"))
+    ) {
+      throw new Error(
+        `${input.filePath}: Import from \`eve/workflow\` (or \`eve/workflow/api\`) instead of "${specifier}".`,
+      );
+    }
+  });
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
     const directive = readWorkflowDirective(statement);

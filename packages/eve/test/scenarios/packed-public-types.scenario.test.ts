@@ -70,6 +70,22 @@ import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
+import { createHook, sleep, createWebhook, FatalError, getWorkflowMetadata } from "eve/workflow";
+import { start, getRun, resumeHook, getHookByToken } from "eve/workflow/api";
+// @ts-expect-error Bare Workflow imports are no longer declared by eve.
+import { sleep as bareSleep } from "workflow";
+async function durable() {
+  "use workflow";
+  using hook = createHook<{ approved: boolean }>({ token: "approval" });
+  const answer: { approved: boolean } = await hook;
+  await sleep("1s");
+  return answer.approved;
+}
+async function launch() {
+  const run = await start(durable, []);
+  const approved: boolean = await run.returnValue;
+  await resumeHook("approval", { approved: true });
+}
 // @ts-expect-error Shared contracts have one home, eve/sessions.
 import type { Delivery as OldDelivery } from "eve/client";
 // @ts-expect-error Routing is on ChannelContext, not a session-shaped handle.
@@ -183,7 +199,7 @@ describe("packed public declarations", () => {
             strict: true,
             skipLibCheck: false,
             noEmit: true,
-            types: ["node"],
+            types: group.name === "core" ? ["node", "eve/workflow-modules"] : ["node"],
             target: "ES2024",
             module: "NodeNext",
             lib: ["ES2024", "DOM", "DOM.Iterable"],

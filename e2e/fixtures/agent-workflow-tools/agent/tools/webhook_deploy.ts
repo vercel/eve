@@ -1,5 +1,5 @@
 import { defineWorkflowTool } from "eve/tools";
-import { createWebhook } from "workflow";
+import { createWebhook } from "eve/workflow";
 import { z } from "zod";
 
 import { postWorkflowCallback } from "../lib/webhook.ts";

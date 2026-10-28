@@ -1,5 +1,5 @@
 import { defineChannel, POST } from "eve/channels";
-import { getHookByToken, getRun, resumeHook } from "workflow/api";
+import { getHookByToken, getRun, resumeHook } from "eve/workflow/api";
 import { z } from "zod";
 import { verificationNamespace, type VerificationGate } from "../lib/verification-gate.js";
 
