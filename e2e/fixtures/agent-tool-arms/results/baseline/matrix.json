@@ -1,0 +1,6 @@
+{
+  "models": ["openai/gpt-6.1-sol", "anthropic/claude-opus-5.5"],
+  "sizes": ["moderate", "large"],
+  "arms": ["direct", "deferred", "subagents"],
+  "repetitions": 3
+}
