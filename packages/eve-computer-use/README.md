@@ -49,9 +49,9 @@ Mounting the extension exposes `computer_use` but does not install or start its 
 Rebuild eve after editing `extension/`:
 
 ```sh
-pnpm exec turbo run build --filter=eve
-pnpm exec turbo run typecheck --filter=@eve/computer-use
-pnpm exec turbo run test:scenario --filter=@eve/computer-use
+pnpm build:eve
+pnpm typecheck --filter=@eve/computer-use
+pnpm test:scenario --filter=@eve/computer-use
 pnpm exec oxlint packages/eve-computer-use
 pnpm exec oxfmt --check packages/eve-computer-use
 ```

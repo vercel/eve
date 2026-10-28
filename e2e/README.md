@@ -227,7 +227,7 @@ check nothing reports blocks every PR as permanently "expected".
 once per leg, then runs one fixture directory with the leg's real model:
 
 ```sh
-pnpm exec turbo run build --filter=eve
+pnpm build:eve
 cd "$FIXTURE_DIR"
 pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"

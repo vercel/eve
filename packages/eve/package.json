@@ -583,7 +583,7 @@
     "build:types": "tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
-    "prepack": "turbo run build --filter=eve && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
+    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:webchat": "vitest run --config vitest.browser.config.ts",
     "test:framework-fixtures": "vitest run --config vitest.framework-fixtures.config.ts",

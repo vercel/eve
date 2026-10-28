@@ -60,10 +60,10 @@ Consumers with a PAT, benchmark token, or another credential provider can omit t
 Rebuild eve after editing `extension/`; the local agent under `agent/` mounts the built `eve/extensions/code`:
 
 ```sh
-pnpm exec turbo run build --filter=eve
-pnpm exec turbo run typecheck --filter=@eve/code
-pnpm exec turbo run test:unit test:integration --filter=@eve/code
-pnpm exec turbo run test:scenario --filter=@eve/code
+pnpm build:eve
+pnpm typecheck --filter=@eve/code
+pnpm test --filter=@eve/code
+pnpm test:scenario --filter=@eve/code
 pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
 ```

@@ -9,6 +9,7 @@
     "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
     "benchmark:publish": "node apps/benchmarks/publish.mjs",
     "build": "turbo run build --filter='./packages/*'",
+    "build:eve": "turbo run build --filter=eve",
     "changeset": "changeset",
     "check:deps": "syncpack lint",
     "check:sandbox-image-tag": "node ./scripts/sandbox-image-tag.mjs --check",
