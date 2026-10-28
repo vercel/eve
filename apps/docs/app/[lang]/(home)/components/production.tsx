@@ -40,27 +40,26 @@ const radarRings = [
 // Teams' white letter takes the chip's color so it stays cut out.
 const monochrome = "[&_path]:fill-current [&_path[fill=white]]:fill-background-100";
 
-// Spread evenly around each ring: the outer every 60° from the horizontal, the only even
-// spacing that keeps chips inside the frame, and the middle every 90°, turned 15° so the two
-// rings interleave instead of lining up.
-const MIDDLE: { label: string; logo: ReactNode }[] = [
-  { label: "Slack", logo: logos.slack({ className: monochrome }) },
-  { label: "WhatsApp", logo: <SiWhatsapp /> },
-  { label: "Microsoft Teams", logo: logos.teams({ className: monochrome }) },
-  { label: "iMessage", logo: <SiImessage /> },
-];
-const OUTER: { label: string; logo: ReactNode }[] = [
-  { label: "GitHub", logo: <SiGithub /> },
-  { label: "Linear", logo: <SiLinear /> },
-  { label: "Web", logo: logos.web({}) },
-  { label: "Discord", logo: <SiDiscord /> },
-  { label: "Telegram", logo: <SiTelegram /> },
-  { label: "Google Chat", logo: <SiGooglechat /> },
-];
-const CHANNELS = [
-  ...MIDDLE.map((channel, i) => ({ ...channel, ring: 1, angle: 15 + i * 90 })),
-  ...OUTER.map((channel, i) => ({ ...channel, ring: 2, angle: i * 60 })),
-];
+// One chip every 36° around the guard, starting 18° off the horizontal, so the gaps between
+// neighbors match and the layout mirrors on both axes. Chips sit on the outer ring, except the
+// two straight above and below the guard, which the outer ring would push past the frame.
+const CHANNELS = (
+  [
+    { label: "GitHub", logo: <SiGithub /> },
+    { label: "Linear", logo: <SiLinear /> },
+    { label: "Slack", logo: logos.slack({ className: monochrome }) },
+    { label: "WhatsApp", logo: <SiWhatsapp /> },
+    { label: "Discord", logo: <SiDiscord /> },
+    { label: "Telegram", logo: <SiTelegram /> },
+    { label: "Google Chat", logo: <SiGooglechat /> },
+    { label: "Microsoft Teams", logo: logos.teams({ className: monochrome }) },
+    { label: "iMessage", logo: <SiImessage /> },
+    { label: "Web", logo: logos.web({}) },
+  ] satisfies { label: string; logo: ReactNode }[]
+).map((channel, i) => {
+  const angle = 18 + i * 36;
+  return { ...channel, angle, ring: angle === 90 || angle === 270 ? 1 : 2 };
+});
 
 function ChannelRadar() {
   return (
