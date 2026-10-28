@@ -125,68 +125,42 @@ function HarnessTools() {
   );
 }
 
-const SIGNUPS = [620, 680, 710, 690, 820, 905, 1010, 1284];
-const SIGNUPS_MAX = Math.max(...SIGNUPS);
-
-function SignupsChart() {
-  return (
-    <div className="flex h-[3em] items-end gap-[0.18em] border-gray-alpha-400 border-b">
-      {SIGNUPS.map((value, i) => (
-        <span
-          className={cn(
-            "flex-1 rounded-t-[0.15em]",
-            i === SIGNUPS.length - 1
-              ? "bg-gray-1000"
-              : "border border-gray-alpha-500 border-b-0 bg-linear-to-b from-gray-200 to-transparent",
-          )}
-          key={i}
-          style={{ height: `${(value / SIGNUPS_MAX) * 100}%` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// Back to front. Each window covers the one behind it but for a sliver, so the back two
-// show only their framework and the start of their agent's reply.
+// Back to front, in the template thumbnail's window from vercel.com/docs, each covering the
+// one behind it but for a sliver. Sizes are front's px values in `em` (1em = 16px at a
+// 350px frame), so the windows scale with the frame.
 const APPS = [
-  { name: "Next.js", Logo: SiNextdotjs, x: 16, reply: "Refund approved for order 4821" },
-  { name: "Nuxt", Logo: SiNuxt, x: 84, reply: "Rolled back the Friday deploy" },
-  { name: "SvelteKit", Logo: SiSvelte, x: 152, reply: null },
+  { name: "Next.js", Logo: SiNextdotjs, left: "8%" },
+  { name: "Nuxt", Logo: SiNuxt, left: "24%" },
+  { name: "SvelteKit", Logo: SiSvelte, left: "40%" },
 ];
 
 function AgentUi() {
   return (
-    <Visual caption="Three agent apps in overlapping windows, built with Next.js, Nuxt, and SvelteKit. The front one answers a question about signups with a bar chart.">
-      {/* The fade sits on a frame-sized layer so it ends at the frame, not the windows. */}
-      <div className="absolute inset-0 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black_72%,transparent),linear-gradient(to_right,black_90%,transparent)]">
-        {APPS.map(({ Logo, name, reply, x }) => (
+    <Visual caption="Three agent apps in overlapping windows, built with Next.js, Nuxt, and SvelteKit.">
+      <div aria-hidden className="absolute inset-0 select-none text-[4.57cqw]">
+        {APPS.map(({ Logo, left, name }) => (
           <div
-            className="absolute top-[15%] -bottom-[10%] flex w-[75%] select-none flex-col gap-[0.75em] rounded-[0.75em] bg-background-100 px-[0.75em] pt-[0.5em] text-[4.4cqw] shadow-(--ds-shadow-border-small)"
+            className="absolute top-[17%] flex min-h-full w-[52%] flex-col gap-[0.625em] rounded-t-[0.625em] border border-gray-300 bg-background-100 px-[0.75em] pt-[0.25em]"
             key={name}
-            style={{ left: pct(x, view.width) }}
+            style={{ left }}
           >
-            <div aria-hidden className="mt-[0.25em] flex gap-[0.25em]">
-              <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
-              <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
-              <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
-            </div>
-            <span className="flex items-center gap-[0.4em] whitespace-nowrap text-[0.75em] text-gray-1000 leading-none [&>svg]:size-[1em] [&>svg]:shrink-0">
-              <Logo aria-hidden />
-              {name}
-            </span>
-            {reply ? (
-              <span className="whitespace-nowrap text-[0.625em] text-gray-900 leading-none">
-                {reply}
-              </span>
-            ) : (
-              <div className="flex w-[9em] flex-col gap-[0.5em]">
-                <span className="self-end whitespace-nowrap rounded-full bg-gray-200 px-[0.6em] py-[0.3em] text-[0.625em] text-gray-1000 leading-none">
-                  Signups trend?
-                </span>
-                <SignupsChart />
+            <div className="flex h-[1em] items-center">
+              <div className="mt-[0.25em] flex gap-[0.25em]">
+                <span className="size-[0.4375em] rounded-full bg-gray-300" />
+                <span className="size-[0.4375em] rounded-full bg-gray-300" />
+                <span className="size-[0.4375em] rounded-full bg-gray-300" />
               </div>
-            )}
+            </div>
+            <div className="flex flex-col gap-[0.5em]">
+              {/* The fill hides overlapping contours and the inner half of the stroke, leaving
+                  a 0.5px outer outline. The logo gets the same treatment as the name. */}
+              <div className="flex items-center gap-[0.35em] whitespace-nowrap font-bold text-[1.25em] text-gray-700 tracking-[-0.01em] [-webkit-text-fill-color:var(--ds-background-100)] [-webkit-text-stroke:1px_currentColor] [paint-order:stroke_fill]">
+                <Logo className="size-[0.9em] shrink-0 overflow-visible fill-background-100 stroke-current [paint-order:stroke_fill] [stroke-width:1px] [vector-effect:non-scaling-stroke] [&_path]:[vector-effect:non-scaling-stroke]" />
+                {name}
+              </div>
+              <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
+              <div className="mt-px h-[3.625em] shrink-0 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100" />
+            </div>
           </div>
         ))}
       </div>
