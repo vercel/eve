@@ -5,6 +5,7 @@ import { helpdeskExtensionSetup } from "../../lib/setups/helpdesk-extension.js";
 // overriding one tool, removing another, and reporting a third's results. The prompt calls it
 // a package; only its own metadata and README say it is an eve extension.
 export default defineAuthoringCase({
+  category: "features/extensions",
   startingPoint: simpleProject,
   setup: helpdeskExtensionSetup,
   async interact({ send }) {

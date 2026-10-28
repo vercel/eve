@@ -4,6 +4,7 @@ import { crmLocalEnvSetup } from "../../lib/setups/crm-local-env.js";
 // Writing an extension package and mounting it into the agent that ships beside it. The prompt
 // asks for a shared package without naming extensions, so the docs have to lead there.
 export default defineAuthoringCase({
+  category: "features/extensions",
   startingPoint: simpleProject,
   setup: crmLocalEnvSetup,
   async interact({ send }) {

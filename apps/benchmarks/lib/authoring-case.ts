@@ -40,6 +40,7 @@ export interface AuthoringInteractionContext {
 export const authoringCategories = [
   "features/channels",
   "features/connections",
+  "features/extensions",
   "features/schedules",
   "features/skills",
   "features/tools",
