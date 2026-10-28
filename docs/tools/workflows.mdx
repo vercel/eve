@@ -125,7 +125,8 @@ import { resumeHook } from "eve/workflow/api";
 ```
 
 Bare `workflow` and `workflow/*` imports in application modules fail the build with an error
-naming these entries. Existing `"types": ["eve/workflow-modules"]` tsconfig entries and reference
+naming these entries. Only the exports listed above are public; other SDK subpaths and helpers
+are not supported by these entries. Existing `"types": ["eve/workflow-modules"]` tsconfig entries and reference
 directives still resolve through 1.x, but the compatibility entry declares no ambient modules.
 You can remove those references when updating your imports.
 

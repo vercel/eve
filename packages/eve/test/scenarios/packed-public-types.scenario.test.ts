@@ -219,6 +219,29 @@ describe("packed public declarations", () => {
           { cause: error },
         );
       }
+      if (group.name === "core") {
+        await execute(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `
+          import assert from "node:assert/strict";
+          import { createRequire } from "node:module";
+          import { dirname, join } from "node:path";
+          import { pathToFileURL } from "node:url";
+          import { createHook } from "eve/workflow";
+          import { getRun } from "eve/workflow/api";
+          const require = createRequire(import.meta.url);
+          const eve = dirname(require.resolve("eve/package.json"));
+          const internal = (file) => import(pathToFileURL(join(eve, "dist/src/internal/workflow", file)));
+          assert.equal(createHook, (await internal("index.js")).createHook);
+          assert.equal(getRun, (await internal("runtime.js")).getRun);
+        `,
+          ],
+          { cwd: app },
+        );
+      }
     },
     180_000,
   );
