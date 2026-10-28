@@ -2,17 +2,17 @@ import { SiNextdotjs, SiNuxt, SiSvelte } from "@icons-pack/react-simple-icons";
 import {
   IconCheck,
   IconCross,
-  IconLogs,
   IconMessage,
+  IconShieldCheck,
   IconWrench,
 } from "@vercel/geistdocs/assets/icons";
+import { Database, KeyRound, UserRound } from "lucide-react";
 import type { JSX } from "react";
 import { cn } from "@/lib/utils";
 import {
   FeatureCard,
   GrayBadge,
   Label,
-  LimitLine,
   RuledList,
   ruledRow,
   Visual,
@@ -117,64 +117,108 @@ function AgentUi() {
   );
 }
 
-// One turn as Agent Runs times it, in milliseconds from the turn start.
-const STEPS = [
-  { name: "claude-opus-5.5", start: 0, end: 800 },
-  { name: "oncall-runbook", start: 800, end: 1000 },
-  { name: "search_logs", start: 1000, end: 1700 },
-  { name: "get_deploy", start: 1700, end: 2000 },
-  { name: "claude-opus-5.5", start: 2000, end: 2900 },
+// Your runtime as a dashed boundary: credentials, run data, and user access stay inside it with
+// the agent, and the one line out carries tool results to the model.
+const boundary = { x: 16, y: 34, width: 208, height: 128 };
+const agentNode = { x: 150, y: 84, width: 56, height: 24 };
+const modelNode = { x: 254, y: 84, width: 50, height: 24 };
+// Where the kept items' badges end, right-aligned, and their lines to the agent begin.
+const keptEnd = 122;
+const KEPT = [
+  { name: "credentials", Icon: KeyRound, y: 64 },
+  { name: "run data", Icon: Database, y: 96 },
+  { name: "access", Icon: UserRound, y: 128 },
 ];
-const TURN_MS = 2900;
-const track = { x: 132, width: 156 };
-const rowY = (i: number) => 50 + i * 22;
-const spanHeight = 10;
 
-function AgentTrace() {
-  const end = track.x + track.width;
+function DataBoundary() {
+  const midY = agentNode.y + agentNode.height / 2;
   return (
     <Visual
-      caption="A trace of one 2.9 second turn: a model call, the oncall-runbook skill, the search_logs and get_deploy tools, then a second model call."
+      caption="Your runtime holds the agent with its credentials, run data, and per-user access. Only tool results leave it, for the model outside."
       scene={
         <>
-          {STEPS.map((step, i) => {
-            const y = rowY(i);
-            return (
-              <g key={`${step.name}-${i}`}>
-                <path
-                  d={`M${track.x} ${y}H${end}`}
-                  stroke="var(--ds-gray-alpha-200)"
-                  strokeDasharray="2 3"
-                />
-                <rect
-                  fill="var(--ds-gray-200)"
-                  height={spanHeight}
-                  rx={2}
-                  stroke="var(--ds-gray-alpha-500)"
-                  width={((step.end - step.start) / TURN_MS) * track.width}
-                  x={track.x + (step.start / TURN_MS) * track.width}
-                  y={y - spanHeight / 2}
-                />
-              </g>
-            );
-          })}
-          <LimitLine id="why-eve-turn-end" x={end} y1={32} y2={166} />
+          <rect
+            height={boundary.height}
+            rx={8}
+            stroke="var(--ds-gray-alpha-600)"
+            strokeDasharray="3 3"
+            width={boundary.width}
+            x={boundary.x}
+            y={boundary.y}
+          />
+          {KEPT.map(({ name, y }) => (
+            <path
+              d={`M${keptEnd + 4} ${y}C${keptEnd + 18} ${y} ${agentNode.x - 14} ${midY} ${agentNode.x} ${midY}`}
+              key={name}
+              stroke="var(--ds-gray-alpha-400)"
+            />
+          ))}
+          <rect
+            fill="var(--ds-gray-200)"
+            height={agentNode.height}
+            rx={4}
+            stroke="var(--ds-gray-alpha-500)"
+            width={agentNode.width}
+            x={agentNode.x}
+            y={agentNode.y}
+          />
+          <path
+            d={`M${agentNode.x + agentNode.width} ${midY}H${modelNode.x}`}
+            stroke="var(--ds-gray-alpha-600)"
+          />
+          <rect
+            fill="var(--ds-background-100)"
+            height={modelNode.height}
+            rx={4}
+            stroke="var(--ds-gray-alpha-500)"
+            strokeDasharray="2 2"
+            width={modelNode.width}
+            x={modelNode.x}
+            y={modelNode.y}
+          />
         </>
       }
     >
-      <ul className="m-0 list-none p-0 text-[4.4cqw]">
-        {STEPS.map((step, i) => (
-          <li
-            className="absolute -translate-y-1/2 whitespace-nowrap font-mono text-[0.625em] text-gray-1000 leading-none"
-            key={`${step.name}-${i}`}
-            style={{ left: pct(32, view.width), top: pct(rowY(i), view.height) }}
+      <div className="select-none text-[4.4cqw]">
+        {KEPT.map(({ Icon, name, y }) => (
+          <span
+            className="absolute -translate-x-full -translate-y-1/2"
+            key={name}
+            style={{ left: pct(keptEnd, view.width), top: pct(y, view.height) }}
           >
-            {step.name}
-          </li>
+            <GrayBadge icon={<Icon aria-hidden />}>{name}</GrayBadge>
+          </span>
         ))}
-      </ul>
-      <Label x={end} y={24}>
-        {(TURN_MS / 1000).toFixed(1)}s
+        <span
+          className="absolute -translate-1/2 font-mono text-[0.625em] text-gray-1000 leading-none"
+          style={{
+            left: pct(agentNode.x + agentNode.width / 2, view.width),
+            top: pct(midY, view.height),
+          }}
+        >
+          agent
+        </span>
+        <span
+          className="absolute -translate-1/2 font-mono text-[0.625em] text-gray-900 leading-none"
+          style={{
+            left: pct(modelNode.x + modelNode.width / 2, view.width),
+            top: pct(midY, view.height),
+          }}
+        >
+          model
+        </span>
+        <span
+          className="absolute -translate-1/2 text-[0.5em] text-gray-900 leading-none"
+          style={{
+            left: pct((boundary.x + boundary.width + modelNode.x) / 2, view.width),
+            top: pct(midY - 8, view.height),
+          }}
+        >
+          results
+        </span>
+      </div>
+      <Label x={boundary.x + boundary.width / 2} y={boundary.y}>
+        Your runtime
       </Label>
     </Visual>
   );
@@ -210,13 +254,13 @@ export function WhyEve(): JSX.Element {
         </FeatureCard>
         <FeatureCard
           className="md:col-span-6 lg:col-span-4"
-          href="/docs/observability/instrumentation"
-          icon={<IconLogs aria-hidden size={16} />}
+          href="/docs/guides/deployment/self-hosting"
+          icon={<IconShieldCheck aria-hidden size={16} />}
           title="Own your data"
-          visual={<AgentTrace />}
+          visual={<DataBoundary />}
         >
-          Govern and observe every run with OpenTelemetry traces of each model and tool call.
-          Credentials never reach the model.
+          You own the runtime and decide where run data lives. Each user reaches only what they're
+          granted, and credentials never reach the model.
         </FeatureCard>
       </ul>
     </HomeSection>
