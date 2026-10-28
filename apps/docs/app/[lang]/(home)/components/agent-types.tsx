@@ -2,7 +2,7 @@
 
 import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
-import { Brain } from "lucide-react";
+import { Brain, ChevronRight } from "lucide-react";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type JSX,
@@ -316,7 +316,8 @@ function ThreadReply({ demo }: { demo: boolean }) {
         aria-controls={id}
         aria-expanded={open}
         className={cn(
-          "-ml-1 mt-1 flex cursor-pointer items-center gap-2 rounded-md p-1 pr-2 transition-colors hover:bg-gray-alpha-100",
+          // Pulled out by its border and padding, so the avatar lines up with the message text.
+          "group -ml-[5px] mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg border border-transparent p-1 pr-2 text-left transition-colors hover:border-gray-alpha-400 hover:bg-background-100 focus-visible:border-gray-alpha-400 focus-visible:outline-none",
           demo && fadeIn,
         )}
         onClick={() => {
@@ -325,19 +326,29 @@ function ThreadReply({ demo }: { demo: boolean }) {
         }}
         type="button"
       >
-        <span className="flex size-5 items-center justify-center rounded-[5px] bg-teal-700 text-white">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-teal-700 text-white">
           <Brain aria-hidden className="size-3" />
         </span>
-        {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
-        <span className="font-medium text-blue-900">
-          <span className="text-copy-13">1 reply</span>
-        </span>
+        <span className="font-medium text-blue-900 text-copy-13">1 reply</span>
+        {/* Unread until opened; hovering, or once read, shows when the reply came instead. */}
         {read ? null : (
-          <span className="flex items-center gap-1 text-red-900">
+          <span className="flex items-center gap-1 text-copy-13 text-red-900 group-hover:hidden group-focus-visible:hidden">
             <span aria-hidden className="size-1.5 rounded-full bg-red-800" />
-            <span className="text-copy-13">Unread</span>
+            Unread
           </span>
         )}
+        <span
+          className={`text-copy-13 text-gray-900 ${read ? "" : "hidden group-hover:inline group-focus-visible:inline"}`}
+        >
+          Today at 9:44 AM
+        </span>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "ml-auto size-4 shrink-0 text-gray-900 opacity-0 transition-[opacity,transform] duration-150 group-hover:opacity-100 group-focus-visible:opacity-100",
+            open && "rotate-90",
+          )}
+        />
       </button>
       {/* Grows from no height to the reply's, by transitioning the row from 0fr to 1fr. */}
       <div
