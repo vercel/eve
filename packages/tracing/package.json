@@ -11,6 +11,8 @@
   },
   "files": [
     "dist",
+    "!dist/CHANGELOG.md",
+    "CHANGELOG.md",
     "src",
     "!src/**/*.test.ts",
     "NOTICE"
@@ -48,6 +50,7 @@
     "build": "tsc -p tsconfig.build.json",
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
+    "postpack": "node ../../scripts/restore-package-changelog.mjs .",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

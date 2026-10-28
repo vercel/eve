@@ -6,7 +6,7 @@ peer dependency is `@opentelemetry/api`.
 
 ## Release notes
 
-The installed package contains its release notes in `dist/CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/%40vercel%2Fagent-runs%40<version>/packages/tracing/CHANGELOG.md`.
+The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/%40vercel%2Fagent-runs%40<version>/packages/tracing/CHANGELOG.md`.
 
 ## Setup
 

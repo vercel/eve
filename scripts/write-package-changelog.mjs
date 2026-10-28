@@ -1,14 +1,27 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 const packageRoot = resolve(process.argv[2] ?? ".");
+const changelogPath = join(packageRoot, "CHANGELOG.md");
+const backupPath = join(
+  dirname(packageRoot),
+  `.${basename(packageRoot)}.eve-changelog-backup.json`,
+);
+try {
+  await access(backupPath);
+  throw new Error(
+    `A changelog backup already exists at ${backupPath}. Run the postpack script to restore it before packing.`,
+  );
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 const directory = manifest.repository?.directory;
 if (typeof directory !== "string" || !/^packages\/[a-z0-9][a-z0-9-]*$/u.test(directory)) {
   throw new Error(`Package ${manifest.name} must declare its repository directory.`);
 }
 
-const source = await readFile(join(packageRoot, "CHANGELOG.md"), "utf8");
+const source = await readFile(changelogPath, "utf8");
 const lines = source.split(/\r?\n/u);
 const headings = [];
 function nextFence(fence, line) {
@@ -73,5 +86,11 @@ const fullSha =
 const ref = gitRevision && selected === 0 ? (fullSha ?? gitRevision) : `refs/tags/${tag}`;
 const fullHistory = `https://raw.githubusercontent.com/vercel/eve/${ref}/${directory}/CHANGELOG.md`;
 const content = `${releaseHeading}\n\n${preview}${entry}\n\nFor an upgrade across multiple releases, review each version between the installed and target versions in the [target version's changelog](${fullHistory}).\n`;
-await mkdir(join(packageRoot, "dist"), { recursive: true });
-await writeFile(join(packageRoot, "dist", "CHANGELOG.md"), content);
+await writeFile(backupPath, JSON.stringify({ source, content }), { flag: "wx" });
+try {
+  await writeFile(changelogPath, content);
+} catch (error) {
+  await writeFile(changelogPath, source);
+  await unlink(backupPath);
+  throw error;
+}

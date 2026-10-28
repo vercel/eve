@@ -8,7 +8,7 @@ The framework is called eve. The published npm package is `eve`. The CLI binary 
 
 ## Release notes
 
-The installed package contains its release notes in `dist/CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
+The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
 
 ## Preview Terms and Safeguards
 

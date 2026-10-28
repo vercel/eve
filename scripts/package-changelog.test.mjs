@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 test("npm and pnpm pack only the current release without changing the repository changelog", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "eve-changelog-pack-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const script = resolve("scripts/write-package-changelog.mjs");
+  const restore = resolve("scripts/restore-package-changelog.mjs");
   const manifest = {
     name: "eve",
     version: "1.2.3",
@@ -17,13 +18,15 @@ test("npm and pnpm pack only the current release without changing the repository
       url: "git+https://github.com/vercel/eve.git",
       directory: "packages/eve",
     },
-    files: ["dist"],
-    scripts: { prepack: `node "${script}" .` },
+    files: ["dist", "!dist/CHANGELOG.md", "CHANGELOG.md"],
+    scripts: { prepack: `node "${script}" .`, postpack: `node "${restore}" .` },
   };
   const source =
     "# eve\n\n## 1.2.4\n\n- Future change.\n\n## 1.2.3\n\n### Release eve@1.2.3 | 2026-10-27 | patch\n\n### 🚀 Features\n\n- Current change.\n\n```md\n## 9.9.9\n### 🚀 Features\n```\n\nText after the code block.\n\n## 1.2.2\n\n- Older change.\n";
   await writeFile(join(root, "package.json"), JSON.stringify(manifest));
   await writeFile(join(root, "CHANGELOG.md"), source);
+  await mkdir(join(root, "dist"));
+  await writeFile(join(root, "dist/CHANGELOG.md"), "Stale notes.\n");
   const pnpmTarball = join(root, "pnpm.tgz");
   execFileSync("pnpm", ["pack", "--out", pnpmTarball], { cwd: root, stdio: "pipe" });
   const npmOutput = execFileSync("npm", ["pack", "--json", "--pack-destination", root], {
@@ -33,9 +36,10 @@ test("npm and pnpm pack only the current release without changing the repository
   const npmTarball = join(root, JSON.parse(npmOutput)[0].filename);
   for (const tarball of [pnpmTarball, npmTarball]) {
     const files = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" });
-    assert.match(files, /package\/dist\/CHANGELOG\.md/u);
-    assert.doesNotMatch(files, /^package\/CHANGELOG\.md$/mu);
-    const changelog = execFileSync("tar", ["-xOf", tarball, "package/dist/CHANGELOG.md"], {
+    assert.match(files, /^package\/CHANGELOG\.md$/mu);
+    assert.doesNotMatch(files, /package\/dist\/CHANGELOG\.md/u);
+    assert.doesNotMatch(files, /eve-changelog-backup/u);
+    const changelog = execFileSync("tar", ["-xOf", tarball, "package/CHANGELOG.md"], {
       encoding: "utf8",
     });
     assert.match(
@@ -63,7 +67,7 @@ test("npm and pnpm pack only the current release without changing the repository
     stdio: "pipe",
     env: { ...process.env, VERCEL_GIT_COMMIT_SHA: sourceSha },
   });
-  const preview = execFileSync("tar", ["-xOf", pnpmTarball, "package/dist/CHANGELOG.md"], {
+  const preview = execFileSync("tar", ["-xOf", pnpmTarball, "package/CHANGELOG.md"], {
     encoding: "utf8",
   });
   assert.match(preview, /development build/u);
@@ -78,7 +82,7 @@ test("npm and pnpm pack only the current release without changing the repository
     stdio: "pipe",
     env: { ...process.env, VERCEL_GIT_COMMIT_SHA: sourceSha },
   });
-  const releasePreview = execFileSync("tar", ["-xOf", pnpmTarball, "package/dist/CHANGELOG.md"], {
+  const releasePreview = execFileSync("tar", ["-xOf", pnpmTarball, "package/CHANGELOG.md"], {
     encoding: "utf8",
   });
   assert.match(releasePreview, /^# Release eve@1\.2\.4$/mu);
@@ -88,7 +92,7 @@ test("npm and pnpm pack only the current release without changing the repository
     stdio: "pipe",
     env: { ...process.env, VERCEL_GIT_COMMIT_SHA: "" },
   });
-  const localPreview = execFileSync("tar", ["-xOf", pnpmTarball, "package/dist/CHANGELOG.md"], {
+  const localPreview = execFileSync("tar", ["-xOf", pnpmTarball, "package/CHANGELOG.md"], {
     encoding: "utf8",
   });
   assert.match(localPreview, /\/abcdef0123456789\/packages\/eve\/CHANGELOG\.md/u);
@@ -122,7 +126,7 @@ test("packing fails when the package version has no release notes", async (t) =>
     "# tracing\n\n## 1.0.0\n\nCurrent notes.\n\n## 0.9.0\n\nOld notes.\n",
   );
   execFileSync(process.execPath, ["scripts/write-package-changelog.mjs", root], { stdio: "pipe" });
-  const changelog = await readFile(join(root, "dist/CHANGELOG.md"), "utf8");
+  const changelog = await readFile(join(root, "CHANGELOG.md"), "utf8");
   assert.match(changelog, /^# Release @vercel\/agent-runs@1\.0\.0$/mu);
   assert.match(
     changelog,
@@ -130,4 +134,49 @@ test("packing fails when the package version has no release notes", async (t) =>
   );
   assert.match(changelog, /Current notes\./u);
   assert.doesNotMatch(changelog, /Old notes\./u);
+  execFileSync(process.execPath, ["scripts/restore-package-changelog.mjs", root], {
+    stdio: "pipe",
+  });
+});
+
+test("an interrupted pack preserves the original history and never overwrites later edits", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "eve-changelog-interrupted-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const backup = join(dirname(root), `.${basename(root)}.eve-changelog-backup.json`);
+  t.after(() => rm(backup, { force: true }));
+  const source = "# eve\n\n## 1.0.0\n\nCurrent notes.\n\n## 0.9.0\n\nOlder notes.\n";
+  await writeFile(
+    join(root, "package.json"),
+    JSON.stringify({ name: "eve", version: "1.0.0", repository: { directory: "packages/eve" } }),
+  );
+  await writeFile(join(root, "CHANGELOG.md"), source);
+  execFileSync(process.execPath, ["scripts/write-package-changelog.mjs", root], { stdio: "pipe" });
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, ["scripts/write-package-changelog.mjs", root], {
+        stdio: "pipe",
+      }),
+    (error) => {
+      assert.match(error.stderr.toString(), /backup already exists/u);
+      return true;
+    },
+  );
+  execFileSync(process.execPath, ["scripts/restore-package-changelog.mjs", root], {
+    stdio: "pipe",
+  });
+  assert.equal(await readFile(join(root, "CHANGELOG.md"), "utf8"), source);
+  execFileSync(process.execPath, ["scripts/write-package-changelog.mjs", root], { stdio: "pipe" });
+  await writeFile(join(root, "CHANGELOG.md"), "A later edit.\n");
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, ["scripts/restore-package-changelog.mjs", root], {
+        stdio: "pipe",
+      }),
+    (error) => {
+      assert.match(error.stderr.toString(), /changed during packing/u);
+      return true;
+    },
+  );
+  assert.equal(await readFile(join(root, "CHANGELOG.md"), "utf8"), "A later edit.\n");
+  assert.equal(JSON.parse(await readFile(backup, "utf8")).source, source);
 });
