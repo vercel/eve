@@ -454,6 +454,53 @@ describe("stageToolResultMedia", () => {
       ]),
     ]);
   });
+
+  // #4839: a sandbox that opens but rejects the write (a cached handle to a
+  // dead VM, a sandbox past its timeout) throws out of the step the same way.
+  it.fails("replaces a returned file with a note when the sandbox rejects the write", async () => {
+    const sandbox = mockSandbox();
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, {
+      ...sandbox.access,
+      open: async () => ({
+        ...sandbox.session,
+        writeBinaryFile: async () => {
+          throw new Error("sandbox is past its timeout");
+        },
+      }),
+    });
+    const toolResult = (value: unknown) =>
+      ({
+        content: [
+          {
+            output: { type: "content", value },
+            toolCallId: "call-1",
+            toolName: "inspect",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      }) as ModelMessage;
+
+    const staged = await contextStorage.run(ctx, () =>
+      stageToolResultMedia([
+        toolResult([
+          {
+            data: { data: "iVBORw0KGgo=", type: "data" },
+            filename: "chart.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ]),
+      ]),
+    );
+
+    expect(staged).toEqual([
+      toolResult([
+        { text: "Returned file chart.png (image/png) could not be stored.", type: "text" },
+      ]),
+    ]);
+  });
 });
 
 // Each test hydrates under its own session id, so bytes cached by one test
