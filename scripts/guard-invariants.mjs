@@ -160,11 +160,10 @@
  *             `eve/events`; the client) never import a schema module by
  *             value: schemas serve tests and development only.
  *
- *   rule 55 — Public named exports match checker-generated per-entry lists.
- *   rule 56 — No emitted declaration names an `@internal` one. eve builds its
- *             declarations with `stripInternal`, so a kept declaration that
- *             names a stripped one ships a missing type. Checked from rule 55's
- *             program, without emitting.
+ *   rule 55 — Public named exports match checker-generated per-entry lists,
+ *             and no entry exports a name `stripInternal` drops (`@internal`).
+ *   rule 56 — Retired: dangling references to stripped declarations are caught
+ *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
