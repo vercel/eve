@@ -3,7 +3,11 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import type { CreatedClientSession, CreatedIdleClientSession } from "#client/sessions.js";
 import type { SendTurnInput } from "#client/types.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeTestLine } from "#internal/testing/events.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
@@ -38,7 +42,10 @@ describe("Client.sessions", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
         new Response(encodeTestLine({ type: "session.started", data: {} }), {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          headers: {
+            [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+            [EVE_STREAM_TAIL_INDEX_HEADER]: "0",
+          },
         }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });

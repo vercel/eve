@@ -61,8 +61,9 @@ response to a message accepted before the upgrade. That accepted message is not 
 `session.clear()` throws the same error, because clearing would keep a session that cannot run.
 `session.stream({ follow: false })` and `session.snapshot()` still read the recorded history.
 
-Every error class `eve/client` throws extends `EveError` and has a stable snake_case `code`:
-`SessionNotActiveError` uses `session_not_active` or `session_not_ready`; `ClientError` carries
+The typed errors `eve/client` throws (`ClientError` and its subclasses, `SessionNotActiveError`,
+`HealthResponseError`, and `AgentInfoResponseError`) extend `EveError` and have a stable snake_case
+`code`: `SessionNotActiveError` uses `session_not_active` or `session_not_ready`; `ClientError` carries
 the response's code (such as `session_stranded` or `session_expired`), or `http_error` when the
 response had none. Narrow with the static `is()` of the class you expect instead of `instanceof`,
 so errors from a separately bundled copy of eve still match:
