@@ -92,8 +92,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
-  dropYieldedFollowUps(ctx, input.written);
-  dropAdmittedSends(ctx, input.written);
+  dropHookSends(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -396,89 +395,55 @@ function actOnCancels(
   if (first === undefined || cancelTurn === undefined) return;
   const hook = reactions.find(({ id }) => id === first.reactionId)?.label ?? first.reactionId;
   takeIntents(ctx, (intent) => intent.type === "cancel");
-  writeReactionsState(ctx, {
-    ...readReactionsState(ctx),
-    cancelledBy: first.reactionId,
-    cancelledTurnId: first.turnId,
-  });
+  writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledTurnId: first.turnId });
   cancelTurn({ hook, ...(first.reason !== undefined && { reason: first.reason }) });
 }
 
 /**
- * A hook's follow-up yields: once another turn starts, a cancel or reset arrives, or the history
- * is cleared, the session no longer follows up the turn it was queued for, and it's dropped. So
- * is one whose turn settles other than completed, unless a hook that sent it cancelled the turn.
- * A compaction keeps it: the conversation it follows up is still there, summarized.
+ * A hook's message leaves the state once its `delivery.admitted` is written. A person can always
+ * stop a hook's loop: a cancel, a clear, a reset, or a turn a person cancelled drops every message
+ * still waiting. A preemptible message is dropped once any other turn starts. A compaction keeps
+ * them all.
  */
-function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
-  const { followUp, ...state } = readReactionsState(ctx);
-  if (followUp === undefined) return;
-  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
-  const senders = new Set(
-    (followUp.delivery.deliveryMetadata ?? []).map(({ hook }) => `hook:${hook}`),
-  );
-  const unfinished = written.some(
-    ({ event }) =>
-      event.type === "turn.settled" &&
-      event.data.turnId === followUp.turnId &&
-      event.data.outcome !== "completed" &&
-      !(
-        event.data.outcome === "cancelled" &&
-        state.cancelledTurnId === followUp.turnId &&
-        state.cancelledBy !== undefined &&
-        senders.has(state.cancelledBy)
-      ),
-  );
-  if (
-    followUp.turnId === latestTurnId &&
-    !unfinished &&
-    !written.some(({ event }) => stopsFollowUps(event))
-  ) {
-    return;
-  }
-  writeReactionsState(ctx, state);
-}
-
-/**
- * A hook's steer or queue message leaves the state once its `delivery.admitted` is written, or
- * when a reset retires the session; a person's queued message survives a cancel and a clear, and
- * so does a hook's.
- */
-function dropAdmittedSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+function dropHookSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
   const { sends, ...state } = readReactionsState(ctx);
   if (sends === undefined) return;
-  if (written.some(({ event }) => isReset(event))) return writeReactionsState(ctx, state);
+  if (written.some(({ event }) => stopsHookSends(event, state.cancelledTurnId))) {
+    writeReactionsState(ctx, state);
+    return;
+  }
+  const latestTurnId = latestTurnIdOf(currentProjection(ctx));
   const admitted = new Set(
     written.flatMap(({ event }) =>
       event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
     ),
   );
-  if (admitted.size === 0) return;
   const pending = sends.filter(
-    ({ deliveryMetadata }) =>
-      !(deliveryMetadata ?? []).some(({ deliveryId }) => admitted.has(deliveryId)),
+    ({ delivery, preemptible }) =>
+      !(delivery.deliveryMetadata ?? []).some(({ deliveryId }) => admitted.has(deliveryId)) &&
+      (preemptible === undefined || preemptible.turnId === latestTurnId),
   );
   if (pending.length === sends.length) return;
   writeReactionsState(ctx, pending.length === 0 ? state : { ...state, sends: pending });
 }
 
-function isReset(event: WrittenEvent["event"]): boolean {
-  if (event.type !== "delivery.admitted") return false;
-  const { source } = event.data;
-  return source !== undefined && "control" in source && source.control === "reset";
-}
-
-function stopsFollowUps(event: WrittenEvent["event"]): boolean {
-  if (event.type === "context.settled") {
-    return event.data.kind === "clear" && event.data.outcome === "completed";
+function stopsHookSends(event: WrittenEvent["event"], hookCancelledTurnId?: string): boolean {
+  switch (event.type) {
+    case "context.settled":
+      return event.data.kind === "clear" && event.data.outcome === "completed";
+    case "turn.settled":
+      return event.data.outcome === "cancelled" && event.data.turnId !== hookCancelledTurnId;
+    case "delivery.admitted": {
+      const { source } = event.data;
+      return (
+        source !== undefined &&
+        "control" in source &&
+        (source.control === "cancel" || source.control === "reset")
+      );
+    }
+    default:
+      return false;
   }
-  if (event.type !== "delivery.admitted") return false;
-  const { source } = event.data;
-  return (
-    source !== undefined &&
-    "control" in source &&
-    (source.control === "cancel" || source.control === "reset")
-  );
 }
 
 function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): ReactionsState {

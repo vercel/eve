@@ -3,7 +3,6 @@ import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
 import type { Memo, Occurrence, SessionFrame } from "../../dynamic/definition.js";
 import type { SessionSendOptions } from "#channel/session.js";
-import type { TurnPolicy } from "#channel/types.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
@@ -33,48 +32,33 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
   : HookEventMap[HookEventType];
 
 /**
- * How a hook's message treats the session's turns, set with `ctx.send()`'s `turnPolicy`:
+ * Options for `ctx.send()`: the shared send options' `auth`, `context`, and `turnPolicy`, as
+ * `session.send()` takes them, plus `preemptible`.
  *
- * - `"yield"`, the default, only for hooks: the message starts the session's next turn once the
- *   running turn, or the turn the event belongs to, settles completed. Anything else that starts a
- *   turn first, a `session.cancel()`, a clear, or a reset drops it.
- * - `"steer"` and `"queue"`: the message is admitted like a person's message sent with that turn
- *   policy, at the running turn's next step boundary. It steers the running turn, or queues behind
- *   it, and starts a turn when none is running. It never steers a turn that waits on a person.
+ * `auth` is required and names who the message acts for: pass `ctx.session.auth.current` to act
+ * as the session's current identity, a principal to act for them, or `null` for no caller. The
+ * message's `delivery.admitted` records that principal, and its source names the hook.
+ *
+ * `turnPolicy` defaults to `"steer"`, as for `session.send()`. With `"queue"`, `preemptible: true`
+ * makes the message give way: it's admitted only once nothing else waits, and dropped if any
+ * other turn starts first. A goal loop uses it so a person's message always wins.
  */
-export type HookTurnPolicy = "yield" | TurnPolicy;
+export type HookSendOptions = Pick<SessionSendOptions, "auth" | "context"> &
+  (
+    | { readonly turnPolicy?: "steer"; readonly preemptible?: never }
+    | { readonly turnPolicy: "queue"; readonly preemptible?: boolean }
+  );
 
 /**
- * Options for `ctx.send()`: the shared send options' `context`, and `auth`, optional, plus
- * `turnPolicy`. Omitted, `auth` names no sender, and the message acts as the session's current
- * identity, so it may steer the running turn. A principal makes it act for them, and `null` sends
- * it with no caller, as with `session.send()`. There's no `idempotencyKey`: a hook sends at most
- * one message per event, which eve admits once.
- */
-export type HookSendOptions = Pick<SessionSendOptions, "context"> &
-  Partial<Pick<SessionSendOptions, "auth">> & {
-    readonly turnPolicy?: HookTurnPolicy;
-  };
-
-/**
- * What `ctx.send()` did, decided when it's called. `queued` means eve recorded the message under
- * `deliveryId`, which its `delivery.admitted` names once the session admits it. A `"yield"`
- * message can still be dropped before then.
+ * What `ctx.send()` did, decided when it's called. `sent` means eve recorded the message under
+ * `deliveryId`, which its `delivery.admitted` names once the session admits it. A cancel, clear, or
+ * reset can still drop it, and so can another turn starting first, for a preemptible message.
+ * `cancelled`: a person cancelled the session's latest turn, so hooks can't start another until a
+ * new turn starts.
  */
 export type HookSendResult =
-  | { readonly queued: true; readonly deliveryId: string }
-  | {
-      readonly queued: false;
-      /**
-       * `already-queued`: this handler already sent a message for this event, or with `"yield"`,
-       * this hook already queued one for the turn.
-       * `not-completed`: with `"yield"`, the turn failed, or something other than this hook
-       * cancelled it.
-       * `auth-conflict`: with `"yield"`, another hook's message for the turn acts for someone
-       * else.
-       */
-      readonly reason: "already-queued" | "not-completed" | "auth-conflict";
-    };
+  | { readonly sent: true; readonly deliveryId: string }
+  | { readonly sent: false; readonly reason: "cancelled" };
 
 /**
  * Every hook handler receives this context: the session as of the commit the event is in, the
@@ -106,15 +90,16 @@ export interface HookContext extends SessionContext, Omit<SessionFrame, "session
    */
   cancel(reason?: string): void;
   /**
-   * Sends `message` into the session as a delivery whose source names this hook and the channel,
-   * from any event. `turnPolicy` decides how it treats the session's turns; see
-   * {@link HookTurnPolicy}. A handler sends at most one message per event. Unlike
-   * `session.send()`, it returns synchronously with the delivery's id, and there's no receipt to
-   * await: the session admits the message after the handler returns. The model is told a hook
-   * sent it, and it never answers a pending question. Like other hook effects, it's lost if the
-   * step is interrupted before it's saved. Throws after the handler has settled.
+   * Sends `message` into the session from any event, admitted like a person's message with the
+   * same `turnPolicy`, at the running turn's next step boundary, or right away between turns. It
+   * never steers a turn that waits on its person, and a person's cancel, clear, or reset drops it:
+   * a person can always stop a hook's loop. Unlike `session.send()`, it returns synchronously with
+   * the delivery's id, and there's no receipt to await: the session admits the message after the
+   * handler returns. The model is told a hook sent it, and it never answers a pending question.
+   * Like other hook effects, it's lost if the step is interrupted before it's saved. Throws after
+   * the handler has settled.
    */
-  send(message: MessageContent, options?: HookSendOptions): HookSendResult;
+  send(message: MessageContent, options: HookSendOptions): HookSendResult;
 }
 
 /**

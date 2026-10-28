@@ -5,7 +5,6 @@ import { getAdapterKind } from "#channel/adapter.js";
 import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import { ChannelDeliveryKey, ChannelInstrumentationKey } from "#context/keys.js";
 import type { HookContext, HookSendOptions, HookSendResult } from "#public/definitions/hook.js";
-import { principalOf } from "#execution/session/principal.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";
@@ -14,7 +13,6 @@ import type { ResolvedHookDefinition } from "#runtime/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { followUpKey } from "../hook-send.js";
 import { queueCommands, reportReactionFailure, type Command } from "../intents.js";
 import { sessionFrameOf } from "../frame.js";
 import type { CommitContext, CommitReaction } from "../reaction.js";
@@ -102,78 +100,43 @@ async function runHandler(call: {
     assertOpen("cancel");
     requested.push(reason === undefined ? { type: "cancel" } : { reason, type: "cancel" });
   };
-  let sent = false;
-  const send = (message: MessageContent, options: HookSendOptions = {}): HookSendResult => {
+  let sends = 0;
+  const send = (message: MessageContent, options: HookSendOptions): HookSendResult => {
     assertOpen("send");
     const empty = typeof message === "string" ? message.trim().length === 0 : message.length === 0;
     if (empty) throw new TypeError(`Hook "${label}" called ctx.send() without a message.`);
-    // One message per handler and event, so a hook that sends on every event can't flood a turn.
-    if (sent) return { queued: false, reason: "already-queued" };
-    const { turnPolicy = "yield", ...rest } = options;
-    const deliveryId = `hook-${digestOf(idempotencyKey)}`;
-    if (turnPolicy !== "yield") {
-      sent = true;
-      requested.push({
-        delivery: hookDelivery(ctx, {
-          ...rest,
-          deliveryId,
-          idempotencyKey: `${idempotencyKey}:send`,
-          message,
-          slug: call.slug,
-          turnPolicy,
-        }),
-        type: "send",
-      });
-      return { deliveryId, queued: true };
+    if (options?.auth === undefined) {
+      throw new TypeError(
+        `Hook "${label}" called ctx.send() without auth. Pass ctx.session.auth.current to act as the session's current identity, or null for no caller.`,
+      );
     }
-    // A follow-up waits on the running turn, or the latest one when none runs.
+    const { preemptible = false, turnPolicy = "steer", ...rest } = options;
+    if (preemptible && turnPolicy !== "queue") {
+      throw new TypeError(
+        `Hook "${label}" called ctx.send() with preemptible and turnPolicy "${turnPolicy}". Only a queued message can be preempted.`,
+      );
+    }
     const projection = currentProjection(ctx);
-    const turnId = activeTurnIdOf(projection) ?? latestTurnIdOf(projection);
-    const state = readReactionsState(ctx);
-    const settledTurn = turnId === undefined ? undefined : projection.view.turns[turnId];
-    if (settledTurn?.status === "settled") {
-      // A hook that cancelled the turn can redirect it; a person's cancel stops the session.
-      const cancelledHere =
-        settledTurn.outcome === "cancelled" &&
-        state.cancelledTurnId === turnId &&
-        state.cancelledBy === id;
-      if (settledTurn.outcome !== "completed" && !cancelledHere) {
-        return { queued: false, reason: "not-completed" };
-      }
+    const turnId = latestTurnIdOf(projection);
+    // A person's cancel stops hooks too: none starts a turn after it until another turn starts.
+    if (activeTurnIdOf(projection) === undefined && personCancelled(ctx, turnId)) {
+      return { reason: "cancelled", sent: false };
     }
-    const queued = [
-      ...requested.flatMap((command) =>
-        command.type === "follow-up" && command.turnId === turnId ? [command.delivery] : [],
-      ),
-      ...(state.followUp !== undefined && state.followUp.turnId === turnId
-        ? [state.followUp.delivery]
-        : []),
-    ];
-    if (
-      queued.some(({ deliveryMetadata }) =>
-        deliveryMetadata?.some((entry) => entry.hook === call.slug),
-      )
-    ) {
-      return { queued: false, reason: "already-queued" };
-    }
-    // One delivery acts for one principal, so follow-ups join only when they agree on it.
-    if (queued.length > 0 && authKey(queued[0]!.auth) !== authKey(rest.auth)) {
-      return { queued: false, reason: "auth-conflict" };
-    }
-    sent = true;
+    const key = `${idempotencyKey}:send:${sends++}`;
+    const deliveryId = `hook-${digestOf(key)}`;
     requested.push({
       delivery: hookDelivery(ctx, {
         ...rest,
         deliveryId,
-        idempotencyKey: followUpKey(sessionId, turnId),
+        idempotencyKey: key,
         message,
         slug: call.slug,
-        turnPolicy: "queue",
+        turnPolicy,
       }),
-      ...(turnId !== undefined && { turnId }),
-      type: "follow-up",
+      ...(preemptible && { preemptible: { turnId } }),
+      type: "send",
     });
-    return { deliveryId, queued: true };
+    return { deliveryId, sent: true };
   };
   const hookContext: HookContext = {
     ...base,
@@ -221,11 +184,15 @@ async function runHandler(call: {
   }
 }
 
-/** Who a follow-up acts for: the session's identity, no caller, or a principal. */
-function authKey(auth: DeliverHookPayload["auth"]): string {
-  if (auth === undefined) return "session";
-  if (auth === null) return "none";
-  return JSON.stringify(principalOf(auth));
+/** The session's latest turn settled cancelled, and no hook's cancel stopped it. */
+function personCancelled(ctx: ContextContainer, turnId: string | undefined): boolean {
+  if (turnId === undefined) return false;
+  const turn = currentProjection(ctx).view.turns[turnId];
+  return (
+    turn?.status === "settled" &&
+    turn.outcome === "cancelled" &&
+    readReactionsState(ctx).cancelledTurnId !== turnId
+  );
 }
 
 function agentOf(ctx: ContextContainer): HookContext["agent"] {
@@ -241,7 +208,7 @@ function agentOf(ctx: ContextContainer): HookContext["agent"] {
  */
 function hookDelivery(
   ctx: ContextContainer,
-  input: Omit<HookSendOptions, "turnPolicy"> & {
+  input: Pick<HookSendOptions, "auth" | "context"> & {
     readonly deliveryId: string;
     readonly idempotencyKey: string;
     readonly message: MessageContent;
@@ -255,7 +222,7 @@ function hookDelivery(
     ctx.get(ChannelInstrumentationKey)?.kind ??
     getAdapterKind(ctx.require(ChannelKey));
   return {
-    ...(input.auth !== undefined && { auth: input.auth }),
+    auth: input.auth,
     deliveryMetadata: [
       {
         channelKind,

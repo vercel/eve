@@ -532,6 +532,14 @@ describe("evaluateValues", () => {
   });
 });
 
+const ALICE = {
+  attributes: {},
+  authenticator: "test",
+  issuer: "test",
+  principalId: "alice",
+  principalType: "user" as const,
+};
+
 describe("runReactions", () => {
   const hook = (
     slug: string,
@@ -659,86 +667,92 @@ describe("runReactions", () => {
     ]);
   });
 
-  describe("follow-ups", () => {
-    const settledFacts = [
-      {
-        data: { cause: { deliveryId: "d_1" }, follows: null, turnId: "turn-1" },
-        type: "turn.started",
-      },
-      { data: { outcome: "completed", turnId: "turn-1" }, type: "turn.settled" },
-    ];
+  describe("hook sends", () => {
+    const started = (turnId: string) => ({
+      data: { cause: { deliveryId: `d_${turnId}` }, follows: null, turnId },
+      type: "turn.started",
+    });
+    const settled = (turnId: string, outcome = "completed") => ({
+      data: { outcome, turnId },
+      type: "turn.settled",
+    });
+    const control = (line: number, control: string) =>
+      written(line, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
 
-    // A session whose turn-1 settled, and a hook that followed it up.
-    async function followedUp() {
+    /** A session whose `facts` are folded, with a hook that sends on `turn.settled`. */
+    function sessionWith(
+      facts: readonly { readonly data: object; readonly type: string }[],
+      options:
+        | Parameters<HookContext["send"]>[1]
+        | ((ctx: HookContext) => Parameters<HookContext["send"]>[1]),
+      results: HookSendResult[] = [],
+    ) {
       const ctx = session(noTools, [
-        {
-          events: {
-            "turn.settled": (_event: unknown, ctx: HookContext) => ctx.send("Keep going."),
-          },
-          slug: "until-done",
-        },
+        hook("reviewer", {
+          "turn.settled": (_event, ctx) =>
+            results.push(
+              ctx.send("Summarize it.", typeof options === "function" ? options(ctx) : options),
+            ),
+        }),
       ]);
       ctx.set(ChannelKey, { kind: "http" } as never);
       const projection = initialSessionProjection();
       foldLine(
         projection.view,
-        { at: "2026-01-01T00:00:00.000Z", facts: settledFacts },
+        { at: "2026-01-01T00:00:00.000Z", facts },
         projection.view.position,
       );
       enterSessionProjectionAt(ctx, projection);
-      await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
-      // The delivery carries what the hook passed, and no sender; the prompt adds the note.
-      const { followUp } = readReactionsState(ctx);
-      expect(followUp?.turnId).toBe("turn-1");
-      expect(followUp?.delivery).toMatchObject({
-        deliveryMetadata: [{ channelKind: "http", hook: "until-done" }],
-        turnPolicy: "queue",
-      });
-      expect(followUp?.delivery).not.toHaveProperty("auth");
-      expect(followUp?.delivery.payloads).toEqual([{ message: "Keep going." }]);
-      return ctx;
+      return { ctx, projection, results };
     }
 
-    it("refuses a follow-up to a turn someone other than the hook cancelled", async () => {
-      const results: unknown[] = [];
-      const ctx = session(noTools, [
-        {
-          events: {
-            "turn.settled": (_event: unknown, ctx: HookContext) =>
-              results.push(ctx.send("Keep going.")),
-          },
-          slug: "until-done",
-        },
-      ]);
-      ctx.set(ChannelKey, { kind: "http" } as never);
-      // Alice cancelled turn-1 through `session.cancel()`, so no hook stopped it.
-      const cancelled = { outcome: "cancelled", turnId: "turn-1" };
-      const projection = initialSessionProjection();
-      foldLine(
-        projection.view,
-        {
-          at: "2026-01-01T00:00:00.000Z",
-          facts: [settledFacts[0]!, { data: cancelled, type: "turn.settled" }],
-        },
-        projection.view.position,
+    async function sent(options: Parameters<HookContext["send"]>[1]) {
+      const { ctx, projection, results } = sessionWith(
+        [started("turn-1"), settled("turn-1")],
+        options,
       );
-      enterSessionProjectionAt(ctx, projection);
-      await commit(ctx, { written: written(1, "turn.settled", cancelled) });
-      expect(results).toEqual([{ queued: false, reason: "not-completed" }]);
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+      await commit(ctx, { written: written(1, "turn.settled", settled("turn-1").data) });
+      const [result] = results;
+      expect(result).toEqual({ deliveryId: expect.stringMatching(/^hook-/u), sent: true });
+      return { ctx, deliveryId: result!.sent ? result!.deliveryId : "", projection };
+    }
+
+    it("records the message with the principal it acts for and the hook that sent it", async () => {
+      const { ctx, deliveryId } = await sent({ auth: ALICE, context: ["Keep it short."] });
+      const [send] = readReactionsState(ctx).sends ?? [];
+      expect(send).toEqual({
+        delivery: expect.objectContaining({
+          auth: ALICE,
+          deliveryMetadata: [
+            expect.objectContaining({ channelKind: "http", deliveryId, hook: "reviewer" }),
+          ],
+          payloads: [{ context: ["Keep it short."], message: "Summarize it." }],
+          turnPolicy: "steer",
+        }),
+      });
     });
 
-    const control = (control: string) =>
-      written(2, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
-
-    it.each(["cancel", "reset"])("drops a follow-up when a %s arrives", async (kind) => {
-      const ctx = await followedUp();
-      await commit(ctx, { written: control(kind) });
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+    it("keeps a message through a compaction until the session admits it", async () => {
+      const { ctx, deliveryId } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      await commit(ctx, { written: control(2, "compact") });
+      expect(readReactionsState(ctx).sends).toHaveLength(1);
+      await commit(ctx, {
+        written: written(3, "delivery.admitted", {
+          deliveryId,
+          source: { channel: "http", hook: "reviewer" },
+        }),
+      });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
-    it("drops a follow-up when the history is cleared", async () => {
-      const ctx = await followedUp();
+    it.each(["cancel", "reset"])("drops every message when a %s arrives", async (kind) => {
+      const { ctx } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      await commit(ctx, { written: control(2, kind) });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("drops every message when the history is cleared", async () => {
+      const { ctx } = await sent({ auth: ALICE });
       await commit(ctx, {
         written: written(2, "context.settled", {
           changeId: "c_1",
@@ -747,97 +761,58 @@ describe("runReactions", () => {
           selects: null,
         }),
       });
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+      expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
-    it("keeps a follow-up through a compaction", async () => {
-      const ctx = await followedUp();
-      await commit(ctx, { written: control("compact") });
-      await commit(ctx, {
-        written: written(3, "context.settled", {
-          changeId: "c_1",
-          kind: "compaction",
-          outcome: "completed",
-          selects: null,
-        }),
+    it("drops a preemptible message once another turn starts", async () => {
+      const { ctx, projection } = await sent({
+        auth: ALICE,
+        preemptible: true,
+        turnPolicy: "queue",
       });
-      expect(readReactionsState(ctx).followUp?.turnId).toBe("turn-1");
-    });
-
-    it("drops a mid-turn follow-up when its turn fails", async () => {
-      const ctx = session(noTools, [
-        {
-          events: { "turn.started": (_event: unknown, ctx: HookContext) => ctx.send("Review it.") },
-          slug: "reviewer",
-        },
-      ]);
-      ctx.set(ChannelKey, { kind: "http" } as never);
-      const projection = initialSessionProjection();
+      expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({ turnId: "turn-1" });
       foldLine(
         projection.view,
-        { at: "2026-01-01T00:00:00.000Z", facts: [settledFacts[0]!] },
+        { at: "2026-01-01T00:00:02.000Z", facts: [started("turn-2")] },
         projection.view.position,
       );
-      enterSessionProjectionAt(ctx, projection);
-      await commit(ctx, { written: written(1, "turn.started", settledFacts[0]!.data) });
-      expect(readReactionsState(ctx).followUp?.turnId).toBe("turn-1");
-      await commit(ctx, {
-        written: written(2, "turn.settled", { outcome: "failed", turnId: "turn-1" }),
-      });
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+      await commit(ctx, { written: written(2, "turn.started", started("turn-2").data) });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
     });
 
-    describe("steer and queue sends", () => {
-      // A session whose turn-1 settled, and a hook that sent with `policy`.
-      async function sent(policy: "steer" | "queue") {
-        const results: HookSendResult[] = [];
-        const ctx = session(noTools, [
-          {
-            events: {
-              "turn.settled": (_event: unknown, ctx: HookContext) =>
-                results.push(ctx.send("Summarize it.", { turnPolicy: policy })),
-            },
-            slug: "reviewer",
+    it("refuses a message after a turn a person cancelled", async () => {
+      const { ctx, results } = sessionWith([started("turn-1"), settled("turn-1", "cancelled")], {
+        auth: ALICE,
+        turnPolicy: "queue",
+      });
+      await commit(ctx, {
+        written: written(1, "turn.settled", settled("turn-1", "cancelled").data),
+      });
+      expect(results).toEqual([{ reason: "cancelled", sent: false }]);
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("requires auth, and a queued turn policy to preempt", async () => {
+      const errors: string[] = [];
+      const ctx = session(noTools, [
+        hook("reviewer", {
+          "turn.settled": (_event, ctx) => {
+            for (const options of [{}, { auth: ALICE, preemptible: true }]) {
+              try {
+                ctx.send("Summarize it.", options as never);
+              } catch (error) {
+                errors.push((error as Error).message);
+              }
+            }
           },
-        ]);
-        ctx.set(ChannelKey, { kind: "http" } as never);
-        const projection = initialSessionProjection();
-        foldLine(
-          projection.view,
-          { at: "2026-01-01T00:00:00.000Z", facts: settledFacts },
-          projection.view.position,
-        );
-        enterSessionProjectionAt(ctx, projection);
-        await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
-        const deliveryId = results[0]?.queued === true ? results[0].deliveryId : undefined;
-        const { sends, followUp } = readReactionsState(ctx);
-        expect(followUp).toBeUndefined();
-        expect(sends).toHaveLength(1);
-        expect(sends?.[0]).toMatchObject({
-          deliveryMetadata: [{ deliveryId, hook: "reviewer" }],
-          turnPolicy: policy,
-        });
-        return { ctx, deliveryId: deliveryId! };
-      }
-
-      it("keeps a send until the session admits it", async () => {
-        const { ctx, deliveryId } = await sent("steer");
-        await commit(ctx, { written: control("cancel") });
-        expect(readReactionsState(ctx).sends).toHaveLength(1);
-        await commit(ctx, {
-          written: written(3, "delivery.admitted", {
-            deliveryId,
-            source: { channel: "http", hook: "reviewer" },
-          }),
-        });
-        expect(readReactionsState(ctx).sends).toBeUndefined();
-      });
-
-      it("drops sends when a reset arrives", async () => {
-        const { ctx } = await sent("queue");
-        await commit(ctx, { written: control("reset") });
-        expect(readReactionsState(ctx).sends).toBeUndefined();
-      });
+        }),
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      await commit(ctx, { written: written(1, "turn.settled", settled("turn-1").data) });
+      expect(errors).toEqual([
+        expect.stringContaining("without auth"),
+        expect.stringContaining("Only a queued message can be preempted"),
+      ]);
     });
   });
 });

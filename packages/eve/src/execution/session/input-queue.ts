@@ -109,6 +109,11 @@ export class SessionInputQueue {
     return admission;
   }
 
+  /** Drops the hooks' messages still waiting: a person's cancel, clear, or reset stops them. */
+  dropHookDeliveries(): void {
+    this.retain((entry) => entry.kind !== "delivery" || !isHookDelivery(entry.delivery));
+  }
+
   enqueueControl(control: SessionControl, origin?: ControlOrigin): void {
     const entry: { -readonly [K in keyof QueuedControl]: QueuedControl[K] } = {
       control,

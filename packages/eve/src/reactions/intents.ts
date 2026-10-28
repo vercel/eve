@@ -1,29 +1,23 @@
-import type { DeliverHookPayload } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { coalesceDeliveries } from "#harness/messages.js";
+import type { PendingSend } from "./hook-send.js";
 import type { Reaction } from "./reaction.js";
 import { readReactionsState, writeReactionsState, type PendingIntent } from "./state.js";
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. A follow-up targets the turn after
-// the one it names. A send is admitted like a person's message. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one; repeated cancels add nothing. A send
+// waits, in order, for the session to admit it.
 
 /** A command a hook asked for, before it's queued. */
 export type Command =
   | { readonly type: "cancel"; readonly reason?: string }
-  | { readonly type: "follow-up"; readonly turnId?: string; readonly delivery: DeliverHookPayload }
-  | { readonly type: "send"; readonly delivery: DeliverHookPayload };
+  | ({ readonly type: "send" } & PendingSend);
 
-/**
- * Adds a hook's commands to the session's queue. Cancels between turns are dropped; each hook's
- * follow-up joins the turn's one follow-up delivery; sends wait, in order, for the session to
- * admit them.
- */
+/** Adds a hook's commands to the session's queue. Cancels between turns are dropped. */
 export function queueCommands(
   ctx: ContextContainer,
   reaction: Pick<Reaction, "id" | "label">,
@@ -33,26 +27,13 @@ export function queueCommands(
   if (commands.length === 0) return;
   const state = readReactionsState(ctx);
   const intents = [...(state.intents ?? [])];
-  let { followUp } = state;
   const sends = [...(state.sends ?? [])];
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
     if (command.type === "send") {
-      sends.push(command.delivery);
-      changed = true;
-      continue;
-    }
-    if (command.type === "follow-up") {
-      // A hook joins the turn's follow-up; `ctx.followUp()` already refused one it can't join.
-      const queued = followUp?.turnId === command.turnId ? followUp : undefined;
-      followUp = {
-        delivery:
-          queued === undefined
-            ? command.delivery
-            : coalesceDeliveries([queued.delivery, command.delivery]),
-        ...(command.turnId !== undefined && { turnId: command.turnId }),
-      };
+      const { type: _type, ...send } = command;
+      sends.push(send);
       changed = true;
       continue;
     }
@@ -68,12 +49,7 @@ export function queueCommands(
     changed = true;
   }
   if (changed) {
-    writeReactionsState(ctx, {
-      ...state,
-      intents,
-      ...(followUp !== undefined && { followUp }),
-      ...(sends.length > 0 && { sends }),
-    });
+    writeReactionsState(ctx, { ...state, intents, ...(sends.length > 0 && { sends }) });
   }
 }
 

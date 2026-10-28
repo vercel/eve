@@ -7,7 +7,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { pendingFollowUp } from "#reactions/hook-send.js";
+import { pendingPreemptibleSends } from "#reactions/hook-send.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
@@ -18,12 +18,12 @@ vi.mock("../route-child-delivery.js", () => ({
 }));
 vi.mock("#reactions/hook-send.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#reactions/hook-send.js")>()),
-  pendingFollowUp: vi.fn(),
+  pendingPreemptibleSends: vi.fn(),
 }));
 
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
-  vi.mocked(pendingFollowUp).mockReset();
+  vi.mocked(pendingPreemptibleSends).mockReset().mockReturnValue([]);
 });
 
 interface ScriptedRead {
@@ -124,15 +124,15 @@ function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
 }
 
 describe("nextTurnDelivery", () => {
-  const followUp: DeliverHookPayload = {
-    idempotencyKey: "ses:follow-up:turn_0",
+  const preemptible: DeliverHookPayload = {
+    idempotencyKey: "ses:hook:until-done:1.0:turn.settled:send:0",
     kind: "deliver",
     payloads: [{ message: "Keep going." }],
     turnPolicy: "queue",
   };
 
-  it("admits a hook's follow-up once nothing else waits", async () => {
-    vi.mocked(pendingFollowUp).mockReturnValue(followUp);
+  it("admits a hook's preemptible message once nothing else waits", async () => {
+    vi.mocked(pendingPreemptibleSends).mockReturnValue([preemptible]);
     const input = batchingInputFor([]);
 
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
@@ -141,8 +141,8 @@ describe("nextTurnDelivery", () => {
     });
   });
 
-  it("holds a follow-up behind input an awaited handover still holds back", async () => {
-    vi.mocked(pendingFollowUp).mockReturnValue(followUp);
+  it("holds a preemptible message behind input an awaited handover still holds back", async () => {
+    vi.mocked(pendingPreemptibleSends).mockReturnValue([preemptible]);
     // Alice's message arrived before the handover, and reads once it settles.
     let settled = false;
     const reads = [messageRead("Alice asks for the appendix.")];

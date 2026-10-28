@@ -6,8 +6,7 @@ import type { AlsContext } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import type { DeliverHookPayload } from "#channel/types.js";
-import { REACTIONS_STATE_KEY, type FollowUp } from "./hook-send.js";
+import { REACTIONS_STATE_KEY, type PendingSend } from "./hook-send.js";
 
 // The session's reactions as they stand, in its checkpointed state, never on the stream: one slot
 // per dynamic value with what's installed, memo results, and the commands hooks queued. Installed values that carry code live in an in-process
@@ -45,14 +44,10 @@ export interface ReactionsState {
   readonly revision?: string;
   /** Commands hooks queued for the running turn that the session hasn't acted on yet. */
   readonly intents?: readonly PendingIntent[];
-  /** The follow-up hooks queued with `"yield"` for a turn, until the session admits or drops it. */
-  readonly followUp?: FollowUp;
-  /** Messages hooks sent with `"steer"` or `"queue"`, until the session admits them. */
-  readonly sends?: readonly DeliverHookPayload[];
+  /** Messages hooks sent with `ctx.send()`, in order, until the session admits or drops them. */
+  readonly sends?: readonly PendingSend[];
   /** The turn a hook's cancel stopped: a cancel acts once on its turn. */
   readonly cancelledTurnId?: string;
-  /** The hook whose cancel stopped `cancelledTurnId`, which may follow the turn up. */
-  readonly cancelledBy?: string;
 }
 
 /** A command a hook queued for the running turn, waiting for the session to act on it. */

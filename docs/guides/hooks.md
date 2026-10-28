@@ -262,7 +262,7 @@ The same goes for the `call.progress` a workflow tool reports while the turn wai
 
 ## Send a message from a hook
 
-Call `ctx.send(message, options?)` from any handler to send the session a message. This hook keeps the agent working until the tests pass, for at most ten more turns:
+Call `ctx.send(message, options)` from any handler to send the session a message. This hook keeps the agent working until the tests pass, for at most ten more turns:
 
 ```ts title="agent/hooks/until-green.ts"
 import { defineState } from "eve/context";
@@ -283,33 +283,24 @@ export default defineHook({
       attempts.update((n) => n + 1);
       ctx.send(
         `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
+        { auth: ctx.session.auth.current, turnPolicy: "queue", preemptible: true },
       );
     },
   },
 });
 ```
 
-The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does, plus `turnPolicy`. Without `auth`, the message names no sender and acts as the session's current identity.
+The message is [`MessageContent`](./client/messages). `options` takes `auth`, `context`, and `turnPolicy`, as `session.send()` does, plus `preemptible`:
 
-`turnPolicy` decides how the message treats the session's turns:
+- `auth` is required and names who the message acts for. Pass `ctx.session.auth.current` to act as the session's current identity, a principal to act for them, or `null` for no caller. The message's `delivery.admitted` records that principal, and `source: { channel, hook }` names the hook that sent it.
+- `turnPolicy` defaults to `"steer"`. The message is admitted like a person's message with the same policy, at the running turn's next step boundary: `"steer"` joins the running turn, and `"queue"` waits behind it and then starts its own turn. With no turn running, either starts one. Only the turn's own principal steers it, so a message with another principal's `auth` queues instead.
+- `preemptible: true`, with `"queue"`, makes the message give way. It's admitted only once nothing else waits, and dropped if any other turn starts first, such as a person's message. Use it for loops like the one above, so a person's message always wins and the hook decides again after their turn. Preemptible messages for the same principal share one turn.
 
-| `turnPolicy`        | While a turn runs                                                   | While no turn runs                            |
-| ------------------- | ------------------------------------------------------------------- | --------------------------------------------- |
-| `"yield"` (default) | Starts the next turn once this one completes                        | Starts the next turn once the session is idle |
-| `"steer"`           | Joins the running turn at its next step, like a person's steering   | Starts a turn                                 |
-| `"queue"`           | Waits behind the running turn, then starts its own, like a person's | Starts a turn                                 |
+A person can always stop a hook's messages. A cancel, a clear, or a reset drops every hook message that hasn't run yet, and after a person cancels a turn, `ctx.send()` refuses to start another until a new turn starts. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in, and never answers one: it waits until they act. A hook can `ctx.cancel()` a turn and send a correction from its `turn.settled` handler.
 
-`"steer"` and `"queue"` messages are admitted like a person's messages with the same turn policy, at the running turn's next step boundary. Only the turn's own principal steers it, so a message with another principal's `auth` queues instead. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in: it waits until they act.
+The model is told that a hook sent the message. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. eve doesn't limit how many messages a hook sends, so bound loops yourself, as the example does.
 
-A `"yield"` message gives way to everything else. It's dropped if anything else starts a turn first, such as a person's message, if the turn fails or someone else cancels it, or if the session is cancelled, cleared, or reset, so a person can always stop a loop. A hook can `ctx.cancel()` a turn and send a `"yield"` correction, since a turn the same hook cancelled still counts. When several hooks send `"yield"` messages for the same turn, their messages share the next turn.
-
-Each message's `delivery.admitted` records `source: { channel, hook }`, and the model is told that a hook sent it. A hook's message never answers a pending question or approval. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. Bound loops yourself, as the example does.
-
-`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ queued: true, deliveryId }`, where `deliveryId` is the id the message's `delivery.admitted` will carry, or `{ queued: false, reason }`:
-
-- `already-queued`: the handler already sent a message for this event, or with `"yield"`, the hook already sent one for this turn.
-- `not-completed`: with `"yield"`, the turn failed, or someone other than this hook cancelled it.
-- `auth-conflict`: with `"yield"`, another hook's message for the turn acts for a different principal.
+`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ sent: true, deliveryId }`, where `deliveryId` is the id the message's `delivery.admitted` will carry, or `{ sent: false, reason: "cancelled" }` after a turn a person cancelled.
 
 ## Subagent isolation
 

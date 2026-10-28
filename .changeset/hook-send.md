@@ -4,4 +4,4 @@
 
 Hooks can send the session a message with `ctx.send()` from any handler.
 
-`turnPolicy` decides how it treats the session's turns: `"yield"`, the default and only for hooks, starts the next turn once the running one completes and gives way to anything else that starts a turn first; `"steer"` and `"queue"` are admitted like a person's message with that policy, and never steer a turn that waits on its person. It takes `MessageContent` with `session.send()`'s `context` and an optional `auth`, and returns `{ queued, deliveryId }` synchronously. `delivery.admitted` records `source: { channel, hook }`.
+It takes `MessageContent` with `session.send()`'s `auth` (required), `context`, and `turnPolicy`, and is admitted like a person's message with that policy, except that it never steers a turn that waits on its person and a person's cancel, clear, or reset drops it. With `turnPolicy: "queue"`, `preemptible: true` makes it wait until nothing else does and drops it if another turn starts first, for loops a person's message should interrupt. It returns `{ sent, deliveryId }` synchronously, and `delivery.admitted` records `source: { channel, hook }`.

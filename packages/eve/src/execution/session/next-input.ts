@@ -1,6 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingFollowUp, pendingHookSends } from "#reactions/hook-send.js";
+import { pendingHookSends, pendingPreemptibleSends } from "#reactions/hook-send.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -51,10 +51,13 @@ export async function nextTurnDelivery(input: {
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
-    if (selected?.kind === "control")
+    if (selected?.kind === "control") {
+      // Hooks' messages sent after a clear or reset was queued still wait behind it; it drops them.
+      if (selected.control === "clear" || selected.control === "reset") queue.dropHookDeliveries();
       return selected.origin === undefined
         ? { kind: selected.control }
         : { kind: selected.control, origin: selected.origin };
+    }
     if (selected?.kind === "turn") {
       const routed = await routeSelectedDelivery(selected, cursor);
       if (routed.kind === "cancel-turn") return routed;
@@ -62,21 +65,25 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    // A hook's follow-up starts the next turn only once nothing else waits; input that starts
-    // another turn first discards it. Its idempotency key admits it once.
+    // A hook's preemptible message starts the next turn only once nothing else waits; input that
+    // starts another turn first discards it. Its idempotency key admits it once.
     if (queue.pendingCount === 0 && !inbox.hasPending()) {
-      const followUp = pendingFollowUp(
+      const preemptible = pendingPreemptibleSends(
         cursor.serializedContext,
         latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
       );
-      if (followUp !== undefined) {
+      if (preemptible.length > 0) {
         // Behind an awaited handover, older input is queued but unreadable: wait for it, so the
-        // follow-up yields to it as it would to anything readable.
+        // message gives way to it as it would to anything readable.
         if (inbox.awaitingHandover === true && inbox.whenHandoverSettled !== undefined) {
           await inbox.whenHandoverSettled();
           continue;
         }
-        if (queue.enqueueDelivery(followUp) !== undefined) continue;
+        let admitted = false;
+        for (const delivery of preemptible) {
+          if (queue.enqueueDelivery(delivery) !== undefined) admitted = true;
+        }
+        if (admitted) continue;
       }
     }
 

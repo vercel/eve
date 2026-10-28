@@ -147,10 +147,11 @@ export class ActiveTurn {
   }
 
   /**
-   * Admits the messages hooks sent with `"steer"` or `"queue"` as the steps that ran them left
-   * them, like a person's messages. Their idempotency keys admit each once.
+   * Admits the messages hooks sent as the steps that ran them left them, like a person's messages.
+   * Their idempotency keys admit each once. A turn a cancel stopped admits none: they're dropped.
    */
   private admitHookSends(): void {
+    if (this.controller.signal.aborted) return;
     for (const delivery of pendingHookSends(this.input.cursor.serializedContext)) {
       const admission = this.input.queue.enqueueDelivery(delivery);
       if (admission !== undefined) this.admitted.add(admission.sequence);
