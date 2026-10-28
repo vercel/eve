@@ -105,7 +105,7 @@ function CompanyBrainPreview() {
         <p className="mt-2">
           Repeat customers placed 44% of orders in October, up from 38% in August.
         </p>
-        <div className="mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1">
+        <div className="mt-2 max-w-[24rem] rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1">
           <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
             <thead className="text-gray-900">
               <tr className="border-gray-alpha-400 border-b">
