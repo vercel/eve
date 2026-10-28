@@ -493,7 +493,7 @@ function WebAppClient() {
               </span>
             ))}
           </span>
-          <span className="hidden h-24 rounded-md bg-linear-to-b from-gray-100 to-background-100 @[20rem]:block" />
+          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-image:linear-gradient(to_bottom,black,transparent)] @[20rem]:block" />
         </div>
         <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 p-2 material-menu sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
