@@ -218,7 +218,7 @@ integration lives at `eve/internal/scaffold`.
 
 ## Direct provider models
 
-`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return `EveLanguageModel` instances using the vendored providers. They accept only an optional model ID. `EveLanguageModel`, exported from `eve` and `eve/models`, is the model instance type `agent.ts` accepts; every AI SDK language model satisfies it, but eve does not promise that its helpers' return values are typed as AI SDK models. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return AI SDK language models that use eve's credentials, so you can also pass them to AI SDK functions such as `generateText`. They accept only an optional model ID. `EveLanguageModel`, exported from `eve` and `eve/models`, is the model instance type `agent.ts` accepts; every AI SDK language model satisfies it. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
 
 Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
 
