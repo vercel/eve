@@ -9,6 +9,7 @@
     "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
     "benchmark:publish": "node apps/benchmarks/publish.mjs",
     "build": "turbo run build --filter='./packages/*'",
+    "build:compiled": "turbo run build:compiled --filter=eve",
     "build:eve": "turbo run build --filter=eve",
     "changeset": "changeset",
     "check:deps": "syncpack lint",

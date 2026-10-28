@@ -202,7 +202,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts <path-or-patter
 ```
 
 Add `-t "<name>"` to filter by test name. If you touched anything under
-`#compiled/*`, run `pnpm --filter eve build:compiled` first — the tier configs
+`#compiled/*`, run `pnpm build:compiled` first — the tier configs
 do not rebuild it.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app

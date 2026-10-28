@@ -246,7 +246,7 @@ Local tests cover output and recovery. They do not prove live Agent Runs ingesti
 
 ## Development
 
-eve vendors this package: `pnpm --filter eve build:compiled` bundles the four
+eve vendors this package: `pnpm build:compiled` bundles the four
 entrypoints into `#compiled/@vercel/agent-runs/` in the same chunk group as eve's
 vendored `@opentelemetry/api`, so both share one copy. eve imports only those
 entrypoints, never this workspace package. After changing the library, rerun

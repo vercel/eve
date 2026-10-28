@@ -62,7 +62,8 @@ Rebuild eve after editing `extension/`; the local agent under `agent/` mounts th
 ```sh
 pnpm build:eve
 pnpm typecheck --filter=@eve/code
-pnpm test --filter=@eve/code
+pnpm test:unit --filter=@eve/code
+pnpm test:integration --filter=@eve/code
 pnpm test:scenario --filter=@eve/code
 pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
