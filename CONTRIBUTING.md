@@ -252,7 +252,7 @@ Restore the connection sign-in page after an authorization error.
 Thanks @octocat for reporting this in #1234.
 ```
 
-Start commit subjects with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. The pre-push hook installed by `pnpm install` checks new non-merge commits. For PRs with changesets, use the same format in the PR title: GitHub uses it as the squash-merge subject, which selects the category independently of the version bump. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
+For a PR with a changeset, start the PR title with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. GitHub uses the PR title as the squash-merge subject; keep the prefix in that subject, which selects the category independently of the version bump. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
 
 Run `pnpm guard:invariants` to validate changeset summaries. CI also checks the actual PR title.
 

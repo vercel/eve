@@ -258,15 +258,14 @@ changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
 cases, including bug fixes and new features. Use `minor` only when the change
 breaks a public API. Start the changeset body with one sentence for someone
 reading release notes; put migration details and contributor thanks in later
-paragraphs. Use `feat:`, `perf:`, `fix:`, `docs(feature):`, `docs(bugfix):`,
-or an internal type (`chore:`, `refactor:`, `test:`, `ci:`, `build:`, or
-`internal:`) in commit subjects. An optional scope is allowed for all types
-except `docs`, where the scope selects the feature or bug fix section. The
-pre-push hook checks new non-merge commits after `pnpm install` installs hooks.
-For PRs with changesets, CI checks the PR title because GitHub uses it as the
-squash-merge subject. The committed subject determines the release section
-independently of the version bump; internal changes are omitted from both public
-sections. Run `pnpm guard:invariants` to validate changeset summaries. See
+paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`,
+`docs(feature):`, `docs(bugfix):`, or an internal type (`chore:`, `refactor:`,
+`test:`, `ci:`, `build:`, or `internal:`) in the PR title. An optional scope is
+allowed for all types except `docs`, where the scope selects the feature or bug
+fix section. CI checks the PR title because GitHub uses it as the squash-merge
+subject. Keep the prefix in the squash commit; its subject determines the
+release section independently of the version bump. Internal changes are omitted
+from both public sections. Run `pnpm guard:invariants` to validate changeset summaries. See
 [Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When

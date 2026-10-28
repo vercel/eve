@@ -57,10 +57,6 @@ Thumbs.db
 # IDE/editor
 .codex/
 .githooks/
-!/.githooks/
-/.githooks/*
-!/.githooks/pre-commit
-!/.githooks/pre-push
 .vscode/
 .idea/
 
