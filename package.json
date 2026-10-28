@@ -11,6 +11,7 @@
     "build": "turbo run build --filter='./packages/*'",
     "build:compiled": "turbo run build:compiled --filter=eve",
     "build:eve": "turbo run build --filter=eve",
+    "build:sandbox-analysis": "turbo run build:analysis --filter=agent-tools-sandbox",
     "build:weather-analysis": "turbo run build:analysis --filter=weather-agent",
     "prepare:e2e": "turbo run e2e:dependencies",
     "changeset": "changeset",

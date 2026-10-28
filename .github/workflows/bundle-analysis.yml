@@ -238,8 +238,6 @@ jobs:
 
       - name: Build sandbox benchmark in Vercel mode
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        env:
-          SANDBOX_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile.json
         run: |
           token_args=()
           if [ -n "${VERCEL_TOKEN:-}" ]; then
@@ -261,7 +259,7 @@ jobs:
             VERCEL_ENV=preview \
             VERCEL_TARGET_ENV=preview \
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-            pnpm --filter agent-tools-sandbox exec eve build --profile "$SANDBOX_BUILD_PROFILE"
+            pnpm build:sandbox-analysis
 
       - name: Generate bundle report
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
@@ -298,7 +296,7 @@ jobs:
         env:
           BASELINE_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile-base.json
           BASELINE_BUILD_PROFILE_LABEL: ${{ steps.baseline.outputs.label }}
-          BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile.json
+          BUILD_PROFILE: ${{ github.workspace }}/e2e/fixtures/agent-tools-sandbox/.eve/bundle-analysis-profile.json
           BUILD_PROFILE_REPORT_JSON: ${{ runner.temp }}/sandbox-build-profile-report.json
           BUILD_PROFILE_REPORT_MARKDOWN: ${{ runner.temp }}/sandbox-build-profile-report.md
           HAS_BASELINE_BUILD_PROFILE: ${{ github.event_name == 'pull_request' && steps.baseline_sandbox_build.outcome == 'success' }}
