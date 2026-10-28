@@ -76,12 +76,7 @@ export { type SlackFetch, type SlackTransportOptions } from "#public/channels/sl
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
-export {
-  fetchSlackSenderProfile,
-  type SlackSenderProfile,
-  type SlackSenderProfileLookup,
-  type SlackSenderProfileLookupInput,
-} from "#public/channels/slack/sender-profiles.js";
+export { type SlackUserInfo } from "#public/channels/slack/user-info.js";
 
 export {
   postCompletedSlackReply,

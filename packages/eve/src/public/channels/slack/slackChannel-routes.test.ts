@@ -13,7 +13,12 @@ import {
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
-import { slackChannel, type SlackChannelState } from "#public/channels/slack/slackChannel.js";
+import { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+import {
+  slackChannel,
+  type SlackChannelConfig,
+  type SlackChannelState,
+} from "#public/channels/slack/slackChannel.js";
 
 const SIGNING_SECRET = "test-signing-secret";
 
@@ -189,51 +194,65 @@ describe("slackChannel inactive prompt press", () => {
   });
 });
 
-describe("slackChannel sender profiles", () => {
-  it("adds the sender's Slack name and email to the turn message", async () => {
+describe("slackChannel messageContext.users", () => {
+  it("resolves the author before the mention hook and adds names to the turn", async () => {
     fetchMock.mockImplementation(async (request: string | URL | Request) => {
       const url = String(request);
       if (url.includes("users.info"))
         return Response.json({
           ok: true,
-          user: { profile: { display_name: "alice", email: "alice@example.com" } },
+          user: {
+            profile: { display_name: "alice", real_name: "Alice Doe", email: "alice@example.com" },
+          },
         });
       if (url.includes("conversations.info"))
         return Response.json({ channel: { is_private: false }, ok: true });
       return Response.json({ ok: true, ts: "1700000001.000001" });
     });
-    const channel = slackChannel({
-      credentials: { botToken: "xoxb-test" },
-      onAppMention: () => ({ auth: null }),
-      senderProfiles: true,
-    });
-    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
-
-    await firePost(channel, mention({ ts: "1700000000.000001" }), send);
-
-    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
-    expect(JSON.stringify("message" in input ? input.message : "")).toContain(
-      "<sender>\\ntype: user\\nid: U01\\nname: alice\\nemail: alice@example.com\\n</sender>",
-    );
-  });
-
-  it("uses an authored lookup instead of the built-in users.info cache", async () => {
-    const lookup = vi.fn(async ({ userId }: { readonly userId: string }) => ({
-      name: `cached-${userId}`,
+    const onAppMention = vi.fn<NonNullable<SlackChannelConfig["onAppMention"]>>((ctx, message) => ({
+      auth: defaultSlackAuth(message, ctx),
     }));
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      onAppMention: () => ({ auth: null }),
-      senderProfiles: lookup,
+      messageContext: { users: true },
+      onAppMention,
     });
     const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
 
     await firePost(channel, mention({ ts: "1700000000.000001" }), send);
 
-    expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ userId: "U01", teamId: "T01" }));
+    expect(onAppMention.mock.calls[0]?.[1].author).toMatchObject({
+      displayName: "alice",
+      fullName: "Alice Doe",
+    });
+    expect(onAppMention.mock.calls[0]?.[1].author?.email).toBeUndefined();
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    const turn = JSON.stringify("message" in input ? input.message : "");
+    expect(turn).toContain(
+      "sender_id: U01\\nsender_display_name: alice\\nsender_real_name: Alice Doe\\n",
+    );
+    expect(turn).not.toContain("alice@example.com");
+    expect(input.auth?.attributes).toMatchObject({ full_name: "Alice Doe" });
+  });
+
+  it("uses an authored resolve instead of the built-in users.info cache", async () => {
+    const resolve = vi.fn(async ({ userId }: { readonly userId: string }) => ({
+      realName: `cached-${userId}`,
+      email: "alice@example.com",
+    }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      messageContext: { users: { email: true, resolve } },
+      onAppMention: () => ({ auth: null }),
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }), send);
+
+    expect(resolve).toHaveBeenCalledWith({ userId: "U01", teamId: "T01" }, expect.any(Function));
     const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
     expect(JSON.stringify("message" in input ? input.message : "")).toContain(
-      "id: U01\\nname: cached-U01\\n</sender>",
+      "sender_id: U01\\nsender_real_name: cached-U01\\nsender_email: alice@example.com\\n",
     );
     expect(fetchMock.mock.calls.map(([request]) => String(request))).not.toContainEqual(
       expect.stringContaining("users.info"),
@@ -322,7 +341,7 @@ describe("slackChannel thread history", () => {
       { id: "1700000000.000002", role: "assistant" },
       { id: "1700000000.000003", role: "user" },
     ]);
-    expect(history?.[0]?.text).toContain("id: U_ROOT\n</sender>");
+    expect(history?.[0]?.text).toContain("sender_id: U_ROOT");
     expect(history?.[1]?.text).toBe("Deploys are green.");
   });
 
