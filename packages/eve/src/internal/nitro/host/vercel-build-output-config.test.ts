@@ -102,6 +102,19 @@ describe("createEveVercelOptions", () => {
     });
   });
 
+  it("bakes the public route prefix into the HTTP function, and nothing when none is set", () => {
+    expect(
+      createEveVercelOptions({
+        agentName: "test-agent",
+        enabled: true,
+        publicRoutePrefix: "eve/support/",
+      })?.functions,
+    ).toEqual({ environment: { EVE_PUBLIC_ROUTE_PREFIX: "/eve/support" } });
+    expect(createEveVercelOptions({ agentName: "test-agent", enabled: true })).not.toHaveProperty(
+      "functions",
+    );
+  });
+
   it("marks workspace-member flow functions without marking standalone agents", () => {
     const standalone = createEveVercelOptions({
       agentName: "test-agent",
