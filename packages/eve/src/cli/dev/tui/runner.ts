@@ -1113,12 +1113,12 @@ export class EveTUIRunner {
   /** Retires the durable session before clearing the local conversation view. */
   async #resetSession(): Promise<void> {
     try {
-      if (this.#store.snapshot.session !== undefined) await (await this.#store.reset()).result();
+      if (this.#store.snapshot.session !== undefined) await (await this.#store.end()).result();
       this.#store.newSession();
     } catch (error) {
       this.#finishCommand({
         kind: "result",
-        message: `Couldn't reset the session: ${toErrorMessage(error)}`,
+        message: `Couldn't end the session: ${toErrorMessage(error)}`,
       });
       return;
     }

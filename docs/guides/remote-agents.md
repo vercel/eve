@@ -71,7 +71,7 @@ export default defineDynamic((ctx) => {
 ```
 
 A child keeps the parent context and memo results used to select its remote configuration.
-Later messages, answers, cancellation, reset, and stream reads use that original selection when
+Later messages, answers, cancellation, session retirement, and stream reads use that original selection when
 rebuilding transport credentials. Only saved memo results are available: a missing result or a
 changed child name or URL fails before credentials are sent. `ctx.messages()` is unavailable
 during this reconstruction, including when eve opens the child; keep conversation-based
@@ -238,7 +238,7 @@ Clients follow a remote child through the parent. [`session.agent(opened).stream
 
 Cancelling the parent turn or the agent task with `eve__task_cancel` also cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.settled` with `outcome: "cancelled"` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
-When the workflow run that opened a remote child finishes, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for it. An agent task's run finishes when the parent session ends. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
+When the workflow run that opened a remote child finishes, eve sends an authenticated request to end it. An agent task's run finishes when the parent session ends. Ending retires the parked remote session and recursively cleans up its descendants. Parent cleanup retains its earlier wire path so independently deployed parents and children can run different eve versions. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
 The parent names its remote agent protocol version when it creates the child, and the remote
 answers with the version it serves. This release serves protocols 2 and 3. A protocol-3 parent

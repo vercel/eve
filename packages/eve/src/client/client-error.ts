@@ -44,7 +44,7 @@ export class ClientError extends Error {
 /**
  * Thrown by `ClientSession.send()`, `respond()`, `clear()`, and live stream connections when the server
  * answers `409 session_stranded`: another eve version built the session's owner, so it can never
- * execute on that deployment and new input is not delivered. Call `reset()` on the session, then
+ * execute on that deployment and new input is not delivered. Call `end()` on the session, then
  * create a new one. `stream({ follow: false })` still reads recorded history.
  */
 export class ClientSessionStrandedError extends ClientError {

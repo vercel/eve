@@ -162,7 +162,7 @@ Spend is recorded on `usage.recorded`, once per model run (`owner: { runId }`) a
 
 ### Deliveries and responses
 
-Everything that reaches a session arrives as a delivery: a message, an answer, a control such as `cancel` or `reset`, or a sign-in callback. `delivery.admitted` records it, with the sender's `principal` and its `source`. A message that a turn takes in is `delivery.consumed`, with the `parts` it received: text, plus file metadata without raw bytes or internal sandbox paths. A delivery that brought [prior history](../channels/eve#start-from-prior-history) also carries it there, in `history`. Every delivery ends with exactly one `delivery.settled`, except after a degraded termination (see below):
+Everything that reaches a session arrives as a delivery: a message, an answer, a control such as `cancel` or `end`, or a sign-in callback. `delivery.admitted` records it, with the sender's `principal` and its `source`. A message that a turn takes in is `delivery.consumed`, with the `parts` it received: text, plus file metadata without raw bytes or internal sandbox paths. A delivery that brought [prior history](../channels/eve#start-from-prior-history) also carries it there, in `history`. Every delivery ends with exactly one `delivery.settled`, except after a degraded termination (see below):
 
 | Outcome          | Meaning                                                                                             |
 | ---------------- | --------------------------------------------------------------------------------------------------- |
@@ -175,8 +175,9 @@ Everything that reaches a session arrives as a delivery: a message, an answer, a
 
 `POST /eve/v1/session/:sessionId` returns the message's `deliveryId`, so a client resuming from an old cursor knows which `delivery.settled` ends its response. Steering and coalesced messages each keep their own delivery. The id is assigned before dispatch,
 not derived from stream position. An answer-only delivery stops on its own `delivery.settled`.
-A stranded reset records its control's admission and settlement before ending the session, with
-`session.ended.data.cause.deliveryId` naming the reset.
+Ending a stranded session records the control's admission and settlement, with
+`session.ended.data.cause.deliveryId` naming that delivery. Its stream control value
+remains `"reset"` for compatibility with recorded history.
 An answer and message sent together by someone other than the turn's caller become separate deliveries: the answer reaches the waiting turn, and the message retains the receipt and waits. Follow the answer through its interaction.
 
 To follow an accepted receipt in a client view, use `delivery(view, receipt.deliveryId)` from
@@ -374,14 +375,14 @@ Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
-## Compact, clear, and reset
+## Compact, clear, and end
 
 All session controls are ID-addressed and accept no continuation token:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/compact
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/clear
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
   -H 'content-type: application/json' \
   -d '{"reason":"Start over"}'
 ```
@@ -392,9 +393,9 @@ Clear removes model-message history in place, including static and dynamic user-
 
 A cancel stops turns, not a compaction or clear: one that arrives while either runs settles `ignored`, and the change finishes. A cancel, clear, or compact sent to a prewarmed session before its first message has nothing to act on, and settles `ignored` once the session starts.
 
-Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. All controls return delivery receipts when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
+End terminally retires the exact session ID. An ended ID never becomes a new session; create another session explicitly for a fresh conversation. All controls return delivery receipts when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
 
-A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. Reset still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear and compact cannot repair a stranded owner; use reset instead.
+A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. End still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear and compact cannot repair a stranded owner; use end instead.
 
 ## Reconnect and rewind
 

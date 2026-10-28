@@ -48,7 +48,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     prewarm: vi.fn().mockResolvedValue({ status: "accepted" }),
     compact: vi.fn().mockResolvedValue(receipt),
     clear: vi.fn().mockResolvedValue(receipt),
-    reset: vi.fn().mockResolvedValue(receipt),
+    end: vi.fn().mockResolvedValue(receipt),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     hasRunnableOwner: vi.fn().mockResolvedValue(true),
@@ -133,6 +133,7 @@ describe("eve ID-addressed session routes", () => {
     ["/eve/v1/session/:sessionId/cancel", { message: "Hello" }, "message", "turnId"],
     ["/eve/v1/session/:sessionId/compact", { turnId: "turn_1" }, "turnId", "(none)"],
     ["/eve/v1/session/:sessionId/clear", { reason: "Start fresh" }, "reason", "(none)"],
+    ["/eve/v1/session/:sessionId/end", { turnId: "turn_1" }, "turnId", "reason"],
     ["/eve/v1/session/:sessionId/reset", { turnId: "turn_1" }, "turnId", "reason"],
   ] as const)(
     "rejects unknown %s fields before dispatch: %s",
@@ -815,17 +816,47 @@ describe("eve ID-addressed session routes", () => {
     ["cancel", "/eve/v1/session/:sessionId/cancel"],
     ["compact", "/eve/v1/session/:sessionId/compact"],
     ["clear", "/eve/v1/session/:sessionId/clear"],
-    ["reset", "/eve/v1/session/:sessionId/reset"],
+    ["end", "/eve/v1/session/:sessionId/end"],
+    ["end", "/eve/v1/session/:sessionId/reset"],
   ] as const)("dispatches %s through the fixed session handle", async (operation, path) => {
     const session = createFixedSession();
     const response = await route("POST", path)(
-      new Request(`https://eve.test/eve/v1/session/wrun_A/${operation}`, { method: "POST" }),
+      new Request(`https://eve.test${path.replace(":sessionId", "wrun_A")}`, {
+        method: "POST",
+        body:
+          operation === "end"
+            ? JSON.stringify({ reason: "Alice ended the conversation" })
+            : undefined,
+      }),
       createArgs(session),
     );
 
     expect(response.ok).toBe(true);
     if (operation === "cancel") expect(response.status).toBe(202);
     expect(session[operation]).toHaveBeenCalledTimes(1);
+    if (operation === "end") {
+      expect(session.end).toHaveBeenCalledWith({
+        auth: expect.objectContaining({ principalId: "anonymous" }),
+        reason: "Alice ended the conversation",
+      });
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        sessionId: "wrun_A",
+        deliveryId: "delivery_A",
+      });
+    }
+  });
+
+  it.each(["end", "reset"])("requires authentication on the %s retirement route", async (path) => {
+    const session = createFixedSession();
+    const response = await route("POST", `/eve/v1/session/:sessionId/${path}`, {
+      auth: () => null,
+    })(
+      new Request(`https://eve.test/eve/v1/session/wrun_A/${path}`, { method: "POST" }),
+      createArgs(session),
+    );
+    expect(response.status).toBe(401);
+    expect(session.end).not.toHaveBeenCalled();
   });
 
   it.each(["turn_1", null])(
@@ -870,11 +901,12 @@ describe("eve ID-addressed session routes", () => {
     ["cancel", "/eve/v1/session/:sessionId/cancel"],
     ["compact", "/eve/v1/session/:sessionId/compact"],
     ["clear", "/eve/v1/session/:sessionId/clear"],
-    ["reset", "/eve/v1/session/:sessionId/reset"],
+    ["end", "/eve/v1/session/:sessionId/end"],
+    ["end", "/eve/v1/session/:sessionId/reset"],
   ] as const)("rejects continuation tokens on the %s route", async (operation, path) => {
     const session = createFixedSession();
     const response = await route("POST", path)(
-      new Request(`https://eve.test/eve/v1/session/wrun_A/${operation}`, {
+      new Request(`https://eve.test${path.replace(":sessionId", "wrun_A")}`, {
         body: JSON.stringify({ continuationToken: "wrun_B" }),
         headers: { "content-type": "application/json" },
         method: "POST",

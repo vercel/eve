@@ -140,7 +140,7 @@ export function App() {
     setComposerError(undefined);
     setComposerInput("");
     if (agent.session?.sessionId === undefined && turns.length > 0) {
-      agent.reset();
+      agent.newSession();
     }
     await agent.send(message);
   };

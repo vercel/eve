@@ -32,7 +32,7 @@ export interface SlackSessionOperations {
   cancel(options?: { readonly turnId?: string }): ReturnType<SlackSource["cancel"]>;
   compact(): ReturnType<SlackSource["compact"]>;
   clear(): ReturnType<SlackSource["clear"]>;
-  reset(options?: { readonly reason?: string }): ReturnType<SlackSource["reset"]>;
+  end(options?: { readonly reason?: string }): ReturnType<SlackSource["end"]>;
   resolveSession(): ReturnType<ChannelResolveSession>;
 }
 
@@ -72,8 +72,8 @@ export function bindSlackSessionOperations(input: {
     async clear() {
       return await source.clear();
     },
-    async reset(options) {
-      return await source.reset(options);
+    async end(options) {
+      return await source.end(options);
     },
     async resolveSession() {
       return await input.resolveSession(input.address);

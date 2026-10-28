@@ -5,7 +5,6 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
-import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -230,18 +229,6 @@ export type CompactResult =
   | {
       /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<CompactStatus, "no_active_session">;
-    };
-
-/** Result of terminally resetting a client session. */
-export type ResetResult =
-  | {
-      /** The prior session was terminally retired. */
-      readonly previousSessionId: string;
-      readonly status: Extract<ResetStatus, "reset">;
-    }
-  | {
-      /** The fixed session ID was unknown or no longer active. */
-      readonly status: Extract<ResetStatus, "no_active_session">;
     };
 
 export type { Delivery, DeliveryResult } from "#shared/delivery.js";
