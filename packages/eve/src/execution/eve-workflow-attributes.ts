@@ -72,10 +72,12 @@ export const EVE_DEPLOYMENT_URL_ATTRIBUTE = "$eve.deployment_url";
  * Recorded at start and re-recorded by handoff successors and legacy
  * importers at boot, from their own code and environment.
  */
-export function buildOwnerIdentityAttributes(eveVersion: string): Record<string, string> {
+export function buildOwnerIdentityAttributes(
+  eveVersion: string,
+  deploymentUrl?: string,
+): Record<string, string> {
   const attributes: Record<string, string> = { [EVE_VERSION_ATTRIBUTE]: eveVersion };
-  const deploymentUrl = process.env.VERCEL_URL?.trim();
-  if (deploymentUrl) attributes[EVE_DEPLOYMENT_URL_ATTRIBUTE] = deploymentUrl;
+  if (deploymentUrl?.trim()) attributes[EVE_DEPLOYMENT_URL_ATTRIBUTE] = deploymentUrl.trim();
   return attributes;
 }
 

@@ -144,6 +144,22 @@ describe("startWorkflowOnCurrentDeployment", () => {
 });
 
 describe("deployment starts", () => {
+  it.each([
+    ["dpl_source", "source.vercel.app"],
+    ["dpl_successor", undefined],
+  ])(
+    "records only the target owner's deployment URL when starting on %s",
+    async (target, expectedUrl) => {
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_source");
+      vi.stubEnv("VERCEL_URL", "source.vercel.app");
+      startMock.mockResolvedValue({ runId: "run-owner" });
+      await startWorkflowOnDeployment(workflowEntryReference, [], target);
+      const attributes = startMock.mock.calls[0]![2].attributes;
+      expect(attributes["$eve.version"]).toBe(resolveInstalledPackageInfo().version);
+      expect(attributes["$eve.deployment_url"]).toBe(expectedUrl);
+    },
+  );
+
   it("rejects non-exact deployment selectors", async () => {
     await expect(startWorkflowOnDeployment(workflowEntryReference, [], "latest")).rejects.toThrow(
       "exact deployment id",

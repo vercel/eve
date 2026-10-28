@@ -269,7 +269,10 @@ async function recordSessionOwner(sessionId: string): Promise<void> {
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
       [EVE_PREWARM_ATTRIBUTE]: "1",
-      ...buildOwnerIdentityAttributes(resolveInstalledPackageInfo().version),
+      ...buildOwnerIdentityAttributes(
+        resolveInstalledPackageInfo().version,
+        process.env.VERCEL_URL,
+      ),
     },
     { allowReservedAttributes: true },
   );

@@ -685,7 +685,13 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
       allowReservedAttributes: true,
       attributes: {
         ...options?.attributes,
-        ...buildOwnerIdentityAttributes(EVE_PACKAGE_INFO.version),
+        ...buildOwnerIdentityAttributes(
+          EVE_PACKAGE_INFO.version,
+          // A remote successor records its own URL at boot, not its source's.
+          deploymentId === process.env.VERCEL_DEPLOYMENT_ID?.trim()
+            ? process.env.VERCEL_URL
+            : undefined,
+        ),
       },
       deploymentId,
     });

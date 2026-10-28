@@ -75,6 +75,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.useRealTimers();
   fetchMock.mockReset();
   getHookByTokenMock.mockReset();
   getWorldMock.mockReset();
@@ -126,24 +127,28 @@ describe("session inbox resume", () => {
       resumeSessionInbox(token, { kind: "send", payload: { message: "Alice follows up." } });
 
     it.each([
-      ["a World that routes runs to their deployment", () => vercelWorld()],
-      ["a World without deployment affinity", () => singleDeploymentWorld(undefined)],
-    ])("refuses an owner whose deployment was deleted on %s", async (_name, makeWorld) => {
-      const { token } = ownerOn(makeWorld(), `${owner}.vercel.app`);
-      deploymentNotFound();
+      ["an affinity World returning 404", () => vercelWorld(), 404, "DEPLOYMENT_NOT_FOUND"],
+      ["an affinity World returning 410", () => vercelWorld(), 410, "DEPLOYMENT_DELETED"],
+      ["a single-build World", () => singleDeploymentWorld(undefined), 404, "DEPLOYMENT_NOT_FOUND"],
+    ] as const)(
+      "refuses an owner whose deployment was deleted on %s",
+      async (_name, makeWorld, status, code) => {
+        const { token } = ownerOn(makeWorld(), `${owner}.vercel.app`);
+        deploymentAnswers(status, { "x-vercel-error": code });
 
-      const refusal = await send(token).catch((error: unknown) => error);
+        const refusal = await send(token).catch((error: unknown) => error);
 
-      expect(refusal).toBeInstanceOf(StrandedSessionOwnerError);
-      expect(refusal).toMatchObject({ ownerRunId: owner });
-      expect(fetchMock).toHaveBeenCalledWith(
-        `https://${owner}.vercel.app`,
-        expect.objectContaining({ method: "HEAD", redirect: "manual" }),
-      );
-      expect(resumeHookMock).not.toHaveBeenCalled();
-    });
+        expect(refusal).toBeInstanceOf(StrandedSessionOwnerError);
+        expect(refusal).toMatchObject({ ownerRunId: owner });
+        expect(fetchMock).toHaveBeenCalledWith(
+          `https://${owner}.vercel.app/eve/v1/health`,
+          expect.objectContaining({ method: "HEAD", redirect: "manual" }),
+        );
+        expect(resumeHookMock).not.toHaveBeenCalled();
+      },
+    );
 
-    it("remembers a deleted deployment without probing it again", async () => {
+    it("shares a deletion verdict across owners until the probe expires", async () => {
       const { token } = ownerOn(vercelWorld(), "deleted-once.vercel.app");
       deploymentNotFound();
       await expect(send(token)).rejects.toBeInstanceOf(StrandedSessionOwnerError);
@@ -155,10 +160,26 @@ describe("session inbox resume", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it("accepts input again after a deleted deployment is restored", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const { token } = ownerOn(vercelWorld(), `${owner}.vercel.app`);
+      deploymentNotFound();
+      await expect(send(token)).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+      deploymentAnswers(200);
+      vi.advanceTimersByTime(30_001);
+      await expect(send(token)).resolves.toMatchObject({ ownerRunId: owner });
+      expect(resumeHookMock).toHaveBeenCalledOnce();
+    });
+
     it.each([
       ["a live deployment", () => deploymentAnswers(302, { location: "https://vercel.com/login" })],
       ["a server error", () => deploymentAnswers(503)],
       ["a 404 that is not a deleted deployment", () => deploymentAnswers(404)],
+      ["a 410 that is not a deleted deployment", () => deploymentAnswers(410)],
+      [
+        "a live route with a deletion header",
+        () => deploymentAnswers(200, { "x-vercel-error": "DEPLOYMENT_DELETED" }),
+      ],
       [
         "a probe that times out",
         () => fetchMock.mockRejectedValue(new DOMException("timeout", "TimeoutError")),
@@ -171,13 +192,45 @@ describe("session inbox resume", () => {
       expect(resumeHookMock).toHaveBeenCalledOnce();
     });
 
-    it("probes a live deployment on every delivery, reading the run once", async () => {
+    it("shares live probes briefly, then detects a deployment deleted after the first delivery", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
       const { token, world } = ownerOn(vercelWorld(), `${owner}.vercel.app`);
       deploymentAnswers(200);
+      await Promise.all([send(token), send(token)]);
+      expect(fetchMock).toHaveBeenCalledOnce();
+
+      deploymentNotFound();
       await send(token);
-      await send(token);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(30_001);
+      await expect(send(token)).rejects.toBeInstanceOf(StrandedSessionOwnerError);
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(world.runs.get).toHaveBeenCalledOnce();
+      expect(world.runs.get).toHaveBeenCalledTimes(3);
+    });
+
+    it("refreshes an owner's identity after its successor boot records a URL", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const world = vercelWorld();
+      const { token } = ownerOn(world, undefined);
+      await send(token);
+      ownerOn(world, `${owner}.vercel.app`);
+      deploymentNotFound();
+      vi.advanceTimersByTime(30_001);
+      await expect(send(token)).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+      expect(resumeHookMock).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      "localhost",
+      "127.0.0.1",
+      "example.com",
+      "owner.vercel.app@127.0.0.1",
+      "owner.vercel.app/path",
+      "owner.vercel.app:8080",
+    ])("does not fetch an invalid deployment host: %s", async (host) => {
+      const { token } = ownerOn(vercelWorld(), host);
+      await expect(send(token)).resolves.toMatchObject({ ownerRunId: owner });
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("never probes its own deployment", async () => {
@@ -188,7 +241,7 @@ describe("session inbox resume", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("never probes an owner that recorded no deployment", async () => {
+    it("preserves a legacy owner with no deployment URL because deletion cannot be established", async () => {
       const { token } = ownerOn(vercelWorld(), undefined);
 
       await expect(send(token)).resolves.toMatchObject({ ownerRunId: owner });

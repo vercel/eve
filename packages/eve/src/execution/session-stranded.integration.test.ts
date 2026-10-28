@@ -75,7 +75,7 @@ async function parkOwnerOnDeletedDeployment(
 ): Promise<ParkedRun> {
   const realFetch = globalThis.fetch;
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-    if (String(input) !== `https://${deploymentUrl}` || init?.method !== "HEAD") {
+    if (String(input) !== `https://${deploymentUrl}/eve/v1/health` || init?.method !== "HEAD") {
       return await realFetch(input, init);
     }
     return new Response(null, {

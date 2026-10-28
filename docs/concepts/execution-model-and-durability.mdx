@@ -45,21 +45,25 @@ Both kinds of handoff need a Workflow world that can move a session's addresses 
 
 ### Stranded sessions
 
-A session is stranded when nothing can replay the workflow run that owns it: another eve version built it, or the Vercel deployment it is pinned to was deleted. A run can only be replayed by the eve version that started it, on the deployment that started it, so the conversation is still stored, but nothing can process a new message. eve checks the owner before delivering channel messages and input responses, rather than committing them to a session that cannot answer.
+A session is stranded when nothing can replay the workflow run that owns it: another eve version built it, or its Vercel deployment was deleted. A run needs the eve version that started it; on Vercel, it also needs its original deployment. The conversation remains stored, but the owner cannot process a new message. eve checks the owner before delivering channel messages and input responses.
 
 eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session can never run again:
 
 | World                        | When a session is stranded                                                                                                                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Workflow              | When the deployment that started the run was deleted. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments, so a version change alone strands nothing.                    |
+| Vercel Workflow              | When eve confirms that the owner's recorded deployment URL was deleted. A version change alone does not strand a session: runs execute on their original deployments, and idle sessions can hand off.                                 |
 | Local world with `eve start` | After any upgrade that changes the eve version. Sessions created before eve recorded its version on the run are treated the same way.                                                                                                 |
 | Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time: a deployment running another version cannot replay these sessions, and eve does not route runs between deployments.                                          |
 | `eve dev`                    | After an eve version change. A session from a previous dev server invocation built by the same eve version is not stranded: it stays dormant until you restart `eve dev` with [`--resume`](../reference/cli#local-workflow-recovery). |
 
-eve ends a stranded session without running any of its code. When that happens depends on the kind of run:
+On Vercel, detection requires an owner that recorded `$eve.deployment_url`: one started by this release or one that successfully moved to it. eve probes that deployment's health route with a three-second timeout. Only Vercel's `404 DEPLOYMENT_NOT_FOUND` or `410 DEPLOYMENT_DELETED` response proves deletion. Other responses and network failures do not reset the session. All probe results are cached for 30 seconds per process; concurrent requests share an in-flight probe. Deletion verdicts expire too, because Vercel can restore a deployment during its [recovery period](https://vercel.com/docs/deployment-retention#restoring-a-deleted-deployment).
+
+Owners from earlier releases without a recorded URL cannot be checked this way. Recording requires Vercel's `VERCEL_URL` system environment variable; enable system environment variables for the project. Upgrading does not recover a session whose deployment is already gone. Keep owner deployments available until sessions move or end. For a stuck legacy owner, restore its deployment during Vercel's recovery period if possible. Otherwise, cancel the run in your Workflow dashboard so a new channel message can start a fresh session. The fresh session does not restore its history or interrupted work.
+
+eve ends a detected stranded session without running any of its code. When that happens depends on the kind of run:
 
 - **A root session**, one that a channel or client started, stays where it is. It keeps its address and executes nothing until a new channel message replaces it, a reset ends it, or its session timeout elapses, whichever comes first.
-- **A subagent session or workflow tool run**, including a task, is cancelled the next time the world delivers work to it, for example when the local world or Postgres recovers active runs at startup. No later message could resume its interrupted work, so eve does not wait.
+- **A subagent session or workflow tool run**, including a task, on a world without deployment routing is cancelled the next time the world delivers work to it. For example, the local world or Postgres retires it during startup recovery. No later message could resume its interrupted work, so eve does not wait.
 
 See [How a stranded session ends](#how-a-stranded-session-ends) for the details.
 
@@ -137,11 +141,11 @@ The transcript is context only: tools, approvals, files, sandbox contents, autho
 
 A stranded root session ends on its next channel message, a reset, or its [session timeout](../agent-config#runtime-limits), whichever comes first. It executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve acknowledges the root session's delivery without replaying it and logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses. A later restart skips it the same way.
 
-The timeout is the session's own durable timer, which its last owner armed for the end of an idle window (30 days by default). An owner re-arms the timer only when the timer fires before the window ends, so a stranded session ends at most `sessionTimeoutMs` after its last turn settled, and possibly sooner. The timer still works after the upgrade. When it fires on a stranded session, it retires the session without starting a fresh one. The next message to the address then starts an ordinary session. A session with `sessionTimeoutMs: false` has no timer, so a stranded one stays until a message or a reset, just as a healthy one would stay open.
+The timeout is the session's own durable timer, which its last owner armed for the end of an idle window (30 days by default). An owner re-arms the timer only when the timer fires before the window ends, so a stranded session ends at most `sessionTimeoutMs` after its last turn settled, and possibly sooner. On worlds without deployment routing, the timer still works after the upgrade. A timer pinned to a deleted Vercel deployment cannot execute there. When a timer fires on a stranded session, it retires the session without starting a fresh one. The next message to the address then starts an ordinary session. A session with `sessionTimeoutMs: false` has no timer, so a stranded one stays until a message or a reset, just as a healthy one would stay open.
 
 Ending a root session does not immediately cancel its subagent sessions and workflow tool runs. Each is retired when a delivery for it reaches the current deployment, and the runtime logs identify the stranded run. A run that never receives a delivery, such as one parked in a dormant `eve dev` generation, can stay active; cancel it in your Workflow world if you need to. Cancellation does not run authored cleanup or lifecycle hooks, undo side effects, or stop independent external jobs, and results and approvals do not carry over to a replacement session.
 
-Runs that recorded no eve version, including every run from a release before eve recorded versions, are treated as stranded.
+On worlds without deployment routing, runs that recorded no eve version are treated as stranded.
 
 ### Upgrading sessions from the former execution model
 

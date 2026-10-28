@@ -2,7 +2,11 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { readInboxHandle } from "#execution/session-inbox/handle.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { findStrandedOwnerRun, type OwnerRun } from "#execution/session-inbox/runnable-owner.js";
+import {
+  findStrandedOwnerRun,
+  routesToOwnerDeployment,
+  type OwnerRun,
+} from "#execution/session-inbox/runnable-owner.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
@@ -45,6 +49,7 @@ export async function resumeRunnableHook(
   payload: unknown,
   inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
+  if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   const world = inbox !== undefined ? await getWorld() : undefined;
   if (
     inbox !== undefined &&
@@ -66,7 +71,6 @@ export async function resumeRunnableHook(
       }
     }
   }
-  if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
 }
 

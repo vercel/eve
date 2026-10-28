@@ -199,8 +199,12 @@ Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for a
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
 An existing workflow whose inbox is not yet available returns `409 session_not_ready` instead.
-A session whose owner can no longer run, because another eve version built it or because its
-deployment was deleted, returns `409 session_stranded` with the `eveVersion` that built it.
+A session whose owner eve detects as stranded returns `409 session_stranded` with the
+`eveVersion` that built it, when recorded. This covers version mismatches on worlds without
+deployment routing and confirmed deletion of a recorded Vercel deployment URL. Owners from
+earlier releases without that URL cannot be checked for deletion; see
+[stranded sessions](../concepts/execution-model-and-durability#stranded-sessions) for detection
+limits and recovery.
 
 ### Send files
 

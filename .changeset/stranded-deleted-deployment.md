@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-A message to a session whose owner run is pinned to a deleted Vercel deployment now answers `409 session_stranded` (and a channel message starts a replacement session) instead of being accepted and never processed. Every run records `$eve.deployment_url`, and ingress probes an owner on another deployment before committing a command.
+For session owners that record their deployment URL, eve now detects deleted Vercel deployments and returns `409 session_stranded` or starts a replacement session for a channel message instead of silently accepting input that cannot run. Thanks @nafisazizir for reporting this and @ruiconti for the original fix in #5383.
