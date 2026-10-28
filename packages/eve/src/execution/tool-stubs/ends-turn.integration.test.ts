@@ -123,6 +123,8 @@ async function runStubbedTurn(
   });
 }
 
+const postedEndsTurn = vi.fn((output: { readonly posted: boolean }) => output.posted);
+
 /** A workflow tool whose body must never run, since a stub answers every call to it. */
 interface WorkflowToolSpec {
   readonly name: string;
@@ -157,7 +159,7 @@ function toolDefinition(tool: string | WorkflowToolSpec) {
       description: `Run ${tool.name}.`,
       execute: async () => ({ posted: true }),
       inputSchema: z.object({}).passthrough(),
-      endsTurn: (output) => output.posted,
+      endsTurn: postedEndsTurn,
     });
   }
   if (tool.runs === "approved-execute") {
@@ -331,6 +333,22 @@ describe("a stub response that ends the turn", () => {
 
     expect(requests).toHaveLength(1);
     expect(turnOutcome(events)).toEqual(["completed"]);
+  });
+
+  it("doesn't ask an endsTurn tool beside a failed call when no stub can end the turn", async () => {
+    postedEndsTurn.mockClear();
+    const { model, requests } = scriptedModel((request) =>
+      request === 1 ? [{ toolName: "post" }, { toolName: "notes" }] : "The notes are down.",
+    );
+    await runStubbedTurn("stub-cannot-end-turn", {
+      message: "Post it and check the notes.",
+      model,
+      rules: [{ id: "notes", tool: "notes", outcome: { throw: { message: "Notes are down" } } }],
+      tools: [{ name: "post", runs: "ends-turn-if-posted" }, "notes"],
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(postedEndsTurn).not.toHaveBeenCalled();
   });
 
   it("keeps the turn going for a stub response without endsTurn", async () => {

@@ -101,14 +101,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     providerExecutedOutcomeIds,
   });
   const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
-  const ending = await endingCalls(
-    result,
-    responseMessages,
-    input.endsTurnTools,
-    input.endingStubCalls,
-  );
   // A step that parks on other calls decides once they settle, from what this one recorded.
-  if (stubsMayEndTurn(step.ctx?.get(ToolStubsKey))) {
+  const ending = stubsMayEndTurn(step.ctx?.get(ToolStubsKey))
+    ? await endingCalls(result, responseMessages, input.endsTurnTools, input.endingStubCalls)
+    : undefined;
+  if (ending !== undefined) {
     step.session = recordEndingStubCalls(step.session, activeTurnId(step.position()), ending);
   }
 
@@ -196,7 +193,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   const toolCalls = result.toolCalls ?? [];
   const endsTurn =
-    toolCalls.length > 0 && toolCalls.every((toolCall) => ending.has(toolCall.toolCallId));
+    ending === undefined
+      ? await stepEndsTurn(result, responseMessages, input.endsTurnTools)
+      : toolCalls.length > 0 && toolCalls.every((toolCall) => ending.has(toolCall.toolCallId));
   const continueLoop =
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
@@ -238,6 +237,45 @@ function answerCallsThatWontRun(
   return answers
     .filter((part) => !answered.has(part.toolCallId))
     .reduce<ModelMessage[]>((next, part) => withResult(next, part), [...messages]);
+}
+
+/**
+ * Whether the step ends the turn: every tool call targets a tool that can end
+ * the turn and succeeded, and each `endsTurn` function accepts its call's
+ * `execute` output. A failed or invalid call lets the model recover instead.
+ */
+async function stepEndsTurn(
+  result: HarnessStepResult,
+  responseMessages: readonly ModelMessage[],
+  endsTurnTools: EndsTurnTools,
+): Promise<boolean> {
+  const toolCalls = result.toolCalls ?? [];
+  if (toolCalls.length === 0) return false;
+  const outputs = new Map<string, ToolResultPart["output"]>();
+  for (const message of responseMessages) {
+    if (message.role !== "tool") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
+    }
+  }
+  const succeeded = toolCalls.every((toolCall) => {
+    const output = outputs.get(toolCall.toolCallId);
+    return (
+      endsTurnTools.has(toolCall.toolName) && output !== undefined && !isToolResultError(output)
+    );
+  });
+  if (!succeeded) return false;
+  const executeOutputs = new Map(
+    (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
+  );
+  for (const toolCall of toolCalls) {
+    const endsTurn = endsTurnTools.get(toolCall.toolName);
+    if (typeof endsTurn !== "function") continue;
+    if (!(await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
