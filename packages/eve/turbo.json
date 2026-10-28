@@ -3,6 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["$TURBO_EXTENDS$", "build:compiled"],
+      "env": ["EVE_PACKAGE_DEPENDENCY_URL", "VERCEL"],
       "inputs": [
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
@@ -96,7 +97,8 @@
     },
     "test:tui": {
       "cache": false,
-      "dependsOn": ["build:js"]
+      "dependsOn": ["build:js"],
+      "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"]
     },
     "test:watch": {
       "cache": false,
