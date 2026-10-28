@@ -19,6 +19,7 @@ import Link from "next/link";
 import { type ComponentType, type JSX, type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
+import { HomeSection } from "./section";
 
 type Mode = "managed" | "self-hosted";
 
@@ -191,18 +192,14 @@ export function ArchitectureDiagram() {
   const selfHosted = mode === "self-hosted";
 
   return (
-    <section className="py-16 sm:py-24" id="self-host">
-      <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40 text-balance">
-          Built on open-source SDKs, yours to self-host
-        </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900 text-balance">
-          Swap any backend and self-host the whole runtime with no managed infrastructure, or deploy
-          on Vercel for fully native support.
-        </p>
-
+    <HomeSection
+      id="self-host"
+      lede="Swap any backend and self-host the whole runtime with no managed infrastructure, or deploy on Vercel for fully native support."
+      title="Built on open-source SDKs, yours to self-host"
+    >
+      <div>
         {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
-        <div className="mt-12 flex items-center justify-center gap-4 text-copy-14">
+        <div className="flex items-center gap-4 text-copy-14">
           <button
             type="button"
             onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
@@ -312,7 +309,7 @@ export function ArchitectureDiagram() {
           </div>
         </div>
 
-        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14 text-balance">
+        <p className="mt-6 max-w-2xl text-pretty text-gray-900 text-copy-14">
           {CAPTIONS[mode]}
           {selfHosted ? (
             <>
@@ -328,6 +325,6 @@ export function ArchitectureDiagram() {
           ) : null}
         </p>
       </div>
-    </section>
+    </HomeSection>
   );
 }

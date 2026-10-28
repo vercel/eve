@@ -11,12 +11,14 @@ export function HomeSection({
   id,
   title,
   lede,
+  action,
   children,
   className,
 }: {
   id: string;
   title: ReactNode;
   lede?: ReactNode;
+  action?: ReactNode;
   children: ReactNode;
   className?: string;
 }): JSX.Element {
@@ -30,6 +32,7 @@ export function HomeSection({
           {title}
         </h2>
         {lede ? <p className="text-pretty text-copy-18 text-gray-900">{lede}</p> : null}
+        {action}
       </div>
       <div className="mt-12 sm:mt-16">{children}</div>
     </section>
