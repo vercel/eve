@@ -27,6 +27,7 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
+import { pendingHookSends } from "#reactions/hook-send.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -138,10 +139,22 @@ export class ActiveTurn {
     this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
   }
 
-  /** Admits everything the pump accepted while the last step ran. */
+  /** Admits everything the pump accepted while the last step ran, then what its hooks sent. */
   async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload, settled);
+    this.admitHookSends();
+  }
+
+  /**
+   * Admits the messages hooks sent with `"steer"` or `"queue"` as the steps that ran them left
+   * them, like a person's messages. Their idempotency keys admit each once.
+   */
+  private admitHookSends(): void {
+    for (const delivery of pendingHookSends(this.input.cursor.serializedContext)) {
+      const admission = this.input.queue.enqueueDelivery(delivery);
+      if (admission !== undefined) this.admitted.add(admission.sequence);
+    }
   }
 
   /**
@@ -150,6 +163,8 @@ export class ActiveTurn {
    * step; only deliveries still unread re-signal the next generation.
    */
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
+    // Steps that ran while the turn waited, such as a workflow tool's progress, can send too.
+    this.admitHookSends();
     const steering: DeliverHookPayload[] = [];
     while (true) {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);

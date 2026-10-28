@@ -7,7 +7,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { pendingFollowUp } from "#reactions/follow-up.js";
+import { pendingFollowUp } from "#reactions/hook-send.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
@@ -16,8 +16,8 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
-vi.mock("#reactions/follow-up.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#reactions/follow-up.js")>()),
+vi.mock("#reactions/hook-send.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#reactions/hook-send.js")>()),
   pendingFollowUp: vi.fn(),
 }));
 

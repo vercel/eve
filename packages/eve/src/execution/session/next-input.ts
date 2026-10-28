@@ -1,6 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingFollowUp } from "#reactions/follow-up.js";
+import { pendingFollowUp, pendingHookSends } from "#reactions/hook-send.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -45,6 +45,9 @@ export async function nextTurnDelivery(input: {
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
+    // Hooks' steer and queue messages are input like a person's; their keys admit each once.
+    for (const delivery of pendingHookSends(cursor.serializedContext))
+      queue.enqueueDelivery(delivery);
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
@@ -59,7 +62,7 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    // A hook follows up the turn that settled only once nothing else waits; input that starts
+    // A hook's follow-up starts the next turn only once nothing else waits; input that starts
     // another turn first discards it. Its idempotency key admits it once.
     if (queue.pendingCount === 0 && !inbox.hasPending()) {
       const followUp = pendingFollowUp(

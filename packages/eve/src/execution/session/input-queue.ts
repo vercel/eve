@@ -187,6 +187,8 @@ export class SessionInputQueue {
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
+        // A hook's message would withdraw what the turn asked its person; it waits for them.
+        !(options?.heldSince !== undefined && isHookDelivery(entry.delivery)) &&
         isSteeringDelivery(entry.delivery, turn, {
           heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
         }),
@@ -300,6 +302,11 @@ export function isSteeringDelivery(
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
+}
+
+/** A message a hook sent with `ctx.send()`. */
+export function isHookDelivery(delivery: DeliverHookPayload): boolean {
+  return (delivery.deliveryMetadata ?? []).some((metadata) => metadata.hook !== undefined);
 }
 
 /** A steering delivery with a message for the model, not only answers to requests. */

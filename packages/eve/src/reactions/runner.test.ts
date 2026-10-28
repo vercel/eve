@@ -17,7 +17,7 @@ import {
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { foldLine } from "#protocol/session-projection/fold.js";
-import type { HookContext } from "#public/definitions/hook.js";
+import type { HookContext, HookSendResult } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineTool } from "#tools/definition.js";
@@ -673,8 +673,7 @@ describe("runReactions", () => {
       const ctx = session(noTools, [
         {
           events: {
-            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
-              ctx.followUp("Keep going."),
+            "turn.settled": (_event: unknown, ctx: HookContext) => ctx.send("Keep going."),
           },
           slug: "until-done",
         },
@@ -705,8 +704,8 @@ describe("runReactions", () => {
       const ctx = session(noTools, [
         {
           events: {
-            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
-              results.push(ctx.followUp("Keep going.")),
+            "turn.settled": (_event: unknown, ctx: HookContext) =>
+              results.push(ctx.send("Keep going.")),
           },
           slug: "until-done",
         },
@@ -763,6 +762,82 @@ describe("runReactions", () => {
         }),
       });
       expect(readReactionsState(ctx).followUp?.turnId).toBe("turn-1");
+    });
+
+    it("drops a mid-turn follow-up when its turn fails", async () => {
+      const ctx = session(noTools, [
+        {
+          events: { "turn.started": (_event: unknown, ctx: HookContext) => ctx.send("Review it.") },
+          slug: "reviewer",
+        },
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts: [settledFacts[0]!] },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, { written: written(1, "turn.started", settledFacts[0]!.data) });
+      expect(readReactionsState(ctx).followUp?.turnId).toBe("turn-1");
+      await commit(ctx, {
+        written: written(2, "turn.settled", { outcome: "failed", turnId: "turn-1" }),
+      });
+      expect(readReactionsState(ctx).followUp).toBeUndefined();
+    });
+
+    describe("steer and queue sends", () => {
+      // A session whose turn-1 settled, and a hook that sent with `policy`.
+      async function sent(policy: "steer" | "queue") {
+        const results: HookSendResult[] = [];
+        const ctx = session(noTools, [
+          {
+            events: {
+              "turn.settled": (_event: unknown, ctx: HookContext) =>
+                results.push(ctx.send("Summarize it.", { turnPolicy: policy })),
+            },
+            slug: "reviewer",
+          },
+        ]);
+        ctx.set(ChannelKey, { kind: "http" } as never);
+        const projection = initialSessionProjection();
+        foldLine(
+          projection.view,
+          { at: "2026-01-01T00:00:00.000Z", facts: settledFacts },
+          projection.view.position,
+        );
+        enterSessionProjectionAt(ctx, projection);
+        await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
+        const deliveryId = results[0]?.queued === true ? results[0].deliveryId : undefined;
+        const { sends, followUp } = readReactionsState(ctx);
+        expect(followUp).toBeUndefined();
+        expect(sends).toHaveLength(1);
+        expect(sends?.[0]).toMatchObject({
+          deliveryMetadata: [{ deliveryId, hook: "reviewer" }],
+          turnPolicy: policy,
+        });
+        return { ctx, deliveryId: deliveryId! };
+      }
+
+      it("keeps a send until the session admits it", async () => {
+        const { ctx, deliveryId } = await sent("steer");
+        await commit(ctx, { written: control("cancel") });
+        expect(readReactionsState(ctx).sends).toHaveLength(1);
+        await commit(ctx, {
+          written: written(3, "delivery.admitted", {
+            deliveryId,
+            source: { channel: "http", hook: "reviewer" },
+          }),
+        });
+        expect(readReactionsState(ctx).sends).toBeUndefined();
+      });
+
+      it("drops sends when a reset arrives", async () => {
+        const { ctx } = await sent("queue");
+        await commit(ctx, { written: control("reset") });
+        expect(readReactionsState(ctx).sends).toBeUndefined();
+      });
     });
   });
 });

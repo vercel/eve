@@ -3,7 +3,7 @@ import {
   anchorToTurn,
   createFrameworkUserMessage,
   followsToolResults,
-  followUpHooksOf,
+  sentByHooksOf,
   type HarnessModelMessage,
   normalizeModelMessages,
   validateHarnessModelMessages,
@@ -120,7 +120,7 @@ function withTurnInput(
 
 /**
  * `messages`, the prompt's by default, as the model reads them: with the client's context at its
- * position, and a note ahead of each hook follow-up. Neither joins history.
+ * position, and a note ahead of each message hooks sent. Neither joins history.
  */
 export function withClientContext(
   prompt: Prompt,
@@ -128,10 +128,10 @@ export function withClientContext(
 ): HarnessModelMessage[] {
   const { clientContext } = prompt;
   if (clientContext === undefined || clientContext.messages.length === 0) {
-    return withFollowUpNotes(messages);
+    return withHookNotes(messages);
   }
   const insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
-  return withFollowUpNotes([
+  return withHookNotes([
     ...messages.slice(0, insertionIndex),
     ...clientContext.messages.map((content) =>
       createFrameworkUserMessage("context.instruction", content),
@@ -140,29 +140,29 @@ export function withClientContext(
   ]);
 }
 
-/** Tells the model which messages a hook sent, from the follow-up's delivery source. */
-function withFollowUpNotes(messages: readonly HarnessModelMessage[]): HarnessModelMessage[] {
+/** Tells the model which messages a hook sent, from their deliveries' source. */
+function withHookNotes(messages: readonly HarnessModelMessage[]): HarnessModelMessage[] {
   return messages.flatMap((message) => {
-    const hooks = followUpHooksOf(message);
+    const hooks = sentByHooksOf(message);
     if (hooks === undefined) return [message];
     const names = hooks.map((hook) => `"${hook}"`).join(" and ");
-    const note = `The next message is a follow-up the ${names} ${hooks.length === 1 ? "hook" : "hooks"} sent after the last turn. No person wrote it.`;
+    const note = `The next message is from the ${names} ${hooks.length === 1 ? "hook" : "hooks"}. No person wrote it.`;
     return [createFrameworkUserMessage("context.instruction", note), message];
   });
 }
 
 /**
- * Whether the model reads exactly the durable messages: no client context or follow-up note is
+ * Whether the model reads exactly the durable messages: no client context or hook note is
  * placed among them, so a measured prompt's message count matches history.
  */
 export function readsOnlyHistory(prompt: Prompt): boolean {
   return (
     (prompt.clientContext?.messages.length ?? 0) === 0 &&
-    !prompt.messages.some((message) => followUpHooksOf(message) !== undefined)
+    !prompt.messages.some((message) => sentByHooksOf(message) !== undefined)
   );
 }
 
-/** The prompt as the model reads it: with the client's context and follow-up notes. */
+/** The prompt as the model reads it: with the client's context and hook notes. */
 export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {
   return validateHarnessModelMessages(normalizeModelMessages(withClientContext(prompt)));
 }

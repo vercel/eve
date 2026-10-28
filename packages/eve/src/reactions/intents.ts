@@ -10,17 +10,19 @@ import { readReactionsState, writeReactionsState, type PendingIntent } from "./s
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. A follow-up targets the next turn, for
-// the turn that settled. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one. A follow-up targets the turn after
+// the one it names. A send is admitted like a person's message. Repeated requests add nothing.
 
 /** A command a hook asked for, before it's queued. */
 export type Command =
   | { readonly type: "cancel"; readonly reason?: string }
-  | { readonly type: "follow-up"; readonly turnId: string; readonly delivery: DeliverHookPayload };
+  | { readonly type: "follow-up"; readonly turnId?: string; readonly delivery: DeliverHookPayload }
+  | { readonly type: "send"; readonly delivery: DeliverHookPayload };
 
 /**
  * Adds a hook's commands to the session's queue. Cancels between turns are dropped; each hook's
- * follow-up joins the turn's one follow-up delivery.
+ * follow-up joins the turn's one follow-up delivery; sends wait, in order, for the session to
+ * admit them.
  */
 export function queueCommands(
   ctx: ContextContainer,
@@ -32,9 +34,15 @@ export function queueCommands(
   const state = readReactionsState(ctx);
   const intents = [...(state.intents ?? [])];
   let { followUp } = state;
+  const sends = [...(state.sends ?? [])];
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
+    if (command.type === "send") {
+      sends.push(command.delivery);
+      changed = true;
+      continue;
+    }
     if (command.type === "follow-up") {
       // A hook joins the turn's follow-up; `ctx.followUp()` already refused one it can't join.
       const queued = followUp?.turnId === command.turnId ? followUp : undefined;
@@ -43,7 +51,7 @@ export function queueCommands(
           queued === undefined
             ? command.delivery
             : coalesceDeliveries([queued.delivery, command.delivery]),
-        turnId: command.turnId,
+        ...(command.turnId !== undefined && { turnId: command.turnId }),
       };
       changed = true;
       continue;
@@ -60,7 +68,12 @@ export function queueCommands(
     changed = true;
   }
   if (changed) {
-    writeReactionsState(ctx, { ...state, intents, ...(followUp !== undefined && { followUp }) });
+    writeReactionsState(ctx, {
+      ...state,
+      intents,
+      ...(followUp !== undefined && { followUp }),
+      ...(sends.length > 0 && { sends }),
+    });
   }
 }
 

@@ -6,7 +6,7 @@ import {
   createImportedHistoryMessages,
   createUserMessage,
   frameworkMessageKindForStepInput,
-  markFollowUp,
+  markSentByHooks,
   type HarnessModelMessage,
   normalizeMessage,
   userContentOf,
@@ -136,8 +136,8 @@ export async function prepareTurnInput(
         : createFrameworkUserMessage(kind, staged),
       turnId,
     );
-    const hooks = followUpHooks(step, input);
-    messages.push(hooks === undefined ? message : markFollowUp(message, hooks));
+    const hooks = sentByHooks(step, input);
+    messages.push(hooks === undefined ? message : markSentByHooks(message, hooks));
   }
   return {
     clientContext,
@@ -152,10 +152,10 @@ export async function prepareTurnInput(
 }
 
 /**
- * The hooks whose follow-ups the input is, read from its deliveries' `source.hook`, which the
- * admission commit recorded before the step. Input that coalesced a person's message isn't one.
+ * The hooks that sent the input, read from its deliveries' `source.hook`, which the admission
+ * commit recorded before the step. Input that coalesced a person's message isn't marked.
  */
-function followUpHooks(
+function sentByHooks(
   step: Step,
   input: HarnessStepInput | undefined,
 ): readonly string[] | undefined {

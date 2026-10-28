@@ -93,6 +93,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
   dropYieldedFollowUps(ctx, input.written);
+  dropAdmittedSends(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -405,17 +406,66 @@ function actOnCancels(
 
 /**
  * A hook's follow-up yields: once another turn starts, a cancel or reset arrives, or the history
- * is cleared, the session no longer follows up the turn it was queued for, and it's dropped.
+ * is cleared, the session no longer follows up the turn it was queued for, and it's dropped. So
+ * is one whose turn settles other than completed, unless a hook that sent it cancelled the turn.
  * A compaction keeps it: the conversation it follows up is still there, summarized.
  */
 function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
   const { followUp, ...state } = readReactionsState(ctx);
   if (followUp === undefined) return;
   const latestTurnId = latestTurnIdOf(currentProjection(ctx));
-  if (followUp.turnId === latestTurnId && !written.some(({ event }) => stopsFollowUps(event))) {
+  const senders = new Set(
+    (followUp.delivery.deliveryMetadata ?? []).map(({ hook }) => `hook:${hook}`),
+  );
+  const unfinished = written.some(
+    ({ event }) =>
+      event.type === "turn.settled" &&
+      event.data.turnId === followUp.turnId &&
+      event.data.outcome !== "completed" &&
+      !(
+        event.data.outcome === "cancelled" &&
+        state.cancelledTurnId === followUp.turnId &&
+        state.cancelledBy !== undefined &&
+        senders.has(state.cancelledBy)
+      ),
+  );
+  if (
+    followUp.turnId === latestTurnId &&
+    !unfinished &&
+    !written.some(({ event }) => stopsFollowUps(event))
+  ) {
     return;
   }
   writeReactionsState(ctx, state);
+}
+
+/**
+ * A hook's steer or queue message leaves the state once its `delivery.admitted` is written, or
+ * when a reset retires the session; a person's queued message survives a cancel and a clear, and
+ * so does a hook's.
+ */
+function dropAdmittedSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+  const { sends, ...state } = readReactionsState(ctx);
+  if (sends === undefined) return;
+  if (written.some(({ event }) => isReset(event))) return writeReactionsState(ctx, state);
+  const admitted = new Set(
+    written.flatMap(({ event }) =>
+      event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
+    ),
+  );
+  if (admitted.size === 0) return;
+  const pending = sends.filter(
+    ({ deliveryMetadata }) =>
+      !(deliveryMetadata ?? []).some(({ deliveryId }) => admitted.has(deliveryId)),
+  );
+  if (pending.length === sends.length) return;
+  writeReactionsState(ctx, pending.length === 0 ? state : { ...state, sends: pending });
+}
+
+function isReset(event: WrittenEvent["event"]): boolean {
+  if (event.type !== "delivery.admitted") return false;
+  const { source } = event.data;
+  return source !== undefined && "control" in source && source.control === "reset";
 }
 
 function stopsFollowUps(event: WrittenEvent["event"]): boolean {

@@ -118,7 +118,7 @@ export interface ChannelDeliveryMetadata {
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
-  /** The hook whose `ctx.followUp()` made the delivery, recorded on its `delivery.admitted`. */
+  /** The hook whose `ctx.send()` made the delivery, recorded on its `delivery.admitted`. */
   readonly hook?: string;
   readonly requestId?: string;
   readonly requestTraceContext?: SessionTraceSeed;
