@@ -13,7 +13,7 @@ export function highlightFlush(code: string, lang: string, lineNumbers = false) 
       pre: ({ children, ...props }: ComponentProps<"pre">) => (
         <CodeBlock
           {...props}
-          {...(lineNumbers ? { "data-line-numbers": "true" } : {})}
+          data-line-numbers={lineNumbers ? "true" : undefined}
           className={cn(
             props.className,
             "my-0 rounded-none border-0 bg-transparent p-0 [&>[data-section=content]]:rounded-none [&>[data-section=content]]:border-0",

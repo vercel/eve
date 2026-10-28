@@ -278,10 +278,13 @@ export function SessionTimeline(): JSX.Element {
   const listRef = useRef<HTMLOListElement>(null);
   const [shown, setShown] = useState(1);
   const [inView, setInView] = useState(false);
+  // Reduced motion shows the whole transcript at once, so there is nothing to replay.
+  const [animated, setAnimated] = useState(true);
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setShown(BEATS.length);
+      setAnimated(false);
       return;
     }
     const root = rootRef.current;
@@ -315,7 +318,7 @@ export function SessionTimeline(): JSX.Element {
           {slackLogo({ "aria-hidden": true, className: "size-3.5 grayscale" })}
           <span className="text-gray-1000">#software-factory</span>
           <span className="ml-auto flex items-center gap-3">
-            {done ? (
+            {done && animated ? (
               <button
                 className="flex animate-in items-center gap-1 text-gray-900 transition-colors fade-in hover:text-gray-1000"
                 onClick={replay}
