@@ -18,7 +18,7 @@ Mounted as `todo`:
 - `todo__write` replaces the list. Each item has `content` and a `status` of `pending`, `in_progress`, `completed`, or `cancelled`.
 - A dynamic system instruction that shows the list while at least one item is `pending` or `in_progress`, and nothing once every item is finished.
 
-The list lives in `defineState`, so it survives step boundaries, redeploys, and compaction. Because the instruction is a system instruction, it stays outside history: compaction never summarizes it or replays it as a user message.
+The list lives in `defineState`, so it survives step boundaries, redeploys, and compaction. Because the instruction is a system instruction, it stays outside history, so the list is never replayed as a user message after compaction. `todo__write` gives the model only per-status counts; hooks and channels get the full list on `call.settled`.
 
 ## Slack
 

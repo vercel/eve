@@ -28,10 +28,35 @@ test("a withheld or invalid latest input shows no list, not an older one", () =>
     latestTodos([{ input: { todos: "x" }, name: "todo__write" }], "todo__write"),
     undefined,
   );
-  assert.equal(
-    latestTodos([{ input: { todos: [] }, name: "todo__write" }], "todo__write"),
-    undefined,
-  );
+});
+
+test("a cleared list replaces the posted plan with the rest of the chain's card or a note", () => {
+  const cleared = [
+    { input: { todos: items }, name: "todo__write" },
+    { input: { todos: [] }, name: "todo__write" },
+  ];
+  assert.deepEqual(latestTodos(cleared, "todo__write"), []);
+  assert.deepEqual(planCard([], null, "id"), {
+    blocks: [{ elements: [{ text: "Cleared the checklist.", type: "mrkdwn" }], type: "context" }],
+    text: "Cleared the checklist.",
+  });
+  const eveCard = { blocks: [{ type: "task_card", task_id: "t", title: "Research" }], text: "R" };
+  assert.equal(planCard([], eveCard, "id"), eveCard);
+});
+
+test("a card that isn't eve's single plan or task card keeps its blocks below the plan", () => {
+  const custom = {
+    blocks: [
+      { text: { text: "Research", type: "mrkdwn" }, type: "section" },
+      { elements: [{ text: "Running", type: "mrkdwn" }], type: "context" },
+    ],
+    text: "Research",
+  };
+  const card = planCard(items.slice(0, 1), custom, "id");
+  assert.equal(card.blocks.length, 3);
+  assert.equal(card.blocks[0]?.type, "plan");
+  assert.equal(rows(card).length, 1);
+  assert.deepEqual(card.blocks.slice(1), custom.blocks);
 });
 
 test("the steps render as plan rows with Slack statuses", () => {

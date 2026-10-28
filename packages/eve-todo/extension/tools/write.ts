@@ -12,4 +12,7 @@ export default defineTool({
     todos.update(() => input.todos);
     return summarize(input.todos);
   },
+  // The instruction shows the list on the next model call, so the model only needs the counts.
+  // Hooks and channels still get the full list on `call.settled`.
+  toModelOutput: ({ counts }) => ({ type: "json", value: counts }),
 });

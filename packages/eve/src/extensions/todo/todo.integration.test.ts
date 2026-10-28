@@ -42,11 +42,14 @@ describe("eve/extensions/todo", () => {
     ];
     const done = open.map((item) => ({ ...item, status: "completed" }));
     const systems: string[] = [];
+    const toolResults: unknown[] = [];
     const settled: { readonly outcome: string; readonly todos: unknown }[] = [];
     const model = markMockModel(
       new MockLanguageModelV4({
         doStream: async ({ prompt }) => {
           systems.push(systemText(prompt));
+          const last = prompt.at(-1);
+          if (last?.role === "tool") toolResults.push(last.content[0]);
           if (systems.length === 1) {
             return toolCallStreamResult({
               input: JSON.stringify({ todos: open }),
@@ -123,6 +126,13 @@ describe("eve/extensions/todo", () => {
       "<todos>\n[>] Read Alice's report\n[ ] Send the summary to Bob\n</todos>",
     );
     expect(systems[2]).not.toContain("<todos>");
+    // The model reads the list from the instruction; the tool result carries only the counts.
+    expect(toolResults[0]).toMatchObject({
+      output: {
+        type: "json",
+        value: { cancelled: 0, completed: 0, in_progress: 1, pending: 1, total: 2 },
+      },
+    });
     expect(settled).toEqual([{ outcome: "completed", todos: done }]);
   }, 90_000);
 });
