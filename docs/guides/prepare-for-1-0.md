@@ -19,7 +19,7 @@ Replace retirement methods named `reset()` with `end()` on client sessions, `Ses
 
 The HTTP endpoint changes from `POST /eve/v1/session/:sessionId/reset` to `POST /eve/v1/session/:sessionId/end`.
 
-Ending permanently retires the session and leaves the handle on the retired ID. Do not use `end()` for a **New chat** button. Use `newSession()` on a frontend binding or store, or create a new client session:
+Ending permanently retires the session and leaves the handle on the retired ID. Do not use `end()` for a **New chat** button. Use `newSession()` when the frontend binding or store owns session creation. When you supply an external `session`, `newSession()` only clears local state and keeps that handle; create a new client session and bind a new store or component to it instead:
 
 ```ts
 import { Client } from "eve/client";
