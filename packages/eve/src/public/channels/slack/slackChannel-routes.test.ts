@@ -13,6 +13,7 @@ import {
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
+import { clearSlackSenderProfileCache } from "#public/channels/slack/sender-profiles.js";
 import { slackChannel, type SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 const SIGNING_SECRET = "test-signing-secret";
@@ -30,6 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clearSlackSenderProfileCache();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -186,6 +188,48 @@ describe("slackChannel inactive prompt press", () => {
         user: "U_APPROVER",
       }),
     ]);
+  });
+});
+
+describe("slackChannel sender profiles", () => {
+  it("adds the sender's Slack name and email to the turn message", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      const url = String(request);
+      if (url.includes("users.info"))
+        return Response.json({
+          ok: true,
+          user: { profile: { display_name: "alice", email: "alice@example.com" } },
+        });
+      if (url.includes("conversations.info"))
+        return Response.json({ channel: { is_private: false }, ok: true });
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+      senderProfiles: true,
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }), send);
+
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(JSON.stringify("message" in input ? input.message : "")).toContain(
+      "sender_id: U01\\nsender_name: alice\\nsender_email: alice@example.com",
+    );
+  });
+
+  it("looks up no profiles when the option is off", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+    });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }));
+
+    expect(fetchMock.mock.calls.map(([request]) => String(request))).not.toContainEqual(
+      expect.stringContaining("users.info"),
+    );
   });
 });
 

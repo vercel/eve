@@ -12,10 +12,17 @@ export function defineSlackAppManifest(input: {
   readonly botName?: string;
   /** Adds the scopes, events, and feature flag Slack code channels need. */
   readonly codeChannels?: boolean;
+  /** Adds the scopes `users.info` needs to return a sender's name and email. */
+  readonly senderProfiles?: boolean;
 }): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
       const name = (input.botName ?? channelName).slice(0, 35);
+      const botScopes = [
+        "app_mentions:read" as const,
+        "chat:write" as const,
+        ...(input.senderProfiles === true ? (["users:read", "users:read.email"] as const) : []),
+      ];
       const manifest = {
         $type: SLACK_APP_MANIFEST_TYPE,
         display_information: { name },
@@ -27,7 +34,7 @@ export function defineSlackAppManifest(input: {
           },
           bot_user: { display_name: name },
         },
-        oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+        oauth_config: { scopes: { bot: botScopes } },
         settings: {
           event_subscriptions: { bot_events: ["app_mention"] },
           org_deploy_enabled: false,

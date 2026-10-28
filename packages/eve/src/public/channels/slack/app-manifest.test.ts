@@ -59,4 +59,12 @@ describe("Slack app manifests", () => {
       },
     });
   });
+
+  it("adds the users.info scopes for sender profiles", () => {
+    expect(defineSlackAppManifest({ senderProfiles: true }).build("support")).toMatchObject({
+      oauth_config: {
+        scopes: { bot: ["app_mentions:read", "chat:write", "users:read", "users:read.email"] },
+      },
+    });
+  });
 });

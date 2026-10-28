@@ -139,7 +139,7 @@ export default slackChannel({
 });
 ```
 
-The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
+The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. With [`senderProfiles`](#add-sender-names-and-emails) enabled, it also includes `sender_name` and `sender_email`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
 When a Slack message includes a link preview, eve includes its attachment text in `<content>` alongside the sender's message, including when the link has words around it. Shared Slack messages work the same way: eve extracts the forwarded message body from Slack's message-unfurl attachment and keeps any top-level comment.
 
@@ -251,6 +251,33 @@ export default slackChannel({
 `threadContext` requires the matching Slack history scope. Thread helpers reuse messages already loaded within the same inbound handler, and overlapping refreshes share one `conversations.replies` request. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
 When the triggering message starts the thread's session, eve adds those replies as session history instead of a transcript. Replies from this installed app become assistant turns, and replies from people and other bots become user messages with their Slack user ids attached. If the agent posted a report and people replied to it, the new session sees that report as its own earlier turn. Slack shows rendered output rather than the model's original response, so these assistant turns can differ from what the model wrote. Later messages in the same thread keep the transcript behavior above. When a hook returns its own `history`, eve keeps the transcript and does not add thread replies as history.
+
+#### Add sender names and emails
+
+Slack user ids identify every sender without a lookup. When the agent should also know who someone is, enable `senderProfiles`:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  senderProfiles: true,
+});
+```
+
+eve then calls Slack's `users.info` for the triggering sender and each `threadContext` sender, and adds the results to their `<slack_message>` metadata:
+
+```text
+sender_id: U0123ABCD
+sender_name: alice
+sender_email: alice@example.com
+```
+
+- `sender_name` is the sender's Slack display name, falling back to their real name.
+- `sender_email` appears only when Slack returns one, which needs the `users:read.email` scope.
+- Lookups are cached per workspace and user for an hour, including failed ones, so a missing scope costs one call per user, not one per message.
+- A failed lookup leaves both fields out and the message is still delivered.
+
+The option adds the `users:read` and `users:read.email` scopes to the generated app manifest. If you manage the Slack app yourself, add them and reinstall the app. Sender emails become part of model context, session history, and traces, so leave the option off when the agent doesn't need them.
 
 #### Control overlapping turns
 

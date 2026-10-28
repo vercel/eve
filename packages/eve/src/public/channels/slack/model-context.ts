@@ -1,7 +1,11 @@
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import type { SlackSenderProfile } from "#public/channels/slack/sender-profiles.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
+
+/** Sender profiles keyed by Slack user id, from the `senderProfiles` option. */
+export type SlackSenderProfiles = ReadonlyMap<string, SlackSenderProfile>;
 
 interface SlackModelMessageInput {
   readonly botUserId?: string;
@@ -9,6 +13,7 @@ interface SlackModelMessageInput {
   readonly content: string;
   readonly isMentioned?: boolean;
   readonly senderId?: string;
+  readonly senderProfile?: SlackSenderProfile;
   readonly senderType: "agent" | "bot" | "unknown" | "user";
   readonly teamId?: string;
   readonly threadTs: string;
@@ -17,14 +22,16 @@ interface SlackModelMessageInput {
 
 /**
  * Renders one Slack message with its sender identity attached to the same
- * model-visible message. Slack user ids are stable and require no profile
- * lookup, so they remain the canonical speaker identity.
+ * model-visible message. Slack user ids are stable, so they remain the
+ * canonical speaker identity; a looked-up name and email only add to them.
  */
 function formatSlackModelMessage(input: SlackModelMessageInput): string {
   return [
     "<slack_message>",
     `sender_type: ${input.senderType}`,
     ...(input.senderId ? [`sender_id: ${input.senderId}`] : []),
+    ...(input.senderProfile?.name ? [`sender_name: ${oneLine(input.senderProfile.name)}`] : []),
+    ...(input.senderProfile?.email ? [`sender_email: ${oneLine(input.senderProfile.email)}`] : []),
     ...(input.botUserId ? [`bot_user_id: ${input.botUserId}`] : []),
     ...(input.isMentioned !== undefined ? [`is_mentioned: ${input.isMentioned}`] : []),
     ...(input.channelId ? [`channel_id: ${input.channelId}`] : []),
@@ -38,10 +45,16 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
   ].join("\n");
 }
 
+// A profile field is user-controlled; keep it from forging extra metadata lines.
+function oneLine(value: string): string {
+  return value.replace(/[\r\n]+/gu, " ");
+}
+
 /** Renders the triggering inbound Slack message as one attributed block. */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
   message: { readonly text: string; readonly ts: string },
+  profiles?: SlackSenderProfiles,
 ): string {
   return formatSlackModelMessage({
     botUserId: context.botUserId,
@@ -49,6 +62,7 @@ export function formatSlackInboundMessage(
     content: slackModelContent(message.text),
     isMentioned: context.isMentioned,
     senderId: context.userId || undefined,
+    senderProfile: context.userId ? profiles?.get(context.userId) : undefined,
     senderType: context.userId ? "user" : "unknown",
     teamId: context.teamId,
     threadTs: context.threadTs,
@@ -79,6 +93,7 @@ function slackModelContent(input: string): string {
  */
 export function formatSlackThreadContext(
   messages: readonly SlackThreadMessage[],
+  profiles?: SlackSenderProfiles,
 ): string | undefined {
   if (messages.length === 0) return undefined;
 
@@ -88,6 +103,7 @@ export function formatSlackThreadContext(
       formatSlackModelMessage({
         content: message.markdown,
         senderId: message.user ?? message.botId,
+        senderProfile: message.user ? profiles?.get(message.user) : undefined,
         senderType: slackThreadSenderType(message),
         threadTs: message.threadTs,
         ts: message.ts,
@@ -111,11 +127,15 @@ function slackThreadSenderType(message: SlackThreadMessage): SlackModelMessageIn
  */
 export function slackThreadSessionHistory(
   messages: readonly SlackThreadMessage[],
+  profiles?: SlackSenderProfiles,
 ): SessionHistoryMessage[] {
-  return messages.flatMap((message) => slackThreadHistoryMessage(message) ?? []);
+  return messages.flatMap((message) => slackThreadHistoryMessage(message, profiles) ?? []);
 }
 
-function slackThreadHistoryMessage(message: SlackThreadMessage): SessionHistoryMessage | undefined {
+function slackThreadHistoryMessage(
+  message: SlackThreadMessage,
+  profiles: SlackSenderProfiles | undefined,
+): SessionHistoryMessage | undefined {
   if (message.markdown.trim().length === 0) return undefined;
   if (message.isMe) return { id: message.ts, role: "assistant", text: message.markdown };
   return {
@@ -124,6 +144,7 @@ function slackThreadHistoryMessage(message: SlackThreadMessage): SessionHistoryM
     text: formatSlackModelMessage({
       content: message.markdown,
       senderId: message.user ?? message.botId,
+      senderProfile: message.user ? profiles?.get(message.user) : undefined,
       senderType: slackThreadSenderType(message),
       threadTs: message.threadTs,
       ts: message.ts,

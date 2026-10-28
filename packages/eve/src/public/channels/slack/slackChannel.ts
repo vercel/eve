@@ -42,6 +42,7 @@ import {
   slackCodeChannelContinuationToken,
   slackContinuationToken,
   slackSessionToken,
+  type SlackApiResponse,
   type SlackBotToken,
   type SlackHandle,
   type SlackThread,
@@ -101,6 +102,7 @@ import {
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
 import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
+import { resolveSlackSenderProfiles } from "#public/channels/slack/sender-profiles.js";
 import {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
@@ -771,6 +773,17 @@ export interface SlackChannelConfig {
   readonly threadContext?: LoadThreadContextMessagesOptions;
 
   /**
+   * Looks up each Slack sender's profile with `users.info` and adds
+   * `sender_name` and, when Slack returns it, `sender_email` to the
+   * model-visible `<slack_message>` metadata, including thread context.
+   * Lookups are cached per workspace and user for an hour, and a failed
+   * lookup leaves the fields out. Adds the `users:read` and
+   * `users:read.email` scopes to the app manifest. Off by default: sender
+   * emails then reach model context and traces.
+   */
+  readonly senderProfiles?: boolean;
+
+  /**
    * Handles human-authored Slack messages. Specialized `onAppMention` and
    * `onDirectMessage` handlers take precedence for their event types. Other
    * channel messages are ignored when this hook is omitted.
@@ -1095,6 +1108,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const manifest = defineSlackAppManifest({
     botName: config.botName,
     codeChannels: config.codeChannels === true,
+    senderProfiles: config.senderProfiles === true,
   });
   setChannelBuildMetadata(channel, (channelName) => ({
     externalCredentials: credentials?.vercelConnect,
@@ -1450,6 +1464,7 @@ async function handleEventPost(input: {
         // A typed reply would bypass a custom `onAnswers` and could answer
         // a request `approvalChannel` sent privately, so either one disables it.
         resolvesTypedInput: config.onAnswers === undefined && config.approvalChannel === undefined,
+        senderProfiles: config.senderProfiles === true,
         threadContext: config.threadContext,
         uploadPolicy: input.uploadPolicy,
       });
@@ -1583,6 +1598,7 @@ async function dispatchSlackMessage(input: {
   readonly message: SlackMessage;
   readonly received: SlackRenderChain["received"];
   readonly resolvesTypedInput: boolean;
+  readonly senderProfiles: boolean;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
 }): Promise<void> {
@@ -1734,6 +1750,9 @@ async function dispatchSlackMessage(input: {
     message: input.message,
     resolvesTypedInput: input.resolvesTypedInput,
     result,
+    senderProfiles: input.senderProfiles
+      ? { request, teamId: input.installationTeamId ?? input.message.teamId }
+      : undefined,
     sessionOperations,
     thread,
     threadContext: input.threadContext,
@@ -1899,6 +1918,13 @@ async function deliverSlackMessage(input: {
   readonly message: SlackMessage;
   readonly resolvesTypedInput: boolean;
   readonly result: Exclude<SlackInboundResult, null>;
+  /** Workspace lookup for sender profiles; `undefined` when `senderProfiles` is off. */
+  readonly senderProfiles:
+    | {
+        readonly request: (operation: string, body: unknown) => Promise<SlackApiResponse>;
+        readonly teamId: string | undefined;
+      }
+    | undefined;
   readonly thread: SlackThread;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
@@ -1917,9 +1943,25 @@ async function deliverSlackMessage(input: {
       priorMessages.length > 0 &&
       input.result.history === undefined &&
       (await input.sessionOperations.resolveSession()) === undefined;
-    const threadContext = seedsHistory ? undefined : formatSlackThreadContext(priorMessages);
+    const authorId = message.author?.userId;
+    const profiles =
+      input.senderProfiles === undefined
+        ? undefined
+        : await resolveSlackSenderProfiles({
+            request: input.senderProfiles.request,
+            teamId: input.senderProfiles.teamId,
+            // The triggering author first, so the lookup cap never drops them.
+            userIds: [
+              ...(authorId ? [authorId] : []),
+              ...priorMessages.flatMap((prior) => (prior.user ? [prior.user] : [])),
+            ],
+          });
+    const threadContext = seedsHistory
+      ? undefined
+      : formatSlackThreadContext(priorMessages, profiles);
     const history =
-      input.result.history ?? (seedsHistory ? slackThreadSessionHistory(priorMessages) : undefined);
+      input.result.history ??
+      (seedsHistory ? slackThreadSessionHistory(priorMessages, profiles) : undefined);
     const fileParts = await collectInboundFileParts({
       botUserId: input.botUserId,
       fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
@@ -1939,7 +1981,7 @@ async function deliverSlackMessage(input: {
       userId: message.author?.userId ?? "",
       userName: message.author?.userName,
     };
-    const attributedMessage = formatSlackInboundMessage(inboundContext, message);
+    const attributedMessage = formatSlackInboundMessage(inboundContext, message, profiles);
     const turnMessage = buildSlackTurnMessage(
       threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
       fileParts,
