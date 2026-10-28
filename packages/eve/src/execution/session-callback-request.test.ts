@@ -123,6 +123,8 @@ describe("postSessionCallbackRequest", () => {
     ["https://a.parent-abc123-team.preview.example.com", false],
     ["https://parent-abc123-team.preview.example.com:8443", false],
     ["https://parent-abc123-team.evilpreview.example.com", false],
+    ["https://parent-abc123-team.preview.example.com.", false],
+    ["https://parent.example.org", true],
   ] as const)(
     "scopes configured callback credentials to trusted origin %s",
     async (origin, attached) => {
@@ -131,7 +133,7 @@ describe("postSessionCallbackRequest", () => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "test-only-child-oidc");
       vi.stubEnv(
         "EVE_CALLBACK_TRUSTED_ORIGINS",
-        "https://parent.example.com, https://*.preview.example.com",
+        "https://parent.example.com, https://*.preview.example.com, https://*.example.org",
       );
       const fetchMock = stubFetch();
 
@@ -150,6 +152,8 @@ describe("postSessionCallbackRequest", () => {
     "https://parent.example.com/path",
     "https://*.com",
     "https://*.vercel.app",
+    "https://*.vercel.app.",
+    "https://*.preview.example.com.",
     "https://parent*.example.com",
     "https://*.*.example.com",
   ])("rejects invalid trusted-origin configuration %s before fetching", async (entry) => {

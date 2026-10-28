@@ -179,22 +179,25 @@ function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
     if (!url.hostname.includes("*")) return (target) => target.origin === url.origin;
 
     // `*.example.com` matches exactly one label so a subdomain owner several
-    // levels down cannot claim the trust. `vercel.app` is shared by every
-    // Vercel customer, so a wildcard over it would trust all deployments.
-    const suffix = url.hostname.slice(1);
+    // levels down cannot claim the trust. A trailing dot would let
+    // `*.vercel.app.` slip past the denylist and match fully qualified hosts.
+    // `vercel.app` is shared by every Vercel customer, so a wildcard over it
+    // would trust all deployments; other shared domains are not detected.
+    const suffix = url.hostname.slice(2);
     if (
       !url.hostname.startsWith("*.") ||
       suffix.includes("*") ||
-      suffix.split(".").length < 3 ||
-      suffix === ".vercel.app"
+      suffix.endsWith(".") ||
+      suffix.split(".").length < 2 ||
+      suffix === "vercel.app"
     ) {
       throw invalidCallbackOriginsError();
     }
     return (target) => {
-      const label = target.hostname.slice(0, -suffix.length);
+      const label = target.hostname.slice(0, -(suffix.length + 1));
       return (
         target.port === url.port &&
-        target.hostname.endsWith(suffix) &&
+        target.hostname.endsWith(`.${suffix}`) &&
         label !== "" &&
         !label.includes(".")
       );
@@ -204,7 +207,7 @@ function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
 
 function invalidCallbackOriginsError(): FatalError {
   return new FatalError(
-    "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments. A leading `*.` label (e.g. `https://*.preview.example.com`) matches exactly one subdomain label and needs at least two labels after it; `*.vercel.app` is not allowed.",
+    "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments. A leading `*.` label (e.g. `https://*.preview.example.com`) matches exactly one subdomain label and needs at least two labels after it; `*.vercel.app` and trailing dots are not allowed.",
   );
 }
 
