@@ -26,7 +26,7 @@
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "sandbox-image:tag": "node ./scripts/sandbox-image-tag.mjs",
     "sync:template-files": "node ./scripts/sync-template-files.mjs",
-    "test": "turbo run test:unit test:integration",
+    "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:webchat": "turbo run test:webchat --filter=eve",
     "test:eval-benchmark": "node --test scripts/eval-metrics/*.test.mjs scripts/eval-benchmark/*.test.mjs",

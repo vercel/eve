@@ -8,13 +8,18 @@
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-format.ts",
+        "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-benchmark.json",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
         "!src/computer-use/extension/**"
-      ]
+      ],
+      "outputs": ["$TURBO_EXTENDS$", "docs/**"]
     },
     "build:compiled": {
+      "dependsOn": ["^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
