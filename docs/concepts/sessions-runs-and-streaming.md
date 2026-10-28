@@ -375,8 +375,6 @@ Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
-<a id="compact-clear-and-reset"></a>
-
 ## Compact, clear, and end
 
 All session controls are ID-addressed and accept no continuation token:

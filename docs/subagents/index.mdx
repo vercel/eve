@@ -240,7 +240,7 @@ A call with the `taskId` of a child that is still working joins the child's curr
 
 eve adds a framework-injected `[Tasks]` note to the conversation that lists the working and idle tasks by `taskId` and tool, so the model can find a child to continue. See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels agent tasks.
 
-The parent holds each child for the life of the task's run, which lasts until the parent session ends or its task is cancelled. Then eve requests child shutdown, using authenticated reset requests for remote children. Cleanup is best effort: a child whose inbox or deployment is unavailable may remain running or parked. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
+The parent holds each child for the life of the task's run, which lasts until the parent session ends or its task is cancelled. Then eve requests child shutdown, using authenticated end-session requests for remote children. Cleanup is best effort: a child whose inbox or deployment is unavailable may remain running or parked. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or end-session behavior introduced by a newer eve version.
 
 ## When to split
 

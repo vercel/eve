@@ -37,7 +37,10 @@ export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 /** Stable route pattern for ending one exact session ID. */
 export const EVE_SESSION_END_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/end`;
 
-/** Compatibility route for independently deployed parents that still call /reset. */
+/**
+ * Legacy alias of `/end`. Still called by remote-agent parent cleanup and older clients;
+ * keep until parents switch to `/end`.
+ */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
 /** Stable route pattern for eval tool-stub verification. */

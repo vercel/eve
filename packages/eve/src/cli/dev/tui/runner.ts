@@ -1118,7 +1118,7 @@ export class EveTUIRunner {
     } catch (error) {
       this.#finishCommand({
         kind: "result",
-        message: `Couldn't reset the session: ${toErrorMessage(error)}`,
+        message: `Couldn't end the session: ${toErrorMessage(error)}`,
       });
       return;
     }
