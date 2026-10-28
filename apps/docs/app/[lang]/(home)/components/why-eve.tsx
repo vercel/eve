@@ -1,218 +1,306 @@
 import { SiNextdotjs, SiNuxt, SiSvelte, SiTanstack } from "@icons-pack/react-simple-icons";
-import { IconChevronRightSmall } from "@vercel/geistdocs/assets/icons";
+import {
+  IconCheck,
+  IconChevronRightSmall,
+  IconCross,
+  IconLogs,
+  IconMessage,
+  IconWrench,
+} from "@vercel/geistdocs/assets/icons";
 import Link from "next/link";
 import type { JSX, ReactNode } from "react";
-import { slackLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { Frame, FrameHeader, HomeSection } from "./section";
+import { HomeSection } from "./section";
 
-// The four harness layers, each with what it decides.
-const HARNESS = [
-  { layer: "Execution", role: "How work runs and waits" },
-  { layer: "Context", role: "What the model knows" },
-  { layer: "Actions", role: "What the agent can do" },
-  { layer: "Triggers", role: "What starts a run" },
-];
+// The visuals follow vercel.com's enterprise control visuals: set straight in a 16:9 frame,
+// black, white, and gray, thin lines, one black label. Each is drawn on a 320 × 180 canvas
+// and scaled with the frame through `cqw` sizes (16px type at a 360px frame).
+const view = { width: 320, height: 180 };
 
-function HarnessLayers() {
-  return (
-    <ol className="flex h-full list-none flex-col justify-center gap-1.5 p-3">
-      {HARNESS.map((row) => (
-        <li
-          className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-center gap-x-2 rounded-md border border-gray-alpha-400 bg-background-200 px-3 py-2.5"
-          key={row.layer}
-        >
-          <span className="text-label-12 text-gray-1000">{row.layer}</span>
-          <span className="truncate text-copy-13 text-gray-900">{row.role}</span>
-        </li>
-      ))}
-    </ol>
-  );
+function pct(value: number, total: number) {
+  return `${(value / total) * 100}%`;
 }
 
-const FRAMEWORKS = [
-  { name: "Next.js", Logo: SiNextdotjs },
-  { name: "Nuxt", Logo: SiNuxt },
-  { name: "SvelteKit", Logo: SiSvelte },
-  { name: "TanStack", Logo: SiTanstack },
-];
-
-const SIGNUPS = [620, 680, 710, 690, 820, 905, 1010, 1284];
-const SIGNUPS_MAX = Math.max(...SIGNUPS);
-const SIGNUPS_GROWTH = Math.round((SIGNUPS.at(-1)! / SIGNUPS[0] - 1) * 100);
-
-function SignupsChart() {
+function Visual({
+  caption,
+  children,
+  scene,
+}: {
+  caption: string;
+  children?: ReactNode;
+  scene?: ReactNode;
+}) {
   return (
-    <figure className="flex flex-col gap-2 rounded-lg border border-gray-alpha-400 bg-background-200 p-3">
-      <figcaption className="flex items-baseline justify-between gap-2">
-        <span className="text-label-12 text-gray-1000">Weekly signups</span>
-        <span className="text-label-12 text-gray-900 tabular-nums">
-          <span className="text-gray-1000">{SIGNUPS.at(-1)?.toLocaleString("en-US")}</span> this
-          week, +{SIGNUPS_GROWTH}%
-        </span>
-      </figcaption>
-      <div aria-hidden className="flex h-12 items-end gap-[2px] border-gray-alpha-400 border-b">
-        {SIGNUPS.map((value, i) => {
-          const current = i === SIGNUPS.length - 1;
-          return (
-            <div className="flex h-full flex-1 items-end" key={i} title={`${value} signups`}>
-              <div
-                className={cn(
-                  "w-full rounded-t-[4px]",
-                  current ? "bg-gray-1000" : "bg-gray-alpha-500",
-                )}
-                style={{ height: `${(value / SIGNUPS_MAX) * 100}%` }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div aria-hidden className="flex justify-between text-label-12 text-gray-900">
-        <span>8 weeks ago</span>
-        <span>This week</span>
-      </div>
-      <table className="sr-only">
-        <caption>Weekly signups for the last 8 weeks</caption>
-        <tbody>
-          {SIGNUPS.map((value, i) => (
-            <tr key={i}>
-              <th scope="row">
-                {i === SIGNUPS.length - 1 ? "This week" : `${SIGNUPS.length - 1 - i} weeks ago`}
-              </th>
-              <td>{value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <figure className="@container relative m-0 aspect-video w-full overflow-hidden">
+      {scene ? (
+        <svg
+          aria-hidden
+          className="absolute inset-0 size-full"
+          fill="none"
+          viewBox={`0 0 ${view.width} ${view.height}`}
+        >
+          {scene}
+        </svg>
+      ) : null}
+      {children}
+      <figcaption className="sr-only">{caption}</figcaption>
     </figure>
   );
 }
 
-function AgentUi() {
+function Label({ children, x, y }: { children: ReactNode; x: number; y: number }) {
+  return (
+    <span
+      aria-hidden
+      className="absolute -translate-1/2 whitespace-nowrap rounded-[0.45em] bg-gray-1000 px-[0.55em] py-[0.2em] font-medium text-[3.05cqw] text-background-100 leading-[1.45]"
+      style={{ left: pct(x, view.width), top: pct(y, view.height) }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A dashed line that fades out at both ends. */
+function LimitLine({ id, x, y1, y2 }: { id: string; x: number; y1: number; y2: number }) {
   return (
     <>
-      <FrameHeader>
-        {FRAMEWORKS.map(({ name, Logo }) => (
-          <Logo aria-label={name} className="size-3.5 text-gray-1000" key={name} role="img" />
-        ))}
-        <code className="ml-auto font-mono text-copy-13-mono">useEveAgent()</code>
-      </FrameHeader>
-      <div className="flex flex-col gap-1.5 p-3">
-        <p className="ml-auto w-fit rounded-xl bg-gray-alpha-200 px-3 py-1 text-copy-13 text-gray-1000">
-          How are signups trending?
-        </p>
-        <SignupsChart />
-      </div>
+      <defs>
+        <linearGradient gradientUnits="userSpaceOnUse" id={id} x1={x} x2={x} y1={y1} y2={y2}>
+          <stop stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+          <stop offset="0.14" stopColor="var(--ds-gray-1000)" />
+          <stop offset="0.86" stopColor="var(--ds-gray-1000)" />
+          <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`M${x} ${y1}V${y2}`} stroke={`url(#${id})`} strokeDasharray="3 3" />
     </>
   );
 }
 
-// Steps of one turn as Agent Runs times them, in milliseconds from the turn start.
+function GrayBadge({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
+  return (
+    <span className="inline-flex h-[1.375em] shrink-0 items-center gap-[0.375em] rounded-full bg-gray-200 px-[0.5em] font-medium text-[0.625em] text-gray-1000 tracking-[0.2px] [&>svg]:size-[1.1em]">
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+const TOOLS = [
+  { name: "bash", state: "Default", Icon: IconCheck },
+  { name: "query_crm", state: "Custom", Icon: IconWrench },
+  { name: "sleep", state: "Disabled", Icon: IconCross },
+  { name: "web_search", state: "Default", Icon: IconCheck },
+];
+
+function HarnessTools() {
+  return (
+    <Visual caption="The agent's tools: bash on by default, a custom query_crm tool added, sleep disabled, and web_search on by default.">
+      {/* The fade sits on a frame-sized layer so it ends at the frame, not the list. */}
+      <div className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_68%,transparent)]">
+        <div className="absolute top-[calc(8cqw+1em)] right-0 left-[8%] select-none pl-[1em] text-[4.4cqw]">
+          <div className="flex flex-col gap-[1.25em]">
+            <span className="font-mono text-[0.8125em] text-gray-900 leading-none">
+              agent/tools
+            </span>
+            <ul className="m-0 flex list-none flex-col divide-y divide-gray-alpha-400 border-gray-alpha-400 border-t p-0 [mask-image:linear-gradient(to_right,black_55%,transparent_92%)]">
+              {TOOLS.map(({ Icon, name, state }) => (
+                <li className="box-content flex h-[1.25em] items-center py-[0.5em]" key={name}>
+                  <span
+                    className={cn(
+                      "w-[8em] whitespace-nowrap font-mono text-[0.75em] leading-none",
+                      state === "Disabled" ? "text-gray-700" : "text-gray-1000",
+                    )}
+                  >
+                    {name}
+                  </span>
+                  <GrayBadge icon={<Icon />}>{state}</GrayBadge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </Visual>
+  );
+}
+
+const FRAMEWORKS = [
+  { name: "Next.js", Logo: SiNextdotjs, y: 54 },
+  { name: "Nuxt", Logo: SiNuxt, y: 78 },
+  { name: "SvelteKit", Logo: SiSvelte, y: 102 },
+  { name: "TanStack", Logo: SiTanstack, y: 126 },
+];
+const frameworkX = 36;
+const hook = { x: 112, y: 90, halfWidth: 34 };
+const appWindow = { x: 178, y: 36, width: 118, height: 108 };
+const SIGNUPS = [620, 680, 710, 690, 820, 905, 1010, 1284];
+const SIGNUPS_MAX = Math.max(...SIGNUPS);
+
+function AgentUi() {
+  return (
+    <Visual
+      caption="Next.js, Nuxt, SvelteKit, and TanStack all connect through the useEveAgent() hook to one chat UI, where the agent answers a question about signups with a bar chart."
+      scene={
+        <>
+          {FRAMEWORKS.map(({ name, y }) => (
+            <path
+              d={`M${frameworkX + 10} ${y}C${frameworkX + 40} ${y} ${hook.x - hook.halfWidth - 24} ${hook.y} ${hook.x - hook.halfWidth} ${hook.y}`}
+              key={name}
+              stroke="var(--ds-gray-alpha-400)"
+            />
+          ))}
+          <path
+            d={`M${hook.x + hook.halfWidth} ${hook.y}H${appWindow.x}`}
+            stroke="var(--ds-gray-alpha-400)"
+          />
+        </>
+      }
+    >
+      {FRAMEWORKS.map(({ Logo, name, y }) => (
+        <span
+          className="absolute flex size-[6cqw] -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[55%]"
+          key={name}
+          style={{ left: pct(frameworkX, view.width), top: pct(y, view.height) }}
+        >
+          <Logo aria-hidden />
+        </span>
+      ))}
+      <Label x={hook.x} y={hook.y}>
+        <code className="font-mono">useEveAgent()</code>
+      </Label>
+      <div
+        className="absolute flex select-none flex-col gap-[0.6em] rounded-[0.75em] bg-background-100 px-[0.75em] pt-[0.5em] pb-[0.75em] text-[4.4cqw] shadow-(--ds-shadow-border-small)"
+        style={{
+          left: pct(appWindow.x, view.width),
+          top: pct(appWindow.y, view.height),
+          width: pct(appWindow.width, view.width),
+          height: pct(appWindow.height, view.height),
+        }}
+      >
+        <div aria-hidden className="mt-[0.25em] flex gap-[0.25em]">
+          <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
+          <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
+          <span className="size-[0.5em] rounded-full bg-gray-alpha-400" />
+        </div>
+        <span className="self-end whitespace-nowrap rounded-full bg-gray-200 px-[0.6em] py-[0.3em] text-[0.625em] text-gray-1000 leading-none">
+          Signups trend?
+        </span>
+        <div className="flex flex-1 items-end gap-[0.18em] border-gray-alpha-400 border-b">
+          {SIGNUPS.map((value, i) => (
+            <span
+              className={cn(
+                "flex-1 rounded-t-[0.15em]",
+                i === SIGNUPS.length - 1
+                  ? "bg-gray-1000"
+                  : "border border-gray-alpha-500 border-b-0 bg-linear-to-b from-gray-200 to-transparent",
+              )}
+              key={i}
+              style={{ height: `${(value / SIGNUPS_MAX) * 100}%` }}
+            />
+          ))}
+        </div>
+      </div>
+    </Visual>
+  );
+}
+
+// One turn as Agent Runs times it, in milliseconds from the turn start.
 const STEPS = [
-  { kind: "Model", name: "claude-opus-5.5", start: 0, end: 800 },
-  { kind: "Skill", name: "oncall-runbook", start: 800, end: 1000 },
-  { kind: "Tool", name: "search_logs", start: 1000, end: 1700 },
-  { kind: "Tool", name: "get_deploy", start: 1700, end: 2000 },
-  { kind: "Model", name: "claude-opus-5.5", start: 2000, end: 2900 },
+  { name: "claude-opus-5.5", start: 0, end: 800 },
+  { name: "oncall-runbook", start: 800, end: 1000 },
+  { name: "search_logs", start: 1000, end: 1700 },
+  { name: "get_deploy", start: 1700, end: 2000 },
+  { name: "claude-opus-5.5", start: 2000, end: 2900 },
 ];
 const TURN_MS = 2900;
+const track = { x: 132, width: 156 };
+const rowY = (i: number) => 50 + i * 22;
+const spanHeight = 10;
 
-function AgentRun() {
+function AgentTrace() {
+  const end = track.x + track.width;
   return (
-    <>
-      <FrameHeader>
-        {slackLogo({ "aria-hidden": true, className: "size-3.5 shrink-0 grayscale" })}
-        <span className="truncate text-gray-1000">
-          Checkout errors started after Friday's deploy
-        </span>
-        <span className="ml-auto shrink-0 tabular-nums">{(TURN_MS / 1000).toFixed(1)}s</span>
-      </FrameHeader>
-      <table className="my-2 w-full table-fixed border-collapse text-left">
-        <caption className="sr-only">Timings for each step of the turn</caption>
-        <colgroup>
-          <col className="w-[4.25rem]" />
-          <col className="w-[42%]" />
-          <col />
-          <col className="w-12" />
-        </colgroup>
-        <tbody>
-          {STEPS.map((step, i) => (
-            <tr className="align-middle" key={`${step.name}-${i}`}>
-              <th className="py-1 pl-4 font-normal text-label-12 text-gray-900" scope="row">
-                {step.kind}
-              </th>
-              <td className="truncate py-1 pr-3 font-mono text-label-12-mono text-gray-1000">
-                {step.name}
-              </td>
-              <td className="py-1">
-                <div className="relative h-1.5 rounded-full bg-gray-alpha-100">
-                  <div
-                    className="absolute inset-y-0 rounded-full bg-gray-1000"
-                    style={{
-                      left: `${(step.start / TURN_MS) * 100}%`,
-                      width: `${((step.end - step.start) / TURN_MS) * 100}%`,
-                    }}
-                  />
-                </div>
-              </td>
-              <td className="py-1 pr-4 text-right text-label-12 text-gray-900 tabular-nums">
-                {((step.end - step.start) / 1000).toFixed(1)}s
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <dl className="mt-auto flex gap-5 border-gray-alpha-400 border-t px-4 py-2.5 text-label-12">
-        {[
-          ["Input", "12.4k"],
-          ["Cached", "9.8k"],
-          ["Output", "860"],
-        ].map(([label, value]) => (
-          <div className="flex gap-1.5" key={label}>
-            <dt className="text-gray-900">{label}</dt>
-            <dd className="text-gray-1000 tabular-nums">{value}</dd>
-          </div>
+    <Visual
+      caption="A trace of one 2.9 second turn: a model call, the oncall-runbook skill, the search_logs and get_deploy tools, then a second model call."
+      scene={
+        <>
+          {STEPS.map((step, i) => {
+            const y = rowY(i);
+            return (
+              <g key={`${step.name}-${i}`}>
+                <path
+                  d={`M${track.x} ${y}H${end}`}
+                  stroke="var(--ds-gray-alpha-200)"
+                  strokeDasharray="2 3"
+                />
+                <rect
+                  fill="var(--ds-gray-200)"
+                  height={spanHeight}
+                  rx={2}
+                  stroke="var(--ds-gray-alpha-500)"
+                  width={((step.end - step.start) / TURN_MS) * track.width}
+                  x={track.x + (step.start / TURN_MS) * track.width}
+                  y={y - spanHeight / 2}
+                />
+              </g>
+            );
+          })}
+          <LimitLine id="why-eve-turn-end" x={end} y1={32} y2={166} />
+        </>
+      }
+    >
+      <ul className="m-0 list-none p-0 text-[4.4cqw]">
+        {STEPS.map((step, i) => (
+          <li
+            className="absolute -translate-y-1/2 whitespace-nowrap font-mono text-[0.625em] text-gray-1000 leading-none"
+            key={`${step.name}-${i}`}
+            style={{ left: pct(32, view.width), top: pct(rowY(i), view.height) }}
+          >
+            {step.name}
+          </li>
         ))}
-      </dl>
-    </>
+      </ul>
+      <Label x={end} y={24}>
+        {(TURN_MS / 1000).toFixed(1)}s
+      </Label>
+    </Visual>
   );
 }
 
 function Reason({
   title,
   href,
-  linkLabel,
+  icon,
   children,
   visual,
-  visualLabel,
 }: {
   title: string;
   href: string;
-  linkLabel: string;
+  icon: ReactNode;
   children: ReactNode;
   visual: ReactNode;
-  visualLabel: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-3 lg:col-span-4">
-      {/* Every column's visual shares one height so the titles below line up. */}
-      <figure aria-label={visualLabel} className="mb-4">
-        <Frame className="flex h-56 flex-col">{visual}</Frame>
-      </figure>
-      <h3 className="text-heading-24 text-gray-1000">{title}</h3>
-      <p className="text-copy-16 text-gray-900">{children}</p>
-      <Link
-        className="group mt-1 inline-flex w-fit items-center text-copy-14 text-gray-1000"
-        href={href}
-        prefetch={true}
-      >
-        {linkLabel}
-        <IconChevronRightSmall
-          className="text-gray-900 transition-transform group-hover:translate-x-0.5"
-          size={16}
-        />
+    <li className="min-w-0 md:col-span-6 lg:col-span-4">
+      <Link className="group flex flex-col gap-3" href={href} prefetch={true}>
+        <div className="relative mb-5 overflow-hidden rounded-xs border border-gray-300">
+          {visual}
+        </div>
+        <h3 className="flex items-center gap-3 font-[450] text-copy-16 text-gray-1000 [&>svg:first-child]:shrink-0">
+          {icon}
+          {title}
+          <IconChevronRightSmall
+            aria-hidden
+            className="-ml-1 -translate-x-px transition-transform group-hover:translate-x-0"
+            size={14}
+          />
+        </h3>
+        <p className="max-w-[34ch] text-pretty text-copy-16 text-gray-900 transition-colors group-hover:text-gray-1000 lg:text-copy-18">
+          {children}
+        </p>
       </Link>
-    </div>
+    </li>
   );
 }
 
@@ -223,38 +311,35 @@ export function WhyEve(): JSX.Element {
       lede="Customize at every layer, from the harness to the UI to every agent run."
       title="Own your intelligence"
     >
-      <div className="grid gap-x-8 gap-y-14 lg:grid-cols-12">
+      <ul className="m-0 grid list-none gap-x-6 gap-y-16 p-0 md:grid-cols-12">
         <Reason
           href="/docs/concepts/default-harness"
-          linkLabel="Read about the default harness"
+          icon={<IconWrench aria-hidden size={16} />}
           title="Own your harness"
-          visual={<HarnessLayers />}
-          visualLabel="The four layers of the eve harness: execution, context, actions, and triggers"
+          visual={<HarnessTools />}
         >
           Start with great defaults. Turn off what you don't need, extend what you do. Scale from
           side project to enterprise.
         </Reason>
         <Reason
           href="/docs/guides/frontend/overview"
-          linkLabel="Build a chat UI"
+          icon={<IconMessage aria-hidden size={16} />}
           title="Own your agent UI"
           visual={<AgentUi />}
-          visualLabel="A data agent answering in chat with a rendered bar chart of weekly signups"
         >
           Build rich agent UIs natively in Next.js, Nuxt, SvelteKit, and TanStack. Ship agent and
           app in one deploy.
         </Reason>
         <Reason
           href="/docs/observability/instrumentation"
-          linkLabel="Set up tracing"
+          icon={<IconLogs aria-hidden size={16} />}
           title="Own your data"
-          visual={<AgentRun />}
-          visualLabel="An example agent run with step timings and token usage, in the style of Vercel Agent Runs"
+          visual={<AgentTrace />}
         >
           Govern and observe every run with OpenTelemetry traces of each model and tool call.
           Credentials never reach the model.
         </Reason>
-      </div>
+      </ul>
     </HomeSection>
   );
 }
