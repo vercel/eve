@@ -193,7 +193,8 @@ const BEATS: Beat[] = [
   },
 ];
 
-// Vercel's custom Slack emoji: a short word in white on a colored tile.
+// Vercel's custom Slack emoji: a short word in white on a colored tile. Reactions show in
+// Slack's reacted state, a blue-outlined pill.
 const TEXT_EMOJI = {
   ACK: "bg-purple-800",
   LFG: "bg-pink-700",
@@ -204,7 +205,7 @@ function TextEmoji({ name }: { name: keyof typeof TEXT_EMOJI }) {
     <span
       aria-label={`:${name.toLowerCase()}:`}
       className={cn(
-        "inline-flex size-[18px] items-center justify-center rounded-[4px] font-bold text-[7px] text-white leading-none tracking-wide",
+        "inline-flex size-5 items-center justify-center rounded-[5px] font-bold text-[8px] text-white leading-none tracking-wide",
         TEXT_EMOJI[name],
       )}
       role="img"
@@ -357,7 +358,7 @@ export function SessionTimeline(): JSX.Element {
                 <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
                   {beat.reactions.map((reaction) => (
                     <span
-                      className="flex items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 py-0.5 pr-2 pl-1 text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
+                      className="flex h-7 items-center gap-1.5 rounded-full border border-blue-1000/75 bg-blue-100 pr-2.5 pl-1 text-blue-1000 text-copy-14 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
                       key={reaction.emoji}
                     >
                       <TextEmoji name={reaction.emoji} />
