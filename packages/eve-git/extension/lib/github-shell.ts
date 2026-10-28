@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { getToken } from "@vercel/connect";
+import { getToken, type ConnectTokenParams } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolContext } from "eve/tools";
@@ -57,6 +57,7 @@ export interface GitHubConfig {
   ) => Promise<void>;
   readonly connector: string;
   readonly org: string;
+  readonly tokenParams?: GitHubTokenParams;
 }
 
 /** What an `authorize` callback sees before a `gh` command runs. */
@@ -65,12 +66,30 @@ export interface GitHubAuthorizeRequest {
   readonly auth: SessionAuthContext | null;
   /** The `owner/name` repository the command declared. */
   readonly repository: string;
-  /** The repository-scoped GitHub App token minted for this command, for API lookups. */
+  /** The token Connect minted for this command, for API lookups. */
   readonly token: string;
 }
 
 /** Decides whether the session's caller may run a `gh` command against one repository. */
 export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
+
+/** What a `tokenParams` callback sees before Connect mints a `gh` command's token. */
+export interface GitHubTokenParamsRequest {
+  /** The session's current caller, or `null` when the session has none. */
+  readonly auth: SessionAuthContext | null;
+  /**
+   * The params eve sends without a callback: an app subject and a
+   * `github_app_installation` detail scoped to the declared repository.
+   */
+  readonly defaults: ConnectTokenParams;
+  /** The `owner/name` repository the command declared. */
+  readonly repository: string;
+}
+
+/** Returns the Connect token params used to mint one `gh` command's token. */
+export type GitHubTokenParams = (
+  request: GitHubTokenParamsRequest,
+) => ConnectTokenParams | Promise<ConnectTokenParams>;
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -86,17 +105,7 @@ interface GitHubShellDependencies {
   /** The calling tool's context, passed to `attribution`. */
   readonly context?: ToolContext;
   readonly auth?: SessionAuthContext | null;
-  readonly getConnectToken?: (
-    connector: string,
-    params: {
-      authorizationDetails: {
-        type: "github_app_installation";
-        org: string;
-        repositories: string[];
-      }[];
-      subject: { type: "app" };
-    },
-  ) => Promise<string>;
+  readonly getConnectToken?: (connector: string, params: ConnectTokenParams) => Promise<string>;
   readonly getSandbox: () => Promise<SandboxSession>;
   /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
   readonly sessionId: string;
@@ -141,18 +150,19 @@ export async function executeGitHubShell(
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const repositories = repositoryNames(declaredRepositories, config.org);
-  const tokenParams: Parameters<NonNullable<GitHubShellDependencies["getConnectToken"]>>[1] = {
+  const repository = declaredRepositories[0]!;
+  const auth = dependencies.auth ?? null;
+  const defaults: ConnectTokenParams = {
     authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
     subject: { type: "app" },
   };
+  const tokenParams = config.tokenParams
+    ? await config.tokenParams({ auth, defaults, repository })
+    : defaults;
   const token = await (dependencies.getConnectToken ?? getToken)(config.connector, tokenParams);
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
-  const repository = declaredRepositories[0]!;
-  if (
-    config.authorize &&
-    !(await config.authorize({ auth: dependencies.auth ?? null, repository, token }))
-  ) {
+  if (config.authorize && !(await config.authorize({ auth, repository, token }))) {
     throw new Error(`The current caller is not authorized to access ${repository}.`);
   }
   const coAuthor =

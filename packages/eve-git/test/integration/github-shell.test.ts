@@ -157,6 +157,71 @@ test("asks authorize with the caller, repository, and token before running", asy
   assert.equal(runs.length, 1);
 });
 
+test("mints with the params tokenParams returns for the caller and repository", async () => {
+  const auth = {
+    attributes: {},
+    authenticator: "slack",
+    issuer: "https://slack.com",
+    principalId: "slack:U123",
+    principalType: "user",
+    subject: "U123",
+  };
+  const requests: unknown[] = [];
+  const tokenCalls: Array<{ connector: string; params: ConnectTokenParams }> = [];
+  const authorized: unknown[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+
+  await executeGitHubShell(
+    READ,
+    {
+      ...CONFIG,
+      tokenParams: async (request) => {
+        requests.push(request);
+        return {
+          ...request.defaults,
+          subject: { type: "user", id: request.auth!.subject!, issuer: request.auth!.issuer },
+        };
+      },
+      authorize: (request) => {
+        authorized.push(request);
+        return true;
+      },
+    },
+    {
+      auth,
+      sessionId: "session-token-params",
+      async getConnectToken(connector, params) {
+        tokenCalls.push({ connector, params });
+        return "user-token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
+  );
+
+  const defaults = {
+    authorizationDetails: [
+      { type: "github_app_installation", org: "vercel", repositories: ["internal-agents"] },
+    ],
+    subject: { type: "app" },
+  };
+  assert.deepEqual(requests, [{ auth, defaults, repository: "vercel/internal-agents" }]);
+  assert.deepEqual(tokenCalls, [
+    {
+      connector: "github/citron-compass",
+      params: {
+        ...defaults,
+        subject: { type: "user", id: "U123", issuer: "https://slack.com" },
+      },
+    },
+  ]);
+  assert.deepEqual(authorized, [
+    { auth, repository: "vercel/internal-agents", token: "user-token" },
+  ]);
+  assert.equal(runs.length, 1);
+});
+
 test("approves the full syntactically valid gh surface", () => {
   for (const command of [
     "gh api repos/vercel/internal-agents",

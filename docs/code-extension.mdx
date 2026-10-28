@@ -98,6 +98,7 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | `github.org`         | With `github` | Organization whose repositories the `gh` tool can access                                          |
 | `github.broker`      | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules        |
 | `github.authorize`   | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
+| `github.tokenParams` | No            | `tokenParams({ auth, repository, defaults })` callback that returns the Connect token params      |
 | `github.attribution` | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`              |
 
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
@@ -128,6 +129,30 @@ export default git({
   },
 });
 ```
+
+### Mint with your own Connect params
+
+By default each `gh` invocation mints an app-subject token with a `github_app_installation` detail scoped to the declared repository. `github.tokenParams` runs before minting with the session's caller, the declared repository, and those `defaults`, and returns the params Connect receives instead. Use it to mint a user-scoped token, so commands run with the caller's own GitHub permissions rather than the installation's:
+
+```ts title="agent/extensions/git.ts"
+import git from "eve/extensions/git";
+
+import { brokerGitHubLease } from "../lib/github";
+
+export default git({
+  github: {
+    connector: "github/my-agent",
+    org: "acme",
+    broker: brokerGitHubLease,
+    tokenParams({ auth, defaults }) {
+      if (!auth?.subject) throw new Error("GitHub commands require a signed-in caller.");
+      return { ...defaults, subject: { type: "user", id: auth.subject, issuer: auth.issuer } };
+    },
+  },
+});
+```
+
+The returned params replace the defaults, so keep `authorizationDetails` when the token should stay scoped to the declared repository. `github.authorize` receives whichever token was minted. The `gh` tool does not start a consent flow: when Connect has no grant for the subject, the invocation fails with Connect's error.
 
 ### Credit the person behind a turn
 
