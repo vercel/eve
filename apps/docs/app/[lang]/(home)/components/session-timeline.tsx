@@ -246,10 +246,7 @@ const SLACK_BEATS: Beat[] = [
   },
   {
     kind: "reactions",
-    reactions: [
-      { emoji: "ACK", count: 1 },
-      { emoji: "LFG", count: 2 },
-    ],
+    reactions: [{ emoji: "LFG", count: 2 }],
     delay: 900,
   },
 ];
@@ -397,7 +394,6 @@ const CONVERSATIONS: {
 
 // Vercel's custom Slack emoji: a short word in white on a colored tile.
 const TEXT_EMOJI = {
-  ACK: "bg-purple-800",
   LFG: "bg-pink-700",
 };
 
