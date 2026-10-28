@@ -6,7 +6,7 @@ url: /guides/prepare-for-1-0
 
 Use this checklist when upgrading an existing project to the coordinated pre-1.0 API cleanup release. These changes do not make the release 1.0; the [stability policy](../reference/typescript-api#stability-policy) still distinguishes stable and experimental APIs.
 
-Upgrade eve in your agent server and apply the authored-file changes below so it builds. Deploy it before upgrading clients: new clients call the `/end` endpoint, which older servers do not serve, and accept only [agent-info version 6](#update-agent-info-readers). Then update frontend code and scripts.
+Upgrade eve in your agent server and apply the authored-file changes below so it builds. Deploy it before upgrading clients: new clients call the `/end` endpoint, which older servers do not serve. Then update frontend code and scripts.
 
 ## End a session or start a new conversation
 
@@ -155,12 +155,6 @@ Every error `eve/client` throws now extends `EveError` and carries a stable snak
 
 `session.snapshot()` now returns the full `ClientSessionState`, including the opaque `inbox` value, instead of only `sessionId` and `streamIndex`. Persist it as is and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](./client/overview#faster-sends-with-inbox).
 
-## Update agent-info readers
-
-`GET /eve/v1/info` and `client.info()` now use agent-info version 6, which end users can read. It no longer includes skill or schedule markdown, `agent.appRoot`, or `agent.agentRoot`, and instruction `content` is present only when `info.mode` is `"development"`. Read authored files from the agent source instead.
-
-The client now ignores unknown fields and reads unknown enum values as `"unrecognized"`; handle that value when you switch on fields such as `mode` or `sourceKind`. `info()` fails with `AgentInfoResponseError` across the version change in either direction: a new client rejects a version 5 server with a message naming which side to upgrade, and an older client rejects version 6. Upgrade the server first, then promptly upgrade the clients that call `info()`. See [Inspect an agent](./client/overview#inspect-an-agent).
-
 ## Update Workflow imports
 
 Import durable primitives from `eve/workflow`, and run/hook operations from `eve/workflow/api`:
@@ -256,6 +250,6 @@ Model-effort `--reasoning` on `eve init` and `eve set model` is unchanged. `--as
 
 ## Check the resulting project
 
-Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it, and call `client.info()` if your clients use it. Test any proactive Slack messages and durable workflow waits your project defines.
+Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it. Test any proactive Slack messages and durable workflow waits your project defines.
 
 Review [run-data retention](../agent-config#run-data-retention) before depending on a completed transcript remaining readable. This cleanup does not change the retention default: outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends. Backend support determines whether deletion occurs; the current override remains experimental.
