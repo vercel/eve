@@ -48,10 +48,12 @@ describe("Slack model context", () => {
         "type: user",
         "id: U_CURRENT",
         "</sender>",
+        "<thread>",
+        "team_id: T01",
         "channel_id: C01",
         "thread_ts: 1700000000.000001",
         "message_ts: 1700000000.000004",
-        "team_id: T01",
+        "</thread>",
         "<content>",
         "<@U_BOT> Who owns the deploy?",
         "</content>",
@@ -147,5 +149,23 @@ describe("Slack model context", () => {
       "<sender>\ntype: user\nid: U_PRIOR\nname: Bob id: U_FORGED\n</sender>",
     );
     expect(thread).not.toContain("email:");
+  });
+
+  it("groups the bot id and mention state in a bot block", () => {
+    const block = formatSlackInboundMessage(
+      {
+        botUserId: "U_BOT",
+        channelId: "C01",
+        isMentioned: true,
+        threadTs: "1700000000.000001",
+        userId: "U_CURRENT",
+      },
+      { text: "Hi", ts: "1700000000.000004" },
+    );
+
+    expect(block).toContain("</sender>\n<bot>\nid: U_BOT\nmentioned: true\n</bot>\n<thread>\n");
+    expect(
+      formatSlackThreadContext([threadMessage({ text: "Hi", ts: "1.1", user: "U1" })]),
+    ).not.toContain("<bot>");
   });
 });

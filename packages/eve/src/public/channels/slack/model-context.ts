@@ -8,40 +8,53 @@ import type {
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 interface SlackModelMessageInput {
-  readonly botUserId?: string;
-  readonly channelId?: string;
+  readonly sender: {
+    readonly type: "agent" | "bot" | "unknown" | "user";
+    readonly id?: string;
+    readonly profile?: SlackSenderProfile;
+  };
+  /** The receiving app; omitted for fetched thread replies. */
+  readonly bot?: {
+    readonly id?: string;
+    readonly mentioned?: boolean;
+  };
+  readonly thread: {
+    readonly teamId?: string;
+    readonly channelId?: string;
+    readonly threadTs: string;
+    readonly messageTs: string;
+  };
   readonly content: string;
-  readonly isMentioned?: boolean;
-  readonly senderId?: string;
-  readonly senderProfile?: SlackSenderProfile;
-  readonly senderType: "agent" | "bot" | "unknown" | "user";
-  readonly teamId?: string;
-  readonly threadTs: string;
-  readonly ts: string;
 }
 
 /**
- * Renders one Slack message with its sender grouped in a `<sender>` block of
- * the same model-visible message. Slack user ids are stable, so they remain
- * the canonical speaker identity; a looked-up name and email only add to them.
+ * Renders one Slack message with its metadata grouped into `<sender>`,
+ * `<bot>`, and `<thread>` blocks of the same model-visible message. Slack user
+ * ids are stable, so they remain the canonical speaker identity; a looked-up
+ * name and email only add to them.
  */
-function formatSlackModelMessage(input: SlackModelMessageInput): string {
+function formatSlackModelMessage({ sender, bot, thread, content }: SlackModelMessageInput): string {
+  const botLines = [
+    ...(bot?.id ? [`id: ${bot.id}`] : []),
+    ...(bot?.mentioned !== undefined ? [`mentioned: ${bot.mentioned}`] : []),
+  ];
   return [
     "<slack_message>",
     "<sender>",
-    `type: ${input.senderType}`,
-    ...(input.senderId ? [`id: ${input.senderId}`] : []),
-    ...(input.senderProfile?.name ? [`name: ${oneLine(input.senderProfile.name)}`] : []),
-    ...(input.senderProfile?.email ? [`email: ${oneLine(input.senderProfile.email)}`] : []),
+    `type: ${sender.type}`,
+    ...(sender.id ? [`id: ${sender.id}`] : []),
+    ...(sender.profile?.name ? [`name: ${oneLine(sender.profile.name)}`] : []),
+    ...(sender.profile?.email ? [`email: ${oneLine(sender.profile.email)}`] : []),
     "</sender>",
-    ...(input.botUserId ? [`bot_user_id: ${input.botUserId}`] : []),
-    ...(input.isMentioned !== undefined ? [`is_mentioned: ${input.isMentioned}`] : []),
-    ...(input.channelId ? [`channel_id: ${input.channelId}`] : []),
-    `thread_ts: ${input.threadTs}`,
-    `message_ts: ${input.ts}`,
-    ...(input.teamId ? [`team_id: ${input.teamId}`] : []),
+    ...(botLines.length > 0 ? ["<bot>", ...botLines, "</bot>"] : []),
+    "<thread>",
+    ...(thread.teamId ? [`team_id: ${thread.teamId}`] : []),
+    ...(thread.channelId ? [`channel_id: ${thread.channelId}`] : []),
+    `thread_ts: ${thread.threadTs}`,
+    `message_ts: ${thread.messageTs}`,
+    "</thread>",
     "<content>",
-    input.content,
+    content,
     "</content>",
     "</slack_message>",
   ].join("\n");
@@ -59,16 +72,19 @@ export function formatSlackInboundMessage(
   profiles?: SlackSenderProfiles,
 ): string {
   return formatSlackModelMessage({
-    botUserId: context.botUserId,
-    channelId: context.channelId,
+    sender: {
+      type: context.userId ? "user" : "unknown",
+      id: context.userId || undefined,
+      profile: context.userId ? profiles?.get(context.userId) : undefined,
+    },
+    bot: { id: context.botUserId, mentioned: context.isMentioned },
+    thread: {
+      teamId: context.teamId,
+      channelId: context.channelId,
+      threadTs: context.threadTs,
+      messageTs: message.ts,
+    },
     content: slackModelContent(message.text),
-    isMentioned: context.isMentioned,
-    senderId: context.userId || undefined,
-    senderProfile: context.userId ? profiles?.get(context.userId) : undefined,
-    senderType: context.userId ? "user" : "unknown",
-    teamId: context.teamId,
-    threadTs: context.threadTs,
-    ts: message.ts,
   });
 }
 
@@ -101,21 +117,29 @@ export function formatSlackThreadContext(
 
   return [
     "<slack_thread_context>",
-    ...messages.map((message) =>
-      formatSlackModelMessage({
-        content: message.markdown,
-        senderId: message.user ?? message.botId,
-        senderProfile: message.user ? profiles?.get(message.user) : undefined,
-        senderType: slackThreadSenderType(message),
-        threadTs: message.threadTs,
-        ts: message.ts,
-      }),
-    ),
+    ...messages.map((message) => formatSlackThreadMessage(message, profiles)),
     "</slack_thread_context>",
   ].join("\n");
 }
 
-function slackThreadSenderType(message: SlackThreadMessage): SlackModelMessageInput["senderType"] {
+function formatSlackThreadMessage(
+  message: SlackThreadMessage,
+  profiles: SlackSenderProfiles | undefined,
+): string {
+  return formatSlackModelMessage({
+    sender: {
+      type: slackThreadSenderType(message),
+      id: message.user ?? message.botId,
+      profile: message.user ? profiles?.get(message.user) : undefined,
+    },
+    thread: { threadTs: message.threadTs, messageTs: message.ts },
+    content: message.markdown,
+  });
+}
+
+function slackThreadSenderType(
+  message: SlackThreadMessage,
+): SlackModelMessageInput["sender"]["type"] {
   if (message.isMe) return "agent";
   if (message.botId) return "bot";
   if (message.user) return "user";
@@ -143,13 +167,6 @@ function slackThreadHistoryMessage(
   return {
     id: message.ts,
     role: "user",
-    text: formatSlackModelMessage({
-      content: message.markdown,
-      senderId: message.user ?? message.botId,
-      senderProfile: message.user ? profiles?.get(message.user) : undefined,
-      senderType: slackThreadSenderType(message),
-      threadTs: message.threadTs,
-      ts: message.ts,
-    }),
+    text: formatSlackThreadMessage(message, profiles),
   };
 }

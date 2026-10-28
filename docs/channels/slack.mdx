@@ -139,7 +139,35 @@ export default slackChannel({
 });
 ```
 
-The model-visible `<slack_message>` groups the sender's `type` and `id` in a `<sender>` block, followed by `bot_user_id` when available and the `is_mentioned` value from `ctx.isBotMentioned()`. With [`senderProfiles`](#add-sender-names-and-emails) enabled, `<sender>` also includes `name` and `email`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
+The model-visible `<slack_message>` groups its metadata into blocks ahead of `<content>`:
+
+```text
+<slack_message>
+<sender>
+type: user
+id: U0123ABCD
+</sender>
+<bot>
+id: U0BOT0001
+mentioned: true
+</bot>
+<thread>
+team_id: T0123ABCD
+channel_id: C0123ABCD
+thread_ts: 1700000000.000001
+message_ts: 1700000000.000004
+</thread>
+<content>
+...
+</content>
+</slack_message>
+```
+
+- `<sender>` carries the sender's `type` and `id`. With [`senderProfiles`](#add-sender-names-and-emails) enabled, it also carries `name` and `email`.
+- `<bot>` carries the receiving app's user `id` when available and `mentioned`, the value of `ctx.isBotMentioned()`. Thread replies added by `threadContext` omit it.
+- `<thread>` locates the message in Slack.
+
+Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
 When a Slack message includes a link preview, eve includes its attachment text in `<content>` alongside the sender's message, including when the link has words around it. Shared Slack messages work the same way: eve extracts the forwarded message body from Slack's message-unfurl attachment and keeps any top-level comment.
 
