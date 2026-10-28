@@ -257,6 +257,22 @@ export function ArchitectureDiagram() {
           </span>
         </div>
 
+        {/* The caption explains the toggled mode, so it sits right under the toggle. */}
+        <p className="mx-auto mt-3 max-w-xl text-balance text-center text-gray-900 text-copy-14">
+          {CAPTIONS[mode]}
+          {selfHosted ? (
+            <>
+              {" "}
+              <Link
+                href="https://github.com/vercel-labs/steve"
+                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
+              >
+                See the example
+                <IconArrowUpRightSmall className="text-gray-900" size={16} />
+              </Link>
+            </>
+          ) : null}
+        </p>
         <LogoEveSvg className="mt-10 ml-5 text-gray-1000" height={13} />
         <div className="mt-3 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
@@ -330,22 +346,6 @@ export function ArchitectureDiagram() {
             </Link>
           </div>
         </div>
-
-        <p className="mt-6 max-w-2xl text-pretty text-gray-900 text-copy-14">
-          {CAPTIONS[mode]}
-          {selfHosted ? (
-            <>
-              {" "}
-              <Link
-                href="https://github.com/vercel-labs/steve"
-                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
-              >
-                See the example
-                <IconArrowUpRightSmall className="text-gray-900" size={16} />
-              </Link>
-            </>
-          ) : null}
-        </p>
       </div>
     </HomeSection>
   );
