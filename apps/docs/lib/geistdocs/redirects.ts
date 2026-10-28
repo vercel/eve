@@ -112,6 +112,29 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
 export const compatibilityRedirects: DocsRedirect[] = [
   ...createIntegrationRedirects("chat-sdk-photon", "photon"),
   ...["", `/${defaultLanguage}`].flatMap((prefix) => [
+    ...[
+      ["eve-chat-template", "eve-chat-template"],
+      ["eve-agent-with-python", "eve-agent-with-python"],
+      ["eve-slack-agent", "eve-slack-agent"],
+      ["eve-data-analyst-template", "eve-data-analyst"],
+      ["eve-contentful-agent-template", "eve-contentful-agent"],
+      ["eve-vercel-drives-starter", "eve-vercel-drives-starter"],
+      ["eve-memory-agent-template", "eve-memory-agent"],
+      ["eve-tanstack-start-template", "eve-tanstack-agent"],
+      ["eve-software-factory-template", "eve-software-factory"],
+      ["marketing-team-eve-template", "eve-marketing-team"],
+      ["openinstinct-eve-template", "openinstinct-eve-agent"],
+      ["kody-eve-template", "eve-github-maintainer"],
+      ["typefully-eve-template", "eve-typefully-agent"],
+      ["eve-sre-agent-template", "eve-incident-response-agent"],
+      ["sanity-copilot-eve-template", "eve-sanity-copilot"],
+    ].flatMap(([source, destination]) =>
+      extensions.map((extension) => ({
+        source: `${prefix}/templates/${source}${extension}`,
+        destination: `${templateGalleryUrl}/${destination}`,
+        permanent: true as const,
+      })),
+    ),
     ...extensions.map((extension) => ({
       source: `${prefix}/templates${extension}`,
       destination: templateGalleryUrl,
