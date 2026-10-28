@@ -775,6 +775,9 @@ export function SessionTimeline(): JSX.Element {
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
   const [count, setCount] = useState(0);
+  // A replay that runs to the end stays at the end, clear of the dock; stopping it or switching
+  // channels returns to the conversation's start.
+  const [ended, setEnded] = useState(false);
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
 
@@ -791,6 +794,7 @@ export function SessionTimeline(): JSX.Element {
     if (!playing) return;
     if (!next) {
       setPlaying(false);
+      setEnded(true);
       return;
     }
     setTyping(false);
@@ -805,10 +809,13 @@ export function SessionTimeline(): JSX.Element {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    // The full conversation opens at its start; a replay follows new messages at the end.
-    list.scrollTo(playing ? { top: list.scrollHeight, behavior: "smooth" } : { top: 0 });
+    // The full conversation opens at its start; a replay follows new messages to the end and
+    // stays there once it finishes.
+    if (playing) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+    else if (ended) list.scrollTo({ top: list.scrollHeight });
+    else list.scrollTo({ top: 0 });
     measure(list);
-  }, [shown, platform, playing]);
+  }, [shown, platform, playing, ended]);
 
   const measure = (list: HTMLOListElement) => {
     const above = list.scrollTop > 1;
@@ -818,12 +825,18 @@ export function SessionTimeline(): JSX.Element {
 
   const play = () => {
     setCount(0);
+    setEnded(false);
     setPlaying(true);
+  };
+
+  const stop = () => {
+    setPlaying(false);
+    setEnded(false);
   };
 
   const pick = (id: string) => {
     setPlatform(id as Platform);
-    setPlaying(false);
+    stop();
   };
 
   return (
@@ -940,7 +953,7 @@ export function SessionTimeline(): JSX.Element {
         <span aria-hidden className="h-4 w-px bg-gray-alpha-400" />
         <Button
           className="rounded-full"
-          onClick={playing ? () => setPlaying(false) : play}
+          onClick={playing ? stop : play}
           prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
           size="small"
           variant="tertiary"
