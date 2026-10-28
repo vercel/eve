@@ -45,3 +45,5 @@ export type {
   AgentToolExposure,
   EveLanguageModel,
 } from "#shared/agent-definition.js";
+// Named in `limits.sessionUsage` callbacks, so declaration emit for `agent.ts` must reach it.
+export type { TokenUsage } from "#shared/token-usage.js";

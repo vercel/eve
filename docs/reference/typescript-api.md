@@ -137,7 +137,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 
 | Import                                                                            | Holds                                                                                                             |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                           |
+| `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types, `TokenUsage`                             |
 | `eve/tools`                                                                       | `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, tool types                                    |
 | `eve/tools/{bash,read_file,write_file,web_fetch,glob,grep}`                       | Individual reusable tool definitions                                                                              |
 | `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |

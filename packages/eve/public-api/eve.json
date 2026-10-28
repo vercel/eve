@@ -30,6 +30,7 @@
   "RemoteAgentUrl",
   "SessionFrame",
   "SessionUsageLimit",
+  "TokenUsage",
   "defineAgent",
   "defineDynamic",
   "defineRemoteAgent"

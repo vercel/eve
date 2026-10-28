@@ -284,8 +284,9 @@ disable the timeout. Session expiration follows
 [run-data retention](#run-data-retention); a zero-retention session loses its
 stored payloads when it ends.
 
-`sessionUsage` gets two usage records with `inputTokens`, `outputTokens`,
-`cacheReadTokens`, `cacheWriteTokens`, and `costUsd`: `total` is everything
+`sessionUsage` gets two `TokenUsage` records (exported from `eve`) with
+`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and
+`costUsd`: `total` is everything
 the session has spent, and `window` is what it spent since the last approved
 continuation. `inputTokens` includes cache reads and writes. Subtract
 `cacheReadTokens` to count only new input; cache reads are the history a
