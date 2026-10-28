@@ -855,6 +855,7 @@ describe("mcpChannel tools", () => {
     expect(discovered.result.capabilities.extensions).toEqual({
       "dev.eve/tool-sessions": {},
       "io.modelcontextprotocol/skills": { directoryRead: true },
+      "io.modelcontextprotocol/tasks": {},
     });
 
     const declared = { extensions: { "dev.eve/tool-sessions": {} } };

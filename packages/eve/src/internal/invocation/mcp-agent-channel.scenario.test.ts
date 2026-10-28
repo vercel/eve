@@ -10,6 +10,7 @@ const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
 const OPERATION_TIMEOUT_MS = 30_000;
 const MCP_PROTOCOL_VERSION = "2026-07-28";
+const MCP_TASKS_EXTENSION = "io.modelcontextprotocol/tasks";
 
 const MCP_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
@@ -20,6 +21,10 @@ const model = mockModel((request) => {
   const prompt = JSON.stringify(request.messages);
   if (prompt.includes("MCP-FAILURE-PROBE")) {
     throw new Error("MCP-FAILURE-PROBE: provider rejected the request.");
+  }
+  const queried = request.toolResults.some((result) => result.name === "query_warehouse");
+  if (prompt.includes("MCP-TASKS-PROBE") && !queried) {
+    return { toolCalls: [{ id: "query-1", input: {}, name: "query_warehouse" }] };
   }
   const answered = request.toolResults.some((result) => result.name === "ask_question");
   if (!answered) {
@@ -60,6 +65,17 @@ export default mcpChannel({
     "agent/instructions.md": "Follow the deterministic mock-model lifecycle.\n",
     "agent/tools/ask_question.ts":
       'import { askQuestion } from "eve/tools/ask_question";\n\nexport default askQuestion;\n',
+    "agent/tools/query_warehouse.ts": `import { defineTool } from "eve/tools";
+
+export default defineTool({
+  description: "Queries the warehouse slowly.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  async execute() {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    return "42 rows";
+  },
+});
+`,
   },
   dependencies: { "just-bash": "3.4.2" },
   installDependencies: true,
@@ -156,9 +172,97 @@ describe("MCP agent channel", () => {
     },
     SCENARIO_TIMEOUT_MS,
   );
+
+  it(
+    "serves an invocation as an MCP task with live status",
+    async () => {
+      const app = await scenarioApp(MCP_AGENT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        // Without the extension, tasks/* is refused and agent_start stays tool-shaped.
+        const refused = await mcpRequest(server.url, "alice", "modern", "tasks/get", {
+          taskId: "anything",
+        });
+        expect(refused.status).toBe(400);
+        expect(await readJsonRpcResponse(refused, { allowError: true })).toMatchObject({
+          error: { code: -32021 },
+        });
+
+        const created = await callToolResult(server.url, "alice", "tasks", "agent_start", {
+          message: "Run MCP-TASKS-PROBE.",
+        });
+        expect(created).toMatchObject({ resultType: "task", status: "working" });
+        const taskId = requiredString(created.taskId, "taskId");
+        expect(await taskRequest(server.url, "alice", "tasks/get", { taskId })).toMatchObject({
+          taskId,
+        });
+
+        const live = await listenTask(
+          server.url,
+          "alice",
+          taskId,
+          (task) => task.status === "input_required",
+        );
+        expect(live[0]).toMatchObject({
+          method: "notifications/subscriptions/acknowledged",
+          params: { notifications: { taskIds: [taskId] } },
+        });
+        const tasks = live.slice(1).map((message) => requiredRecord(message.params, "params"));
+        expect(tasks.map((task) => task.statusMessage)).toContain("Query warehouse");
+        const pending = tasks.at(-1)!;
+        const [requestKey, elicitation] = Object.entries(
+          requiredRecord(pending.inputRequests, "inputRequests"),
+        )[0]!;
+        expect(elicitation).toMatchObject({
+          method: "elicitation/create",
+          params: {
+            message: "Proceed with the delegated work?",
+            mode: "form",
+            requestedSchema: { properties: { answer: { type: "string" } } },
+          },
+        });
+        await expect(taskRequest(server.url, "bob", "tasks/get", { taskId })).rejects.toThrow(
+          /-32602/,
+        );
+
+        await taskRequest(server.url, "alice", "tasks/update", {
+          inputResponses: { [requestKey]: { action: "accept", content: { answer: "Yes" } } },
+          taskId,
+        });
+        const finished = await listenTask(
+          server.url,
+          "alice",
+          taskId,
+          (task) => task.status === "completed",
+        );
+        expect(finished.at(-1)).toMatchObject({
+          params: {
+            result: { structuredContent: { result: "MCP-LIFECYCLE-COMPLETE" } },
+            status: "completed",
+          },
+        });
+        // The tools still read the same invocation, in their own shape.
+        const invocation = await callTool(server.url, "alice", "modern", "agent_get", {
+          invocationId: taskId,
+        });
+        expect(invocation).toMatchObject({ result: "MCP-LIFECYCLE-COMPLETE" });
+        expect(invocation).not.toHaveProperty("updatedAt");
+      } catch (error) {
+        throw new Error(
+          [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),
+          { cause: error },
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
 });
 
-type McpEra = "legacy" | "modern";
+/** `tasks` is the modern era with the Tasks extension declared. */
+type McpEra = "legacy" | "modern" | "tasks";
 
 async function callTool(
   serverUrl: string,
@@ -216,18 +320,80 @@ async function pollInvocation(
   throw new Error(`Timed out waiting for ${statuses.join(" or ")} on ${invocationId}.`);
 }
 
+async function taskRequest(
+  serverUrl: string,
+  principal: string,
+  method: string,
+  params: Readonly<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  const response = await mcpRequest(serverUrl, principal, "tasks", method, params);
+  const envelope = requiredRecord(await readJsonRpcResponse(response), "JSON-RPC envelope");
+  if (envelope.error !== undefined) {
+    throw new Error(`MCP ${method} failed: ${JSON.stringify(envelope.error)}`);
+  }
+  return requiredRecord(envelope.result, "result");
+}
+
+/** Listens to one task until `until` matches a notification, returning every message so far. */
+async function listenTask(
+  serverUrl: string,
+  principal: string,
+  taskId: string,
+  until: (task: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>[]> {
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), OPERATION_TIMEOUT_MS);
+  const response = await mcpRequest(
+    serverUrl,
+    principal,
+    "tasks",
+    "subscriptions/listen",
+    { notifications: { taskIds: [taskId] } },
+    abort.signal,
+  );
+  expect(response.headers.get("content-type")).toContain("text/event-stream");
+  const messages: Record<string, unknown>[] = [];
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    for await (const chunk of response.body!) {
+      buffered += decoder.decode(chunk, { stream: true });
+      const frames = buffered.split("\n\n");
+      buffered = frames.pop()!;
+      for (const frame of frames) {
+        const data = frame.split("\n").find((line) => line.startsWith("data: "));
+        if (data === undefined) continue;
+        const message = requiredRecord(JSON.parse(data.slice("data: ".length)), "message");
+        messages.push(message);
+        if (
+          message.method === "notifications/tasks" &&
+          until(requiredRecord(message.params, "params"))
+        ) {
+          return messages;
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+    abort.abort();
+  }
+  throw new Error(`Task listen ended before the expected state: ${JSON.stringify(messages)}`);
+}
+
 async function mcpRequest(
   serverUrl: string,
   principal: string,
   era: McpEra,
   method: string,
   params: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const modernMeta =
-    era === "modern"
+    era !== "legacy"
       ? {
           _meta: {
-            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientCapabilities":
+              era === "tasks" ? { extensions: { [MCP_TASKS_EXTENSION]: {} } } : {},
             "io.modelcontextprotocol/clientInfo": { name: "eve-scenario", version: "0.0.0" },
             "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
           },
@@ -238,10 +404,11 @@ async function mcpRequest(
     "content-type": "application/json",
     "x-test-principal": principal,
   };
-  if (era === "modern") {
+  if (era !== "legacy") {
     headers["mcp-method"] = method;
     headers["mcp-protocol-version"] = MCP_PROTOCOL_VERSION;
     if (typeof params.name === "string") headers["mcp-name"] = params.name;
+    if (typeof params.taskId === "string") headers["mcp-name"] = params.taskId;
   }
   return await fetch(new URL("/eve/v1/mcp", serverUrl), {
     body: JSON.stringify({
@@ -252,12 +419,18 @@ async function mcpRequest(
     }),
     headers,
     method: "POST",
+    signal,
   });
 }
 
-async function readJsonRpcResponse(response: Response): Promise<unknown> {
+async function readJsonRpcResponse(
+  response: Response,
+  options: { readonly allowError?: boolean } = {},
+): Promise<unknown> {
   const body = await response.text();
-  if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${body}`);
+  if (!response.ok && options.allowError !== true) {
+    throw new Error(`MCP HTTP ${response.status}: ${body}`);
+  }
   if (!response.headers.get("content-type")?.includes("text/event-stream")) {
     return JSON.parse(body);
   }

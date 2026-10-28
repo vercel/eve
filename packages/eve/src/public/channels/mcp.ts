@@ -33,6 +33,8 @@ import {
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
+import { createMcpTasksFeature } from "#internal/mcp/tasks.js";
+import { createInvocationTaskSource } from "#public/channels/mcp-tasks.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
@@ -447,6 +449,13 @@ async function handleMcpRequest(
         })
       : [];
   const features: McpServerFeature[] = [];
+  if (publish.agent) {
+    const source = createInvocationTaskSource(execution, {
+      startTool: { inputSchema: AGENT_START_INPUT_SCHEMA, name: "agent_start" },
+      toolResult: invocationResult,
+    });
+    features.push(createMcpTasksFeature(source));
+  }
   if (publish.tools) {
     // Advertised only; published tools read the key from each call's `_meta`.
     features.push({
@@ -512,9 +521,7 @@ function createInvocationTools(
           agentDescription === undefined
             ? startDescription
             : `${agentDescription} ${startDescription}`,
-        inputSchema: z.strictObject({
-          message: utf8Bounded(MAX_MESSAGE_BYTES).min(1),
-        }),
+        inputSchema: AGENT_START_INPUT_SCHEMA,
         name: "agent_start",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -643,8 +650,14 @@ function requiredMutation(result: AgentInvocationMutationResult): AgentInvocatio
 }
 
 function invocationResult(invocation: AgentInvocation): McpCallToolResult {
+  // `updatedAt` and `statusMessage` feed tasks; the agent_* tools keep their documented shape.
+  const {
+    statusMessage: _statusMessage,
+    updatedAt: _updatedAt,
+    ...shape
+  } = invocation as AgentInvocation & { readonly statusMessage?: string };
   const structuredContent = parseJsonObject({
-    ...invocation,
+    ...shape,
     status: invocation.status === "awaiting-input" ? "input_required" : invocation.status,
   });
   return {
@@ -668,6 +681,10 @@ function utf8Bounded(maxBytes: number) {
     message: `must be at most ${String(maxBytes)} bytes when UTF-8 encoded`,
   });
 }
+
+const AGENT_START_INPUT_SCHEMA = z.strictObject({
+  message: utf8Bounded(MAX_MESSAGE_BYTES).min(1),
+});
 
 const MCP_INPUT_RESPONSE_SCHEMA = answerSchema.safeExtend({
   optionId: z.string().max(MAX_ID_CHARS).optional(),

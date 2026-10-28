@@ -5,7 +5,7 @@ import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/e
 
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
-import { streamSessionLines } from "#execution/session-event-stream.js";
+import { type PositionedLine, streamSessionLines } from "#execution/session-event-stream.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { isV26Line } from "#protocol/v26-lines.js";
 import type {
@@ -25,11 +25,13 @@ import { getWorld } from "#internal/workflow/runtime.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
+  activity,
   failure,
   interactionBatches,
   reply,
   replyText,
 } from "#protocol/session-projection/selectors.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
@@ -78,6 +80,49 @@ export class WorkflowAgentInvocationExecution {
     return (await this.#readCurrent(input))?.invocation;
   }
 
+  /**
+   * The invocation now, then each time it changes, until it is terminal or `signal` aborts.
+   * Nothing when the caller can't read it.
+   */
+  async *watch(input: {
+    readonly auth: SessionAuthContext | null;
+    readonly invocationId: string;
+    readonly signal: AbortSignal;
+  }): AsyncGenerator<AgentInvocation, void, undefined> {
+    const run = await this.#readInvocationRun(input.invocationId, input.auth);
+    if (run === undefined) return;
+    const base = invocationBase(run);
+    if (run.status === "cancelled") {
+      yield { ...base, sessionEnded: true, status: "cancelled", updatedAt: base.createdAt };
+      return;
+    }
+    // Catch up first, so a watcher sees the state now rather than the session's history.
+    const folder = invocationFolder();
+    let next = 0;
+    for await (const line of streamSessionLines(input.invocationId, {
+      follow: false,
+      signal: input.signal,
+    })) {
+      folder.add(line);
+      next = line.position + 1;
+    }
+    let shown = projectInvocation(base, run.status, folder.stream());
+    yield shown;
+    if (isTerminal(shown.status)) return;
+    for await (const line of streamSessionLines(input.invocationId, {
+      signal: input.signal,
+      startIndex: next,
+    })) {
+      folder.add(line);
+      // The run status only matters once it is terminal, which the session's own events show first.
+      const current = projectInvocation(base, "running", folder.stream());
+      if (sameState(current, shown)) continue;
+      shown = current;
+      yield shown;
+      if (isTerminal(shown.status)) return;
+    }
+  }
+
   async update(input: {
     readonly auth: SessionAuthContext | null;
     readonly invocationId: string;
@@ -119,7 +164,12 @@ export class WorkflowAgentInvocationExecution {
     }
 
     return {
-      invocation: workingInvocation(input.invocationId, invocation.createdAt, invocation.expiresAt),
+      invocation: workingInvocation(
+        input.invocationId,
+        invocation.createdAt,
+        invocation.expiresAt,
+        new Date().toISOString(),
+      ),
       type: "success",
     };
   }
@@ -154,13 +204,11 @@ export class WorkflowAgentInvocationExecution {
   > {
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return undefined;
-    const base = {
-      createdAt: run.createdAt.toISOString(),
-      expiresAt: run.expiredAt?.toISOString(),
-      invocationId: run.runId,
-    };
+    const base = invocationBase(run);
     if (run.status === "cancelled")
-      return { invocation: { ...base, sessionEnded: true, status: "cancelled" } };
+      return {
+        invocation: { ...base, sessionEnded: true, status: "cancelled", updatedAt: base.createdAt },
+      };
     const stream = await readInvocationStream(input.invocationId);
     return {
       invocation: projectInvocation(base, run.status, stream),
@@ -182,6 +230,24 @@ export class WorkflowAgentInvocationExecution {
       throw error;
     }
   }
+}
+
+interface InvocationBase {
+  readonly createdAt: string;
+  readonly expiresAt?: string;
+  readonly invocationId: string;
+}
+
+function invocationBase(run: {
+  readonly createdAt: Date;
+  readonly expiredAt?: Date;
+  readonly runId: string;
+}): InvocationBase {
+  return {
+    createdAt: run.createdAt.toISOString(),
+    expiresAt: run.expiredAt?.toISOString(),
+    invocationId: run.runId,
+  };
 }
 
 /**
@@ -208,22 +274,43 @@ interface InvocationStream {
   readonly result: JsonValue | undefined;
   /** How the latest turn ended; reset when a turn starts or a park resumes. */
   readonly settled: "completed" | "cancelled" | InvocationFailure | undefined;
+  /** When the latest event was recorded. */
+  readonly updatedAt: string | undefined;
 }
 
 async function readInvocationStream(invocationId: string): Promise<InvocationStream> {
+  const folder = invocationFolder();
+  for await (const line of streamSessionLines(invocationId, { follow: false })) folder.add(line);
+  return folder.stream();
+}
+
+/** Folds a session's lines, one at a time, into what an invocation shows. */
+function invocationFolder() {
   const view = emptySessionView();
   const reader = createEventReader();
-  for await (const { line, position, record } of streamSessionLines(invocationId, {
-    follow: false,
-  })) {
-    if (line === undefined) {
-      // v27 can't read the turns or requests of an invocation an earlier eve started; without
-      // this, it would read as working forever.
-      if (position === 0 && isV26Line(record)) return startedOnEarlierEve(view);
-      continue;
-    }
-    for (const event of reader.read(line, position)) foldReceivedEvent(view, event);
-  }
+  let earlierEve = false;
+  let updatedAt: string | undefined;
+  return {
+    add({ line, position, record }: PositionedLine): void {
+      if (earlierEve) return;
+      if (line === undefined) {
+        // v27 can't read the turns or requests of an invocation an earlier eve started; without
+        // this, it would read as working forever.
+        if (position === 0 && isV26Line(record)) earlierEve = true;
+        return;
+      }
+      for (const event of reader.read(line, position)) {
+        foldReceivedEvent(view, event);
+        updatedAt = event.meta.at;
+      }
+    },
+    stream(): InvocationStream {
+      return earlierEve ? startedOnEarlierEve(view) : deriveStream(view, updatedAt);
+    },
+  };
+}
+
+function deriveStream(view: SessionView, updatedAt: string | undefined): InvocationStream {
   const batches = interactionBatches(view).map(
     (batch): InputBatch =>
       new Map(
@@ -243,6 +330,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
     result: latestResult(view),
     settled: howItSettled(view),
     signIns: openSignIns(view),
+    updatedAt,
     view,
   };
 }
@@ -260,8 +348,33 @@ function startedOnEarlierEve(view: SessionView): InvocationStream {
     result: undefined,
     settled: { error, terminal: true },
     signIns: [],
+    updatedAt: undefined,
     view,
   };
+}
+
+/** What the session is doing, as one line: the calls it runs, the tasks it waits on. */
+function statusMessage(view: SessionView): string | undefined {
+  const current = activity(view);
+  switch (current.kind) {
+    case "calling":
+      return current.names.length === 0 ? undefined : [...new Set(current.names)].join(", ");
+    case "waiting-on-tasks":
+      return `Waiting on ${[...new Set(current.tasks.map((task) => displayTitle(task.name)))].join(", ")}`;
+    case "compacting":
+      return "Compacting context";
+    case "thinking":
+      return "Thinking";
+    default:
+      return undefined;
+  }
+}
+
+/** Whether two projections show the same state; `updatedAt` alone is not a change. */
+function sameState(left: AgentInvocation, right: AgentInvocation): boolean {
+  const { updatedAt: _left, ...leftState } = left;
+  const { updatedAt: _right, ...rightState } = right;
+  return JSON.stringify(leftState) === JSON.stringify(rightState);
 }
 
 /**
@@ -326,7 +439,7 @@ function replaysSettledBatch(stream: InvocationStream, responses: readonly Answe
  * request outranks how the turn ended.
  */
 function projectInvocation(
-  base: { readonly createdAt: string; readonly expiresAt?: string; readonly invocationId: string },
+  base: InvocationBase,
   runStatus: string,
   stream: InvocationStream,
 ): AgentInvocation {
@@ -335,6 +448,7 @@ function projectInvocation(
     ...base,
     sessionEnded:
       stream.view.session.status === "ended" || runStatus === "completed" || runStatus === "failed",
+    updatedAt: stream.updatedAt ?? base.createdAt,
   };
   const failure = typeof settled === "object" ? settled : undefined;
   const failed = (): AgentInvocation => ({
@@ -360,13 +474,21 @@ function projectInvocation(
   if (failure !== undefined) return failed();
   if (settled === "cancelled") return { ...info, status: "cancelled" };
   if (settled === "completed") return { ...info, result, status: "completed" };
-  return { ...info, pollAfterMs: 1_000, result, status: "working" };
+  const message = statusMessage(stream.view);
+  return {
+    ...info,
+    pollAfterMs: 1_000,
+    result,
+    status: "working",
+    ...(message === undefined ? {} : { statusMessage: message }),
+  };
 }
 
 function workingInvocation(
   invocationId: string,
   createdAt: string,
   expiresAt: string | undefined,
+  updatedAt = createdAt,
 ): AgentInvocation {
   return {
     createdAt,
@@ -375,6 +497,7 @@ function workingInvocation(
     sessionEnded: false,
     pollAfterMs: 1_000,
     status: "working",
+    updatedAt,
   };
 }
 
