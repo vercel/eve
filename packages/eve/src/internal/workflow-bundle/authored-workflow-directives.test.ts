@@ -163,6 +163,16 @@ return inner();
     );
   });
 
+  it.each([
+    'import { agent } from "eve/workflow";',
+    'import { sleep, ask as askUser } from "eve/workflow";',
+    'export { agent } from "eve/workflow";',
+  ])("points removed eve/workflow helpers at defineWorkflowTool: %s", async (source) => {
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      /is no longer exported from "eve\/workflow"\. Use defineWorkflowTool\(\)/u,
+    );
+  });
+
   it("accepts public primitives without mistaking a bare-import string for an import", async () => {
     const source = `import { sleep } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";

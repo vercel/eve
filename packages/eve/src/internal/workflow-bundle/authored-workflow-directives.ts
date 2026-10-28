@@ -9,6 +9,10 @@ const ENTRY_POINT_METHODS = new Intl.ListFormat("en", { type: "disjunction" }).f
   WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
 );
 
+// Earlier eve releases exported these helpers from `eve/workflow`; name the replacement instead
+// of surfacing a generic missing-export error.
+const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
+
 type AstNode = {
   async?: boolean;
   generator?: boolean;
@@ -20,6 +24,7 @@ type AstNode = {
   end?: number;
   expression?: AstNode | boolean | null;
   id?: AstNode | null;
+  imported?: AstNode | null;
   key?: AstNode | null;
   kind?: string;
   local?: AstNode | null;
@@ -81,6 +86,15 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       (node.type === "CallExpression" && node.callee?.name === "require"
         ? node.arguments?.[0]?.value
         : undefined);
+    if (specifier === "eve/workflow") {
+      const removed = node.specifiers?.find(isRemovedWorkflowHelper);
+      if (removed !== undefined) {
+        throw new Error(
+          `${input.filePath}: "${specifierName(removed)}" is no longer exported from "eve/workflow". ` +
+            'Use defineWorkflowTool() from "eve/tools" and call ctx.agent(target, input) or ctx.ask(request) in its executor.',
+        );
+      }
+    }
     if (
       typeof specifier === "string" &&
       (specifier === "workflow" || specifier.startsWith("workflow/"))
@@ -295,6 +309,18 @@ function isFunctionLike(node: AstNode): boolean {
     node.type === "FunctionExpression" ||
     node.type === "ArrowFunctionExpression"
   );
+}
+
+/** The source-module name of an import or re-export specifier. */
+function specifierName(specifier: AstNode): unknown {
+  const name = specifier.type === "ImportSpecifier" ? specifier.imported : specifier.local;
+  return name?.name ?? name?.value;
+}
+
+function isRemovedWorkflowHelper(specifier: AstNode): boolean {
+  if (specifier.type !== "ImportSpecifier" && specifier.type !== "ExportSpecifier") return false;
+  const name = specifierName(specifier);
+  return typeof name === "string" && REMOVED_WORKFLOW_HELPERS.has(name);
 }
 
 function visit(node: AstNode, visitor: (node: AstNode) => void): void {
