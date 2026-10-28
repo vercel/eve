@@ -3,27 +3,19 @@ import {
   type WorkflowToolContext,
   type WorkflowToolDefinition,
 } from "eve/tools";
-import { createHook, FatalError, getWorkflowMetadata, sleep } from "eve/workflow";
+import { createHook, FatalError, sleep } from "eve/workflow";
 import { z } from "zod";
-import { publishVerificationGate } from "../../../lib/verification-gate.js";
+import { verificationToken } from "../../../lib/verification-gate.js";
 
 async function execute({ key }: { key: string }, ctx: WorkflowToolContext) {
   "use workflow";
-  const gate = createHook<string>({ metadata: { key, sessionId: ctx.session.id } });
-  try {
-    await publishVerificationGate(ctx.session.id, key, {
-      token: gate.token,
-      runId: getWorkflowMetadata().workflowRunId,
-    });
-    return await Promise.race([
-      gate,
-      sleep("2m").then(() => {
-        throw new FatalError("Verification was not released within two minutes.");
-      }),
-    ]);
-  } finally {
-    await gate.dispose();
-  }
+  using gate = createHook<string>({ token: verificationToken(ctx.session.id, key) });
+  return await Promise.race([
+    gate,
+    sleep("2m").then(() => {
+      throw new FatalError("Verification was not released within two minutes.");
+    }),
+  ]);
 }
 
 const tool: WorkflowToolDefinition<{ key: string }, string> = defineWorkflowTool({

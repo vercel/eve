@@ -1,1 +1,1 @@
-["getHookByToken", "getRun", "resumeHook", "start"]
+["WorkflowRun", "WorkflowRunStatus", "getRun", "resumeHook", "start"]

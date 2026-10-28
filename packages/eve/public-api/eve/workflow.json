@@ -1,1 +1,14 @@
-["FatalError", "RetryableError", "createHook", "createWebhook", "getWorkflowMetadata", "sleep"]
+[
+  "FatalError",
+  "RetryableError",
+  "WorkflowHook",
+  "WorkflowHookOptions",
+  "WorkflowMetadata",
+  "WorkflowWebhook",
+  "WorkflowWebhookOptions",
+  "WorkflowWebhookRequest",
+  "createHook",
+  "createWebhook",
+  "getWorkflowMetadata",
+  "sleep"
+]

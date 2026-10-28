@@ -82,7 +82,7 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
   is replayed and must stay deterministic.
 - Import `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata` from
-  `eve/workflow` in the body. Import `start`, `getRun`, `resumeHook`, and `getHookByToken` from
+  `eve/workflow` in the body. Import `start`, `getRun`, and `resumeHook` from
   `eve/workflow/api` in routes or steps, not in replayed bodies. Both entries use eve's bundled
   SDK; no separate `workflow` dependency or ambient tsconfig `types` entry is needed.
 - In an `execute` or `task` body, `ctx` is a `WorkflowToolContext` with `session`, `callId`,
@@ -124,9 +124,36 @@ import { createHook, sleep } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
 ```
 
+`eve/workflow` exports:
+
+- `createHook<T>({ token?, metadata? })` returns a `WorkflowHook<T>`. Await it for the next payload
+  or iterate it with `for await`. Its `token` resumes it; `metadata` is JSON stored with the hook.
+  `await hook.getConflict()` registers the hook before you hand out its token and resolves the run
+  that already owns the token, or `null`. `dispose()`, or `using`, releases the token.
+- `createWebhook({ respondWith? })` returns a `WorkflowWebhook` whose `url` resumes it with the
+  incoming `Request`. With `respondWith: "manual"`, each request is a `WorkflowWebhookRequest`
+  that you answer with `request.respondWith(response)`.
+- `sleep(duration)` takes a duration such as `"1h"`, milliseconds, or a `Date` to wait until.
+- `getWorkflowMetadata()` returns the current run's `workflowName`, `workflowRunId`,
+  `workflowStartedAt`, and `url`.
+- Throw `FatalError` to fail without retrying, or `RetryableError` with an optional
+  `{ retryAfter }` to retry a step.
+
+Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`,
+`WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` when you need explicit types.
+
+`eve/workflow/api` exports:
+
+- `start(workflow, args)` starts a `"use workflow"` function; omit `args` when it takes none. eve
+  routes the run to the agent's own workflow queue and deployment, so `start` takes no options.
+- `start` and `getRun(runId)` return a `WorkflowRun<T>` with `runId`, `status` (a promise of
+  `WorkflowRunStatus`), `returnValue`, and `cancel()`.
+- `resumeHook(token, payload)` delivers a payload to the hook with that token. Pass a
+  deterministic `token` to `createHook` when a route must find the hook later.
+
 Bare `workflow` and `workflow/*` imports in application modules fail the build with an error
-naming these entries. Only the exports listed above are public; other SDK subpaths and helpers
-are not supported by these entries. Existing `"types": ["eve/workflow-modules"]` tsconfig entries and reference
+naming these entries. Only the exports listed above are public; other SDK subpaths, helpers, and
+options are not supported by these entries. Existing `"types": ["eve/workflow-modules"]` tsconfig entries and reference
 directives still resolve through 1.x, but the compatibility entry declares no ambient modules.
 You can remove those references when updating your imports.
 

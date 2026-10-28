@@ -71,7 +71,9 @@ import type { Delivery, SessionReader } from "eve/sessions";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
 import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
-import { start, getRun, resumeHook, getHookByToken } from "eve/workflow/api";
+import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
+// @ts-expect-error Hook storage records are not part of eve's Workflow API.
+import { getHookByToken } from "eve/workflow/api";
 // @ts-expect-error Bare Workflow imports are no longer declared by eve.
 import { sleep as bareSleep } from "workflow";
 async function durable() {
@@ -86,9 +88,12 @@ async function retryableStep() {
   throw new RetryableError("Please try again.", { retryAfter: "5s" });
 }
 async function launch() {
-  const run = await start(durable, []);
+  const run: WorkflowRun<boolean> = await start(durable);
   const approved: boolean = await run.returnValue;
   await resumeHook("approval", { approved: true });
+  // @ts-expect-error Runs started by eve stay on the agent's own deployment.
+  await start(durable, [], { deploymentId: "latest" });
+  const status: "pending" | "running" | "completed" | "failed" | "cancelled" = await getRun(run.runId).status;
 }
 // @ts-expect-error Shared contracts have one home, eve/sessions.
 import type { Delivery as OldDelivery } from "eve/client";

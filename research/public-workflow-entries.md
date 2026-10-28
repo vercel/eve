@@ -16,9 +16,15 @@ import { resumeHook } from "eve/workflow/api";
 ```
 
 The first entry exposes `createHook`, `createWebhook`, `sleep`, `FatalError`,
-`RetryableError`, and `getWorkflowMetadata`. The API entry exposes `start`, `getRun`, `resumeHook`, and
-`getHookByToken`. The API entry is unavailable inside replayed workflow bodies:
+`RetryableError`, and `getWorkflowMetadata`. The API entry exposes `start`, `getRun`, and
+`resumeHook`. The API entry is unavailable inside replayed workflow bodies:
 call it from a route or a `"use step"` function instead.
+
+Both entries declare eve-owned types (`WorkflowHook`, `WorkflowWebhook`, `WorkflowMetadata`,
+`WorkflowRun`, and their options) over the SDK values, so SDK-only surface stays private: no
+`world`, `deploymentId`, queue namespace, source-string, or encryption options on `start` and
+`resumeHook`, no storage-record `getHookByToken`, and a `WorkflowRun` limited to `runId`, `status`,
+`returnValue`, and `cancel()`. Type tests assert the SDK values satisfy the eve declarations.
 
 Both entries bind to eve's existing vendored SDK. The driver maps body imports
 to its existing Workflow-safe shim; server and step imports share the existing
