@@ -518,11 +518,12 @@ function TeamsMessage({
         )}
         <div
           className={cn(
-            "max-w-[min(85%,26rem)] rounded-md px-3 py-2 text-copy-14 text-gray-1000",
+            "max-w-[min(85%,26rem)] rounded-md px-3 py-2 text-gray-1000",
             isAgent ? "bg-gray-100" : "bg-gray-200",
           )}
         >
-          {children}
+          {/* The size sits apart from the color, which cn would otherwise merge it away with. */}
+          <div className="text-copy-14">{children}</div>
         </div>
       </div>
     </li>
