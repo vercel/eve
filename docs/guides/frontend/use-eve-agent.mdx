@@ -110,10 +110,12 @@ A `tool` part shows a call's shared state, with partial input while it streams.
 
 ### Messages during a running turn
 
-| `turnPolicy` | Behavior                                   |
-| ------------ | ------------------------------------------ |
-| `"queue"`    | Waits for the current turn to finish       |
-| `"steer"`    | Corrects the current turn with the message |
+| `turnPolicy`        | Behavior                                   |
+| ------------------- | ------------------------------------------ |
+| `"steer"` (default) | Corrects the current turn with the message |
+| `"queue"`           | Waits for the current turn to finish       |
+
+You don't need to pass `"steer"`; omit `turnPolicy` unless you want to queue.
 
 Steering timing depends on what the turn is doing:
 
@@ -272,9 +274,38 @@ const agent = useEveAgent({
 
 To read the result of one delivery, use `receipt.result()` instead of `onFinish`. A delivery can settle while its turn still waits for input.
 
-## Derive state from events
+## Interactions
 
-Read lifecycle state from `view` with functions from `eve/events`, such as `activeTurn`, `waiting`, `activity`, `call`, and `interaction`. Don't fold `events` again inside a component.
+Approvals, questions, sign-ins, and budget prompts are interactions. Read them with `interaction(view, id)`, `interactions(view)`, or `openInteractions(view)` from `eve/events`.
+
+- An interaction is `open` until eve settles it. Submitting an answer doesn't settle it; the stream's `interaction.settled` does.
+- A tool part's `state` is the call's state, not the decision. A call can be `cancelled` while its approval was never answered.
+
+| `outcome`                                                               | Meaning                                                                                                                |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `accepted`                                                              | A person approved or answered it                                                                                       |
+| `declined`                                                              | A person declined                                                                                                      |
+| `withdrawn`, `interrupted`, `abandoned`, `expired`, `invalid`, `failed` | No decision. The interaction ended another way, such as a cancelled turn or a message sent while a sign-in was pending |
+
+Show "Approved" or "Denied" only for `accepted` and `declined`. For any other outcome, show the outcome itself. Keep a default branch: later releases can add outcomes.
+
+## Use eve's answers
+
+Read lifecycle state from `view` with functions from `eve/events`, instead of scanning `events` or keeping your own copy:
+
+| Question                                        | Ask eve                                                                                                   |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| How did my request end, and what did it reply?  | `delivery.result()`: `status`, `outcome`, `reply`, `interactions`, and `error` for that delivery          |
+| Is a turn open?                                 | `activeTurn(view)`                                                                                        |
+| What is the turn waiting on?                    | `waiting(view, turnId)` or `activity(view)`                                                               |
+| How did a turn end, and why did it fail?        | `turn(view, turnId)` and `failure(view, turnId)`, which also covers a session failure that ended the turn |
+| What is a call doing, and how long did it take? | `call(view, callId)`: `state`, `outcome`, `startedAt`, and `endedAt`                                      |
+| What did a turn's model runs cost?              | `runs(view, { turnId })` and `usage(view)`                                                                |
+| What did a turn reply?                          | `reply(view, turnId)`                                                                                     |
+| Where should a saved chat resume?               | The hook's `session`, `position(view)`, or `session.snapshot()`. Never an event count                     |
+| Did a person approve?                           | `interaction(view, id).outcome`. See [Interactions](#interactions)                                        |
+
+`delivery.result()` is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
 
 Outside the store:
 
@@ -350,4 +381,5 @@ if (activity.status === "linked") {
 ### Without the hook
 
 - For headless capture, use [`SessionStore.observe()`](../client/streaming#observe-nested-traces-without-a-framework). Archive observed prefixes with their per-session cursors in your own versioned schema, and keep earlier archives when history expires.
+- If you read child streams yourself, attribute work with the parent's `child.sent` facts. Each one names the `callId` and the `childDeliveryId` on the child's stream. Don't count `delivery.consumed` on the child: answers to the child's questions are deliveries too.
 - With your own session, pass a `child.opened` event to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It reads local and remote children through the parent. See [What the parent sees](../../subagents#what-the-parent-sees).

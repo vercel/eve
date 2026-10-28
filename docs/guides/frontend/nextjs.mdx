@@ -117,12 +117,10 @@ Call `useEveAgent` from a Client Component:
 ```tsx title="apps/web/app/_components/chat.tsx"
 "use client";
 
-import { activeTurn } from "eve/events";
 import { useEveAgent } from "eve/react";
 
 export function Chat() {
   const agent = useEveAgent();
-  const turnOpen = activeTurn(agent.view) !== undefined;
   const isResuming = agent.status === "resuming";
 
   return (
@@ -131,7 +129,7 @@ export function Chat() {
         event.preventDefault();
         const message = String(new FormData(event.currentTarget).get("message") ?? "").trim();
         if (message.length > 0 && !isResuming) {
-          void agent.send(message, turnOpen ? { turnPolicy: "steer" } : undefined);
+          void agent.send(message);
         }
       }}
     >

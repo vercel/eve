@@ -21,12 +21,10 @@ To generate a working chat app, run `eve add channel/web`. For scripts and serve
 ```tsx
 "use client";
 
-import { activeTurn } from "eve/events";
 import { useEveAgent } from "eve/react";
 
 export function Chat() {
   const agent = useEveAgent();
-  const turnOpen = activeTurn(agent.view) !== undefined;
   const isResuming = agent.status === "resuming";
 
   return (
@@ -36,7 +34,7 @@ export function Chat() {
         const form = new FormData(event.currentTarget);
         const message = String(form.get("message") ?? "").trim();
         if (message.length > 0 && !isResuming) {
-          void agent.send(message, turnOpen ? { turnPolicy: "steer" } : undefined);
+          void agent.send(message);
         }
       }}
     >
@@ -64,7 +62,7 @@ Most chat UIs need only a few values from the hook:
 | `messages`         | Render the conversation                                         |
 | `status`           | Disable input while `"resuming"`; show a spinner while `"busy"` |
 | `error`            | Show the latest failure                                         |
-| `activeTurn(view)` | Check whether a turn is open, so you can steer or cancel it     |
+| `activeTurn(view)` | Check whether a turn is open, so you can offer to cancel it     |
 | `send`, `respond`  | Send a message, or answer a question                            |
 | `cancel`           | Stop the running turn                                           |
 | `newSession`       | Start a new conversation                                        |
@@ -99,13 +97,10 @@ await agent.send([
 
 `send()` resolves as soon as eve accepts the message. The reply then streams into `messages`.
 
-To send while the agent is still working, choose a `turnPolicy`:
-
-- `"steer"` redirects the current turn with your message.
-- `"queue"` waits for the current turn to finish.
+A message sent while the agent is still working redirects the current turn, called steering. You don't need to do anything extra. To wait for the turn to finish instead, queue the message:
 
 ```tsx
-await agent.send("Focus on the second file instead.", { turnPolicy: "steer" });
+await agent.send("Then summarize the second file.", { turnPolicy: "queue" });
 ```
 
 To stop a running turn, call `cancel()`. Closing the page doesn't stop the turn on the server.
@@ -150,6 +145,7 @@ return pendingRequests.map(({ interactionId, request }) => (
 
 - For a free-text answer, send `{ interactionId, text }`.
 - A prompt stays `open` until eve settles it, not when you submit an answer. If the answer is refused, the prompt stays answerable.
+- To show how a prompt ended, read its `outcome`. Only `accepted` and `declined` mean a person decided; a prompt can also end because its turn was cancelled. See [Interactions](./use-eve-agent#interactions).
 - A prompt about a tool call also appears on that call's `tool` part as `part.interaction`. Other prompts appear as `interaction` message parts.
 
 ## Sign-ins and other interactions
@@ -295,6 +291,8 @@ const turn = activeTurn(agent.view);
 const currentActivity = activity(agent.view);
 const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
 ```
+
+See [Use eve's answers](./use-eve-agent#use-eves-answers) for which query answers each common question, from a request's result to call timing and usage.
 
 For something `view` doesn't cover, read the raw `events`:
 
