@@ -13,9 +13,9 @@ describe("subagent compilation", () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.ts":
-          "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
         "agent/subagents/researcher/agent.ts":
-          "export default { description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
       },
       name: "subagent-execution-edge",
     });
@@ -33,9 +33,9 @@ describe("subagent compilation", () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.ts":
-          "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
         "agent/subagents/researcher/agent.ts":
-          "export default { description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
       },
       name: "subagent-execution-gate",
     });

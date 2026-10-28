@@ -6,6 +6,7 @@ import {
   type ApprovalPolicy,
 } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
+import { dynamicEvaluate } from "#dynamic/definition.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
@@ -92,7 +93,7 @@ describe("schedule creation and invocation", () => {
       )!;
       const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
         .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
-      const tools = (await dynamic.evaluate({} as never)) as Record<
+      const tools = (await dynamicEvaluate(dynamic)({} as never)) as Record<
         string,
         ToolDefinition<never, unknown> & {
           execute(input: unknown, ctx: never): Promise<unknown>;

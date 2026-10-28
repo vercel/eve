@@ -89,7 +89,7 @@ async function createTemporaryAppRoot(input: {
   );
   await writeFile(
     join(appRoot, "agent", "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
   );
 
   if (!input.omitInstructionsSource) {
@@ -249,7 +249,8 @@ describe("eve build process output", () => {
   it("bundles authored workflow tools into the server and driver output", async () => {
     const { appRoot } = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "You are a precise assistant.",
       },
       installDependencies: true,

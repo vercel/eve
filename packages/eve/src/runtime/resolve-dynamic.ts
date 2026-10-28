@@ -1,6 +1,7 @@
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import {
   assertDynamicSentinelKeys,
+  dynamicEvaluate,
   isDynamicSentinel,
   isFrameworkDefinition,
 } from "#dynamic/definition.js";
@@ -35,7 +36,7 @@ export async function resolveDynamicDefinition<T extends ModuleSourceRef>(
     return {
       ...definition,
       ...(isFrameworkDefinition(value) ? { framework: true as const } : {}),
-      evaluate: value.evaluate as ResolvedReactionSource["evaluate"],
+      evaluate: dynamicEvaluate(value) as ResolvedReactionSource["evaluate"],
     };
   } catch (error) {
     if (error instanceof ResolveAgentError) throw error;

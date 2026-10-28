@@ -40,7 +40,8 @@ describe("authored workflow scope", () => {
           [configFile]: JSON.stringify({
             compilerOptions: { baseUrl: ".", paths: { "@/*": ["./*"] } },
           }),
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/instructions.md": "Call the probe tool.",
           "agent/tools/probe.ts":
             'import { defineWorkflowTool } from "eve/tools"; import { describe } from "@/lib/describe"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, async execute() { "use workflow"; return describe(); } });',
@@ -84,7 +85,8 @@ describe("authored workflow scope", () => {
       name: "workflow-agent-scope",
       installDependencies: true,
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Call the probe tool.",
         "agent/tools/probe.ts":
           'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
@@ -136,7 +138,8 @@ describe("authored workflow scope", () => {
       name: "workflow-raw-assets",
       installDependencies: true,
       files: {
-        [`${input.member}agent/agent.ts`]: 'export default { model: "openai/gpt-5.4" };',
+        [`${input.member}agent/agent.ts`]:
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         [`${input.member}agent/instructions.md`]: "Call the probe tool.",
         [`${input.member}agent/tools/probe.ts`]: `import { defineWorkflowTool } from "eve/tools"; import { run } from "${input.toPackageRoot}/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });`,
         "lib/run.ts":

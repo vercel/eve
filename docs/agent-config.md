@@ -24,6 +24,8 @@ dev TUI with `/model anthropic/claude-opus-5.5`.
 The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `openai/gpt-6-luna-fast` and `reasoning: "high"`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
 
+An `agent.ts` that configures a local agent, root or subagent, must export the value `defineAgent` returns, and a dynamic subagent resolver that selects a local agent must return one. The compiler rejects a plain object export with `Export defineAgent({...}) from "<path>".`
+
 A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.

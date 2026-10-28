@@ -90,7 +90,12 @@ describe("dynamic subagents", () => {
     const { ctx } = reactionSession({
       subagents: [
         {
-          evaluate: () => ({ ...analyst(), build: { externalDependencies: ["duckdb"] } }),
+          evaluate: () =>
+            defineAgent({
+              build: { externalDependencies: ["duckdb"] },
+              description: "Analyzes the books.",
+              model: "openai/gpt-5.4",
+            }),
           name: "analyst",
         },
       ],

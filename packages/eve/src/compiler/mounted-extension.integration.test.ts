@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { dynamicEvaluate, type DynamicSentinel } from "#dynamic/definition.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
@@ -48,7 +49,8 @@ describe("mounted extension via authored-source loader", () => {
   it("binds independent config for duplicate mounts, authored subagents, and loaded application graphs", async () => {
     const app = await createAppRoot("eve-independent-extension-config-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one/extension.mjs":
           'import ext from "@acme/crm"; export default ext({ account: "one" });',
@@ -59,17 +61,17 @@ describe("mounted extension via authored-source loader", () => {
           'export default { description: "Read overridden account", inputSchema: {}, execute: () => { count.update(n => n + 1); return { account: ext.config.account, count: count.get() }; } };',
         ].join("\n"),
         "agent/extensions/one/subagents/helper/agent.mjs":
-          'export default { model: "openai/gpt-5.4", description: "Help with accounts" };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Help with accounts" });',
         "agent/extensions/one/subagents/helper/tools/peek.mjs":
           'import ext from "@acme/crm"; export default { description: "Read account", inputSchema: {}, execute: () => ext.config.account };',
         "agent/extensions/two.mjs":
           'import ext from "@acme/crm"; export default ext({ account: "two" });',
         "agent/subagents/research/agent.mjs":
-          'export default { model: "openai/gpt-5.4", description: "Research accounts" };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Research accounts" });',
         "agent/subagents/research/extensions/crm.mjs":
           'import ext from "@acme/crm"; export default ext({ account: "research" });',
         "agent/subagents/support/agent.mjs":
-          'export default { model: "openai/gpt-5.4", description: "Support accounts" };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Support accounts" });',
         "agent/subagents/support/extensions/crm.mjs":
           'import ext from "@acme/crm"; export default ext({ account: "support" });',
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -183,7 +185,8 @@ describe("mounted extension via authored-source loader", () => {
   it("allocates a new authored-source graph on each load", async () => {
     const app = await createAppRoot("eve-fallback-generation-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs": 'import ext from "@acme/crm"; export default ext;',
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -233,7 +236,8 @@ describe("mounted extension via authored-source loader", () => {
   it("isolates configured built-in extension mounts", async () => {
     const app = await createAppRoot("eve-built-in-mounts-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs":
           'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "high" } });',
@@ -250,8 +254,8 @@ describe("mounted extension via authored-source loader", () => {
     const reasoningOf = (map: typeof moduleMap, worker: (typeof workers)[number]) => {
       if (!("config" in worker.agent)) throw new Error("Expected a worker config.");
       const definition = map.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
-        .default as { model: { evaluate: (ctx: object) => { reasoning: string } } };
-      return definition.model.evaluate({}).reasoning;
+        .default as { model: DynamicSentinel<{ reasoning: string }, object> };
+      return (dynamicEvaluate(definition.model)({}) as { reasoning: string }).reasoning;
     };
     const reasoning = workers.map((worker) => reasoningOf(moduleMap, worker));
     expect(reasoning).toEqual(["high", "low"]);
@@ -265,7 +269,8 @@ describe("mounted extension via authored-source loader", () => {
   it("keeps state independent across mounts and context restoration", async () => {
     const app = await createAppRoot("eve-mount-state-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs": 'import ext from "@acme/crm"; export default ext;',
         "agent/extensions/two.mjs": 'import ext from "@acme/crm"; export default ext;',
@@ -326,7 +331,8 @@ describe("mounted extension via authored-source loader", () => {
   it("rejects application state using a generated mount key", async () => {
     const app = await createAppRoot("eve-mount-state-collision-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";',
         "agent/tools/intrude.mjs": [
@@ -357,7 +363,8 @@ describe("mounted extension via authored-source loader", () => {
   it("keeps module instances distinct across mounts in a generation graph", async () => {
     const app = await createAppRoot("eve-mount-instances-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs": 'import ext from "@acme/crm"; export default ext;',
         "agent/extensions/two.mjs": 'import ext from "@acme/crm"; export default ext;',
@@ -434,7 +441,7 @@ describe("mounted extension via authored-source loader", () => {
   it("binds mounted config so a composed tool reads it", async () => {
     const app = await createAppRoot("eve-mounted-extension-authored-source-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": [
@@ -490,7 +497,7 @@ describe("mounted extension without config", () => {
   it("composes and runs a no-config extension mounted via re-export", async () => {
     const app = await createAppRoot("eve-mounted-extension-no-config-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/widget.mjs": `export { default } from "@acme/widget";
@@ -535,7 +542,7 @@ describe("mounted extension with an unsupported capability contract", () => {
   it("fails compilation when the distribution requires an unsupported generation", async () => {
     const app = await createAppRoot("eve-mounted-extension-incompatible-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/widget.mjs": `export { default } from "@acme/widget";
@@ -576,7 +583,7 @@ describe("mounted extension via directory form with override", () => {
   it("binds base config and lets a co-located override shadow or disable a tool", async () => {
     const app = await createAppRoot("eve-mounted-extension-directory-override-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm/extension.mjs": [
@@ -697,7 +704,7 @@ describe("mounted extension via directory form with override", () => {
   it("replaces extension local and remote subagents with remote overrides", async () => {
     const app = await createAppRoot("eve-mounted-extension-subagent-override-repro-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm/extension.mjs": [
@@ -734,10 +741,11 @@ describe("mounted extension via directory form with override", () => {
           "",
         ].join("\n"),
         "node_modules/@acme/crm/extension/subagents/weather/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Use the local weather agent.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "node_modules/@acme/crm/extension/subagents/alerts.mjs": [
@@ -776,7 +784,8 @@ describe("nested extension mounts", () => {
   it("binds enclosing extension config through nested mounts of a twice-mounted extension", async () => {
     const app = await createAppRoot("eve-nested-extension-config-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/outer.mjs":
           'import outer from "@acme/outer"; export default outer({ label: "from-outer" });',
@@ -795,7 +804,7 @@ describe("nested extension mounts", () => {
           "export default defineExtension({ config });",
         ].join("\n"),
         "node_modules/@acme/outer/extension/subagents/helper/agent.mjs":
-          'export default { model: "openai/gpt-5.4", description: "Help with labels" };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Help with labels" });',
         "node_modules/@acme/outer/extension/subagents/helper/extensions/inner.mjs": [
           'import inner from "@acme/inner";',
           'import outer from "../../../extension.mjs";',
@@ -819,7 +828,7 @@ describe("nested extension mounts", () => {
           "export default { description: label, inputSchema: {}, execute: () => label };",
         ].join("\n"),
         "node_modules/@acme/inner/extension/subagents/deep/agent.mjs":
-          'export default { model: "openai/gpt-5.4", description: "Go deeper" };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Go deeper" });',
         "node_modules/@acme/inner/extension/subagents/deep/extensions/leaf.mjs": [
           'import leaf from "@acme/leaf";',
           'import inner from "../../../extension.mjs";',
@@ -887,12 +896,12 @@ describe("mounted extension subagent resources", () => {
   it("materializes extension subagent resources under a Windows-safe directory", async () => {
     const app = await createAppRoot("eve-mounted-extension-subagent-resources-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": `export { default } from "@acme/crm";
 `,
-        "agent/subagents/research/agent.mjs": `export default { model: "openai/gpt-5.4", description: "Research." };
+        "agent/subagents/research/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", description: "Research." });
 `,
         "agent/subagents/research/extensions/crm.mjs": `export { default } from "@acme/crm";
 `,
@@ -909,10 +918,11 @@ describe("mounted extension subagent resources", () => {
           "",
         ].join("\n"),
         "node_modules/@acme/crm/extension/subagents/reviewer/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Review CRM notes.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "node_modules/@acme/crm/extension/subagents/reviewer/tools/review.mjs": [
