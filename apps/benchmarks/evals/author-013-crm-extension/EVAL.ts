@@ -118,7 +118,9 @@ test("add_note always asks for approval", async () => {
   for (const note of ["short", "x".repeat(500)]) {
     const toolInput = { customerId: customer.id, email: customer.email, note };
     const request = { callId: "call-1", session: {}, toolInput, toolName: "x" };
-    const decision = await sessionStorage().run({ context: session }, () => policy(request));
+    const decision = await (
+      await sessionStorage()
+    ).run({ context: session }, () => policy(request));
     expect(requiresApproval(decision)).toBe(true);
   }
   const manifest = readJson(eveInfo().artifacts.compiledManifest);
@@ -277,18 +279,24 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     messages: [],
     channel: { kind: "eve" },
   };
-  return sessionStorage().run({ context: session }, () => tool.execute(parsed, call));
+  return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }
 
-/** The process-wide storage eve creates on load for its session context, shared by every eve copy. */
-function sessionStorage(): AsyncLocalStorage<{ context: SessionState }> {
+/**
+ * The process-wide storage eve keeps its session context in, shared by every eve copy. eve
+ * creates it when its context module loads, and `eve/tools` and `eve/extension` don't load
+ * that module, so a solution that never imports `eve/context` would leave it missing. Load
+ * it from the project's eve first.
+ */
+async function sessionStorage(): Promise<AsyncLocalStorage<{ context: SessionState }>> {
+  await importProjectEve("./context");
   const key = Symbol.for("eve.context-storage");
   const global = globalThis as Record<
     symbol,
     AsyncLocalStorage<{ context: SessionState }> | undefined
   >;
   const storage = global[key];
-  if (!storage) throw new Error("eve context storage is missing; load a graded module first.");
+  if (!storage) throw new Error("eve context storage is missing after loading eve/context.");
   return storage;
 }
 
@@ -340,4 +348,12 @@ function requiresApproval(decision: unknown): boolean {
     "type" in decision &&
     decision.type === "user-approval"
   );
+}
+
+/** Imports an `eve` entry point as the authored modules resolve it, sharing their module instance. */
+// oxlint-disable-next-line typescript/no-explicit-any -- eve's types aren't installed at the root.
+async function importProjectEve(subpath: string): Promise<any> {
+  const eveRoot = "node_modules/eve";
+  const target = readJson(`${eveRoot}/package.json`).exports[subpath];
+  return import(pathToFileURL(resolve(eveRoot, target.import ?? target.default)).href);
 }

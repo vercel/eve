@@ -270,18 +270,24 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     messages: [],
     channel: { kind: "eve" },
   };
-  return sessionStorage().run({ context: session }, () => tool.execute(parsed, call));
+  return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }
 
-/** The process-wide storage eve creates on load for its session context, shared by every eve copy. */
-function sessionStorage(): AsyncLocalStorage<{ context: SessionState }> {
+/**
+ * The process-wide storage eve keeps its session context in, shared by every eve copy. eve
+ * creates it when its context module loads, and `eve/tools` and `eve/extension` don't load
+ * that module, so a solution that never imports `eve/context` would leave it missing. Load
+ * it from the project's eve first.
+ */
+async function sessionStorage(): Promise<AsyncLocalStorage<{ context: SessionState }>> {
+  await importProjectEve("./context");
   const key = Symbol.for("eve.context-storage");
   const global = globalThis as Record<
     symbol,
     AsyncLocalStorage<{ context: SessionState }> | undefined
   >;
   const storage = global[key];
-  if (!storage) throw new Error("eve context storage is missing; load a graded module first.");
+  if (!storage) throw new Error("eve context storage is missing after loading eve/context.");
   return storage;
 }
 
