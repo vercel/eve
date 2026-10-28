@@ -60,8 +60,8 @@ export function deliveryResponse(receipt: DeliveryReceipt): Response {
       ok: true,
       sessionId: receipt.sessionId,
       deliveryId: receipt.deliveryId,
-      // The wire keeps the runtime's name for the client's opaque `resume` value.
-      inbox: receipt.resume,
+      // The wire keeps the runtime's name for the client's opaque `hint` value.
+      inbox: receipt.hint,
     },
     {
       headers: { "cache-control": "no-store", [EVE_SESSION_ID_HEADER]: receipt.sessionId },

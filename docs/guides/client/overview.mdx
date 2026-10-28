@@ -113,10 +113,10 @@ await response.result();
 
 Per-request headers override client-level values with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` continues to send the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
 
-## Faster sends with `resume`
+## Faster sends with `hint`
 
 Keep the complete `session.state` when saving and restoring a conversation. It can include an
-opaque `resume` value issued by the server. The client sends it back with later messages (as the
+opaque `hint` value issued by the server. The client sends it back with later messages (as the
 HTTP body field `inbox`) to avoid another hook lookup. Persist it and pass it back unchanged: do
 not inspect, edit, or construct it, because eve may change or extend its contents in any release.
 A missing, stale, or rejected value only costs a slower lookup.
@@ -187,7 +187,7 @@ for await (const event of session.stream({ follow: false })) {
 await session.end({ reason: "User requested a fresh session" });
 ```
 
-`client.sessions` stores the session ID, stream cursor, and optional opaque `resume` value. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and `end()` leaves the handle pinned to the retired ID. Replace calls to the old `reset()` method with `end()`; use `client.sessions.create()` to start a different session. Upgrade the server before using a new client's `end()` method: earlier servers do not serve `/end`.
+`client.sessions` stores the session ID, stream cursor, and optional opaque `hint` value. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and `end()` leaves the handle pinned to the retired ID. Replace calls to the old `reset()` method with `end()`; use `client.sessions.create()` to start a different session. Upgrade the server before using a new client's `end()` method: earlier servers do not serve `/end`.
 
 A client can own many independent fixed sessions at once:
 

@@ -150,17 +150,17 @@ export class ClientSession {
       path,
       input,
       retrySessionNotReady,
-      this.#state.resume,
+      this.#state.hint,
     );
     const {
       sessionId: responseSessionId,
       deliveryId,
-      resume,
+      hint,
     } = await readAcceptedMessage(response, this.#state.sessionId);
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
-    this.#state = { ...this.#state, resume };
+    this.#state = { ...this.#state, hint };
     if (deliveryId === undefined) {
       throw new Error(
         "Message route did not return a delivery id. Update the server before sending with this client.",
@@ -352,7 +352,7 @@ async function postSessionSend(
   path: string,
   input: SendTurnPayload,
   retrySessionNotReady: boolean,
-  resume?: string,
+  hint?: string,
 ): Promise<{
   readonly response: Response;
   readonly timing: Omit<ClientSendReceipt, "deliveryId">;
@@ -363,7 +363,7 @@ async function postSessionSend(
   for (;;) {
     const attemptAt = Date.now();
     try {
-      const response = await postTurn(context, path, input, false, undefined, resume);
+      const response = await postTurn(context, path, input, false, undefined, hint);
       const timing = { startedAt, notReadyMs: attemptAt - startedAt, acceptedAt: Date.now() };
       return { response, timing };
     } catch (error) {
@@ -409,7 +409,7 @@ async function postTurn(
   input: SendTurnPayload,
   requireMessage: boolean,
   stubs?: CreateSessionOptions["stubs"],
-  resume?: string,
+  hint?: string,
 ): Promise<Response> {
   const body = createMessageBody(input, requireMessage);
   if (body === null) {
@@ -421,7 +421,7 @@ async function postTurn(
   }
   if (stubs !== undefined) body.stubs = stubs;
   // The HTTP field keeps the server's name for the value.
-  if (resume !== undefined) body.inbox = resume;
+  if (hint !== undefined) body.inbox = hint;
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
@@ -445,7 +445,7 @@ async function readAcceptedMessage(
 ): Promise<{
   readonly sessionId: string;
   readonly deliveryId?: string;
-  readonly resume?: string;
+  readonly hint?: string;
 }> {
   const payload = (await response.json()) as Record<string, unknown>;
   const sessionId =
@@ -455,7 +455,7 @@ async function readAcceptedMessage(
   if (!sessionId) throw new Error("Message route did not return a session id.");
   return {
     sessionId,
-    resume: typeof payload.inbox === "string" ? payload.inbox : undefined,
+    hint: typeof payload.inbox === "string" ? payload.inbox : undefined,
     deliveryId:
       typeof payload.deliveryId === "string" && payload.deliveryId.length > 0
         ? payload.deliveryId
