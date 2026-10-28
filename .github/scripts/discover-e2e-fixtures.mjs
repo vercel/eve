@@ -81,8 +81,11 @@ function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
   const pkg = packageJson ?? {};
   const packageJsonPath = join(dir, "package.json");
   const packageName = pkg.name;
-  if (typeof packageName !== "string" || packageName.length === 0) {
-    throw new Error(`${packageJsonPath}: every e2e fixture needs a non-empty package name.`);
+  if (
+    typeof packageName !== "string" ||
+    !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(packageName)
+  ) {
+    throw new Error(`${packageJsonPath}: every e2e fixture needs a valid package name.`);
   }
   const selectedWorlds = validateNames(
     pkg.e2e?.worlds ?? worlds.map((world) => world.name),

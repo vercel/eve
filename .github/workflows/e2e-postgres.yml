@@ -127,9 +127,11 @@ jobs:
         # Turbo builds the selected fixture's dependency graph plus every
         # extension fixture that dist-only coverage stages below. The update
         # re-packs the file-protocol store copies with the fresh dist output.
+        env:
+          FIXTURE_PACKAGE: ${{ matrix.package }}
         run: |
           pnpm build:e2e \
-            --filter="${{ matrix.package }}^..." \
+            --filter="${FIXTURE_PACKAGE}^..." \
             --filter="./e2e/fixtures/*-extension"
           pnpm --filter dist-extensions update gizmo-extension gadget-extension
 

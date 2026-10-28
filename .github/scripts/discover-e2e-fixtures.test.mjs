@@ -53,15 +53,17 @@ test("a registered world must retain at least one fixture", () => {
   );
 });
 
-test("fixtures need a package name for Turbo filtering", () => {
-  assert.throws(
-    () =>
-      discoverE2eFixtures({
-        registry,
-        fixtures: [{ name: "fixture", dir: "fixtures/fixture", packageJson: {} }],
-      }),
-    /every e2e fixture needs a non-empty package name/u,
-  );
+test("fixtures need a valid package name for Turbo filtering", () => {
+  for (const packageJson of [{}, { name: "fixture$(invalid)" }]) {
+    assert.throws(
+      () =>
+        discoverE2eFixtures({
+          registry,
+          fixtures: [{ name: "fixture", dir: "fixtures/fixture", packageJson }],
+        }),
+      /every e2e fixture needs a valid package name/u,
+    );
+  }
 });
 
 test("a valid e2e.worlds subset selects only that world", () => {
