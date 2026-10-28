@@ -743,6 +743,42 @@ describe("dispatchChannelRequest", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("rejects a websocket upgrade with 400 when a route param is malformed", async () => {
+    const websocket = vi.fn(async () => ({ upgrade: () => ({ context: {} }) }));
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          fetch: async () => new Response("not used"),
+          websocket,
+          logicalPath: "agent/channels/voice.ts",
+          method: "WEBSOCKET",
+          name: "voice",
+          sourceId: "channel-voice",
+          sourceKind: "module",
+          urlPath: "/ws/:token",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+
+    const hooks = await dispatchChannelWebSocketRequest(
+      createEvent({ params: { token: "%ZZ" }, waitUntil: vi.fn() }),
+      "WEBSOCKET /ws/:token",
+      {} as never,
+    );
+
+    let thrown: unknown;
+    try {
+      hooks.upgrade?.(new Request("https://eve.test/ws/%ZZ"));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(400);
+    expect(websocket).not.toHaveBeenCalled();
+  });
+
   it("logs and returns a 500 with an errorId when a handler throws", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
