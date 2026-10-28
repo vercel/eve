@@ -8,6 +8,7 @@ import {
   SiWhatsapp,
 } from "@icons-pack/react-simple-icons";
 import {
+  IconAcronymTs,
   IconAgents,
   IconCheck,
   IconLinked,
@@ -196,18 +197,21 @@ function TenantCapabilities() {
   );
 }
 
-// One run: deterministic steps along a line that fades out at both ends, and one agentic step
-// at its center that loops, drawn as a ring with a sweep like the channel radar's.
+// One run along a line that fades out at both ends: deterministic steps are your TypeScript,
+// square and in sequence, and the agentic step at the center sends the line around a loop.
 const run = { y: 96, x0: 28, x1: 292 };
-const deterministicSteps = [62, 106, 214, 258];
+const deterministicSteps = [60, 106, 214, 260];
 const loop = { x: 160, r: 26, from: -150, to: -30 };
+
+const chip =
+  "absolute flex -translate-1/2 items-center justify-center bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)";
 
 function DeterminismRun() {
   const from = ringPointAt(loop.x, run.y, loop.r, loop.from);
   const to = ringPointAt(loop.x, run.y, loop.r, loop.to);
   return (
     <Visual
-      caption="A workflow run: deterministic steps in sequence, with one agentic step in the middle that loops until it's done."
+      caption="A workflow run: steps of your TypeScript code in sequence, with one agentic step in the middle that loops until it's done."
       scene={
         <>
           <defs>
@@ -237,42 +241,34 @@ function DeterminismRun() {
               <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          <path d={`M${run.x0} ${run.y}H${run.x1}`} stroke="url(#determinism-run)" />
-          <circle
-            cx={loop.x}
-            cy={run.y}
-            fill="var(--ds-background-200)"
-            r={loop.r}
-            stroke="var(--ds-gray-alpha-400)"
-            strokeDasharray="2 3"
+          <path
+            d={`M${run.x0} ${run.y}H${loop.x - loop.r}M${loop.x + loop.r} ${run.y}H${run.x1}`}
+            stroke="url(#determinism-run)"
           />
+          <circle cx={loop.x} cy={run.y} r={loop.r} stroke="var(--ds-gray-alpha-500)" />
           <path
             d={`M${from.x} ${from.y}A${loop.r} ${loop.r} 0 0 1 ${to.x} ${to.y}`}
             stroke="url(#determinism-loop)"
             strokeLinecap="round"
-            strokeWidth="0.75"
           />
-          <circle
-            cx={loop.x}
-            cy={run.y}
-            fill="var(--ds-background-200)"
-            r={5}
-            stroke="var(--ds-gray-1000)"
-          />
-          {deterministicSteps.map((x) => (
-            <rect
-              fill="var(--ds-gray-1000)"
-              height={9}
-              key={x}
-              rx={1.5}
-              width={9}
-              x={x - 4.5}
-              y={run.y - 4.5}
-            />
-          ))}
         </>
       }
     >
+      {deterministicSteps.map((x) => (
+        <span
+          className={cn(chip, "size-[6.5cqw] rounded-[1.2cqw] [&>svg]:size-[55%]")}
+          key={x}
+          style={{ left: pct(x, view.width), top: pct(run.y, view.height) }}
+        >
+          <IconAcronymTs />
+        </span>
+      ))}
+      <span
+        className={cn(chip, "size-[8cqw] rounded-full [&>svg]:size-[50%]")}
+        style={{ left: pct(loop.x, view.width), top: pct(run.y, view.height) }}
+      >
+        <IconSparkles />
+      </span>
       <Label x={loop.x} y={run.y - loop.r - 14}>
         Agent
       </Label>
