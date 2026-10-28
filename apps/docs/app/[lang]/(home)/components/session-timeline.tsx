@@ -469,22 +469,22 @@ function ThreadMessage({
 // WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
 // WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
 
-/** The tail WhatsApp gives the first bubble in a run, at its top outer corner. */
+/** The curved tail WhatsApp gives the last bubble in a run, at its bottom outer corner. */
 function BubbleTail({ outgoing }: { outgoing: boolean }) {
   return (
     <svg
       aria-hidden
       className={cn(
-        "absolute top-0 h-[13px] w-2",
-        outgoing ? "-right-2 text-gray-200" : "-left-2 text-background-100",
+        "absolute bottom-0 h-4 w-2.5",
+        outgoing ? "-right-[9px] text-gray-200" : "-left-[9px] text-background-100",
       )}
-      viewBox="0 0 8 13"
+      viewBox="0 0 10 16"
     >
       <path
         d={
           outgoing
-            ? "M5.19 1H0v11.19l6.47-8.62C7.53 2.16 6.96 1 5.19 1z"
-            : "M1.53 3.57 8 12.19V1H2.81C1.04 1 .47 2.16 1.53 3.57z"
+            ? "M0 0C0 9 3 13.5 9.5 15.6 5.5 16.5 2 15.7 0 14Z"
+            : "M10 0C10 9 7 13.5.5 15.6 4.5 16.5 8 15.7 10 14Z"
         }
         fill="currentColor"
       />
@@ -533,12 +533,15 @@ function Bubble({
   author,
   time,
   continued,
+  tail,
   attachment,
   children,
 }: {
   author: Author;
   time: string;
   continued: boolean;
+  /** The last bubble in a run of one sender's messages carries the tail. */
+  tail: boolean;
   attachment?: ReactNode;
   children: ReactNode;
 }) {
@@ -558,10 +561,10 @@ function Bubble({
           "relative max-w-[min(80%,22rem)] rounded-[7.5px] text-copy-14 text-gray-1000 [filter:drop-shadow(0_0_0.5px_var(--ds-gray-alpha-600))_drop-shadow(0_1px_0.5px_var(--ds-gray-alpha-300))]",
           // The agent's bubbles share one width, so a run of them lines up on both edges.
           outgoing ? "bg-gray-200" : "w-full bg-background-100",
-          !continued && (outgoing ? "rounded-tr-none" : "rounded-tl-none"),
+          tail && (outgoing ? "rounded-br-none" : "rounded-bl-none"),
         )}
       >
-        {continued ? null : <BubbleTail outgoing={outgoing} />}
+        {tail ? <BubbleTail outgoing={outgoing} /> : null}
         {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
             shares the last line when it fits and takes its own line when it doesn't. */}
         <div className="relative text-pretty px-2 pt-1.5 pb-2 text-copy-14">
@@ -750,6 +753,7 @@ export function SessionTimeline(): JSX.Element {
                 attachment={beat.attachment}
                 author={author}
                 continued={beat.author === authorOf(beats[i - 1])}
+                tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
                 key={i}
                 time={beat.time}
               >
