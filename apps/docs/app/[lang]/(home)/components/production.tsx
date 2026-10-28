@@ -161,9 +161,36 @@ const TENANTS = [
   },
 ];
 
+// The Acme logo from geistcn-assets (`logo-acme`), which marks each person as a member of the
+// Acme org, like the managed accounts visual on vercel.com's enterprise page.
+function AcmeLogo({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} fill="none" viewBox="0 0 16 16">
+      <path
+        clipRule="evenodd"
+        d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 10.63h2.13l2.44-4.26L8 4.5zm4.15 0h2.85l-1.42-2.5z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+/** A member's avatar, badged with the org's logo ringed in the page's color. */
+function MemberAvatar({ avatar }: { avatar: string }) {
+  return (
+    <span className="relative size-[1.25em] shrink-0">
+      <span className="absolute inset-0 rounded-full" style={{ background: avatar }} />
+      <span className="absolute -right-[0.18em] -bottom-[0.18em] flex size-[0.625em] rounded-full bg-background-200 text-gray-1000 shadow-[0_0_0_0.1em_var(--ds-background-200)]">
+        <AcmeLogo className="size-full" />
+      </span>
+    </span>
+  );
+}
+
 function TenantCapabilities() {
   return (
-    <Visual caption="One deployment resolves capabilities per person: Alice gets memory and CRM tools, Bob memory and schedules, and Carol memory and legal skills.">
+    <Visual caption="One deployment resolves capabilities per person in the Acme org, each avatar badged with the Acme logo: Alice gets memory and CRM tools, Bob memory and schedules, and Carol memory and legal skills.">
       <RuledList
         header={
           <>
@@ -174,7 +201,7 @@ function TenantCapabilities() {
       >
         {TENANTS.map(({ avatar, capabilities, name }) => (
           <li className={cn(ruledRow, "gap-[0.5em]")} key={name}>
-            <span className="size-[1.25em] shrink-0 rounded-full" style={{ background: avatar }} />
+            <MemberAvatar avatar={avatar} />
             <span className="w-[4.5em] whitespace-nowrap text-[0.75em] text-gray-1000 leading-none">
               {name}
             </span>
@@ -304,9 +331,9 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     href: "/docs/agent-config#set-the-model",
   },
   {
-    title: "Durable execution",
+    title: "Durable execution & scheduling",
     icon: <IconWorkflow size={16} />,
-    text: "Checkpoints every step. Survives crashes, restarts, and days-long waits.",
+    text: "Checkpoints every step. Survives crashes, restarts, and days-long waits. Runs on a cron schedule, too.",
     href: "/docs/concepts/execution-model-and-durability",
   },
   {
