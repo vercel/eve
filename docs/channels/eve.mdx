@@ -108,7 +108,7 @@ has completed. Idle preparation preserves the session ID, stream, history, and e
 active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
 for client usage and deployment routing.
 
-`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. Any caller the channel admits can read it, including end users, so it omits authored text and server paths: instruction `content` is included only when the server runs in development, and skill or schedule markdown and the app and agent roots are never included. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
+`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. Any caller the channel admits can read it, including end users, so it omits authored text and server paths: sources report only logical paths, instruction `content` and the ChatGPT account label are included only when the server runs in development, and skill or schedule markdown and the app and agent roots are never included. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
 
 ### Request validation
 

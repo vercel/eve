@@ -52,8 +52,6 @@ function scaffold(): AgentInfoResult {
             packageName: "eve",
           },
           name: "self-modification__agent",
-          entryPath: "subagents/agent/agent.ts",
-          rootPath: "/eve/self-modification",
           nodeId: "self-modification__agent",
           parentNodeId: "__root__",
           summary: {

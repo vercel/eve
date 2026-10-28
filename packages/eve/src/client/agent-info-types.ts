@@ -9,13 +9,13 @@ type Owner =
       readonly packageName: string;
     };
 
+/** Where a bound module comes from. Filesystem backings omit server paths. */
 type ModuleBacking =
   | {
       readonly kind: "filesystem";
       readonly externalDependencies: readonly string[];
-      readonly extensionScope?: { readonly namespace: string; readonly sourceRoot: string };
+      readonly extensionScope?: { readonly namespace: string };
       readonly mountId?: string;
-      readonly sourcePath: string;
     }
   | {
       readonly kind: "programmatic";
@@ -99,7 +99,7 @@ export interface AgentInfoChannelEntry extends AgentInfoEntry {
 }
 
 type SourceDescriptor = {
-  readonly backing: ModuleBacking | { readonly kind: "resource"; readonly sourcePath: string };
+  readonly backing: ModuleBacking | { readonly kind: "resource" };
   readonly form: "derived" | "direct" | "unrecognized";
   readonly layer:
     | "framework-default"
@@ -152,10 +152,8 @@ export interface AgentInfoSandboxEntry extends AgentInfoSource {
 export interface AgentInfoSubagentEntry extends AgentInfoEntry {
   readonly configResolver?: AgentInfoDynamicResolverEntry;
   readonly description?: string;
-  readonly entryPath: string;
   readonly nodeId: string;
   readonly parentNodeId: string;
-  readonly rootPath: string;
   readonly summary: {
     readonly channels: number;
     readonly connections: number;
@@ -197,6 +195,7 @@ type ModelEndpoint =
         | "reauth-required"
         | "unavailable"
         | "unrecognized";
+      /** Signed-in account, served only by development servers. */
       readonly accountLabel?: string;
     }
   | {
