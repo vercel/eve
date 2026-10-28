@@ -325,7 +325,8 @@ async function buildRouteArgs(
         delivery,
         requestId,
       });
-      return { ...handle, deliveryId: delivery.deliveryId };
+      // A reserved session that already existed answers with the delivery its run accepted.
+      return handle.existing ? handle : { ...handle, deliveryId: delivery.deliveryId };
     },
   );
   attachSkillFileSource(args, agent.skillFiles);

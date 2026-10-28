@@ -262,7 +262,8 @@ export function createWorkflowRuntime(config: {
     const attributes = {
       ...sessionAttributes,
       [EVE_PREWARM_ATTRIBUTE]: "1",
-      ...(input.delivery === undefined
+      // A retry of a caller-reserved creation reads back the delivery its run answered.
+      ...(input.sessionId === undefined || input.delivery === undefined
         ? {}
         : { "eve.channel.initialDeliveryId": input.delivery.deliveryId }),
       ...(input.externalInvocation === undefined
