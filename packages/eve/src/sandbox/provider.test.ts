@@ -69,6 +69,7 @@ function bakingProvider(
 ) {
   return defineSandboxProvider({
     name: "baking",
+    contractVersion: 1,
     environment: () => ({
       async prepare(ctx) {
         if (!ctx.isEmpty) await ctx.populate(connection, { mountedAt });
@@ -82,10 +83,34 @@ function bakingProvider(
 }
 
 describe("defineSandboxProvider", () => {
+  it("rejects a provider that targets a contract version eve does not support", () => {
+    const define = (contractVersion: unknown) => () =>
+      defineSandboxProvider({
+        name: "acme",
+        contractVersion: contractVersion as 1,
+        environment: () => {
+          throw new Error("unreachable");
+        },
+      });
+
+    expect(define(undefined)).toThrow(
+      'Sandbox provider "acme" does not set contractVersion. This version of eve supports contractVersion 1. Update the provider package or eve so both target the same sandbox provider contract.',
+    );
+    expect(define(2)).toThrow(
+      'Sandbox provider "acme" targets contractVersion 2. This version of eve supports contractVersion 1.',
+    );
+    expect(define("1")).toThrow('Sandbox provider "acme" targets contractVersion "1".');
+    expect(define(1)).not.toThrow();
+    expectTypeOf<
+      Parameters<typeof defineSandboxProvider>[0]["contractVersion"]
+    >().toEqualTypeOf<1>();
+  });
+
   it("passes environment options to the provider without prepare, and {} when omitted", () => {
     const received: object[] = [];
     const provider = defineSandboxProvider({
       name: "options",
+      contractVersion: 1,
       environment(options: { readonly region?: string }) {
         received.push(options);
         return {
@@ -108,6 +133,7 @@ describe("defineSandboxProvider", () => {
     const keys: string[] = [];
     const provider = defineSandboxProvider({
       name: "keys",
+      contractVersion: 1,
       environment: () => ({
         async prepare(ctx) {
           keys.push(ctx.templateKey({ image: "ubuntu", skip: undefined, version: 1 }));
@@ -189,6 +215,7 @@ describe("public sandbox types", () => {
     type Extensions = { setNetworkPolicy(policy: "deny-all"): Promise<void> };
     const provider = defineSandboxProvider({
       name: "acme",
+      contractVersion: 1,
       environment(options: { readonly project: string }) {
         return {
           prepare: async (ctx) => ({ snapshotId: ctx.templateKey({ project: options.project }) }),

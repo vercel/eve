@@ -29,6 +29,7 @@ export function defineDockerSandboxProvider(
 > {
   return defineSandboxProvider({
     name: DOCKER_PROVIDER_NAME,
+    contractVersion: 1,
     environment: (options: DockerSandboxProviderOptions) =>
       createDockerSandboxProvider(options, dockerCli),
   });

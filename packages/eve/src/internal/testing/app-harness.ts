@@ -169,6 +169,7 @@ function createTestSandboxProvider(beforeStart?: (sessionId: string) => Promise<
 
   const provider = defineSandboxProvider({
     name: TEST_SANDBOX_PROVIDER_NAME,
+    contractVersion: 1,
     environment: () => ({
       async onSessionEnd(context, _state, { reason }) {
         if (reason === "deleted") events.push(`delete:${context.session.id}`);

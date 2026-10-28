@@ -78,6 +78,7 @@ function createSessionSandboxHarness() {
   let sandboxCount = 0;
   const provider = defineSandboxProvider({
     name: "session-reset-test",
+    contractVersion: 1,
     environment: () => ({
       async onSessionEnd() {},
       async start(context) {

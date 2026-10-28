@@ -73,6 +73,7 @@ import { VercelSandbox } from "eve/sandbox/vercel";
 
 const custom = defineSandboxProvider({
   name: "custom",
+  contractVersion: 1,
   environment() {
     return {
       async onSessionEnd() {},

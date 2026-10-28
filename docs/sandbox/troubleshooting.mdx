@@ -151,6 +151,14 @@ Another request or `eve dev` worker is still preparing environments. Check the `
 
 These errors come from a provider defined with `defineSandboxProvider()`, or from a keyed tool call on a provider that cannot keep its sandbox. See [Custom sandbox providers](/docs/sandbox/custom-providers).
 
+### `does not set contractVersion` or `targets contractVersion`
+
+```text
+Sandbox provider "acme" does not set contractVersion. This version of eve supports contractVersion 1. Update the provider package or eve so both target the same sandbox provider contract.
+```
+
+The provider was written for a different version of eve's sandbox provider contract than the installed eve supports. If the provider comes from a package, update the package or eve to versions that support the same contract. If you maintain the provider, update it to the current contract and set `contractVersion` to a supported version. See [Declare the contract version](/docs/sandbox/custom-providers#declare-the-contract-version).
+
 ### `cannot keep a sandbox between invokeTool calls`
 
 ```text

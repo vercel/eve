@@ -10,5 +10,6 @@ export type JustBashEnvironmentOptions = WithPrepareOption<
 
 export const JustBashSandbox = defineSandboxProvider({
   name: "just-bash",
+  contractVersion: 1,
   environment: (options: JustBashSandboxCreateOptions) => createJustBashSandboxProvider(options),
 });

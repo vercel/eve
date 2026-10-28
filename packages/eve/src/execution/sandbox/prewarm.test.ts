@@ -158,6 +158,7 @@ function createGraph(
 ): ResolvedAgentGraphBundle {
   const provider = defineSandboxProvider({
     name: input.providerName ?? "test",
+    contractVersion: 1,
     environment: () => ({
       async onSessionEnd() {},
       async prepare() {

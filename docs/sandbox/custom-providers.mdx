@@ -7,7 +7,7 @@ A custom sandbox provider connects eve to a backend that eve does not ship, such
 
 ## Define a provider
 
-`defineSandboxProvider()` from `eve/sandbox/provider` takes a name and an `environment()` function that returns the lifecycle. This example targets `@acme/sdk`, a hypothetical client for a snapshot-capable machine service:
+`defineSandboxProvider()` from `eve/sandbox/provider` takes a name, the provider contract version it targets, and an `environment()` function that returns the lifecycle. This example targets `@acme/sdk`, a hypothetical client for a snapshot-capable machine service:
 
 ```ts title="agent/lib/acme-sandbox.ts"
 import { createHash } from "node:crypto";
@@ -21,6 +21,7 @@ import { AcmeClient, type AcmeMachine } from "@acme/sdk";
 
 export const AcmeSandbox = defineSandboxProvider({
   name: "acme",
+  contractVersion: 1,
   environment(options: { readonly project: string }) {
     const acme = new AcmeClient({ project: options.project });
     // Session ids can be long, so hash them into a bounded machine name.
@@ -105,6 +106,18 @@ export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 ```
 
 `environment(options)` always receives an object, without `prepare`: `{}` when the sandbox file passes no options, so make every field optional or require the caller to pass it. TypeScript infers the environment options, open options, artifact, state, and connection extensions from the implementation, so you do not pass type arguments. Write `start()` before `resume()` so the state type comes from `start()`'s return value, or annotate `resume()`'s `state` parameter.
+
+### Declare the contract version
+
+`contractVersion` is required. It is the version of eve's sandbox provider contract that your implementation targets: the connection methods, lifecycle methods, and context values described on this page. The current version is `1`, and it is the only value the type accepts. eve raises the version when it changes that contract in a way an existing provider cannot handle, such as a new requirement on `spawn()`, so a provider written for one version is never run against another.
+
+`contractVersion` is unrelated to `stateProtocolVersion`, which versions the session state your provider records (see [`resume()`](#resume)).
+
+`defineSandboxProvider()` throws when `contractVersion` is missing or names a version this eve does not support:
+
+```text
+Sandbox provider "acme" targets contractVersion 2. This version of eve supports contractVersion 1. Update the provider package or eve so both target the same sandbox provider contract.
+```
 
 ## Implement the connection
 
@@ -242,6 +255,7 @@ eve surfaces the error to the caller and never retries or rebuilds the template 
 
 Earlier releases asked a provider to return a handle with a complete sandbox session. To move a provider to the current API:
 
+- Add `contractVersion: 1` to the provider definition.
 - Return `{ connection, state }` from `start()` and a connection from `resume()`, instead of a handle. Move provider-specific session methods to `extensions`.
 - Remove `onSandboxStop()` and `onRuntimeShutdown()`; implement `connection.stop()`. Move `onSandboxDelete()` into `onSessionEnd()`, which receives `reason: "deleted"`.
 - Replace hashes of `ctx.resources` and `ctx.sourceRevision` with `ctx.templateKey()`, and replace writes of resource files plus your own `prepare` call with `ctx.populate()`. Remove `prepare` from your environment options; eve owns it.

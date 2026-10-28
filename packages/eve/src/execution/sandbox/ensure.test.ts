@@ -40,6 +40,7 @@ function fixture(
   }));
   const provider = defineSandboxProvider({
     name: "test",
+    contractVersion: 1,
     environment: () => ({ onSessionEnd, prepare: async () => null, start, resume }),
   });
   const environment = provider.environment();
@@ -77,6 +78,7 @@ function upsertingFixture() {
   };
   const environment = defineSandboxProvider({
     name: "upserting",
+    contractVersion: 1,
     environment: () => ({
       onSessionEnd: async (context) => void live.delete(context.session.id),
       prepare: async () => null,

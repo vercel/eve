@@ -191,6 +191,8 @@ export interface SandboxPrepareOption<Session> {
 export type WithPrepareOption<Options extends object, Session> = Options &
   SandboxPrepareOption<Session>;
 
+const SUPPORTED_CONTRACT_VERSIONS = [1] as const;
+
 export interface SandboxProviderDefinition<
   EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
@@ -199,6 +201,12 @@ export interface SandboxProviderDefinition<
   Extensions extends object,
 > {
   readonly name: string;
+  /**
+   * The version of eve's sandbox provider contract this implementation
+   * targets. eve rejects a provider that targets a version it does not
+   * support, instead of running it against a contract it was not written for.
+   */
+  readonly contractVersion: (typeof SUPPORTED_CONTRACT_VERSIONS)[number];
   /** Bump when `State` changes incompatibly; recorded state from another version starts fresh. */
   readonly stateProtocolVersion?: number;
   /**
@@ -262,6 +270,7 @@ export function defineSandboxProvider<
   SandboxSession & Extensions
 > {
   type Session = SandboxSession & Extensions;
+  assertSupportedContractVersion(definition);
   return {
     name: definition.name,
     environment(options?: WithPrepareOption<EnvironmentOptions, Session>) {
@@ -277,4 +286,19 @@ export function defineSandboxProvider<
       });
     },
   } as SandboxProvider<WithPrepareOption<EnvironmentOptions, Session>, OpenOptions, Session>;
+}
+
+function assertSupportedContractVersion(definition: {
+  readonly name: string;
+  readonly contractVersion?: unknown;
+}): void {
+  const version = definition.contractVersion;
+  if ((SUPPORTED_CONTRACT_VERSIONS as readonly unknown[]).includes(version)) return;
+  const declared =
+    version === undefined
+      ? "does not set contractVersion"
+      : `targets contractVersion ${typeof version === "string" ? JSON.stringify(version) : String(version)}`;
+  throw new Error(
+    `Sandbox provider "${definition.name}" ${declared}. This version of eve supports contractVersion ${SUPPORTED_CONTRACT_VERSIONS.join(", ")}. Update the provider package or eve so both target the same sandbox provider contract.`,
+  );
 }

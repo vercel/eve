@@ -250,6 +250,7 @@ function vercelHarness(
 ) {
   const provider = defineSandboxProvider({
     name: "vercel",
+    contractVersion: 1,
     environment: () => createVercelImplementation(input),
   });
   return createSandboxEnvironmentHarness<

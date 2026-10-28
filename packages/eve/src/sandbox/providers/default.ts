@@ -86,6 +86,7 @@ export const DefaultSandbox: SandboxProvider<
   DefaultSandboxSession
 > = defineSandboxProvider({
   name: "default",
+  contractVersion: 1,
   environment(options: Omit<DefaultSandboxEnvironmentOptions, "prepare">) {
     if (
       options.justBash &&

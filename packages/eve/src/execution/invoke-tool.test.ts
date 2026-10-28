@@ -103,6 +103,7 @@ function sandboxes(
   });
   const environment = defineSandboxProvider({
     name: "memory",
+    contractVersion: 1,
     environment: () => ({
       onSessionEnd: async (context, _state, { reason }) => deleted(context.session.id, reason),
       prepare: async () => null,
@@ -150,6 +151,7 @@ function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {})
   };
   const environment = defineSandboxProvider({
     name: "keyed",
+    contractVersion: 1,
     environment: () => ({
       onSessionEnd: async (context) => deleted(context.session.id),
       prepare: async () => null,

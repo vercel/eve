@@ -26,6 +26,7 @@ export const VercelSandbox: SandboxProvider<
   VercelSandboxSession
 > = defineSandboxProvider({
   name: "vercel",
+  contractVersion: 1,
   // eve's create options mirror the SDK's; the cast drops only eve's `readonly` network policy.
   environment: (options: VercelSandboxCreateOptions) =>
     createVercelSandbox({ createOptions: options as VercelCreateOptions }),

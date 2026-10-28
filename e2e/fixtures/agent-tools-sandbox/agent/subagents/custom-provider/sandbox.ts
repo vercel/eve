@@ -35,6 +35,7 @@ const machines = new Map<string, Machine>();
 
 const CustomSandbox = defineSandboxProvider({
   name: "custom-provider-session",
+  contractVersion: 1,
   environment() {
     return {
       async prepare(ctx) {

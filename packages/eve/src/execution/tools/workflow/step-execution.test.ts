@@ -95,6 +95,7 @@ function upsertSandboxes() {
   };
   const provider = defineSandboxProvider({
     name: "upsert",
+    contractVersion: 1,
     environment: () => ({
       prepare: async () => null,
       start: async (context) => {
@@ -276,6 +277,7 @@ describe("workflow step authorization", () => {
     ).resolves.toMatchObject({ output: "opened" });
     const other = defineSandboxProvider({
       name: "other",
+      contractVersion: 1,
       environment: () => ({
         onSessionEnd: async () => {},
         prepare: async () => null,
