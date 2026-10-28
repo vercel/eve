@@ -202,6 +202,15 @@ Event union types name today's values. Adding fact types, outcomes, or interacti
 kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add)
 is not a breaking change. Keep a default branch when switching on those values.
 
+Values eve passes into code you implement can also gain members in a minor
+release, such as a sandbox provider's `onSessionEnd()` `reason`, the provider
+context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values, for
+example with a default branch, instead of switching exhaustively.
+
+`eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose
+types from the `chat` package (Chat SDK v4) as part of their contract. They track
+`chat` v4, so a future breaking `chat` major may require a corresponding eve change.
+
 The CLI setup wizard is not a public authoring API; Agent Builder's scaffold
 integration lives at `eve/internal/scaffold`.
 
