@@ -109,7 +109,11 @@ export async function checkPublicSignatures({ write = false } = {}) {
           dtsRollup: { enabled: false },
           tsdocMetadata: { enabled: false },
           messages: {
-            extractorMessageReporting: { default: { logLevel: "none", addToApiReportFile: false } },
+            compilerMessageReporting: { default: { logLevel: "error" } },
+            extractorMessageReporting: {
+              default: { logLevel: "none", addToApiReportFile: false },
+              "ae-unresolved-import-path": { logLevel: "error" },
+            },
             tsdocMessageReporting: { default: { logLevel: "none" } },
           },
         },
