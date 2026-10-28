@@ -116,6 +116,7 @@ export function catalogBundle(
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
     graph: undefined as never,
+    modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {

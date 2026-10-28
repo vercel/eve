@@ -238,13 +238,11 @@ function createResolvedAgentConfig(
           ? {
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
-              maxOutputTokens: manifest.config.compaction.model.maxOutputTokens,
               providerOptions: manifest.config.compaction.model.providerOptions,
             }
           : {
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
-              maxOutputTokens: manifest.config.compaction.model.maxOutputTokens,
               providerOptions: manifest.config.compaction.model.providerOptions,
               source: {
                 exportName: manifest.config.compaction.model.source.exportName,
@@ -307,13 +305,11 @@ function createResolvedAgentConfig(
         ? {
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
-            maxOutputTokens: model.maxOutputTokens,
             providerOptions: model.providerOptions,
           }
         : {
             contextWindowTokens: model.contextWindowTokens,
             id: model.id,
-            maxOutputTokens: model.maxOutputTokens,
             promptCache: model.promptCache,
             providerOptions: model.providerOptions,
             source: {

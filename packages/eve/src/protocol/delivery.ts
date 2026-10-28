@@ -4,6 +4,7 @@ import { z } from "#compiled/zod/index.js";
 export interface DeliveryReceipt {
   readonly sessionId: string;
   readonly deliveryId: string;
+  readonly inbox?: string;
 }
 
 export const DeliveryResponseSchema = z.object({

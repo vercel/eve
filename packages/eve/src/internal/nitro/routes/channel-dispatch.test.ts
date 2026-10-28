@@ -406,6 +406,70 @@ describe("dispatchChannelRequest", () => {
     );
   });
 
+  // https://github.com/vercel/eve/issues/5408
+  it("tags ctx.to() sends with the Vercel deployment that accepted them", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        sessionId: "sess_alert",
+        status: "accepted",
+      }),
+    });
+    const alerts: CompiledChannel = {
+      __kind: CHANNEL_SENTINEL,
+      routes: [],
+      adapter: { kind: "channel:alerts" },
+      receive: async ({ auth, message, target }, { from }) =>
+        await from(String(target.address)).send(message, { auth }),
+    };
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          handler: async (_req, args) => {
+            await args.to(alerts, { address: "alert-42" }).send("alert reopened", { auth: null });
+            return new Response("ok");
+          },
+          fetch: async () => new Response("ok"),
+          adapter: { kind: "channel:webhook" },
+          logicalPath: "agent/channels/webhook.ts",
+          method: "POST",
+          name: "webhook",
+          sourceId: "channel-webhook",
+          sourceKind: "module",
+          urlPath: "/webhook",
+        } satisfies ResolvedChannelDefinition,
+        {
+          handler: async () => new Response("ok"),
+          fetch: async () => new Response("ok"),
+          adapter: alerts.adapter,
+          definition: alerts,
+          receive: alerts.receive,
+          logicalPath: "agent/channels/alerts.ts",
+          method: "POST",
+          name: "alerts",
+          sourceId: "channel-alerts",
+          sourceKind: "module",
+          urlPath: "/alerts",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /webhook", {} as never);
+
+    expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
+      {
+        delivery: {
+          acceptedDeploymentId: "dpl_current",
+          channelKind: "channel:alerts",
+          channelName: "alerts",
+        },
+      },
+    );
+  });
+
   it("tags dev-worker sends with the generation that accepted them", async () => {
     vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "secret");
     const runtimeForTest = createRuntime({

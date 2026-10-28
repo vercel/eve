@@ -85,7 +85,7 @@ function legsDirectory(t, meta = {}) {
   return root;
 }
 
-function writeEval(leg, evalId, modelId) {
+function writeEval(leg, evalId, modelId, { derivedModels = true } = {}) {
   const artifact = {
     id: evalId,
     verdict: "passed",
@@ -94,7 +94,18 @@ function writeEval(leg, evalId, modelId) {
     completedAt: "2026-01-01T00:00:01.500Z",
     result: {
       runtimeIdentity: { eveVersion: "0.71.2" },
-      derived: { models: [modelId] },
+      // Runners before eve 0.70.0 derive no models; their step events name them.
+      derived: derivedModels ? { models: [modelId] } : {},
+      ...(derivedModels
+        ? {}
+        : {
+            sessions: [
+              {
+                sessionId: "s",
+                events: [{ type: "step.started", meta: { id: "e" }, data: { modelId } }],
+              },
+            ],
+          }),
     },
   };
   writeFileSync(join(leg, "run", "evals", `${evalId}.json`), JSON.stringify(artifact));
@@ -336,6 +347,12 @@ test("excludes live-leg evals whose model steps all ran on another model", (t) =
   assert.deepEqual(excluded, [
     { leg_id: "live__agent-tools__alpha__local__1", eval_id: "static-tools/no-reply" },
   ]);
+  writeEval(leg, "static-tools/no-reply", "eve-mock/notebook-parent", { derivedModels: false });
+  assert.deepEqual(
+    buildWithExclusions(legsDir).excluded,
+    excluded,
+    "a release backfill's older runner records models only on its step events",
+  );
   const live = records.filter((r) => r.model_id === "acme/alpha");
   assert.deepEqual(
     live.map((r) => r.eval_id),
@@ -422,5 +439,16 @@ test("publishes raw trees and records before the manifest, idempotently and immu
   await assert.rejects(
     publishRun({ ...input, recordsJsonl: recordsJsonl.split("\n").slice(1).join("\n") }),
     /records.jsonl was already published with different content/,
+  );
+
+  // A release backfill is not a run of main: it publishes with the imports
+  // and names its release in the manifest.
+  const source = { kind: "release-backfill", release: "0.61.0" };
+  const backfillStore = memoryStore();
+  const backfill = await publishRun({ ...input, plan: { ...plan, source }, store: backfillStore });
+  assert.equal(backfill.prefix, `imports/metrics-v${METRICS_VERSION}/runs/123/1`);
+  assert.deepEqual(
+    JSON.parse(backfillStore.objects.get(`${backfill.prefix}/manifest.json`)).source,
+    source,
   );
 });

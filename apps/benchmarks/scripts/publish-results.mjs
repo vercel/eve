@@ -41,25 +41,19 @@ import {
   vercelBlobStore,
 } from "../../../scripts/eval-benchmark/publish.mjs";
 import { findBenchmarkModel } from "../lib/benchmark-config.ts";
-import { modelPricing, priceUsage } from "./cost.mjs";
+import { modelPricing, priceRequests } from "./cost.mjs";
 import { analyzeRun, collectRuns } from "./run-analysis.mjs";
 
-export const RECORD_SCHEMA_VERSION = 1;
+// 2: Claude Code responses count once, and requests over a long-context threshold
+// are priced at its rates. Version 1 records overstate Claude Code tokens and cost.
+export const RECORD_SCHEMA_VERSION = 2;
 const ARTIFACT_PREFIX = "authoring-benchmark-";
 const UPLOAD_CONCURRENCY = 8;
 
 /** Maps downloaded model artifacts onto planned models, rejecting anything unplanned. */
 export function readModelArtifacts(plan, artifactsDir) {
   const found = new Map();
-  const entries = existsSync(artifactsDir)
-    ? readdirSync(artifactsDir, { withFileTypes: true })
-    : [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith(ARTIFACT_PREFIX))
-      throw new Error(
-        `Unexpected entry "${entry.name}" in ${artifactsDir}; expected ${ARTIFACT_PREFIX}<model> directories.`,
-      );
-    const dir = join(artifactsDir, entry.name);
+  for (const dir of artifactDirs(artifactsDir)) {
     const metaPath = join(dir, "meta.json");
     if (!existsSync(metaPath)) throw new Error(`${dir} has no meta.json.`);
     const meta = JSON.parse(readFileSync(metaPath, "utf8"));
@@ -74,6 +68,24 @@ export function readModelArtifacts(plan, artifactsDir) {
     found.set(meta.model_id, { dir, meta });
   }
   return plan.models.map((modelId) => ({ modelId, ...found.get(modelId) }));
+}
+
+/**
+ * One directory per downloaded artifact. actions/download-artifact unpacks a
+ * pattern that matches a single artifact straight into `path` rather than an
+ * `<artifact-name>/` subdirectory, so a `meta.json` at the root means the root
+ * is that one artifact.
+ */
+function artifactDirs(artifactsDir) {
+  if (!existsSync(artifactsDir)) return [];
+  if (existsSync(join(artifactsDir, "meta.json"))) return [artifactsDir];
+  return readdirSync(artifactsDir, { withFileTypes: true }).map((entry) => {
+    if (!entry.isDirectory() || !entry.name.startsWith(ARTIFACT_PREFIX))
+      throw new Error(
+        `Unexpected entry "${entry.name}" in ${artifactsDir}; expected ${ARTIFACT_PREFIX}<model> directories.`,
+      );
+    return join(artifactsDir, entry.name);
+  });
 }
 
 /** Derives one record per planned (model, case, run), in plan order. */
@@ -145,7 +157,10 @@ function runMetrics(result, benchmark) {
             cache_read_tokens: usage.cacheRead,
             cache_write_tokens: usage.cacheWrite,
           },
-    cost_usd: usage === null || pricing === undefined ? null : priceUsage(usage, pricing),
+    cost_usd:
+      usage === null || pricing === undefined
+        ? null
+        : priceRequests(result.requests, pricing, benchmark.harness),
     docs_read: result.docsRead,
     docs_entry: result.docsEntry,
     registry_calls: result.registryCalls,

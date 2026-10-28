@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolveModelReleases } from "./catalog.mjs";
 import { planLegs, selectBenchmark } from "./plan.mjs";
+import { evalFlags, releasePublishedAt, releaseTag } from "./release.mjs";
 
 const registry = {
   models: [
@@ -14,7 +15,7 @@ const registry = {
   attempts: 2,
   mockAttempts: 2,
   devStartup: { runs: 3, subjects: ["minimal"] },
-  concurrency: { legs: 3, evalsPerLeg: 1 },
+  concurrency: { legs: 2, evalsPerLeg: 1 },
 };
 const matrix = {
   worlds: [{ name: "vercel" }, { name: "postgres", package: "@workflow/world-postgres" }],
@@ -38,7 +39,7 @@ const select = (overrides = {}, narrow = {}) =>
 
 test("expands fixtures × models × attempts and mock worlds the fixture selects", () => {
   const selection = select();
-  assert.deepEqual(selection.concurrency, { legs: 3, evalsPerLeg: 1 });
+  assert.deepEqual(selection.concurrency, { legs: 2, evalsPerLeg: 1 });
   assert.deepEqual(selection.devStartup, { runs: 3, subjects: [{ name: "minimal", tools: 0 }] });
   const { live, mock } = planLegs(selection);
   assert.equal(live.length, 2 * 2 * 2);
@@ -86,6 +87,11 @@ test("dispatch inputs narrow every dimension and reject unknown names", () => {
     planLegs(selection).live.map((leg) => leg.leg_id),
     ["live__agent-two__beta__local__1"],
   );
+  // Narrowing models lowers the leg cap to the model count, never below one.
+  assert.equal(selection.concurrency.legs, 1);
+  assert.equal(select({}, { models: "none" }).concurrency.legs, 1);
+  // A registry cap below the model count stays, as in the nightly's 8 for 10.
+  assert.equal(select({ concurrency: { legs: 1, evalsPerLeg: 1 } }).concurrency.legs, 1);
   assert.deepEqual(planLegs(select({}, { fixtures: "none" })), { live: [], mock: [] });
   assert.throws(
     () => select({}, { models: "gamma" }),
@@ -142,6 +148,53 @@ test("mock-only fixtures and hosted worlds plan without live legs", () => {
     ).live,
     [],
   );
+});
+
+test("a backfill plans the fixtures its release has and no hosted worlds", () => {
+  const selection = selectBenchmark({
+    registry: {
+      ...registry,
+      fixtures: ["agent-one", "agent-new"],
+      mockFixtures: ["agent-one", "agent-stress"],
+      mockWorlds: ["local", "postgres", { name: "vercel", fixtures: ["agent-stress"] }],
+      mockAttempts: 1,
+    },
+    matrix,
+    // The release predates agent-new.
+    findFixture: (name) => fixtures[name],
+    backfill: true,
+  });
+  assert.deepEqual(selection.absentFixtures, ["agent-new"]);
+  const { live, mock } = planLegs(selection);
+  assert.deepEqual([...new Set(live.map((leg) => leg.fixture))], ["agent-one"]);
+  assert.deepEqual(
+    mock.map((leg) => leg.leg_id),
+    [
+      "mock__agent-one__mock__local__1",
+      "mock__agent-one__mock__postgres__1",
+      "mock__agent-stress__mock__local__1",
+      "mock__agent-stress__mock__postgres__1",
+    ],
+  );
+});
+
+test("dates a backfill at its npm publish time and passes only flags its runner has", async () => {
+  const npm = (time) => async () => ({ ok: true, status: 200, json: async () => ({ time }) });
+  assert.equal(
+    await releasePublishedAt("0.61.0", npm({ "0.61.0": "2026-09-18T17:49:48.172Z" })),
+    "2026-09-18T17:49:48.172Z",
+  );
+  await assert.rejects(
+    releasePublishedAt("0.61.9", npm({})),
+    /npm has no publish time for eve 0.61.9/,
+  );
+  // Numeric, not lexical: 0.9.0 is older than 0.83.1.
+  assert.deepEqual(
+    ["0.9.0", "0.83.0", "0.83.1", "0.100.0"].map((version) => evalFlags(version).keepState),
+    [false, false, true, true],
+  );
+  assert.equal(releaseTag("0.61.0"), "eve@0.61.0");
+  assert.throws(() => releaseTag("eve@0.61.0"), /must be a published eve version/);
 });
 
 test("registry errors name the offending entry", () => {

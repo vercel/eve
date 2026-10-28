@@ -12,6 +12,10 @@
 // The manifest lists both record files and carries the metric catalog (unit,
 // direction, and scope of every metric), so ingest reads scopes from the run.
 //
+// A release backfill (a plan with a `source`, see release.mjs) publishes
+// under imports/metrics-v<METRICS_VERSION>/runs/ instead of runs/, with the
+// plan's source in its manifest: it is not a run of main.
+//
 // Usage: node scripts/eval-benchmark/publish.mjs <plan.json> <legs-dir> <records.jsonl> <dev-startup-dir> <framework-records.jsonl>
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT.
 import { createHash } from "node:crypto";
@@ -41,9 +45,15 @@ const UPLOAD_CONCURRENCY = 8;
  * }} ImmutableStore `put` must reject with an "already exists" error rather than overwrite.
  */
 
+/** Where a plan's run is published: main's runs, or the import root for a backfill. */
+export function publishRoot(plan) {
+  return plan.source === undefined ? "runs" : `imports/metrics-v${METRICS_VERSION}/runs`;
+}
+
 /**
  * `root` and `source` let an importer publish runs it did not execute (see
  * import-stress-artifacts.mjs) outside `runs/`, saying where they came from.
+ * They default to the plan's: a release backfill's plan has a `source`.
  *
  * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, frameworkRecordsJsonl: string, devStartupDir?: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore, root?: string, source?: object }} input
  */
@@ -57,8 +67,8 @@ export async function publishRun({
   runAttempt,
   eveVersion,
   store,
-  root = "runs",
-  source,
+  root = publishRoot(plan),
+  source = plan.source,
 }) {
   const parse = (jsonl) =>
     jsonl
@@ -241,7 +251,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     devStartupDir,
     githubRunId,
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
-    eveVersion: JSON.parse(readFileSync("packages/eve/package.json", "utf8")).version,
+    // The code under test's version, which a backfill's harness does not share.
+    eveVersion: plan.eve_version,
     store: await vercelBlobStore(token),
   });
   console.error(

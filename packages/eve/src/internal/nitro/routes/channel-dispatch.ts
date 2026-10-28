@@ -275,7 +275,11 @@ async function buildRouteArgs(
     ...deliverySource,
     turnPolicy: channel?.turnPolicy,
   });
-  const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
+  const to = createCrossChannelToFn(
+    bundle.runtime,
+    toCrossChannelTargets(bundle.channels),
+    deliverySource,
+  );
 
   const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
   const args = attachRouteSessionCreator(

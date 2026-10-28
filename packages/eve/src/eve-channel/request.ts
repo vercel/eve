@@ -180,6 +180,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 }
 
 interface ParsedSessionMessageBody {
+  inbox?: string;
   callback?: SessionCallback;
   /** Names the delivery: a repeat with the same key is the same delivery, with the same receipt. */
   idempotencyKey?: string;
@@ -194,6 +195,7 @@ export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
   const fields = [
+    "inbox",
     "message",
     "answers",
     "clientContext",
@@ -241,6 +243,7 @@ export function parseSessionMessageBody(
   }
 
   return {
+    inbox: typeof payload.inbox === "string" ? payload.inbox : undefined,
     callback,
     message,
     answers,

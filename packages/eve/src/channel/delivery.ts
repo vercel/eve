@@ -18,6 +18,7 @@ export function commandDelivery(
   }
   const sessionId = result.status === "reset" ? result.previousSessionId : result.sessionId;
   return new StreamDelivery({
+    inbox: "inbox" in result ? result.inbox : undefined,
     sessionId,
     deliveryId,
     createStream: async function* (read) {

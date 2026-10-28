@@ -7,6 +7,7 @@ import {
   type ChannelReference,
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
+import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Delivery } from "#shared/delivery.js";
 import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -44,6 +45,9 @@ export interface CrossChannelTarget {
   readonly turnPolicy?: CompiledChannel["turnPolicy"];
 }
 
+/** What a forwarded delivery inherits from the caller; the target channel supplies its own name. */
+type CrossChannelDeliverySource = Omit<ChannelDeliverySource, "channelKind" | "channelName">;
+
 /**
  * Projects an agent's resolved channels into the receiver-input shape.
  *
@@ -75,6 +79,7 @@ export function toCrossChannelTargets(
 export function createCrossChannelToFn(
   runtime: Runtime,
   channels: readonly CrossChannelTarget[],
+  source: CrossChannelDeliverySource = {},
 ): CrossChannelToFn {
   return (channel, target) => {
     const targetChannel = resolveTargetByReference(channel, channels);
@@ -82,6 +87,7 @@ export function createCrossChannelToFn(
       async send(message, options) {
         return await invokeChannelReceive({
           runtime,
+          source,
           target: targetChannel,
           input: {
             message,
@@ -102,6 +108,7 @@ export function createCrossChannelToFn(
 
 interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
+  readonly source: CrossChannelDeliverySource;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: {
     readonly message: MessageContent;
@@ -126,6 +133,11 @@ async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<De
   const channelOperations = createChannelOperations({
     adapter: args.target.adapter,
     channelName: args.target.name,
+    metadata: {
+      ...args.source,
+      channelKind: `channel:${args.target.name}`,
+      channelName: args.target.name,
+    },
     runtime: args.runtime,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
   });
