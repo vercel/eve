@@ -129,8 +129,8 @@ function HarnessTools() {
 // covering the one behind it but for a sliver. Sizes are front's px values in `em` (1em =
 // 16px at a 350px frame), so the windows scale with the frame.
 // In % of the frame: each back window shows a `sliver` before the next covers it, and the
-// front one ends as far from the right edge as the first starts from the left.
-const windowWidth = 46;
+// front one runs past the right edge.
+const windowWidth = 55;
 const sliver = 22;
 const APPS = [
   { name: "SvelteKit", Logo: SiSvelte, left: 5, back: true },
