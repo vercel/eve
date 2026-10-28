@@ -79,7 +79,7 @@ function LimitLine({ id, x, y1, y2 }: { id: string; x: number; y1: number; y2: n
 
 function GrayBadge({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return (
-    <span className="inline-flex h-[1.375em] shrink-0 items-center gap-[0.375em] rounded-full bg-gray-200 px-[0.5em] font-medium text-[0.625em] text-gray-1000 tracking-[0.2px] [&>svg]:size-[1.1em]">
+    <span className="inline-flex h-[1.75em] shrink-0 items-center gap-[0.375em] rounded-full bg-gray-200 px-[0.75em] font-medium text-[0.625em] text-gray-1000 tracking-[0.2px] [&>svg]:size-[1.1em]">
       {icon}
       {children}
     </span>
