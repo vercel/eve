@@ -6,12 +6,15 @@ import { ClientError, ClientSessionStrandedError } from "#client/client-error.js
 import { HealthResponseError } from "#client/health-response-error.js";
 import { EveError } from "#shared/eve-error.js";
 
-/** What an error thrown by a separately bundled copy of eve looks like to this copy. */
+/**
+ * What an error thrown by a separately bundled copy of eve looks like to this copy. The brand is
+ * keyed by an independently obtained registry symbol, so a module-local symbol would fail here.
+ */
 function fromAnotherCopy(error: EveError): Error {
   const foreign = Object.assign(new Error(error.message), { code: error.code });
-  for (const key of Object.getOwnPropertySymbols(error)) {
-    Object.defineProperty(foreign, key, { value: Reflect.get(error, key) });
-  }
+  Object.defineProperty(foreign, Symbol.for("eve.error.lineage"), {
+    value: [...(Reflect.get(error, Symbol.for("eve.error.lineage")) as string[])],
+  });
   return foreign;
 }
 
@@ -42,6 +45,19 @@ describe("EveError", () => {
     expect(SessionNotActiveError.is(foreign)).toBe(true);
     expect(EveError.is(foreign)).toBe(true);
     expect(ClientError.is(foreign)).toBe(false);
+  });
+
+  it("rejects subclasses that inherit their parent's errorName", () => {
+    class ForgetfulError extends ClientError {}
+    class NamedError extends ClientError {
+      static override readonly errorName = "NamedError";
+    }
+
+    expect(() => new ForgetfulError(500, "boom")).toThrow(
+      "ForgetfulError must declare its own static errorName.",
+    );
+    expect(new NamedError(500, "boom").name).toBe("NamedError");
+    expect(new EveError("custom_code", "boom").name).toBe("EveError");
   });
 
   it("gives every client-thrown error a stable name and snake_case code", () => {

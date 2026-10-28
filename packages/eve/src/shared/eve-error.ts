@@ -12,7 +12,7 @@ const LINEAGE = Symbol.for("eve.error.lineage");
 export class EveError extends Error {
   /**
    * Stable class name that `is()` matches and the instance `name` reports. Minifiers rename
-   * constructors, so subclasses declare it explicitly.
+   * constructors, so every subclass must declare its own; the constructor throws otherwise.
    */
   static readonly errorName: string = "EveError";
 
@@ -21,6 +21,11 @@ export class EveError extends Error {
 
   constructor(code: string, message: string, options?: ErrorOptions) {
     super(message, options);
+    // An inherited `errorName` would give the subclass its parent's identity, so `is()` would
+    // narrow unrelated errors to it.
+    if (new.target !== EveError && !Object.hasOwn(new.target, "errorName")) {
+      throw new TypeError(`${new.target.name} must declare its own static errorName.`);
+    }
     this.name = new.target.errorName;
     this.code = code;
     const lineage = [new.target.errorName];
