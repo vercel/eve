@@ -6,18 +6,20 @@ url: /guides/prepare-for-1-0
 
 Use this checklist when upgrading an existing project to the coordinated pre-1.0 API cleanup release. These changes do not make the release 1.0; the [stability policy](../reference/typescript-api#stability-policy) still distinguishes stable and experimental APIs.
 
-Update agent servers before client applications. New clients call the `/end` endpoint, which older servers do not serve, and accept only [agent-info version 6](#update-agent-info-readers). Then update your authored files, frontend code, and scripts as described below.
+Upgrade eve in your agent server and apply the authored-file changes below so it builds. Deploy it before upgrading clients: new clients call the `/end` endpoint, which older servers do not serve, and accept only [agent-info version 6](#update-agent-info-readers). Then update frontend code and scripts.
 
 ## End a session or start a new conversation
 
-Replace retirement methods named `reset()` with `end()` on client sessions, `SessionStore`, React/Vue/Svelte bindings, channel session handles, and Slack session callbacks:
+Replace retirement methods named `reset()` with `end()` on client sessions, `SessionStore`, React/Vue/Svelte bindings, channel session handles, `ChannelSource` from `eve/channels`, and the Slack handler context (`ctx.end()`):
 
 ```diff
 -await session.reset({ reason: "Conversation finished" });
 +await session.end({ reason: "Conversation finished" });
 ```
 
-The HTTP endpoint changes from `POST /eve/v1/session/:sessionId/reset` to `POST /eve/v1/session/:sessionId/end`.
+`end()` resolves with a delivery receipt, like the other session controls. The stream still records the control as `source: { control: "reset" }` on `delivery.admitted` for compatibility with recorded history, so code that matches that value does not change.
+
+The HTTP endpoint changes from `POST /eve/v1/session/:sessionId/reset` to `POST /eve/v1/session/:sessionId/end`. Upgraded servers still serve `POST …/reset` beside `/end`, so existing HTTP callers keep working, but move them to `/end`.
 
 Ending permanently retires the session and leaves the handle on the retired ID. Do not use `end()` for a **New chat** button. Use `newSession()` when the frontend binding or store owns session creation. When you supply an external `session`, `newSession()` only clears local state and keeps that handle; create a new client session and bind a new store or component to it instead:
 
@@ -149,7 +151,7 @@ To disable automatic reconnects:
 +reconnect: false
 ```
 
-Use the exported `ReconnectOptions` type from `eve/client` instead of `StreamReconnectPolicy`, `ResolvedStreamReconnectPolicy`, or `StreamReconnectRetryPolicy`. The option also applies to client session and event readers. Defaults and cursor recovery are unchanged; following reads keep reconnecting, and server-side readers do not reconnect. See [Streaming](./client/streaming#reconnection).
+Use the exported `ReconnectOptions` type from `eve/client` instead of `StreamReconnectPolicy` or `StreamReconnectRetryPolicy`. The option also applies to client session and event readers. Defaults and cursor recovery are unchanged; following reads keep reconnecting, and server-side readers do not reconnect. See [Streaming](./client/streaming#reconnection).
 
 ## Update client error handling and saved state
 
@@ -190,7 +192,7 @@ Import durable primitives from `eve/workflow`, and run/hook operations from `eve
 +import { start, getRun, resumeHook } from "eve/workflow/api";
 ```
 
-Bare `workflow` and `workflow/*` imports in authored modules now fail the build. Only the exports listed above are public; other SDK subpaths, helpers, and options are not supported by these entries.
+Bare `workflow` and `workflow/*` imports in authored modules now fail the build. Only the exports listed above are public; other SDK subpaths, helpers, and options are not supported by these entries. The previously removed `agent` and `ask` helpers stay removed: importing them from `eve/workflow` fails with a pointer to `defineWorkflowTool()` from `eve/tools`.
 
 Both entries declare eve-owned types instead of the SDK's:
 
@@ -214,6 +216,7 @@ eve's authoring and configuration types no longer expose AI SDK, zod, OpenTeleme
 
 - Agent `model` fields accept `EveLanguageModel` (exported from `eve` and `eve/models`); any AI SDK language model satisfies it. `anthropic()`, `openai()`, `chatgpt()`, and `mockModel()` still return AI SDK language models, so nothing changes where you pass them to AI SDK functions.
 - `DecisionModel` instances must declare `specificationVersion: "v4"`.
+- `TokenUsage`, the usage record `limits.sessionUsage` callbacks receive, is now exported from `eve` for annotations.
 - `MemoryToolDefinition` is removed. Type memory provider tools as `MemoryToolSet`, a map of `defineTool()` values (`ToolDefinition` from `eve/tools`).
 - Import `SpanProcessor`, `SpanExporter`, and `SpanProcessorOrName` from `eve/instrumentation/otel`, `LinqWebhookVerifier` from `eve/channels/linq`, and `PhotonIMessageWebhookVerifier` and `PhotonProjectCredentials` from `eve/channels/photon`.
 
@@ -228,6 +231,14 @@ Remove these exports from `eve/channels/slack` imports:
 - `Modal*`, `TextInput*`, and `ExternalSelect*` builders and their associated types.
 - `CardJSXElement` and `CardJSXProps`.
 - `isCardElement` and `cardChildToFallbackText`.
+- `ChatElement`, `ContainerProps`, and the builder props types: `ButtonProps`, `CardLinkProps`, `CardProps`, `DividerProps`, `FieldProps`, `ImageProps`, `LinkButtonProps`, `SelectOptionProps`, `SelectProps`, and `TextProps`.
+
+Card builders no longer accept JSX-style props with `children`. Call their data forms instead:
+
+```diff
+-Actions({ children: [Button({ id: "approve", children: "Approve" })] });
++Actions([Button({ id: "approve", label: "Approve" })]);
+```
 
 Use `CardText` for labels and `cardToFallbackText` for whole cards. Use native Slack view data for custom modals; the removed builders did not have a supported eve delivery path. Built-in human-in-the-loop modals are unchanged.
 
