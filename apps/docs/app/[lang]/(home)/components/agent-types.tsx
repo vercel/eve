@@ -100,16 +100,21 @@ const BRAIN: Author = { name: "company-brain", icon: Brain };
  */
 const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600, 1100, 1300, 1600];
 
+// Dana's follow-up and its thread only come in the demo; shown in full, the thread ends with
+// her thumbs-up.
+const FOLLOW_UP = 10;
+
 // Entrances run only in the demo; shown in full, the thread is simply there.
 const fadeIn = "animate-command-fade-in";
 
 /**
  * The hero's Slack thread, with the company brain on its own avatar color. In the demo it
- * builds up stage by stage (`stage` counts the stages shown); otherwise it shows in full.
+ * builds up stage by stage (`stage` counts the stages shown); otherwise it shows up to the
+ * follow-up.
  */
 function CompanyBrainPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
-  const shown = stage ?? BRAIN_DEMO.length;
+  const shown = stage ?? FOLLOW_UP - 1;
   const list = useRef<HTMLDivElement>(null);
   // Which edges have messages scrolled past them, so only those edges fade, as in the hero.
   const [overflow, setOverflow] = useState({ above: false, below: false });
@@ -269,7 +274,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             </Reaction>
           </li>
         ) : null}
-        {shown >= 10 ? (
+        {shown >= FOLLOW_UP ? (
           <SlackMessage
             author={DANA}
             avatarColor={brainAvatar}
@@ -282,7 +287,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             <p>
               <Mention>company-brain</Mention> can you split October by payment method?
             </p>
-            {shown >= 11 ? <ThreadReply demo={demo} /> : null}
+            {shown >= FOLLOW_UP + 1 ? <ThreadReply demo={demo} /> : null}
           </SlackMessage>
         ) : null}
       </ol>
@@ -761,7 +766,9 @@ export function AgentTypes(): JSX.Element {
             id={`${baseId}-panel`}
             role="tabpanel"
           >
-            <AppWindow className="h-[30rem]">{selected.preview(demo?.stage)}</AppWindow>
+            <AppWindow className="h-[30rem] sm:h-[26rem]">
+              {selected.preview(demo?.stage)}
+            </AppWindow>
           </div>
         </div>
       </div>
