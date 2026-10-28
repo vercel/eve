@@ -33,18 +33,18 @@ export default defineTool({
 Install the framework packages for the integration you import. These are optional peers of eve;
 using another entry does not require them.
 
-| Entry                                      | Required integration packages                         |
-| ------------------------------------------ | ----------------------------------------------------- |
-| `eve/react`                                | `react` 19 (and its React typings in TypeScript apps) |
-| `eve/vue`                                  | `vue` 3.5 or later in v3                              |
-| `eve/svelte`                               | `svelte` 5                                            |
-| `eve/next`                                 | `next` 16 and `react` 19                              |
-| `eve/sveltekit`, `eve/tanstack`            | `vite` 8.3.1 or later in v8                           |
-| `eve/nuxt`                                 | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
-| Chat SDK, Linq, and Photon channels        | `chat` 4.42 or later in v4                            |
-| `eve/channels/linq`                        | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
-| `eve/sandbox/just-bash`                    | `just-bash` 3.6 or later in v3                        |
-| `@vercel/connect/eve` with eve connections | `@vercel/connect` 2.5.2 or later in v2                |
+| Entry                                                         | Required integration packages                         |
+| ------------------------------------------------------------- | ----------------------------------------------------- |
+| `eve/react`                                                   | `react` 19 (and its React typings in TypeScript apps) |
+| `eve/vue`                                                     | `vue` 3.5 or later in v3                              |
+| `eve/svelte`                                                  | `svelte` 5                                            |
+| `eve/next`                                                    | `next` 16 and `react` 19                              |
+| `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.1 or later in v8                           |
+| `eve/nuxt`                                                    | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
+| Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
+| `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
+| `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
+| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.5.2 or later in v2                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
@@ -197,8 +197,8 @@ have one home, `eve/sessions`; client factories and transport-specific types sta
 The `exports` field in `packages/eve/package.json` lists every package entry point.
 `eve/experimental/*` and `eve/internal/*` have no compatibility promise. The same
 applies to `experimental` fields in stable definitions, such as
-`defineAgent({ experimental })` and connection `experimental.events`, and to
-`experimental_`-prefixed functions such as `experimental_runDiscordGatewayRelay`.
+`defineAgent({ experimental })`, connection `experimental.events`, and
+`JustBashSandbox.environment({ experimental })`.
 
 Event union types name today's values. Adding fact types, outcomes, or interaction
 kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add)

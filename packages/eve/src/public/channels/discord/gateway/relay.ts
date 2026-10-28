@@ -29,7 +29,7 @@ const MESSAGE_CONTENT_INTENT = 1 << 15;
 // Vercel Daemons get 10 seconds between SIGTERM and SIGKILL by default.
 const SHUTDOWN_DRAIN_MS = 8_000;
 
-/** Options for {@link experimental_runDiscordGatewayRelay}. */
+/** Options for {@link runDiscordGatewayRelay}. */
 export interface DiscordGatewayRelayOptions {
   /**
    * Bot credentials. Pass the same object as the agent's `discordChannel`,
@@ -76,7 +76,7 @@ export interface DiscordGatewayRelayOptions {
  * Run exactly one relay per bot: Discord sends every message to each
  * connection, so a second relay makes the agent answer twice.
  */
-export async function experimental_runDiscordGatewayRelay(
+export async function runDiscordGatewayRelay(
   options: DiscordGatewayRelayOptions = {},
 ): Promise<void> {
   const target = new URL(options.route ?? "/eve/v1/discord/gateway", resolveBaseUrl(options.url));
@@ -113,7 +113,7 @@ function resolveBaseUrl(url: string | URL | undefined): URL {
   const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   if (production) return new URL(`https://${production}`);
   throw new Error(
-    "experimental_runDiscordGatewayRelay needs the eve deployment's URL: pass `url`, such as " +
+    "runDiscordGatewayRelay needs the eve deployment's URL: pass `url`, such as " +
       "http://localhost:2000 for eve dev, or run it where VERCEL_PROJECT_PRODUCTION_URL is set.",
   );
 }
