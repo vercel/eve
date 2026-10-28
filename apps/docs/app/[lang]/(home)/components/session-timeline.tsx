@@ -246,7 +246,7 @@ const SLACK_BEATS: Beat[] = [
   },
   {
     kind: "reactions",
-    reactions: [{ emoji: "LFG", count: 2 }],
+    reactions: [{ emoji: "LFG", count: 1 }],
     delay: 900,
   },
 ];
@@ -805,6 +805,15 @@ export function SessionTimeline(): JSX.Element {
   // A replay that runs to the end stays at the end, clear of the dock; stopping it or switching
   // channels returns to the conversation's start.
   const [ended, setEnded] = useState(false);
+  // Reactions the visitor added, keyed by emoji, toggled like Slack's: a click adds one to the
+  // count, a second click takes it back.
+  const [reacted, setReacted] = useState<Set<string>>(new Set());
+  const toggleReaction = (emoji: string) =>
+    setReacted((current) => {
+      const next = new Set(current);
+      if (!next.delete(emoji)) next.add(emoji);
+      return next;
+    });
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
 
@@ -921,16 +930,29 @@ export function SessionTimeline(): JSX.Element {
               if (beat.kind === "reactions") {
                 return (
                   <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
-                    {beat.reactions.map((reaction, index) => (
-                      <span
-                        className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-scale-in motion-reduce:animate-fade-in"
-                        style={{ animationDelay: `${index * 60}ms` }}
-                        key={reaction.emoji}
-                      >
-                        <TextEmoji name={reaction.emoji} />
-                        {reaction.count}
-                      </span>
-                    ))}
+                    {beat.reactions.map((reaction, index) => {
+                      const mine = reacted.has(reaction.emoji);
+                      const count = reaction.count + (mine ? 1 : 0);
+                      return (
+                        <button
+                          aria-label={`:${reaction.emoji.toLowerCase()}: ${count}`}
+                          aria-pressed={mine}
+                          className={cn(
+                            "flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-[7px] text-gray-1000 tabular-nums transition-[background-color,border-color,transform] duration-150 ease-out active:scale-95 motion-safe:animate-scale-in motion-reduce:animate-fade-in",
+                            mine
+                              ? "border-gray-alpha-700 bg-gray-alpha-200"
+                              : "border-gray-alpha-400 bg-background-100 hover:border-gray-alpha-500",
+                          )}
+                          key={reaction.emoji}
+                          onClick={() => toggleReaction(reaction.emoji)}
+                          style={{ animationDelay: `${index * 60}ms` }}
+                          type="button"
+                        >
+                          <TextEmoji name={reaction.emoji} />
+                          <span className="text-copy-13">{count}</span>
+                        </button>
+                      );
+                    })}
                   </li>
                 );
               }
