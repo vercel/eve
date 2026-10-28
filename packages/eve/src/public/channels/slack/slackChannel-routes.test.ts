@@ -213,7 +213,7 @@ describe("slackChannel sender profiles", () => {
 
     const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
     expect(JSON.stringify("message" in input ? input.message : "")).toContain(
-      "sender_id: U01\\nsender_name: alice\\nsender_email: alice@example.com",
+      "<sender>\\ntype: user\\nid: U01\\nname: alice\\nemail: alice@example.com\\n</sender>",
     );
   });
 
@@ -299,7 +299,7 @@ describe("slackChannel thread history", () => {
       { id: "1700000000.000002", role: "assistant" },
       { id: "1700000000.000003", role: "user" },
     ]);
-    expect(history?.[0]?.text).toContain("sender_id: U_ROOT");
+    expect(history?.[0]?.text).toContain("id: U_ROOT\n</sender>");
     expect(history?.[1]?.text).toBe("Deploys are green.");
   });
 

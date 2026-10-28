@@ -139,7 +139,7 @@ export default slackChannel({
 });
 ```
 
-The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. With [`senderProfiles`](#add-sender-names-and-emails) enabled, it also includes `sender_name` and `sender_email`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
+The model-visible `<slack_message>` groups the sender's `type` and `id` in a `<sender>` block, followed by `bot_user_id` when available and the `is_mentioned` value from `ctx.isBotMentioned()`. With [`senderProfiles`](#add-sender-names-and-emails) enabled, `<sender>` also includes `name` and `email`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
 When a Slack message includes a link preview, eve includes its attachment text in `<content>` alongside the sender's message, including when the link has words around it. Shared Slack messages work the same way: eve extracts the forwarded message body from Slack's message-unfurl attachment and keeps any top-level comment.
 
@@ -264,16 +264,19 @@ export default slackChannel({
 });
 ```
 
-eve then calls Slack's `users.info` for the triggering sender and each `threadContext` sender, and adds the results to their `<slack_message>` metadata:
+eve then calls Slack's `users.info` for the triggering sender and each `threadContext` sender, and adds the results to their `<sender>` block:
 
 ```text
-sender_id: U0123ABCD
-sender_name: alice
-sender_email: alice@example.com
+<sender>
+type: user
+id: U0123ABCD
+name: alice
+email: alice@example.com
+</sender>
 ```
 
-- `sender_name` is the sender's Slack display name, falling back to their real name.
-- `sender_email` appears only when Slack returns one, which needs the `users:read.email` scope.
+- `name` is the sender's Slack display name, falling back to their real name.
+- `email` appears only when Slack returns one, which needs the `users:read.email` scope.
 - Profiles are cached per workspace and user for an hour. Each Slack channel keeps its own cache.
 - A failed lookup leaves both fields out, the message is still delivered, and eve retries the lookup after a minute. A missing `users:read` scope is logged with a reinstall hint.
 

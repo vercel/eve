@@ -775,9 +775,9 @@ export interface SlackChannelConfig {
   readonly threadContext?: LoadThreadContextMessagesOptions;
 
   /**
-   * Looks up each Slack sender's profile with `users.info` and adds
-   * `sender_name` and, when Slack returns it, `sender_email` to the
-   * model-visible `<slack_message>` metadata, including thread context.
+   * Looks up each Slack sender's profile with `users.info` and adds `name`
+   * and, when Slack returns it, `email` to the model-visible `<sender>`
+   * block of each `<slack_message>`, including thread context.
    * Profiles are cached per workspace and user for an hour; a failed
    * lookup leaves the fields out and is retried after a minute. Adds the `users:read` and
    * `users:read.email` scopes to the app manifest. Off by default: sender

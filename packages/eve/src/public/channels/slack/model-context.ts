@@ -21,17 +21,19 @@ interface SlackModelMessageInput {
 }
 
 /**
- * Renders one Slack message with its sender identity attached to the same
- * model-visible message. Slack user ids are stable, so they remain the
- * canonical speaker identity; a looked-up name and email only add to them.
+ * Renders one Slack message with its sender grouped in a `<sender>` block of
+ * the same model-visible message. Slack user ids are stable, so they remain
+ * the canonical speaker identity; a looked-up name and email only add to them.
  */
 function formatSlackModelMessage(input: SlackModelMessageInput): string {
   return [
     "<slack_message>",
-    `sender_type: ${input.senderType}`,
-    ...(input.senderId ? [`sender_id: ${input.senderId}`] : []),
-    ...(input.senderProfile?.name ? [`sender_name: ${oneLine(input.senderProfile.name)}`] : []),
-    ...(input.senderProfile?.email ? [`sender_email: ${oneLine(input.senderProfile.email)}`] : []),
+    "<sender>",
+    `type: ${input.senderType}`,
+    ...(input.senderId ? [`id: ${input.senderId}`] : []),
+    ...(input.senderProfile?.name ? [`name: ${oneLine(input.senderProfile.name)}`] : []),
+    ...(input.senderProfile?.email ? [`email: ${oneLine(input.senderProfile.email)}`] : []),
+    "</sender>",
     ...(input.botUserId ? [`bot_user_id: ${input.botUserId}`] : []),
     ...(input.isMentioned !== undefined ? [`is_mentioned: ${input.isMentioned}`] : []),
     ...(input.channelId ? [`channel_id: ${input.channelId}`] : []),
