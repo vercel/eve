@@ -578,7 +578,7 @@ const formatDuration = (seconds: number) =>
 
 /**
  * A phone call to a clinic's front desk. While it's live the timer runs and the waveform moves;
- * End stops both and leaves the call's recording to play back, and Call starts a new one.
+ * End stops both and leaves the call's recording to play back, and Record starts a new one.
  */
 function VoiceClient() {
   const [call, setCall] = useState({ id: 0, live: true, seconds: 42 });
@@ -618,7 +618,7 @@ function VoiceClient() {
           }
           type="button"
         >
-          {call.live ? "End" : "Call"}
+          {call.live ? "End" : "Record"}
         </button>
       </div>
       <p className="text-copy-13 text-gray-900">
@@ -916,8 +916,8 @@ export function AgentTypes(): JSX.Element {
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-x-6">
           {/* Every use case's text shares one grid cell, so the column keeps the tallest one's
               height and switching tabs never shifts the layout. Beside the window, from its top
-              and a column clear of it, on wide screens; above it when stacked. */}
-          <div className="grid lg:col-span-4 lg:col-start-9 lg:row-start-1">
+              and a little clear of it, on wide screens; above it when stacked. */}
+          <div className="grid lg:col-span-5 lg:col-start-8 lg:row-start-1 lg:pl-12">
             {USE_CASES.map((useCase) => (
               <div
                 className={cn(
