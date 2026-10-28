@@ -431,6 +431,23 @@ function Avatar({ author, round }: { author: Author; round: boolean }) {
   );
 }
 
+/**
+ * A message's card or buttons follow its text by 60ms rather than arriving with it, so a
+ * message reads as one entrance instead of two things appearing at once.
+ */
+function Attachment({ children }: { children: ReactNode }) {
+  if (!children) return null;
+  return (
+    <div
+      className="motion-safe:animate-message-in motion-reduce:animate-fade-in"
+      // Inline, since the animation shorthand would reset a class-set delay.
+      style={{ animationDelay: "60ms" }}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** Slack: avatar, name, Agent badge, time; consecutive messages fold under the first. */
 function ThreadMessage({
   author,
@@ -446,7 +463,7 @@ function ThreadMessage({
   return (
     <li
       className={cn(
-        "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+        "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-message-in motion-reduce:animate-fade-in",
         continued ? "pt-2" : "pt-4",
       )}
     >
@@ -491,7 +508,7 @@ function TeamsMessage({
   return (
     <li
       className={cn(
-        "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+        "motion-safe:animate-message-in motion-reduce:animate-fade-in",
         isAgent ? "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5" : "flex flex-col items-end",
         continued ? "pt-1" : "pt-4",
       )}
@@ -645,7 +662,7 @@ function Bubble({
   return (
     <li
       className={cn(
-        "flex motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+        "flex motion-safe:animate-message-in motion-reduce:animate-fade-in",
         outgoing ? "justify-end pr-2" : "justify-start pl-2",
         continued ? "pt-1.5" : "pt-4",
       )}
@@ -678,7 +695,7 @@ function Bubble({
             {outgoing ? <ReadTicks /> : null}
           </span>
         </div>
-        {attachment}
+        <Attachment>{attachment}</Attachment>
       </div>
     </li>
   );
@@ -861,9 +878,10 @@ export function SessionTimeline(): JSX.Element {
           if (beat.kind === "reactions") {
             return (
               <li className="flex gap-1.5 pt-1.5 pl-[2.875rem]" key={i}>
-                {beat.reactions.map((reaction) => (
+                {beat.reactions.map((reaction, index) => (
                   <span
-                    className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75"
+                    className="flex h-7 items-center gap-1.5 rounded-full border border-gray-alpha-400 bg-background-100 px-[7px] text-copy-13 text-gray-1000 tabular-nums motion-safe:animate-scale-in motion-reduce:animate-fade-in"
+                    style={{ animationDelay: `${index * 60}ms` }}
                     key={reaction.emoji}
                   >
                     <TextEmoji name={reaction.emoji} />
@@ -893,21 +911,21 @@ export function SessionTimeline(): JSX.Element {
             return (
               <TeamsMessage author={author} continued={continued} key={i} time={beat.time}>
                 <p>{beat.body}</p>
-                {beat.attachment}
+                <Attachment>{beat.attachment}</Attachment>
               </TeamsMessage>
             );
           }
           return (
             <ThreadMessage author={author} continued={continued} key={i} time={beat.time}>
               <p className="text-gray-1000">{beat.body}</p>
-              {beat.attachment}
+              <Attachment>{beat.attachment}</Attachment>
             </ThreadMessage>
           );
         })}
         {typing && next?.kind === "message" ? (
           <li
             className={cn(
-              "pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300",
+              "pt-3 animate-fade-in",
               platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]",
             )}
           >
