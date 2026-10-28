@@ -13,6 +13,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { IconBox, IconCheck } from "@vercel/geistdocs/assets/icons";
+import { LogoIconMicrosoftTeamsSvg } from "@vercel/geistdocs/assets/logos/logo-icon-microsoft-teams-svg";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type ComponentType,
@@ -383,8 +384,7 @@ const CONVERSATIONS: {
   {
     id: "teams",
     label: "Operations",
-    logo: (className) =>
-      logos.teams({ "aria-hidden": true, className: cn(className, monochromeLogo) }),
+    logo: (className) => <LogoIconMicrosoftTeamsSvg aria-hidden className={className} size={16} />,
     beats: TEAMS_BEATS,
   },
   {
