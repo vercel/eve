@@ -3,7 +3,7 @@ import { readInboxHandle } from "#execution/session-inbox/handle.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
-  findRetiredOwnerRun,
+  findStrandedOwnerRun,
   routesToOwnerDeployment,
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
@@ -11,9 +11,10 @@ import { DevelopmentRunUnavailableError } from "#internal/workflow/development-r
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
 /**
- * The session's owner was built by another eve version, so this build cannot
- * execute it and ingress refused the command before committing it. Internal:
- * carries the owner run, which never reaches a client.
+ * Nothing can execute the session's owner: another eve version built it, or
+ * the deployment it is pinned to was deleted. Ingress refused the command
+ * before committing it. Internal: carries the owner run, which never reaches
+ * a client.
  */
 export class StrandedSessionOwnerError extends Error {
   /** The owner's hook, when ingress looked it up; its metadata names the session. */
@@ -48,6 +49,7 @@ export async function resumeRunnableHook(
   payload: unknown,
   inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
+  if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   const world = inbox !== undefined ? await getWorld() : undefined;
   if (
     inbox !== undefined &&
@@ -69,21 +71,17 @@ export async function resumeRunnableHook(
       }
     }
   }
-  if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
 }
 
 /**
  * Throws {@link StrandedSessionOwnerError} when the run holding a physical
  * session inbox token cannot execute. An unheld token passes: resuming it
- * reports the absence. Where the World replays each run on its own
- * deployment, every owner can execute, so nothing is looked up.
+ * reports the absence.
  */
 export async function assertRunnableSessionInbox(token: string): Promise<void> {
-  const world = await getWorld();
-  if (routesToOwnerDeployment(world)) return;
   const holder = await findSessionHookHolder(token);
-  if (holder !== undefined) await assertRunnableOwner(world, holder.runId, holder.hook);
+  if (holder !== undefined) await assertRunnableOwner(holder.runId, holder.hook);
 }
 
 /** {@link assertRunnableSessionInbox} for a holder the caller already looked up. */
@@ -91,9 +89,7 @@ export async function assertRunnableSessionOwner(holder: {
   readonly runId: string;
   readonly hook?: Hook;
 }): Promise<void> {
-  const world = await getWorld();
-  if (routesToOwnerDeployment(world)) return;
-  await assertRunnableOwner(world, holder.runId, holder.hook);
+  await assertRunnableOwner(holder.runId, holder.hook);
 }
 
 /**
@@ -125,16 +121,12 @@ export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
     return await getHookByToken(token);
   } catch (error) {
     if (!DevelopmentRunUnavailableError.is(error)) throw error;
-    await assertRunnableOwner(await getWorld(), error.runId);
+    await assertRunnableOwner(error.runId);
     throw error;
   }
 }
 
-async function assertRunnableOwner(
-  world: Awaited<ReturnType<typeof getWorld>>,
-  runId: string,
-  hook?: Hook,
-): Promise<void> {
-  const ownerRun = await findRetiredOwnerRun(world, runId);
+async function assertRunnableOwner(runId: string, hook?: Hook): Promise<void> {
+  const ownerRun = await findStrandedOwnerRun(await getWorld(), runId);
   if (ownerRun !== undefined) throw new StrandedSessionOwnerError(ownerRun, hook);
 }

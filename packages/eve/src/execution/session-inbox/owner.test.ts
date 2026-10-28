@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HookSchema } from "@workflow/world";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { issueInboxHandle, readInboxHandle } from "#execution/session-inbox/handle.js";
-import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import { resumeRunnableHook, StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 
 const runtime = vi.hoisted(() => ({
   resumeHook: vi.fn(),
   getWorld: vi.fn(),
+  getHookByToken: vi.fn(),
   parseHookResumeHandle: vi.fn(),
   supportsHandles: true,
 }));
@@ -44,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.resetAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("reusing a session inbox handle", () => {
@@ -95,6 +98,35 @@ describe("reusing a session inbox handle", () => {
     const result = await resumeRunnableHook(hook.token, payload, issueInboxHandle(hook));
     expect(runtime.resumeHook.mock.calls.map(([target]) => target)).toEqual([hook, hook.token]);
     expect(result.runId).toBe("wrun_successor");
+  });
+
+  it("refuses a deleted owner even when a signed inbox handle is available", async () => {
+    const inbox = { ...hook, token: sessionInboxHookToken("deleted-owner") };
+    runtime.getHookByToken.mockResolvedValue(inbox);
+    runtime.getWorld.mockResolvedValue({
+      capabilities: { deploymentAffinity: true, resolvedHookResume: true },
+      runs: {
+        get: vi.fn(async () => ({
+          runId: inbox.runId,
+          deploymentId: "dpl_deleted",
+          attributes: { "$eve.deployment_url": "handle-deleted.vercel.app" },
+        })),
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(null, {
+            status: 410,
+            headers: { "x-vercel-error": "DEPLOYMENT_DELETED" },
+          }),
+      ),
+    );
+    await expect(
+      resumeRunnableHook(inbox.token, payload, issueInboxHandle(inbox)),
+    ).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+    expect(runtime.resumeHook).not.toHaveBeenCalled();
   });
 
   it("does not redeliver when the resolved write has an uncertain outcome", async () => {

@@ -34,6 +34,8 @@
  * - `$eve.version`      — eve version that started the run; handoff successors
  *   and legacy importers re-record their own at boot. Ingress and the stranded
  *   replay guard compare it to decide whether the run can still execute
+ * - `$eve.deployment_url` — unique URL of the Vercel deployment that runs the
+ *   owner. Ingress probes it to notice a deleted deployment; absent off Vercel
  * - `$eve.session`      — public session id a handoff successor owner serves
  */
 
@@ -61,6 +63,23 @@ export const EVE_PREWARM_ATTRIBUTE = "$eve.prewarm";
 
 /** eve version recorded on every run eve starts; successors re-record it at boot. */
 export const EVE_VERSION_ATTRIBUTE = "$eve.version";
+
+/** Unique URL of the Vercel deployment that runs the owner; absent off Vercel. */
+export const EVE_DEPLOYMENT_URL_ATTRIBUTE = "$eve.deployment_url";
+
+/**
+ * Attributes that name the build and deployment running a session owner.
+ * Recorded at start and re-recorded by handoff successors and legacy
+ * importers at boot, from their own code and environment.
+ */
+export function buildOwnerIdentityAttributes(
+  eveVersion: string,
+  deploymentUrl?: string,
+): Record<string, string> {
+  const attributes: Record<string, string> = { [EVE_VERSION_ATTRIBUTE]: eveVersion };
+  if (deploymentUrl?.trim()) attributes[EVE_DEPLOYMENT_URL_ATTRIBUTE] = deploymentUrl.trim();
+  return attributes;
+}
 
 /** Run kind; only runs started as a session or subagent session carry it. */
 export const EVE_TYPE_ATTRIBUTE = "$eve.type";

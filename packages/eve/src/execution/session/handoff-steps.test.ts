@@ -33,7 +33,10 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   getStepMetadata: () => ({ stepId: "handover-step", attempt: 2 }),
 }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("handover trace events", () => {
   it.each([0, 2])(
@@ -124,6 +127,7 @@ describe("prepareSuccessorStep", () => {
   });
 
   it("hydrates the target bundle and durable state, then records this owner", async () => {
+    vi.stubEnv("VERCEL_URL", "successor.vercel.app");
     const require = vi.fn();
     deserializeContextMock.mockResolvedValue({ require });
     readDurableSessionMock.mockReturnValue({});
@@ -134,7 +138,10 @@ describe("prepareSuccessorStep", () => {
     expect(require).toHaveBeenCalledWith(BundleKey);
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
     expect(setAttributesMock).toHaveBeenCalledWith(
-      expect.objectContaining({ "$eve.session": "session-1" }),
+      expect.objectContaining({
+        "$eve.session": "session-1",
+        "$eve.deployment_url": "successor.vercel.app",
+      }),
       { allowReservedAttributes: true },
     );
   });

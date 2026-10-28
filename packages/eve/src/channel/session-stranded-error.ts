@@ -6,9 +6,10 @@ interface StrandedSessionOwner {
 
 /**
  * Thrown when sending, responding, clearing, or following the live stream of
- * a session whose owner another eve version built, on a World that only runs
- * this build, so the owner can never execute again. Nothing is delivered and
- * nothing is mutated. Historical reads with `follow: false` still succeed.
+ * a session whose owner cannot currently execute: another eve version built it
+ * on a World that only runs this build, or its deployment was deleted. Nothing
+ * is delivered and nothing is mutated. Historical reads with `follow: false`
+ * still succeed.
  * Call `reset()` to end the session, then start a new one. Narrow with
  * {@link SessionStrandedError.is}.
  */

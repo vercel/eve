@@ -24,9 +24,9 @@ import type {
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
+  buildOwnerIdentityAttributes,
   buildSessionAttributes,
   buildSubagentRootAttributes,
-  EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
@@ -683,7 +683,16 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
     return await start(workflow, args, {
       ...options,
       allowReservedAttributes: true,
-      attributes: { ...options?.attributes, [EVE_VERSION_ATTRIBUTE]: EVE_PACKAGE_INFO.version },
+      attributes: {
+        ...options?.attributes,
+        ...buildOwnerIdentityAttributes(
+          EVE_PACKAGE_INFO.version,
+          // A remote successor records its own URL at boot, not its source's.
+          deploymentId === process.env.VERCEL_DEPLOYMENT_ID?.trim()
+            ? process.env.VERCEL_URL
+            : undefined,
+        ),
+      },
       deploymentId,
     });
   });

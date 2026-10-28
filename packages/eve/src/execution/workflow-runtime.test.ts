@@ -38,7 +38,7 @@ import { captureLogRecords } from "#internal/testing/log-records.js";
 const getHookByTokenMock = vi.fn();
 const getRunRecordMock = vi.fn();
 const world = {
-  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  // Vercel-shaped: owners run on their own deployment, so any eve version is runnable.
   capabilities: { deploymentAffinity: true },
   getDeploymentId: vi.fn(async () => "dpl_current"),
   runs: { get: getRunRecordMock },
@@ -69,7 +69,7 @@ beforeEach(() => {
     return currentSessionHook(token);
   });
   getWorldMock.mockResolvedValue(world);
-  getRunRecordMock.mockResolvedValue({ status: "running" });
+  getRunRecordMock.mockResolvedValue({ attributes: {}, status: "running" });
   getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
   resumeHookMock.mockImplementation(async (token: string) => currentSessionHook(token));
 });
@@ -144,6 +144,22 @@ describe("startWorkflowOnCurrentDeployment", () => {
 });
 
 describe("deployment starts", () => {
+  it.each([
+    ["dpl_source", "source.vercel.app"],
+    ["dpl_successor", undefined],
+  ])(
+    "records only the target owner's deployment URL when starting on %s",
+    async (target, expectedUrl) => {
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_source");
+      vi.stubEnv("VERCEL_URL", "source.vercel.app");
+      startMock.mockResolvedValue({ runId: "run-owner" });
+      await startWorkflowOnDeployment(workflowEntryReference, [], target);
+      const attributes = startMock.mock.calls[0]![2].attributes;
+      expect(attributes["$eve.version"]).toBe(resolveInstalledPackageInfo().version);
+      expect(attributes["$eve.deployment_url"]).toBe(expectedUrl);
+    },
+  );
+
   it("rejects non-exact deployment selectors", async () => {
     await expect(startWorkflowOnDeployment(workflowEntryReference, [], "latest")).rejects.toThrow(
       "exact deployment id",
@@ -248,7 +264,8 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).rejects.toThrow("command accepted");
     expect(resumeHookMock).toHaveBeenCalledOnce();
     expect(startMock).not.toHaveBeenCalled();
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    // Ingress looked the owner up once; identity hydration never looks it up again.
+    expect(getHookByTokenMock).toHaveBeenCalledOnce();
     expect(logs.records).toContainEqual(
       expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
     );
