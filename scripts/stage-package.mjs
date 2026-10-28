@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { access, cp, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveCatalogReferences } from "./package-catalog.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 if (
@@ -32,8 +33,9 @@ try {
       if (error?.code !== "ENOENT") throw error;
     }
   }
+  const { manifest: resolvedManifest } = await resolveCatalogReferences(root, manifest);
   const stagedManifest = {
-    ...manifest,
+    ...resolvedManifest,
     files: [...new Set([...manifest.files, "!dist/CHANGELOG.md", "CHANGELOG.md"])],
   };
   stagedManifest.publishConfig = { ...manifest.publishConfig };
