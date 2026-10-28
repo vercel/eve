@@ -460,7 +460,11 @@ async function toolContext(
     abortSignal: AbortSignal;
     approval?: { responder: unknown };
   } = {
-    session: { id: sessionId, auth: { current, initiator: current }, turn: { id: "turn-1" } },
+    session: {
+      id: sessionId,
+      auth: { current, initiator: current },
+      turn: { id: "turn-1", sequence: 0 },
+    },
     // eve gives every call its own ID; a tool may key idempotent writes on it.
     callId: `call-${(toolCalls += 1)}`,
     abortSignal: new AbortController().signal,
@@ -519,7 +523,7 @@ async function approvalSettles(tool: any, user: User, input: unknown): Promise<b
       principal: requester,
     },
     response: { decision: "approve", principal: requester },
-    session: { id: "session-1", initiator: requester, turn: { id: "turn-1" } },
+    session: { id: "session-1", initiator: requester, turn: { id: "turn-1", sequence: 0 } },
     auth: {
       getToken: async () => {
         throw new Error("The grader has no provider tokens.");
