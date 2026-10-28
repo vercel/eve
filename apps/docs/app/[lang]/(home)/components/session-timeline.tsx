@@ -697,7 +697,7 @@ export function SessionTimeline(): JSX.Element {
           messages scrolled past it. In full it opens at its start; a replay fills from the
           bottom like a chat. */}
       <ol
-        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [scrollbar-width:none] [&>li:first-child]:mt-auto"
+        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-12 [scrollbar-width:none] [&>li:first-child]:mt-auto"
         key={platform}
         onScroll={(event) => measure(event.currentTarget)}
         ref={listRef}
@@ -749,12 +749,20 @@ export function SessionTimeline(): JSX.Element {
             </ThreadMessage>
           );
         })}
+        {next?.kind === "message" ? (
+          <li className={cn("pt-3", platform === "whatsapp" ? "pl-2" : "pl-[2.875rem]")}>
+            <TypingIndicator author={AUTHORS[next.author]} />
+          </li>
+        ) : null}
       </ol>
-      <figcaption className="mt-3 flex items-center gap-2 text-copy-13 text-gray-900">
+      {/* A floating dock: the only raised element, overlapping the conversation's bottom so
+          messages fade out behind it. */}
+      <figcaption className="relative z-10 mx-auto -mt-9 flex w-fit items-center gap-1 rounded-full border border-gray-alpha-400 bg-background-100 p-1 shadow-sm">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               aria-label={`Conversation: ${conversation.label}`}
+              className="rounded-full"
               prefix={conversation.logo("size-4")}
               size="small"
               suffix={<IconChevronDownSmall className="text-gray-900" />}
@@ -763,7 +771,7 @@ export function SessionTimeline(): JSX.Element {
               {conversation.label}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-56">
+          <DropdownMenuContent align="start" className="min-w-56" side="top">
             <DropdownMenuRadioGroup onValueChange={pick} value={platform}>
               {CONVERSATIONS.map((c) => (
                 // The check sits on the right, so the item's own left indicator is hidden.
@@ -780,9 +788,9 @@ export function SessionTimeline(): JSX.Element {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <TypingIndicator author={next?.kind === "message" ? AUTHORS[next.author] : undefined} />
+        <span aria-hidden className="h-4 w-px bg-gray-alpha-400" />
         <Button
-          className="ml-auto"
+          className="rounded-full"
           onClick={playing ? () => setPlaying(false) : play}
           prefix={playing ? <IconStopCircle /> : <IconPlayCircle />}
           size="small"
