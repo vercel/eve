@@ -232,15 +232,9 @@ jobs:
         run: |
           echo "Pull request base sandbox benchmark failed; build timing will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build eve package
-        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: pnpm build:eve
-
       - name: Build weather-agent for size analysis
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: >-
-          VERCEL=1 pnpm --filter weather-agent
-          exec eve build --skip-sandbox-prewarm
+        run: VERCEL=1 pnpm build:weather-analysis
 
       - name: Build sandbox benchmark in Vercel mode
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}

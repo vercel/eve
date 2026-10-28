@@ -101,6 +101,7 @@
     },
     "test:scenario": {
       "cache": false,
+      "dependsOn": ["^build"],
       "env": ["EVE_SANDBOX_IMAGE_TAG"],
       "inputs": [
         "$TURBO_DEFAULT$",

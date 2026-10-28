@@ -85,7 +85,7 @@
       "dependsOn": ["build"]
     },
     "test:scenario": {
-      "dependsOn": ["build"]
+      "dependsOn": ["$TURBO_EXTENDS$", "build"]
     },
     "test:webchat": {
       "cache": false,
@@ -94,7 +94,7 @@
     },
     "test:framework-fixtures": {
       "cache": false,
-      "dependsOn": ["build:compiled"]
+      "dependsOn": ["build"]
     },
     "test:tui": {
       "cache": false,

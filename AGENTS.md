@@ -63,7 +63,7 @@ pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
 pnpm test:integration   # integration tests (several minutes; leave the full run to CI)
 pnpm test:scenario      # scenario tests (2–5 min; Turbo builds prerequisites)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
 pnpm test:webchat       # web chat template in headless Chromium (needs playwright-core's chromium-headless-shell)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
