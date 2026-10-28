@@ -122,7 +122,7 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         # Full build, not build:js: the deployed/runtime bundles must carry the
         # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
-        run: pnpm --filter eve run build
+        run: pnpm exec turbo run build --filter=eve
 
       - name: Build extension fixtures
         if: needs.changes.outputs.relevant == 'true'

@@ -60,15 +60,15 @@ Consumers with a PAT, benchmark token, or another credential provider can omit t
 Rebuild eve after editing `extension/`; the local agent under `agent/` mounts the built `eve/extensions/code`:
 
 ```sh
-pnpm --filter eve build
-pnpm --filter @eve/code typecheck
-pnpm --filter @eve/code test
-pnpm --filter @eve/code test:scenario
+pnpm exec turbo run build --filter=eve
+pnpm exec turbo run typecheck --filter=@eve/code
+pnpm exec turbo run test:unit test:integration --filter=@eve/code
+pnpm exec turbo run test:scenario --filter=@eve/code
 pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
 ```
 
-Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. The package integration task depends only on eve's build. The root integration command runs the framework suite before the other packages because that suite rebuilds the runtime files they import. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
+Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. Turbo builds eve once before the integration tasks that import its runtime files. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
 
 The `typescript-compiler` development alias supplies the JavaScript compiler API used by the diagnostics worker test. The workspace's TypeScript 7 CLI remains the package typechecker. `prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
 

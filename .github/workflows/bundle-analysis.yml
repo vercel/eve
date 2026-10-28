@@ -139,7 +139,7 @@ jobs:
       - name: Build eve package on pull request base
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         working-directory: ${{ steps.baseline.outputs.root }}
-        run: pnpm --filter eve build
+        run: pnpm exec turbo run build --filter=eve
 
       - name: Resolve weather app on pull request base
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
@@ -234,7 +234,7 @@ jobs:
 
       - name: Build eve package
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: pnpm --filter eve build
+        run: pnpm exec turbo run build --filter=eve
 
       - name: Build weather-agent for size analysis
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
