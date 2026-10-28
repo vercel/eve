@@ -38,12 +38,12 @@ export class ClientSessions {
   /** Attaches a fixed handle to a known session ID without performing I/O. */
   attach(
     sessionId: string,
-    options?: Partial<Pick<ClientSessionState, "resume" | "streamIndex">>,
+    options?: Partial<Pick<ClientSessionState, "hint" | "streamIndex">>,
   ): ClientSession {
     if (sessionId.length === 0) throw new Error("sessionId must be a non-empty string.");
     return new ClientSession(this.#context, {
       sessionId,
-      resume: options?.resume,
+      hint: options?.hint,
       streamIndex: options?.streamIndex ?? 0,
     });
   }

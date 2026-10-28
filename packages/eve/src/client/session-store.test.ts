@@ -183,7 +183,7 @@ describe("SessionStore acceptance and observation", () => {
     current.newSession();
     expect(current.snapshot.session).toBeUndefined();
   });
-  it("preserves refreshed resume values in saved snapshots and session-change callbacks", async () => {
+  it("preserves refreshed hint values in saved snapshots and session-change callbacks", async () => {
     agent();
     const fetchAgent = vi.mocked(fetch).getMockImplementation()!;
     const wireInboxes: Array<string | undefined> = [];
@@ -194,27 +194,27 @@ describe("SessionStore acceptance and observation", () => {
       const accepted = (await response.json()) as Record<string, unknown>;
       return Response.json({
         ...accepted,
-        inbox: `resume_${wireInboxes.length}`,
+        inbox: `hint_${wireInboxes.length}`,
       });
     });
-    const current = store({ initialSession: { ...initialSession, resume: "resume_0" } });
+    const current = store({ initialSession: { ...initialSession, hint: "hint_0" } });
     const changed = vi.fn();
     current.setCallbacks({ onSessionChange: changed });
     const before = current.snapshot.session;
-    expect(before?.resume).toBe("resume_0");
+    expect(before?.hint).toBe("hint_0");
 
     // No stream facts arrive: the POST receipt must publish the refreshed state.
     await current.send({ message: "Alice starts the conversation." });
-    expect(current.snapshot.session).toEqual({ ...initialSession, resume: "resume_1" });
+    expect(current.snapshot.session).toEqual({ ...initialSession, hint: "hint_1" });
     expect(changed).toHaveBeenLastCalledWith(current.snapshot.session);
-    expect(before?.resume).toBe("resume_0");
+    expect(before?.hint).toBe("hint_0");
 
     const restored = store({
       initialSession: JSON.parse(JSON.stringify(changed.mock.lastCall![0])),
     });
     await restored.send({ message: "Bob continues after reopening it." });
-    expect(wireInboxes).toEqual(["resume_0", "resume_1"]);
-    expect(restored.snapshot.session).toEqual({ ...initialSession, resume: "resume_2" });
+    expect(wireInboxes).toEqual(["hint_0", "hint_1"]);
+    expect(restored.snapshot.session).toEqual({ ...initialSession, hint: "hint_2" });
   });
 
   it.each([false, true])(
