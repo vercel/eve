@@ -1,5 +1,7 @@
 import {
+  assertSupportedSandboxContract,
   createSandboxEnvironment,
+  type SUPPORTED_SANDBOX_CONTRACT_VERSIONS,
   type SandboxEnvironment,
   type SandboxSelectorContext,
 } from "#shared/sandbox-environment.js";
@@ -191,8 +193,6 @@ export interface SandboxPrepareOption<Session> {
 export type WithPrepareOption<Options extends object, Session> = Options &
   SandboxPrepareOption<Session>;
 
-const SUPPORTED_CONTRACT_VERSIONS = [1] as const;
-
 export interface SandboxProviderDefinition<
   EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
@@ -206,7 +206,7 @@ export interface SandboxProviderDefinition<
    * targets. eve rejects a provider that targets a version it does not
    * support, instead of running it against a contract it was not written for.
    */
-  readonly contractVersion: (typeof SUPPORTED_CONTRACT_VERSIONS)[number];
+  readonly contractVersion: (typeof SUPPORTED_SANDBOX_CONTRACT_VERSIONS)[number];
   /** Bump when `State` changes incompatibly; recorded state from another version starts fresh. */
   readonly stateProtocolVersion?: number;
   /**
@@ -243,6 +243,11 @@ export interface SandboxProviderRuntime {
     SandboxJson,
     object
   >;
+  /**
+   * The provider's `contractVersion`. The eve that runs the lifecycle checks it again, because
+   * a provider that bundles its own eve copy was only checked by that copy.
+   */
+  readonly contractVersion: number;
   /** The authored `prepare` option, which eve runs in `ctx.populate()`. */
   readonly prepare: ((sandbox: SandboxSession) => void | Promise<void>) | undefined;
   readonly providerName: string;
@@ -270,12 +275,13 @@ export function defineSandboxProvider<
   SandboxSession & Extensions
 > {
   type Session = SandboxSession & Extensions;
-  assertSupportedContractVersion(definition);
+  assertSupportedSandboxContract(definition.name, definition.contractVersion);
   return {
     name: definition.name,
     environment(options?: WithPrepareOption<EnvironmentOptions, Session>) {
       const { prepare, ...environmentOptions } = options ?? {};
       return createSandboxEnvironment<OpenOptions, Session>({
+        contractVersion: definition.contractVersion,
         // The provider's own types are erased: core passes it only what it returned.
         implementation: definition.environment(
           environmentOptions as EnvironmentOptions,
@@ -286,19 +292,4 @@ export function defineSandboxProvider<
       });
     },
   } as SandboxProvider<WithPrepareOption<EnvironmentOptions, Session>, OpenOptions, Session>;
-}
-
-function assertSupportedContractVersion(definition: {
-  readonly name: string;
-  readonly contractVersion?: unknown;
-}): void {
-  const version = definition.contractVersion;
-  if ((SUPPORTED_CONTRACT_VERSIONS as readonly unknown[]).includes(version)) return;
-  const declared =
-    version === undefined
-      ? "does not set contractVersion"
-      : `targets contractVersion ${typeof version === "string" ? JSON.stringify(version) : String(version)}`;
-  throw new Error(
-    `Sandbox provider "${definition.name}" ${declared}. This version of eve supports contractVersion ${SUPPORTED_CONTRACT_VERSIONS.join(", ")}. Update the provider package or eve so both target the same sandbox provider contract.`,
-  );
 }

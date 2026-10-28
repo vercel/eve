@@ -109,11 +109,11 @@ export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 
 ### Declare the contract version
 
-`contractVersion` is required. It is the version of eve's sandbox provider contract that your implementation targets: the connection methods, lifecycle methods, and context values described on this page. The current version is `1`, and it is the only value the type accepts. eve raises the version when it changes that contract in a way an existing provider cannot handle, such as a new requirement on `spawn()`, so a provider written for one version is never run against another.
+`contractVersion` is required. It is the version of eve's sandbox provider contract that your implementation targets: the connection methods, lifecycle methods, and context values described on this page. The current version is `1`, and it is the only value the type accepts. eve raises the version when it changes that contract in a way an existing provider cannot handle, such as a new requirement on `spawn()`, so eve rejects a provider written for a version it does not support instead of running it.
 
 `contractVersion` is unrelated to `stateProtocolVersion`, which versions the session state your provider records (see [`resume()`](#resume)).
 
-`defineSandboxProvider()` throws when `contractVersion` is missing or names a version this eve does not support:
+`defineSandboxProvider()` throws when `contractVersion` is missing or names a version this eve does not support. The eve that runs your app checks again before it uses the provider, which catches a provider package that bundles or depends on its own copy of eve instead of listing eve as a peer dependency:
 
 ```text
 Sandbox provider "acme" targets contractVersion 2. This version of eve supports contractVersion 1. Update the provider package or eve so both target the same sandbox provider contract.

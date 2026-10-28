@@ -8,6 +8,7 @@ import {
 } from "#execution/sandbox/prewarm.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
 import {
+  createSandboxEnvironment,
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
 } from "#shared/sandbox-environment.js";
@@ -104,6 +105,30 @@ describe("defineSandboxProvider", () => {
     expectTypeOf<
       Parameters<typeof defineSandboxProvider>[0]["contractVersion"]
     >().toEqualTypeOf<1>();
+  });
+
+  it("rechecks the contract version where core takes the runtime", () => {
+    // Stands in for an environment built by another eve copy, whose own
+    // defineSandboxProvider() accepted a version this eve does not support.
+    const { implementation } = getSandboxEnvironmentRuntime(
+      bakingProvider(recordingConnection().connection).environment(),
+    );
+    const environment = (contractVersion: number | undefined) =>
+      createSandboxEnvironment({
+        contractVersion: contractVersion as number,
+        implementation,
+        prepare: undefined,
+        providerName: "acme",
+        stateProtocolVersion: 1,
+      });
+
+    expect(() => getSandboxEnvironmentRuntime(environment(2))).toThrow(
+      'Sandbox provider "acme" targets contractVersion 2. This version of eve supports contractVersion 1. Update the provider package or eve so both target the same sandbox provider contract.',
+    );
+    expect(() => getSandboxEnvironmentRuntime(environment(undefined))).toThrow(
+      'Sandbox provider "acme" does not set contractVersion.',
+    );
+    expect(getSandboxEnvironmentRuntime(environment(1))).toMatchObject({ contractVersion: 1 });
   });
 
   it("passes environment options to the provider without prepare, and {} when omitted", () => {

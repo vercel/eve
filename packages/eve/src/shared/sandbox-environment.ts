@@ -82,10 +82,31 @@ export function createSandboxEnvironment<
   return environment;
 }
 
+export const SUPPORTED_SANDBOX_CONTRACT_VERSIONS = [1] as const;
+
+/** Throws unless this eve supports the sandbox provider contract a provider targets. */
+export function assertSupportedSandboxContract(providerName: string, version: unknown): void {
+  if ((SUPPORTED_SANDBOX_CONTRACT_VERSIONS as readonly unknown[]).includes(version)) return;
+  const declared =
+    version === undefined
+      ? "does not set contractVersion"
+      : `targets contractVersion ${typeof version === "string" ? JSON.stringify(version) : String(version)}`;
+  throw new Error(
+    `Sandbox provider "${providerName}" ${declared}. This version of eve supports contractVersion ${SUPPORTED_SANDBOX_CONTRACT_VERSIONS.join(", ")}. Update the provider package or eve so both target the same sandbox provider contract.`,
+  );
+}
+
+/**
+ * Returns the provider runtime core runs, after checking its contract version: the environment
+ * may come from another eve copy whose `defineSandboxProvider()` approved a version this eve
+ * does not support.
+ */
 export function getSandboxEnvironmentRuntime(
   environment: SandboxEnvironmentIdentity,
 ): SandboxProviderRuntime {
-  return environment[PROVIDER_RUNTIME] as SandboxProviderRuntime;
+  const runtime = environment[PROVIDER_RUNTIME] as SandboxProviderRuntime;
+  assertSupportedSandboxContract(runtime.providerName, runtime.contractVersion);
+  return runtime;
 }
 
 export function bindSandboxEnvironment(
