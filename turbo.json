@@ -58,6 +58,16 @@
     },
     "test:e2e": {
       "cache": false,
+      "dependsOn": ["^build"],
+      "env": [
+        "AI_GATEWAY_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "EVE_E2E_MODEL",
+        "EVE_E2E_WORKFLOW_WORLD",
+        "EVE_SANDBOX_IMAGE_TAG",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "OPENAI_API_KEY"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
