@@ -19,7 +19,7 @@ export interface ClientSendReceipt {
 }
 
 interface DeliveryInput {
-  readonly inbox?: string;
+  readonly resume?: string;
   readonly createStream: (options?: DeliveryReadOptions) => AsyncIterable<SessionStreamEvent>;
   readonly deliveryId: string;
   readonly receipt?: ClientSendReceipt;
@@ -32,14 +32,15 @@ const sendReceipts = new WeakMap<Delivery, ClientSendReceipt>();
 export class StreamDelivery<TOutput = unknown> implements Delivery<TOutput> {
   readonly sessionId: string;
   readonly deliveryId: string;
-  readonly inbox?: string;
+  /** Opaque value to store with the session state; see `ClientSessionState.resume`. */
+  readonly resume?: string;
   readonly #createStream: DeliveryInput["createStream"];
   #result: DeliveryResult<TOutput> | undefined;
 
   /** @internal */
   constructor(input: DeliveryInput) {
     this.sessionId = input.sessionId;
-    this.inbox = input.inbox;
+    this.resume = input.resume;
     this.deliveryId = input.deliveryId;
     if (input.receipt !== undefined) sendReceipts.set(this, input.receipt);
     this.#createStream = input.createStream;

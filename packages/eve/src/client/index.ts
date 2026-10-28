@@ -6,7 +6,13 @@ export { SessionStore } from "#client/session-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
-export { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
+export { EveError } from "#shared/eve-error.js";
+export {
+  ClientError,
+  ClientSessionStrandedError,
+  type ClientErrorCode,
+} from "#client/client-error.js";
+export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 export { conversationOf } from "#client/conversation.js";
 export { agentCallActivity } from "#client/conversation-state.js";
 export {
