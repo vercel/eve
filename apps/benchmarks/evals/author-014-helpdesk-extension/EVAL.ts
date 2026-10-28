@@ -243,7 +243,7 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   );
   const ctx = {
     agent: { name: "support" },
-    session: { id: "session-1", auth: { current: null, initiator: null } },
+    session: graderSession,
     position: { line: facts.length - 1, index: 0 },
     view,
     turn: { id: "turn-1" },
@@ -261,11 +261,11 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   return output;
 }
 
-/** The session eve hands tools and approval policies: one conversation, in its first turn. */
+/** The session eve hands tools, hooks, and approval policies: one conversation, in its first turn. */
 const graderSession = {
   id: "session-1",
   auth: { current: null, initiator: null },
-  turn: { id: "turn-1" },
+  turn: { id: "turn-1", sequence: 0 },
 };
 
 /**

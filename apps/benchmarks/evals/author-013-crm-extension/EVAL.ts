@@ -269,7 +269,7 @@ function stubFetch() {
 const graderSession = {
   id: "session-1",
   auth: { current: null, initiator: null },
-  turn: { id: "turn-1" },
+  turn: { id: "turn-1", sequence: 0 },
 };
 
 /**
