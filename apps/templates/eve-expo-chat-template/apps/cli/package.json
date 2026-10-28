@@ -1,0 +1,17 @@
+{
+  "name": "eve-start",
+  "version": "0.1.0",
+  "bin": {
+    "eve-start": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "dependencies": {
+    "agent-browser": "0.39.2"
+  },
+  "devDependencies": {
+    "@types/qrcode-terminal": "^0.12.2"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "eve-expo-chat-template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "dev": "pnpm build:mobile && pnpm build:runtime && node scripts/dev.mjs",
+    "deploy": "eve deploy",
+    "build": "pnpm build:mobile && node scripts/build-agent.mjs",
+    "build:runtime": "node scripts/build-libraries.mjs",
+    "prepare": "pnpm build:runtime",
+    "typecheck": "pnpm build:runtime && tsc --noEmit && pnpm --dir apps/mobile check",
+    "test": "node --conditions=development --test tests/*.test.ts",
+    "test:smoke": "pnpm test",
+    "cli": "node --conditions=development --env-file-if-exists=.env.local apps/cli/src/index.ts",
+    "mobile": "pnpm --dir apps/mobile start",
+    "mobile:go": "pnpm --dir apps/mobile go",
+    "mobile:build": "node scripts/build-mobile.mjs",
+    "build:mobile": "node scripts/build-mobile-bundle.mjs",
+    "postdeploy": "node --env-file-if-exists=.env.local --input-type=module -e \"import('@eve-start/eve/deploy').then(({afterDeploy})=>afterDeploy())\""
+  },
+  "dependencies": {
+    "@agent-browser/eve": "^0.39.2",
+    "@eve-start/browser-runtime": "link:./packages/browser-runtime",
+    "@eve-start/eve": "link:./packages/start",
+    "@eve-start/protocol": "link:./packages/protocol",
+    "@eve-start/sdk": "link:./packages/sdk",
+    "@novnc/novnc": "^1.7.0",
+    "@vercel/functions": "^3.0.0",
+    "@vercel/sandbox": "^3.8.0",
+    "agent-browser": "0.39.2",
+    "dompurify": "^3.4.17",
+    "eve": "^0.84.0",
+    "hono": "^4.12.0",
+    "marked": "^18.1.1",
+    "postgres": "^3.4.0",
+    "qrcode": "^1.5.4",
+    "shell-quote": "^1.12.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/shell-quote": "^1.7.5",
+    "esbuild": "^0.28.2",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=24.3"
+  },
+  "packageManager": "pnpm@12.9.1"
+}

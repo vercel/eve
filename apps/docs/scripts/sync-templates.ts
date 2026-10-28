@@ -1,10 +1,17 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 import { getToken } from "@vercel/connect";
 
-import type { TemplateFile } from "../lib/templates/compose";
+import {
+  composeTemplateEntries,
+  type GeneratedTemplatesInput,
+  type TemplateFile,
+} from "../lib/templates/compose";
 import { templateManifest } from "../lib/templates/manifest";
+import { readLocalTemplate } from "../lib/templates/sync-local";
 import {
   commitUrl,
   languageForPath,
@@ -32,6 +39,20 @@ const resolveToken = async (): Promise<string | undefined> => {
   }
 };
 
+const useWorkingTree = process.argv.includes("--local");
+const outputPath = join(import.meta.dirname, "../.template-data/templates.json");
+let cached: GeneratedTemplatesInput = { templates: {} };
+if (useWorkingTree) {
+  try {
+    cached = JSON.parse(await readFile(outputPath, "utf8")) as GeneratedTemplatesInput;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+const repositoryRoot = join(import.meta.dirname, "../../..");
+const localRevision = useWorkingTree
+  ? (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot })).stdout.trim()
+  : undefined;
 const token = await resolveToken();
 const deployedCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
 const headers: Record<string, string> = {
@@ -70,10 +91,39 @@ const githubText = async (url: string, notFoundMessage: string): Promise<string>
   return response.text();
 };
 
-console.log(`Syncing templates from GitHub (${token ? "authenticated" : "unauthenticated"})`);
+console.log(
+  useWorkingTree
+    ? "Syncing in-repo templates from the local working tree; external templates from cached snapshots or GitHub"
+    : `Syncing templates from GitHub (${token ? "authenticated" : "unauthenticated"})`,
+);
 
 const syncedTemplates = await Promise.all(
   templateManifest.map(async (entry) => {
+    if (localRevision) {
+      const local = await readLocalTemplate(entry, repositoryRoot, localRevision);
+      if (local) {
+        return {
+          slug: entry.slug,
+          data: local,
+          log: `${entry.slug} → local working tree (${local.files.length} files; source links use HEAD)`,
+        };
+      }
+      const snapshot = cached.templates[entry.slug];
+      if (snapshot) {
+        const [validated] = composeTemplateEntries([entry], {
+          templates: { [entry.slug]: snapshot },
+        });
+        return {
+          slug: entry.slug,
+          data: {
+            files: validated.files,
+            readme: validated.readme,
+            sourceRevision: validated.sourceRevision,
+          },
+          log: `${entry.slug} → cached external snapshot (${snapshot.sourceRevision.slice(0, 7)})`,
+        };
+      }
+    }
     const { github } = entry;
     const source =
       deployedCommit && github.owner === "vercel" && github.repo === "eve"
@@ -127,7 +177,6 @@ const output = {
   templates,
 };
 
-const outputPath = join(import.meta.dirname, "../.template-data/templates.json");
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`Wrote ${outputPath}`);

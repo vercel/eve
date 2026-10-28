@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <title>eve Start</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/assets/geist.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/assets/web.css" />
+    <script src="/assets/web.js" type="module"></script>
+  </head>
+  <body>
+    <svg class="sprite" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="i-gear" viewBox="0 0 24 24">
+        <path
+          d="m9 3-.6 2.3-2 .9L4.3 5 2 9l1.7 1.6v2.8L2 15l2.3 4 2.1-1.2 2 .9L9 21h6l.6-2.3 2-.9 2.1 1.2 2.3-4-1.7-1.6v-2.8L22 9l-2.3-4-2.1 1.2-2-.9L15 3z"
+        />
+        <circle cx="12" cy="12" r="3" />
+      </symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5m8 0h6" /></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6m8 4v6" /></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect x="6" y="2" width="12" height="20" rx="3" />
+        <path d="M11 18h2" />
+      </symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="13" rx="2" />
+        <path d="M8 21h8m-4-4v4" />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m7 17 10-10M7 7h10v10" /></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+    </svg>
+    <button
+      id="sidebar-backdrop"
+      class="sidebar-backdrop"
+      aria-label="Close navigation"
+      hidden
+    ></button>
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="/" aria-label="eve Start"
+        ><img src="/assets/eve-logo.svg" alt="eve" /><span>/ start</span></a
+      >
+
+      <nav>
+        <button class="nav-item selected" id="nav-chat">
+          <svg><use href="#i-terminal" /></svg><span id="agent-nav-name">Agent chat</span
+          ><span class="nav-shortcut">↵</span></button
+        ><button class="nav-item" id="nav-mobile">
+          <svg><use href="#i-phone" /></svg>Open on mobile
+        </button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="environment">
+        <div class="environment-heading">
+          <div class="workspace-label">Settings</div>
+          <button id="browser-settings" class="icon-button" aria-label="Settings" title="Settings">
+            <svg><use href="#i-gear" /></svg>
+          </button>
+        </div>
+        <p id="sidebar-browser-status" class="browser-status" aria-live="polite" hidden></p>
+      </div>
+    </aside>
+    <main class="app-main">
+      <header class="app-header">
+        <button id="toggle-sidebar" class="icon-button mobile-only" aria-label="Toggle navigation">
+          <svg><use href="#i-menu" /></svg>
+        </button>
+        <div class="chat-title">
+          <span class="header-slash">/</span><strong id="agent-name">Agent chat</strong
+          ><span id="live-status">Offline</span>
+        </div>
+        <button id="toggle-browser" aria-controls="browser-dock" aria-expanded="false" hidden>
+          Show browser
+        </button>
+      </header>
+      <section class="chat" aria-label="Conversation">
+        <div id="pair-panel" hidden>
+          <h1 id="entry-title">eve Start</h1>
+          <form id="login-form" hidden>
+            <label for="app-password">Password</label>
+            <div class="pair-input-row">
+              <input
+                id="app-password"
+                type="password"
+                required
+                maxlength="256"
+                autocomplete="current-password"
+              /><button id="login-button" class="primary">Sign in</button>
+            </div>
+            <p class="login-hint">
+              Use the password configured in <code>agent/extensions/start.ts</code>.
+            </p>
+            <p id="login-error" role="alert"></p>
+          </form>
+          <form id="pair-form">
+            <label for="pair-input">Pairing code</label>
+            <div class="pair-input-row">
+              <input id="pair-input" required placeholder="XXXX-XXXX" autocomplete="off" /><button
+                class="primary"
+              >
+                Connect ↗
+              </button>
+            </div>
+          </form>
+          <p class="pair-hint" id="pair-hint">Get a code from the agent’s web dashboard.</p>
+        </div>
+        <div id="welcome" hidden>
+          <img src="/assets/eve-icon.svg" alt="" />
+          <h1>What are we building?</h1>
+        </div>
+        <div id="messages" role="log" aria-live="polite" aria-label="Chat messages" hidden></div>
+        <div class="composer-area">
+          <button id="jump-latest" hidden>↓ Back to latest</button>
+          <div id="thinking" role="status" hidden>eve is thinking…</div>
+          <div id="suggestions" hidden>
+            <button data-prompt="What can you do?">Explore what’s possible ↗</button
+            ><button data-prompt="Check my inbox for actionable emails.">Check my inbox ↗</button>
+          </div>
+          <form id="compose">
+            <label class="sr-only" for="message">Message eve</label
+            ><textarea
+              id="message"
+              rows="1"
+              maxlength="10000"
+              placeholder="Message eve…"
+              disabled
+            ></textarea>
+            <div class="composer-tools">
+              <span class="composer-hint">↵ send <span>⇧ ↵ new line</span></span
+              ><button class="primary send-button" id="send" aria-label="Send message" disabled>
+                ↑
+              </button>
+            </div>
+          </form>
+          <div id="error" role="alert"></div>
+          <div id="model-name" class="model-name" hidden></div>
+        </div>
+      </section>
+    </main>
+    <aside id="browser-dock" class="browser-dock" aria-label="Active browser" hidden>
+      <div class="dock-header">
+        <span class="status-dot" id="preview-dot"></span><span id="dock-title">Cloud browser</span
+        ><button
+          id="browser-expand"
+          class="icon-button"
+          aria-label="Open full browser in a new tab"
+          title="Open full browser"
+        >
+          <svg><use href="#i-arrow" /></svg>
+        </button>
+      </div>
+      <div id="cloud-preview">
+        <div id="preview-screen" aria-label="Live cloud browser preview"></div>
+        <button id="preview-overlay" aria-label="Open full controllable cloud browser">
+          <span id="preview-label">Connecting to live browser…</span
+          ><span class="preview-expand">Open browser ↗</span>
+        </button>
+      </div>
+      <div class="dock-footer">
+        <span id="dock-status">Sleeping</span>
+      </div>
+    </aside>
+    <dialog id="connections-dialog" aria-label="Settings">
+      <div class="dialog-header">
+        <h2>Settings</h2>
+        <button id="close-settings" class="icon-button" aria-label="Close settings">
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <div class="settings-content">
+        <section class="settings-section">
+          <h3>Cloud browser</h3>
+          <p>
+            Chrome runs in a Vercel Sandbox. Sign-ins persist on its profile Drive, and it sleeps
+            when idle.
+          </p>
+          <div class="desktop-status" id="desktop-status">Loading…</div>
+          <div class="settings-actions">
+            <button class="primary" id="remote" disabled>Open full browser ↗</button
+            ><button id="stop" hidden>Stop sandbox</button>
+          </div>
+        </section>
+      </div>
+      <div class="dialog-footer"><button id="logout" hidden>Disconnect this browser</button></div>
+    </dialog>
+    <dialog id="mobile-dialog" aria-label="Open on mobile">
+      <div class="dialog-header">
+        <h2>Open on mobile</h2>
+        <button id="close-mobile" class="icon-button" aria-label="Close open on mobile">
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <div class="settings-content">
+        <section id="phone-settings" class="settings-section">
+          <div id="phone-code" class="pair-view">
+            <img id="pair-qr" class="qr" alt="Pairing QR code" hidden />
+            <p id="pair-instructions" class="pair-caption">Loading pairing link…</p>
+            <div class="pair-meta">
+              <svg
+                id="pair-code-timer"
+                class="code-timer"
+                viewBox="0 0 20 20"
+                role="img"
+                aria-label="Time until the pairing link refreshes"
+              >
+                <circle class="timer-track" cx="10" cy="10" r="8" />
+                <circle
+                  id="pair-code-progress"
+                  cx="10"
+                  cy="10"
+                  r="8"
+                  pathLength="100"
+                  stroke-dasharray="100"
+                  stroke-dashoffset="0"
+                />
+              </svg>
+              <span id="pair-code"></span><span>New link every 30 seconds</span>
+            </div>
+            <div class="pair-actions">
+              <button id="copy-pair-code" disabled>Copy link</button
+              ><a id="pair-link" class="pair-open" hidden>Open in Expo Go</a>
+            </div>
+            <p id="pair-code-status" aria-live="polite"></p>
+          </div>
+          <p id="mobile-local-help" class="pair-help">
+            Need Expo Go?
+            <a href="https://expo.dev/go" target="_blank" rel="noreferrer">Install it</a> on your
+            phone first. Pairing connects this phone directly to your agent.
+          </p>
+          <details id="metro-override">
+            <summary>Developing the mobile app?</summary>
+            <form id="expo-go-form">
+              <label for="expo-go-url">Metro server URL</label>
+              <div class="expo-go-url-row">
+                <input
+                  id="expo-go-url"
+                  type="url"
+                  placeholder="exp://192.168.1.10:8081"
+                  autocomplete="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                />
+                <button type="submit">Update QR</button>
+              </div>
+              <small
+                >Run <code>pnpm mobile:go --lan</code> and enter its URL to load your local changes.
+                Leave empty to use the deployed app.</small
+              >
+            </form>
+          </details>
+        </section>
+      </div>
+    </dialog>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+{
+  "name": "@eve-start/eve",
+  "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./client": {
+      "types": "./dist/client-types/relay-client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./provision": {
+      "default": "./dist/provision.js"
+    },
+    "./deploy": {
+      "default": "./dist/deploy.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@agent-browser/eve": "^0.39.2",
+    "@vercel/sandbox": "^3.8.0",
+    "hono": "^4.12.0",
+    "postgres": "^3.4.0",
+    "qrcode": "^1.5.4",
+    "shell-quote": "^1.12.0",
+    "zod": "^4.0.0"
+  },
+  "peerDependencies": {
+    "eve": ">=0.83.0"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension",
+      "externalDependencies": [
+        "@vercel/sandbox"
+      ]
+    }
+  }
+}

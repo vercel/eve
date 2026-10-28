@@ -1,0 +1,13 @@
+.env*
+.eve
+.expo
+.vercel
+node_modules
+apps/mobile/.expo
+apps/mobile/node_modules
+apps/mobile/ios
+apps/mobile/android
+apps/mobile/dist*
+apps/cli/dist
+packages/*/dist
+tests
