@@ -392,36 +392,55 @@ const CONVERSATIONS: {
   },
 ];
 
-const REACTIONS_KEY = "eve-home-reactions";
-
 // Vercel's custom Slack emoji: a short word in white on a colored tile.
 const TEXT_EMOJI = {
   LFG: "bg-pink-700",
 };
 
-function TextEmoji({
-  name,
-  className,
-  delay,
-}: {
-  name: keyof typeof TEXT_EMOJI;
-  className?: string;
-  delay?: number;
-}) {
+function TextEmoji({ name }: { name: keyof typeof TEXT_EMOJI }) {
   return (
     <span
       aria-label={`:${name.toLowerCase()}:`}
       className={cn(
         "inline-flex size-4 items-center justify-center rounded-[4px] font-bold text-[6.5px] text-white leading-none tracking-wide",
         TEXT_EMOJI[name],
-        className,
       )}
       role="img"
-      style={{ animationDelay: delay === undefined ? undefined : `${delay}ms` }}
     >
       {name}
     </span>
   );
+}
+
+/**
+ * A reaction being added pops its emoji and rolls its count up; one taken back only rolls the
+ * count down. Through the Web Animations API, so it runs while the full conversation has its
+ * CSS entrances off.
+ */
+function animateReaction(button: Element, adding: boolean, delay = 0) {
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
+  button.querySelector("[data-count]")?.animate(
+    reduce
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [
+          { opacity: 0, transform: `translateY(${adding ? 6 : -6}px)` },
+          { opacity: 1, transform: "none" },
+        ],
+    { delay, duration: 200, easing: easeOut, fill: "backwards" },
+  );
+  if (adding && !reduce) {
+    button
+      .querySelector("[role=img]")
+      ?.animate(
+        [
+          { transform: "none", easing: easeOut },
+          { transform: "scale(1.25)", offset: 0.4, easing: easeOut },
+          { transform: "none" },
+        ],
+        { delay, duration: 300 },
+      );
+  }
 }
 
 function authorOf(beat: Beat | undefined): AuthorKey | undefined {
@@ -826,53 +845,16 @@ export function SessionTimeline(): JSX.Element {
   // channels returns to the conversation's start.
   const [ended, setEnded] = useState(false);
   // Reactions the visitor added, keyed by emoji, toggled like Slack's: a click adds one to the
-  // count, a second click takes it back. Remembered in this browser only; storage can be
-  // unavailable (private windows, blocked site data), so it's best effort.
+  // count, a second click takes it back.
   const [reacted, setReacted] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(REACTIONS_KEY) ?? "[]");
-      if (Array.isArray(saved)) setReacted(new Set(saved.filter((e) => e in TEXT_EMOJI)));
-    } catch {}
-  }, []);
-
-  // Adding a reaction pops its emoji and rolls the count up; taking it back only rolls the
-  // count down. Through the Web Animations API, so it runs while the full conversation has its
-  // CSS entrances off.
   const toggleReaction = (button: HTMLElement, emoji: string) => {
     const adding = !reacted.has(emoji);
     const next = new Set(reacted);
     if (adding) next.add(emoji);
     else next.delete(emoji);
     setReacted(next);
-    try {
-      localStorage.setItem(REACTIONS_KEY, JSON.stringify([...next]));
-    } catch {}
-
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
-    button.querySelector("[data-count]")?.animate(
-      reduce
-        ? [{ opacity: 0 }, { opacity: 1 }]
-        : [
-            { opacity: 0, transform: `translateY(${adding ? 6 : -6}px)` },
-            { opacity: 1, transform: "none" },
-          ],
-      { duration: 200, easing: easeOut },
-    );
-    if (adding && !reduce) {
-      button
-        .querySelector("[role=img]")
-        ?.animate(
-          [
-            { transform: "none", easing: easeOut },
-            { transform: "scale(1.25)", offset: 0.4, easing: easeOut },
-            { transform: "none" },
-          ],
-          { duration: 300 },
-        );
-    }
+    animateReaction(button, adding);
   };
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
@@ -910,6 +892,15 @@ export function SessionTimeline(): JSX.Element {
     };
   }, [playing, next]);
 
+  // In a replay, a reaction lands the way a click adds one, once its pill is in.
+  const reactionsIn = (playing || ended) && beats[shown - 1]?.kind === "reactions";
+  useEffect(() => {
+    if (!reactionsIn) return;
+    contentRef.current
+      ?.querySelectorAll("button[aria-pressed]")
+      .forEach((button, index) => animateReaction(button, true, 150 + index * 60));
+  }, [reactionsIn]);
+
   // Before paint: the full conversation opens at its start; a replay snaps to its end, so the
   // newest line always settles clear of the dock, then glides there from where the content was
   // (a FLIP), on the same 300ms ease-in-out as the bubble entrance.
@@ -940,6 +931,7 @@ export function SessionTimeline(): JSX.Element {
   };
 
   const play = () => {
+    setReacted(new Set());
     setCount(0);
     setEnded(false);
     setPlaying(true);
@@ -1056,12 +1048,7 @@ export function SessionTimeline(): JSX.Element {
                             style={{ animationDelay: `${index * 60}ms` }}
                             type="button"
                           >
-                            {/* Arriving in a replay, the emoji pops once the pill is in. */}
-                            <TextEmoji
-                              className="motion-safe:animate-emoji-pop"
-                              delay={150 + index * 60}
-                              name={reaction.emoji}
-                            />
+                            <TextEmoji name={reaction.emoji} />
                             <span className="text-copy-13" data-count>
                               {count}
                             </span>

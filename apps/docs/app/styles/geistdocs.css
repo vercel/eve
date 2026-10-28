@@ -41,7 +41,6 @@ body:has([data-nights-route]) {
   --animate-scale-in: scale-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   --animate-fade-in: fade-in 200ms ease-out both;
   --animate-thinking-loader: thinking-loader 1.5s linear infinite;
-  --animate-emoji-pop: emoji-pop 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
 
   @keyframes bubble-in {
     from {
@@ -60,12 +59,6 @@ body:has([data-nights-route]) {
   @keyframes fade-in {
     from {
       opacity: 0;
-    }
-  }
-
-  @keyframes emoji-pop {
-    40% {
-      transform: scale(1.25);
     }
   }
 
