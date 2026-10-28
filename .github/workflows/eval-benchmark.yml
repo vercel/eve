@@ -214,7 +214,7 @@ jobs:
           RELEASE: ${{ inputs.release }}
         run: |
           if [ -n "$RELEASE" ]; then
-            # Release backfills use the checkout's pre-Turbo task contract.
+            # Release backfills predate the e2e dependency task graph.
             pnpm --filter eve build
             pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
             pnpm --filter dist-extensions update gizmo-extension gadget-extension
@@ -342,7 +342,7 @@ jobs:
           RELEASE: ${{ inputs.release }}
         run: |
           if [ -n "$RELEASE" ]; then
-            # Release backfills use the checkout's pre-Turbo task contract.
+            # Release backfills predate the e2e dependency task graph.
             pnpm --filter eve build
             pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
             pnpm --filter dist-extensions update gizmo-extension gadget-extension
