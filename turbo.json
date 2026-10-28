@@ -56,9 +56,13 @@
       ],
       "outputs": []
     },
+    "e2e:dependencies": {
+      "cache": false,
+      "dependsOn": ["^build"]
+    },
     "test:e2e": {
       "cache": false,
-      "dependsOn": ["^build"],
+      "dependsOn": ["e2e:dependencies"],
       "env": [
         "AI_GATEWAY_API_KEY",
         "ANTHROPIC_API_KEY",

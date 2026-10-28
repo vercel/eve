@@ -120,16 +120,11 @@ jobs:
 
       - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'
-        # Turbo builds the selected fixture's dependency graph plus every
-        # extension fixture that dist-only coverage stages below. The update
-        # re-packs the file-protocol store copies with the fresh dist output.
+        # Turbo resolves the selected fixture's workspace build graph. The
+        # dist-extensions task also builds and re-packs its file dependencies.
         env:
           FIXTURE_PACKAGE: ${{ matrix.package }}
-        run: |
-          pnpm build:e2e \
-            --filter="${FIXTURE_PACKAGE}^..." \
-            --filter="./e2e/fixtures/*-extension"
-          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+        run: pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
 
       - name: Test Workflow stress reporting
         if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'

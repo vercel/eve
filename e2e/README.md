@@ -227,13 +227,13 @@ newly added fixtures and models become required automatically. Add a new
 aggregate to the ruleset only after its workflow lands on `main`: a required
 check nothing reports blocks every PR as permanently "expected".
 
-`.github/workflows/e2e-local.yml` (the model suite) asks Turbo to build the
-selected fixture's workspace dependencies and the dist-only extension
-fixtures, then runs one fixture directory with the leg's real model:
+`.github/workflows/e2e-local.yml` (the model suite) asks Turbo to prepare the
+selected fixture's workspace dependencies, then runs one fixture directory
+with the leg's real model. The `dist-extensions` task also builds and re-packs
+its file-protocol extension dependencies:
 
 ```sh
-pnpm build:e2e --filter="$FIXTURE_PACKAGE^..." \
-  --filter="./e2e/fixtures/*-extension"
+pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
 cd "$FIXTURE_DIR"
 pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
