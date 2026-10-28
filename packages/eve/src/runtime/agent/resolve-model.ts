@@ -9,6 +9,7 @@ import {
   formatLanguageModelGatewayId,
   isRuntimeLanguageModel,
   isAgentReasoningDefinition,
+  toAiSdkLanguageModel,
 } from "#internal/runtime-model.js";
 import type {
   RuntimeDynamicModelReference,
@@ -123,7 +124,7 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  return model;
+  return toAiSdkLanguageModel(model);
 }
 
 function isSourceBackedRuntimeModelReference(

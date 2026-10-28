@@ -1,16 +1,23 @@
 import { mockModel } from "eve/evals";
+import type { EveLanguageModel } from "eve/models";
 
 import { respond } from "./respond.ts";
 
-type Prompt = Parameters<Exclude<ReturnType<typeof mockModel>, string>["doGenerate"]>[0]["prompt"];
+type Prompt = readonly { readonly content: string | readonly { readonly type: string }[] }[];
+
+/** `mockModel()` keeps AI SDK call options opaque; this suite reads only the prompt. */
+interface PromptCheckedModel extends EveLanguageModel {
+  doGenerate(options: { readonly prompt: Prompt }): PromiseLike<unknown>;
+  doStream(options: { readonly prompt: Prompt }): PromiseLike<unknown>;
+}
 
 /**
  * The hitl suite's scripted model. eve runs approved calls itself, so
  * no prompt may carry an AI SDK approval part; one fails the turn.
  */
 export function humanInputModel() {
-  const model = mockModel({ modelId: "hitl", respond });
-  if (typeof model === "string" || model.specificationVersion !== "v4") {
+  const model: PromptCheckedModel = mockModel({ modelId: "hitl", respond });
+  if (model.specificationVersion !== "v4") {
     throw new Error("This fixture expects mockModel's v4 provider boundary.");
   }
   const generate = model.doGenerate.bind(model);

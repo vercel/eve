@@ -1,8 +1,8 @@
-import type { LanguageModel } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
 import { contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import type { EveLanguageModel } from "#shared/agent-definition.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
@@ -153,7 +153,7 @@ export interface MockModelOptions {
  */
 export function mockModel(
   input: MockModelOptions | MockModelResponder | string = {},
-): LanguageModel {
+): EveLanguageModel {
   const options = normalizeOptions(input);
   const respond = normalizeResponder(options.respond);
   const modelId = options.modelId ?? DEFAULT_MODEL_ID;

@@ -173,10 +173,10 @@ To use that choice to delegate while keeping specialist subagents out of the par
 Pass `signal: ctx.abortSignal` to cancel the request. Import `DecisionModel`, `DecisionState`,
 `DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`,
 and `DecisionResult` from `eve/ai` to annotate reusable configs and handlers.
-Model instances must implement a decision model specification supported by the installed AI SDK;
+Model instances must implement decision model specification `v4`, the version AI SDK 7 supports;
 a matching `provider`, `modelId`, and `specificationVersion` alone is not an implementation.
-A newer specification can typecheck but still be rejected by an older SDK at runtime. Input and
-answer validation, retries, and provider errors follow AI SDK semantics.
+If the installed `ai` package does not export a decision API, `decide` throws an error naming the
+missing export. Input and answer validation, retries, and provider errors follow AI SDK semantics.
 
 You can also call `decide` outside a tool; it does not require an active eve
 session. Each call performs its own decision. `auto` uses this function

@@ -4,15 +4,16 @@ import type { HistoryMessage } from "#shared/history-message.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
 /** A model ID or an installed provider's decision model instance.
- * The installed AI SDK validates the model specification at runtime.
- * An identity object without a decision implementation is not a model.
+ * AI SDK 7 decision models implement specification `v4`; the installed AI SDK
+ * validates the full model contract at runtime. An identity object without a
+ * decision implementation is not a model.
  */
 export type DecisionModel =
   | string
   | ({
       readonly provider: string;
       readonly modelId: string;
-      readonly specificationVersion: string;
+      readonly specificationVersion: "v4";
     } & (
       | { readonly doDecide: (...args: never[]) => unknown }
       | { readonly doEvaluate: (...args: never[]) => unknown }
