@@ -30,7 +30,7 @@
     "test:webchat": "pnpm --filter eve run test:webchat",
     "test:eval-benchmark": "node --test scripts/eval-metrics/*.test.mjs scripts/eval-benchmark/*.test.mjs",
     "test:framework-fixtures": "pnpm --filter eve run test:framework-fixtures",
-    "test:integration": "turbo run test:integration --filter=eve && turbo run test:integration --filter=\"!eve\"",
+    "test:integration": "turbo run test:integration",
     "test:scenario": "turbo run test:scenario",
     "test:tui": "pnpm --filter eve run test:tui",
     "test:unit": "turbo run test:unit",

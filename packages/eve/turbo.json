@@ -25,6 +25,9 @@
         "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
+    },
+    "test:integration": {
+      "dependsOn": ["build"]
     }
   }
 }
