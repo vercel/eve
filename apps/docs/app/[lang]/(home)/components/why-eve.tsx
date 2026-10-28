@@ -165,14 +165,15 @@ function AgentUi() {
               <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
               <div className="mt-px h-[3.625em] shrink-0 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100" />
             </div>
-            {/* A back window fades, border and all, into the page across the sliver it shows,
-                so it's gone where the next window starts. Opaque rather than a mask, which
-                would show the window behind instead of the page. */}
+            {/* A back window recedes, border and all, toward the page across the sliver it
+                shows, starting a third of the way in and stopping short of the page color.
+                Drawn over the window rather than as a mask, which would show the window
+                behind instead of the page. */}
             {back ? (
               <span
                 className="pointer-events-none absolute -inset-px rounded-t-[inherit]"
                 style={{
-                  background: `linear-gradient(to right, transparent 8%, var(--ds-background-200) ${(sliver / windowWidth) * 100}%)`,
+                  background: `linear-gradient(to right, transparent ${(sliver / 3 / windowWidth) * 100}%, color-mix(in srgb, var(--ds-background-200) 60%, transparent) ${(sliver / windowWidth) * 100}%)`,
                 }}
               />
             ) : null}
