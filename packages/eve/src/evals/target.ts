@@ -24,7 +24,6 @@ export async function resolveEvalTargetHandle(input: {
 }): Promise<EveEvalTargetHandle> {
   await waitForTargetHealth(input.client, input.url);
   const info = await input.client.info();
-  assertAgentInfoShape(info, input.url);
 
   if (
     input.expectedAgentName !== undefined &&
@@ -175,12 +174,6 @@ async function waitForTargetHealth(client: Client, url: string): Promise<void> {
     `Timed out waiting for eval target health at ${url}.` +
       (lastError === undefined ? "" : ` Last error: ${lastError}`),
   );
-}
-
-function assertAgentInfoShape(info: AgentInfoResult, url: string): void {
-  if (info.kind !== "eve-agent-info" || info.version !== 5) {
-    throw new Error(`Eval target ${url} returned an unrecognized /eve/v1/info payload.`);
-  }
 }
 
 function parseScheduleDispatchResult(payload: unknown): EveEvalScheduleDispatchResult {

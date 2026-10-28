@@ -86,7 +86,6 @@ describe("initialPromptPlaceholder", () => {
                 ...info.subagents.local[0]!,
                 name: "self-modification__trace_analysis",
                 description: "Inspect traces",
-                markdown: "Inspect traces",
               },
             ],
           },

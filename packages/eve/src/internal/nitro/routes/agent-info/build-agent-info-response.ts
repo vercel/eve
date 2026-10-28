@@ -28,11 +28,15 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v4 exclusively from the effective compiled graph. */
+/**
+ * Projects agent info exclusively from the effective compiled graph. End users
+ * can read this route when the eve channel admits them, so it omits authored
+ * text and server paths; instruction text is kept for the development TUI only.
+ */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
-    readonly mode: AgentInfoResponse["mode"];
+    readonly mode: "development" | "production";
     readonly gatewayCredentials: GatewayCredentialPresence;
     readonly chatgptAuth?: ChatGptAuthState;
   },
@@ -47,8 +51,6 @@ export function buildAgentInfoResponse(
 
   return {
     agent: {
-      agentRoot: manifest.agentRoot,
-      appRoot: manifest.appRoot,
       config: { ...configSource, binding: configSource.binding },
       description: manifest.config.description,
       model:
@@ -119,7 +121,7 @@ export function buildAgentInfoResponse(
       ),
       static: manifest.instructions.map((definition) => ({
         ...toOwnedSource(manifest, definition),
-        content: definition.content,
+        ...(input.mode === "development" ? { content: definition.content } : {}),
         name: definition.name,
         role: definition.role,
       })),
@@ -146,7 +148,6 @@ export function buildAgentInfoResponse(
       ...toOwnedSource(manifest, schedule),
       cron: schedule.cron,
       hasRun: schedule.hasRun,
-      markdown: schedule.markdown,
       name: schedule.name,
     })),
     skills: {
@@ -155,7 +156,6 @@ export function buildAgentInfoResponse(
         ...toOwnedSource(manifest, skill),
         description: skill.description,
         license: skill.license,
-        markdown: skill.content,
         metadata: skill.metadata,
         name: skill.name,
       })),
@@ -198,7 +198,7 @@ export function buildAgentInfoResponse(
         requiresApproval: tool.requiresApproval,
       })),
     },
-    version: 5,
+    version: 6,
     workspace: {
       resourceRoot: manifest.workspaceResourceRoot,
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],

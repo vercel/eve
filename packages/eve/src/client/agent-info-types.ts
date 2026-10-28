@@ -41,7 +41,7 @@ export interface AgentInfoSource {
   readonly logicalPath: string;
   readonly owner: Owner;
   readonly sourceId: string;
-  readonly sourceKind: "markdown" | "module" | "skill-package";
+  readonly sourceKind: "markdown" | "module" | "skill-package" | "unrecognized";
 }
 
 /** A named, inspected capability. */
@@ -67,22 +67,30 @@ export interface AgentInfoToolEntry extends AgentInfoEntry {
 export interface AgentInfoSkillEntry extends AgentInfoEntry {
   readonly description: string;
   readonly license?: string;
-  readonly markdown: string;
   readonly metadata?: Readonly<Record<string, string>>;
 }
 /** An inspected static instruction. */
 export interface AgentInfoInstructionsEntry extends AgentInfoEntry {
-  readonly content: string;
-  readonly role: "system" | "user";
+  /** Instruction text, served only by development servers. */
+  readonly content?: string;
+  readonly role: "system" | "user" | "unrecognized";
 }
 /** An inspected schedule. */
 export interface AgentInfoScheduleEntry extends AgentInfoEntry {
   readonly cron: string;
   readonly hasRun: boolean;
-  readonly markdown?: string;
 }
 
-type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "WEBSOCKET";
+type ChannelMethod =
+  | "GET"
+  | "HEAD"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "OPTIONS"
+  | "WEBSOCKET"
+  | "unrecognized";
 /** An inspected channel route. */
 export interface AgentInfoChannelEntry extends AgentInfoEntry {
   readonly adapterKind?: string;
@@ -92,8 +100,13 @@ export interface AgentInfoChannelEntry extends AgentInfoEntry {
 
 type SourceDescriptor = {
   readonly backing: ModuleBacking | { readonly kind: "resource"; readonly sourcePath: string };
-  readonly form: "derived" | "direct";
-  readonly layer: "framework-default" | "extension-package" | "extension-override" | "application";
+  readonly form: "derived" | "direct" | "unrecognized";
+  readonly layer:
+    | "framework-default"
+    | "extension-package"
+    | "extension-override"
+    | "application"
+    | "unrecognized";
   readonly logicalPath: string;
   readonly owner: Owner;
   readonly sourceId: string;
@@ -177,13 +190,19 @@ type ModelEndpoint =
   | { readonly kind: "external"; readonly provider: string }
   | {
       readonly kind: "chatgpt";
-      readonly state: "checking" | "ready" | "signed-out" | "reauth-required" | "unavailable";
+      readonly state:
+        | "checking"
+        | "ready"
+        | "signed-out"
+        | "reauth-required"
+        | "unavailable"
+        | "unrecognized";
       readonly accountLabel?: string;
     }
   | {
       readonly kind: "gateway";
       readonly connected: true;
-      readonly credential: "api-key" | "oidc" | "oauth";
+      readonly credential: "api-key" | "oidc" | "oauth" | "unrecognized";
       readonly team?: string;
     }
   | { readonly kind: "gateway"; readonly connected: false };
@@ -217,18 +236,19 @@ type AgentModel = {
     }
 );
 type CompositionDiagnostic = {
-  readonly kind: "disabled" | "shadowed";
+  readonly kind: "disabled" | "shadowed" | "unrecognized";
   readonly logicalPath: string;
   readonly owner: Owner;
   readonly sourceId: string;
   readonly winnerSourceId?: string;
 };
 
-/** Authoritative `/eve/v1/info` v5 response, independent of its runtime validator. */
+/**
+ * Authoritative `/eve/v1/info` v6 response, independent of its runtime validator.
+ * Enum-like fields include `"unrecognized"` for values added by a newer server.
+ */
 export interface AgentInfoResult {
   readonly agent: {
-    readonly agentRoot: string;
-    readonly appRoot: string;
     readonly config: AgentInfoSource & { readonly binding: Binding };
     readonly description?: string;
     readonly model: AgentModel;
@@ -255,7 +275,7 @@ export interface AgentInfoResult {
   }[];
   readonly kind: "eve-agent-info";
   readonly memories: readonly AgentInfoMemoryEntry[];
-  readonly mode: "development" | "production";
+  readonly mode: "development" | "production" | "unrecognized";
   readonly remoteAgents: {
     readonly entries: readonly AgentInfoRemoteAgentEntry[];
     readonly total: number;
@@ -268,6 +288,6 @@ export interface AgentInfoResult {
   };
   readonly subagents: { readonly local: readonly AgentInfoSubagentEntry[]; readonly total: number };
   readonly tools: AgentInfoTools;
-  readonly version: 5;
+  readonly version: 6;
   readonly workspace: { readonly resourceRoot: unknown; readonly rootEntries: readonly string[] };
 }

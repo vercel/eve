@@ -41,7 +41,7 @@ type ModelProviderAccess =
   | {
       kind: "gateway";
       runtime:
-        | { status: "connected"; credential: "api-key" | "oidc" | "oauth" }
+        | { status: "connected"; credential: "api-key" | "oidc" | "oauth" | "unrecognized" }
         | { status: "disconnected" }
         | { status: "unknown" };
     };

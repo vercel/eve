@@ -34,7 +34,7 @@ The client requires the successful response to match `{ ok: true, status: "ready
 
 ## Inspect an agent
 
-Use `info()` to inspect an agent. The client requires the complete agent-info version 6 response before returning it:
+Use `info()` to inspect an agent. The client requires a complete agent-info version 6 response before returning it:
 
 ```ts
 const info = await client.info();
@@ -43,7 +43,11 @@ console.log(info.agent.name, info.agent.model.id);
 
 Pass `info({ signal })` to cancel the HTTP request. The signal is checked only after custom header and credential callbacks resolve; it does not limit how long those callbacks or the complete `info()` call can take.
 
-Version 4 separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. A non-success response throws `ClientError`; invalid JSON, an earlier schema version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`.
+The response separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. It omits authored text and server paths because end users can reach the route: instruction `content` is present only when `info.mode` is `"development"`, and skill or schedule markdown and the app and agent roots are not included.
+
+The version changes only for breaking reshapes; a server adds fields and enum values within a version. The client ignores fields it does not know, and enum-like fields it cannot interpret (such as `mode`, `sourceKind`, or a channel `method`) read as `"unrecognized"`, so handle that value when you switch on them.
+
+A non-success response throws `ClientError`. Invalid JSON, a different agent-info version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`. For a version mismatch, its `issues` name which side to upgrade: eve in the agent, or the eve package the client runs from.
 
 ## Authentication
 
