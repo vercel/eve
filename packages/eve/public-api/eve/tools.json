@@ -47,7 +47,6 @@
   "defineTool",
   "defineWorkflowTool",
   "disableTool",
-  "isDisabledToolSentinel",
   "toolOutput",
   "toolOutputPart",
   "toolResultFrom"

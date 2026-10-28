@@ -118,6 +118,13 @@ The full catalog, its outcome sets, and TypeScript types are exported from `eve/
 import { FACT_CATALOG, foldEvents, activeTurn, reply } from "eve/events";
 ```
 
+The family-specific arrays `SESSION_OUTCOMES`, `DELIVERY_OUTCOMES`, `TURN_OUTCOMES`,
+`MODEL_OUTCOMES`, `CALL_OUTCOMES`, `TASK_OUTCOMES`, `INTERACTION_OUTCOMES`,
+`RESPONSE_OUTCOMES`, and `CONTEXT_OUTCOMES` list the outcomes known to this release.
+`TERMINAL_OUTCOMES` maps terminal fact types to those arrays. `isTerminal(fact)`
+narrows a fact to one that ends its entity; it does not test whether the whole
+session has ended. These helpers come from `eve/events`.
+
 #### What a later release can add
 
 Within stream version 27, a later minor release can add:
@@ -234,6 +241,8 @@ const totals = usage(agent.view);
 const observed = call(agent.view, callId);
 if (observed?.state === "failed") console.error(observed.error.message);
 ```
+
+`callOutputSource(view, callId)` returns the observation of the call that produced a call's output. `call(view, callId)?.output` already follows `outputOf`, so use `callOutputSource` when you need the producing call itself, such as its `callId` or label.
 
 Calls include their resolved `turnId`, `runId`, and `taskId` when known, so applications do not
 join calls to runs to find their turn. `turns`, `deliveries`, `tasks`, `runs`, `parts`, and
