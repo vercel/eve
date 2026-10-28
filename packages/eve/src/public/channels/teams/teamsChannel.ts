@@ -70,7 +70,7 @@ import {
   type TeamsInvokeActivity,
   type TeamsMessageActivity,
 } from "#public/channels/teams/inbound.js";
-import { verifyTeamsRequest } from "#public/channels/teams/verify.js";
+import { verifyTeamsRequest, type VerifiedTeamsRequest } from "#public/channels/teams/verify.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
@@ -339,17 +339,21 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       POST<TeamsChannelState>(
         config.route ?? "/eve/v1/teams",
         async (req, { from, resolveSession, waitUntil }) => {
-          const body = await verifyInbound(req, config.credentials);
-          if (body === null) return new Response("unauthorized", { status: 401 });
+          const verified = await verifyInbound(req, config.credentials);
+          if (verified === null) return new Response("unauthorized", { status: 401 });
 
           let raw: JsonObject;
           try {
-            raw = parseJsonObject(JSON.parse(body) as unknown);
+            raw = parseJsonObject(JSON.parse(verified.body) as unknown);
           } catch (error) {
             log.warn("inbound Teams body is not valid JSON", { error });
             return teamsOk();
           }
 
+          if (verified.serviceUrl !== undefined && raw.serviceUrl !== verified.serviceUrl) {
+            log.warn("Teams activity service URL does not match the verified token.");
+            return new Response("unauthorized", { status: 401 });
+          }
           const activity = parseTeamsActivity(raw);
           if (activity === null) return teamsOk();
 
@@ -388,8 +392,8 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       ),
     ],
 
-    async receive(input, { from }) {
-      const receiveTarget = input.target as Partial<TeamsReceiveTarget>;
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Partial<TeamsReceiveTarget>;
       const serviceUrl = readNonEmptyString(receiveTarget.serviceUrl);
       const conversationId = readNonEmptyString(receiveTarget.conversationId);
       if (!serviceUrl || !conversationId) {
@@ -433,7 +437,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           replyToActivityId,
           tenantId: state.tenantId,
         }),
-      ).send(input.message, { auth: input.auth, state });
+      ).send(message, { ...send, state });
     },
 
     events: mergedEvents,
@@ -603,7 +607,7 @@ function buildTeamsHandle(input: {
 async function verifyInbound(
   req: Request,
   credentials: TeamsChannelCredentials | undefined,
-): Promise<string | null> {
+): Promise<VerifiedTeamsRequest | null> {
   try {
     return await verifyTeamsRequest(req, {
       appId: credentials?.webhookVerifier ? undefined : credentials?.appId,

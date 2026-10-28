@@ -21,8 +21,9 @@ import { ScheduleIdKey } from "#context/keys.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import { slackThreadTsParam } from "#public/channels/slack/code-channel.js";
 import { truncateMessageText } from "#public/channels/slack/limits.js";
-import type { SlackTaskCard } from "#public/channels/slack/renderers.js";
+import type { SlackCardMessage } from "#public/channels/slack/renderers.js";
 import { restoreStatus } from "#public/channels/slack/thread-status.js";
 import type {
   SlackChannelInternalEvents,
@@ -66,7 +67,7 @@ interface SlackTaskObject {
  * with `eve__task_cancel` shows as done, since it no longer needed the work; a
  * failed task, or one stopped any other way, shows as an error.
  */
-export function renderDefaultSlackTaskCard(snapshot: TaskCard): SlackTaskCard | null {
+export function renderDefaultSlackTaskCard(snapshot: TaskCard): SlackCardMessage | null {
   const view = sessionTables(snapshot.view);
   const card: RenderCard = {
     ...snapshot,
@@ -335,7 +336,7 @@ export interface SlackTaskCardState {
  */
 export function withTaskCards(
   events: SlackChannelInternalEvents,
-  taskCard: (card: TaskCard) => SlackTaskCard | null,
+  taskCard: (card: TaskCard) => SlackCardMessage | null,
 ): SlackChannelInternalEvents {
   const committed = events.committed;
   return {
@@ -367,7 +368,7 @@ async function writeTaskCards(
   channel: SlackEventContext,
   view: SessionView,
   turnId: string,
-  taskCard: (card: TaskCard) => SlackTaskCard | null,
+  taskCard: (card: TaskCard) => SlackCardMessage | null,
 ): Promise<void> {
   if (view.turns[turnId] === undefined) return;
   const audience = normalizeChannelAudience(channel.state.audience);
@@ -389,11 +390,13 @@ async function writeChangedCard(
   channel: SlackEventContext,
   turnId: string,
   view: TaskCard,
-  taskCard: (card: TaskCard) => SlackTaskCard | null,
+  taskCard: (card: TaskCard) => SlackCardMessage | null,
 ): Promise<void> {
-  const { channelId, threadTs } = channel.state;
+  const { channelId, codeChannel } = channel.state;
+  // A code channel's card posts in the thread its turn answers, else top-level.
+  const threadTs = (codeChannel ? channel.state.replyThreadTs : channel.state.threadTs) ?? "";
   const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
-  if (!channelId || !threadTs || scheduled) return;
+  if (!channelId || !(threadTs || codeChannel) || scheduled) return;
   const card = renderCard(taskCard, view);
   if (card === null) return;
   const current = channel.state.taskCards?.[turnId] ?? {};
@@ -423,9 +426,9 @@ function forgetTurn(state: SlackChannelState, turnId: string): void {
 
 /** An authored card that throws leaves that turn's card as it was. */
 function renderCard(
-  taskCard: (card: TaskCard) => SlackTaskCard | null,
+  taskCard: (card: TaskCard) => SlackCardMessage | null,
   view: TaskCard,
-): SlackTaskCard | null {
+): SlackCardMessage | null {
   try {
     return taskCard(view);
   } catch (error) {
@@ -435,7 +438,7 @@ function renderCard(
 }
 
 interface CardWrite {
-  readonly card: SlackTaskCard;
+  readonly card: SlackCardMessage;
   readonly channelId: string;
   readonly threadTs: string;
   readonly ts: string | undefined;
@@ -471,7 +474,7 @@ async function writeCard(slack: SlackHandle, write: CardWrite): Promise<string> 
   }
   const posted = await slack.request("chat.postMessage", {
     ...message,
-    thread_ts: write.threadTs,
+    thread_ts: slackThreadTsParam(write.threadTs),
     unfurl_links: false,
     unfurl_media: false,
   });

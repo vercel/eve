@@ -30,7 +30,7 @@ describe("failure notices", () => {
 
   it("posts how to fix a failure eve recognizes in Slack, for a turn and for the session", async () => {
     const post = vi.fn(async (_text: string) => undefined);
-    const ctx = { channel: { thread: { post } } } as never;
+    const ctx = { channel: { state: {}, thread: { post } } } as never;
 
     await defaultEvents["turn.settled"]!(
       { data: { error: keyRejected, outcome: "failed", turnId: "turn_0" } } as never,

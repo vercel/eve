@@ -9,21 +9,19 @@ import {
 } from "#channel/compiled-channel.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
+import { toSessionSendOptions, type SessionSendOptions } from "#channel/session.js";
+import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { Runtime, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-
-/**
- * Options for sending a message to a channel selected with `ctx.to(...)`.
- */
-interface CrossChannelSendOptions {
-  readonly auth: SessionAuthContext | null;
-  readonly turnPolicy?: TurnPolicy;
-}
 
 /** Message delivery bound to one channel-specific proactive target. */
 export interface CrossChannelTargetHandle {
-  send(message: MessageContent, options: CrossChannelSendOptions): Promise<Delivery>;
+  /**
+   * Starts a session at the target, or continues the one that owns it. The
+   * channel's `receive()` hook gets `options` with the message and target.
+   */
+  send(message: MessageContent, options: SessionSendOptions): Promise<Delivery>;
 }
 
 /** Selects another authored channel and one of its proactive targets. */
@@ -74,7 +72,8 @@ export function toCrossChannelTargets(
 }
 
 /**
- * Builds the `ctx.to(channel, target)` closure used by route and schedule handlers.
+ * Builds the `ctx.to(channel, target)` closure used by route and schedule
+ * handlers and tools.
  */
 export function createCrossChannelToFn(
   runtime: Runtime,
@@ -84,22 +83,17 @@ export function createCrossChannelToFn(
   return (channel, target) => {
     const targetChannel = resolveTargetByReference(channel, channels);
     return {
-      async send(message, options) {
+      async send(message, sendOptions) {
         return await invokeChannelReceive({
           runtime,
           source,
           target: targetChannel,
           input: {
+            ...toSessionSendOptions(sendOptions),
             message,
             target: target as Readonly<Record<string, unknown>>,
-            auth: options.auth,
           },
-          turnPolicy: options.turnPolicy,
-          describeMissingReceive: () =>
-            `ctx.to(): channel "${targetChannel.name}" does not implement receive(). ` +
-            `Declare a receive hook on the channel to accept cross-channel sessions.`,
-          describeMissingAdapter: () =>
-            `ctx.to(): channel "${targetChannel.name}" has no adapter — cannot build ctx.from().`,
+          turnPolicy: sendOptions.turnPolicy,
         });
       },
     };
@@ -110,34 +104,26 @@ interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
   readonly source: CrossChannelDeliverySource;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
-  readonly input: {
-    readonly message: MessageContent;
-    readonly target: Readonly<Record<string, unknown>>;
-    readonly auth: SessionAuthContext | null;
-  };
+  readonly input: GenericReceiveInput;
   readonly turnPolicy?: TurnPolicy;
-  readonly describeMissingReceive: () => string;
-  readonly describeMissingAdapter: () => string;
 }
 
-/**
- * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
- */
+/** Shared authored `receive(input, ctx)` invocation behind every `ctx.to()`. */
 async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Delivery> {
+  const { name } = args.target;
   if (!args.target.receive) {
-    throw new Error(args.describeMissingReceive());
+    throw new Error(
+      `ctx.to(): channel "${name}" does not implement receive(). ` +
+        `Declare a receive hook on the channel to accept cross-channel sessions.`,
+    );
   }
   if (!args.target.adapter) {
-    throw new Error(args.describeMissingAdapter());
+    throw new Error(`ctx.to(): channel "${name}" has no adapter — cannot build ctx.from().`);
   }
   const channelOperations = createChannelOperations({
     adapter: args.target.adapter,
-    channelName: args.target.name,
-    metadata: {
-      ...args.source,
-      channelKind: `channel:${args.target.name}`,
-      channelName: args.target.name,
-    },
+    channelName: name,
+    metadata: { ...args.source, channelKind: `channel:${name}`, channelName: name },
     runtime: args.runtime,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
   });

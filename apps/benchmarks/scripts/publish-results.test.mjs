@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { parseTranscript } from "@vercel/agent-eval";
 
-import { publishResults } from "./publish-results.mjs";
+import { caseCategories, publishResults } from "./publish-results.mjs";
 
 const plan = {
   sha: "a".repeat(40),
@@ -177,4 +177,42 @@ test("reads a single artifact that download-artifact unpacked straight into the 
     .map((line) => JSON.parse(line));
   assert.equal(first.outcome, "passed");
   assert.equal(first.raw_path, `raw/kimi-k3/${rawPath}`);
+});
+
+test("publishes a pull request run apart from main's runs", async (t) => {
+  const store = memoryStore();
+  const result = await publishResults({
+    plan,
+    artifactsDir: artifactsDirectory(t),
+    githubRunId: "123",
+    runAttempt: 1,
+    pullRequest: 4567,
+    store,
+  });
+  const prefix = "authoring/pull-requests/4567/123/1";
+  assert.equal(result.prefix, prefix);
+  assert(![...store.objects.keys()].some((path) => path.startsWith("authoring/runs/")));
+  assert.equal(JSON.parse(store.objects.get(`${prefix}/manifest.json`)).pull_request, 4567);
+  const [first] = store.objects.get(`${prefix}/records.jsonl`).toString().trim().split("\n");
+  assert.equal(JSON.parse(first).pull_request, 4567);
+});
+
+test("records carry their case's category from CASE.ts", async (t) => {
+  const store = memoryStore();
+  const result = await publishResults({
+    plan,
+    artifactsDir: artifactsDirectory(t),
+    githubRunId: "123",
+    runAttempt: 1,
+    categories: await caseCategories(plan.cases),
+    store,
+  });
+  const records = store.objects
+    .get(`${result.prefix}/records.jsonl`)
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  // Missing runs (claude-fable-5-1 uploaded nothing) carry it too.
+  assert.deepEqual(new Set(records.map((record) => record.category)), new Set(["features/tools"]));
 });

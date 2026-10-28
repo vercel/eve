@@ -258,11 +258,11 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
       ),
     ],
 
-    async receive(input, { from }) {
-      const target = input.target as Record<string, unknown>;
-      const session = await resolveReceiveSession(target, config);
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Record<string, unknown>;
+      const session = await resolveReceiveSession(receiveTarget, config);
 
-      const initialActivity = readNonEmptyString(target.initialActivity);
+      const initialActivity = readNonEmptyString(receiveTarget.initialActivity);
       if (initialActivity !== undefined) {
         await createLinearAgentActivity({
           api: config.api,
@@ -274,8 +274,8 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
         });
       }
 
-      return from(linearContinuationToken({ agentSessionId: session.id })).send(input.message, {
-        auth: input.auth,
+      return from(linearContinuationToken({ agentSessionId: session.id })).send(message, {
+        ...send,
         state: stateFromAgentSession(session),
       });
     },

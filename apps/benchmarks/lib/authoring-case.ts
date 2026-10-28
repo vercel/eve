@@ -1,6 +1,8 @@
 export interface AuthoringSetupContext {
   readonly workspace: string;
   readonly artifactsRoot: string;
+  /** The eve package under test, as an npm install specifier. */
+  readonly packageSpec: string;
   run(command: string, workingDirectory?: string): Promise<void>;
   write(path: string, content: string): Promise<void>;
 }
@@ -30,12 +32,36 @@ export interface AuthoringInteractionContext {
   send(prompt: string): Promise<AuthoringTurn>;
 }
 
+/**
+ * What a case asks the agent to build. Published on every record, so results
+ * can be narrowed to a category (e.g. the eve-evals matrix's case filter). A
+ * `/` nests a category: selecting `features` selects every `features/*` case.
+ */
+export const authoringCategories = [
+  "features/channels",
+  "features/connections",
+  "features/extensions",
+  "features/schedules",
+  "features/skills",
+  "features/tools",
+  "projects",
+  "full-agents",
+] as const;
+
+export type AuthoringCategory = (typeof authoringCategories)[number];
+
 export interface AuthoringCase {
+  readonly category: AuthoringCategory;
   readonly startingPoint: AuthoringStartingPoint;
   /** Directory created by the agent, relative to the starting workspace. */
   readonly projectDirectory?: string;
   /** Agent time limit for large cases. A run uses the longest limit among its selected cases. */
   readonly timeoutSeconds?: number;
+  /**
+   * Validate the result with `eve build --skip-sandbox-prewarm`, for an empty-workspace case
+   * whose sandbox needs Vercel credentials the eval sandbox doesn't have.
+   */
+  readonly skipSandboxPrewarm?: boolean;
   readonly setup?: AuthoringSetup;
   readonly interact: (context: AuthoringInteractionContext) => Promise<void>;
 }

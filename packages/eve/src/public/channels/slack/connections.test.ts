@@ -120,6 +120,13 @@ describe("buildAuthEphemeralBlocks", () => {
     expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
   });
 
+  it("round-trips a code channel's Cancel target", () => {
+    const target = { channelId: "C01", codeChannel: true, turnId: "turn_0" } as const;
+    const blocks = buildAuthEphemeralBlocks({ cancel: target, displayName: "Linear" });
+    const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[0];
+    expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
+  });
+
   it("keeps the button label within Slack's limit for long display names", () => {
     const blocks = buildAuthEphemeralBlocks({
       displayName: "x".repeat(90),

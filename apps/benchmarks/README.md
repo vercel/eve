@@ -1,8 +1,8 @@
 # eve benchmarks
 
 This private workspace measures how coding agents create and modify eve projects. It uses
-`@vercel/agent-eval`, Vercel Sandbox, and deterministic Vitest graders. These benchmarks do not
-run automatically in CI or as part of `pnpm test`.
+`@vercel/agent-eval`, Vercel Sandbox, and deterministic Vitest graders. They do not run as part of
+`pnpm test` or on pull requests by default.
 
 To benchmark a same-repository pull request, add the `run-authoring-benchmark` label. The
 [Authoring Benchmark workflow](../../.github/workflows/authoring-benchmark.yml) uses the branch's
@@ -14,18 +14,22 @@ authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-010-ops-agent ru
 ```
 
 `models` is required, and `models=all` selects every supported model. `cases` defaults to the
-published cases and `runs` to 1. Each model runs as its own job with its own summary
-and results artifact. Remove and re-add the label to run again. The workflow can also be
-dispatched from the Actions tab on a branch with the same options as inputs.
+published cases (`cases=all` selects every single-prompt case) and `runs` to 1. Each model runs as its own job
+with its own summary and results artifact. Remove and re-add the label to run again. The workflow
+can also be dispatched from the Actions tab on a branch with the same options as inputs.
 
-Dispatches on `main` also publish to the private benchmark Blob store, like the nightly Eval
-Benchmark. Every model runs the same eve package: the workflow pins `main`'s package to one commit
-before any model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
+Every night, the workflow runs Haiku 5.5 three times on every single-prompt case against `main`.
+It skips the run when `main` has not moved since the last successful nightly run. Nightly runs, dispatches on `main`,
+and labeled PR runs publish to the private benchmark Blob store, like the nightly Eval Benchmark.
+Every model runs the same eve package: the workflow pins `main`'s package to one commit before any
+model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
 `records.jsonl` and `manifest.json` under `authoring/runs/<run-id>/<attempt>/`. A record is one run
 of one case on one model. It holds the outcome, timings, turns, tokens, estimated cost, and which
 docs pages the agent read. A planned run that produced no result is recorded as `missing`. Objects
-are immutable, and the manifest is written last. PR runs execute branch code, so their results stay
-in workflow artifacts and are not published.
+are immutable, and the manifest is written last. PR runs execute branch code, so they publish under
+`authoring/pull-requests/<pr-number>/<run-id>/<attempt>/` instead, and their manifest and records
+set `pull_request` to the PR number (it is `null` for `main`). Dispatches on other branches are not
+published.
 
 Locally, pass several cases as separate or comma-separated arguments:
 `pnpm benchmark author-001-weather-tool,author-005-conditional-approval`.
@@ -103,7 +107,7 @@ Without `--models`, publication covers the complete configured model matrix. Use
 publish or refresh selected model rows. The published suite currently includes weather-tool,
 new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
 schedule cases. The iMessage case remains available for local runs but is excluded from the
-published matrix, and so are the company-brain and ops-agent cases. Each
+published matrix, and so are the company-brain, ops-agent, invoice-assistant, and extension cases. Each
 cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
 when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
@@ -125,6 +129,7 @@ case can be as small as:
 
 ```ts
 export default defineAuthoringCase({
+  category: "features/tools",
   startingPoint: simpleProject,
   async interact({ send }) {
     await send("Add a weather tool to this agent.");
@@ -132,8 +137,14 @@ export default defineAuthoringCase({
 });
 ```
 
+`category` is one of `authoringCategories` in `lib/authoring-case.ts`: what the case asks the agent to
+build, e.g. `features/tools` for one task on a scaffolded project or `full-agents` for a whole agent
+from an empty workspace. Published records carry it so results can be narrowed to a category. Add a
+category there when no existing one fits.
+
 Use `simpleProject` for the selected canary's `eve init` output and `emptyProject` for a project
-the coding agent creates. Put reusable setup under `lib/setups/`. Native runs support one-turn
+the coding agent creates. A setup can seed an existing app instead, as `lib/setups/tally-app.ts` does
+from `fixtures/tally/`; pin its eve dependency to the setup context's `packageSpec`. Put reusable setup under `lib/setups/`. Native runs support one-turn
 cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
 
 ## Partial credit
@@ -141,5 +152,5 @@ cases; the iMessage case remains local-only. Prefer source assertions over an LL
 A run passes only when every grader test passes. Each run's `result.json` also records
 `analysis.checks` (`passed`, `total`, and `score`, the share of grader tests that passed), and the
 PR-label workflow reports the mean per case. Use it to hill-climb large cases such as
-`author-009-company-brain` and `author-010-ops-agent`, where each test grades one requirement independently, so fixing one
+`author-009-company-brain`, `author-010-ops-agent`, and `author-012-invoice-assistant`, where each test grades one requirement independently, so fixing one
 requirement moves the score before the whole case passes.

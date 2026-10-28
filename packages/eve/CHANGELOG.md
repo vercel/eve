@@ -1,5 +1,51 @@
 # eve
 
+## 0.85.0
+
+### Minor Changes
+
+- 24c6b9f: Client requests now reject redirects by default, including session writes and event streams. Update redirecting base URLs to their final destination, use `redirect: "manual"` to stop at redirects, or explicitly opt into `"follow"` only when every redirect destination is trusted.
+- c8328f8: Protected cross-project callbacks now require reciprocal Vercel Trusted Sources and an explicit `EVE_CALLBACK_TRUSTED_ORIGINS` allowlist on the remote deployment. Callback URLs no longer include the parent's deployment-wide bypass secret; listed origins instead receive the remote's short-lived OIDC credential.
+- 5cfec0e: Slack renderers can restyle approval, question, and budget prompt cards with a new `interactionCard(card, next)` hook, while eve keeps routing, batching, action IDs, and card updates. Cards now update from the session for every request kind, so a question answered by a typed reply or withdrawn, or a settled budget prompt, no longer keeps live buttons.
+  
+  Breaking changes:
+  
+  - `SlackChannelState.pendingApprovalCards` is replaced by `interactionCards`. Cards posted before the upgrade keep their buttons.
+  - `SlackTaskCard` is renamed to `SlackCardMessage`, which both `taskCard` and `interactionCard` return.
+  - Clicking a question no longer rewrites its card from the webhook. The buttons stay until the session admits the answer, and apps that post eve's controls themselves no longer get that rewrite.
+  - An approval's buttons disappear once its answer is admitted, so a later click can't change it. A denied approval reads **Deny** instead of **Cancel**, and a direct-message request's thread note reports the same outcome as its card.
+
+### Patch Changes
+
+- f20a7a1: Bind native Teams activities to the verified Bot Connector token's service URL before dispatch. Connector requests require HTTPS and reject redirects, keeping bearer credentials on the validated destination.
+- 4f290a7: Sessions whose deployment runs eve 0.69 through 0.83 now move to a v27 deployment the next time they receive a message while idle, or earlier when a channel prepares them for the next message, instead of staying on their original deployment until they time out. eve compacts the earlier conversation as the session moves, so the model continues from a summary; the stored transcript stays intact, and new turns continue after it. Remembered tool approvals and usage limits start over.
+- 0553a67: Keep continuation capabilities out of session lookup and child-interaction failure logs, including capability values embedded in error messages and causes. Failure diagnostics retain correlation fields and non-secret error details.
+- e54f078: Render Teams mention display names and fallback IDs as literal text, preserving names that contain ampersands or angle brackets without changing mention identity.
+- ba52da4: Remove the deprecated internal setup type alias `RunPnpmOptions`. Setup tooling should use `RunPackageManagerOptions`; package-manager command behavior is unchanged.
+- 5b8a34b: `to(channel, target).send()`, Slack's `onEvent` `ctx.send()`, dynamic schedules' `to().send()`, and channel `receive` hooks now accept the same options as `from(address).send()`, including `history`, `idempotencyKey`, and `title`. Slack derives a threadless target's session from `idempotencyKey`, and a dynamic schedule's keyed send reaches the session its earlier attempt started, so a retried send no longer starts a second thread or session.
+- 6ea94da: Set `codeChannels: true` on `slackChannel()` to serve Slack code channels as one session per channel. The agent answers un-mentioned messages, replies top-level or in the thread a person wrote in, and follows Slack's session status and stop. The option also adds the code channel scopes and events to the app manifest. A code channel session has no thread: `threadTs` is empty or `null`, and `ctx.slack.codeChannel` marks it. Address its session with `{ channelId, codeChannel: true }` in `onEvent` targets, or with `slackCodeChannelContinuationToken(channelId)`.
+  
+  Two changes also reach agents that don't enable code channels: a cancelled turn now clears the Slack thread status by default, and `SlackSessionTarget` is now a union, so code that reads `target.threadTs` must handle the `{ channelId, codeChannel: true }` variant. `SlackHandle` also gains a required `codeChannel` field, which affects code that builds a handle by hand.
+- 2764e1e: Add `openCodeChannel(ctx, slack, message, { name })` to `eve/channels/slack`, which a tool calls to move the Slack conversation it was called from into a new Slack code channel and continue the work there with the conversation so far. Wrap it in your own tool with your own description and inputs, and pass your Slack channel. It finds the conversation from `ctx.channel`, so it works when message hooks return their own auth. To write your own variant, Slack receive targets accept `codeChannel`. Message hooks can open a code channel without the model through `ctx.openCodeChannel()`.
+- cb14c32: Reject framework-owned adapter attachment references in HTTP messages and restrict Linq attachment downloads to bounded public HTTPS destinations. Thanks to HackerOne researcher ryota for reporting the attachment-reference boundary issue.
+- 412b077: Tools can start or reach sessions on the agent's channels with `ctx.to(channel, target).send(message, options)`, the same call route handlers and schedules use, such as forking a conversation into a new Slack thread. Ordinary tools call it directly, and workflow tools call it in a `"use step"` helper. Pass `` idempotencyKey: `${ctx.session.id}:${ctx.callId}` `` so a retried call reaches the same session once. `ctx.to()` throws in a subagent, a root copy, or a remote agent call. Tools also get `ctx.channel`, the calling session's channel `kind`, `continuationToken`, and `metadata`, as hooks and dynamic resolvers read it.
+
+## 0.84.1
+
+### Patch Changes
+
+- 41916a5: Dynamic models, dynamic subagent configs, and `ctx.agent(name, { model })` overrides now read context windows from the AI Gateway model catalog recorded at build time instead of downloading it at runtime; a model that catalog doesn't list fails until you return `modelContextWindowTokens` or rebuild. Builds no longer carry built-in limits for `anthropic/claude-opus-4.7`, `openai/gpt-5.4`, and `openai/gpt-5.4-mini`, so a static model needs the catalog, a cached copy, or `modelContextWindowTokens` to compile offline.
+- b322096: A compaction that fails during a turn, for example on a provider 429 that outlasts its retries, now fails that turn with `MODEL_CALL_FAILED` and leaves the session waiting with its history uncompacted. Previously the error escaped the turn step, so eve replayed the step and then ended the session. Thanks @gshost1 for the report and reproduction in #5350.
+- 4276727: Messages a route forwards with `ctx.to()` now carry the deployment and request that accepted them, so an idle session reached that way hands off to the new deployment like one reached with `from()`. Thanks @haydenbleasel for reporting this in #5408.
+- bea10fd: Model calls that AI Gateway rejects with a 402 because it temporarily throttled the credit balance check now retry with backoff. They previously reported "AI Gateway credit balance exhausted", told users to add credits, and parked the session without retrying.
+- 105bf60: `eve init apps/my-agent` now creates missing parent directories such as `apps/` instead of failing with `ENOENT` from `mkdtemp`. Thanks @otakusboy for reporting this in #5422.
+- 5bb6d43: Nuxt apps that call the auto-imported `useEveAgent()` now hydrate in `nuxt dev`. The `eve/nuxt` module pre-bundles `eve/vue` with Vite, which previously served its CommonJS dependencies to the browser unbundled and failed with `does not provide an export named 'getContext'`.
+- cb1db12: Sending a message from a web client served over plain HTTP on a host other than `localhost` no longer fails with `crypto.randomUUID is not a function`. Thanks @KingAmo for reporting this in #5415.
+- 5458bc4: Reuse signed inbox routing information between client turns when the Workflow SDK and adapter support guarded resumes and `EVE_INBOX_HANDLE_SECRET` is configured. Refresh stale routing after a confirmed refusal without retrying uncertain deliveries.
+- a5328b4: `sandbox.spawn({ stdin: true })` returns a process with a writable `stdin` stream; closing it sends EOF. The Vercel and Docker sandboxes support it, and just-bash and custom providers without stdin support reject the call.
+- 66103be: `eve dev` on Windows no longer opens a console window for each Docker command, dev build process, or optional package install. Thanks @satish860 for reporting this in #5291.
+- 040519a: The browser client no longer triggers a Content Security Policy `eval` violation on pages whose `script-src` omits `'unsafe-eval'`. eve's bundled Zod now skips its `Function("")` probe and always uses its interpreted parser. Your app's own Zod and `z.config()` are not affected. Thanks @wasimxyz for reporting this in #5365.
+
 ## 0.84.0
 
 ### Minor Changes

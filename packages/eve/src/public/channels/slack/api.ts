@@ -31,6 +31,10 @@ import { isCardElement, type CardElement, type FileUpload } from "#public/channe
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
+import {
+  setSlackCodeChannelStatus,
+  slackThreadTsParam,
+} from "#public/channels/slack/code-channel.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import {
@@ -38,6 +42,7 @@ import {
   slackApiOptions,
   type SlackTransportOptions,
 } from "#public/channels/slack/transport.js";
+import type { SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
 
 const log = createLogger("slack.api");
 
@@ -67,6 +72,30 @@ export function slackContinuationToken({
   readonly threadTs: string;
 }): string {
   return `${channelId}:${threadTs}`;
+}
+
+/**
+ * Builds the channel-local continuation token of a code channel's one
+ * session (`code:<channelId>`), which no thread token can collide with.
+ */
+export function slackCodeChannelContinuationToken(channelId: string): string {
+  return `code:${channelId}`;
+}
+
+/** The session `slack` is bound to: its code channel, or its thread. */
+export function slackSessionTargetOf(
+  slack: Pick<SlackHandle, "channelId" | "codeChannel" | "threadTs">,
+): SlackSessionTarget {
+  return slack.codeChannel
+    ? { channelId: slack.channelId, codeChannel: true }
+    : { channelId: slack.channelId, threadTs: slack.threadTs };
+}
+
+/** The continuation token of a thread's or a code channel's session. */
+export function slackSessionToken(target: SlackSessionTarget): string {
+  return target.codeChannel === true
+    ? slackCodeChannelContinuationToken(target.channelId)
+    : slackContinuationToken({ channelId: target.channelId, threadTs: target.threadTs });
 }
 
 /**
@@ -299,8 +328,9 @@ export interface SlackThread {
   /**
    * Show a typing/status indicator in this thread via Slack's
    * `assistant.threads.setStatus`. Called with no argument, clears the
-   * indicator (empty status). Failures are logged and swallowed: the
-   * indicator is a UX nicety, never a reason to fail a turn.
+   * indicator (empty status). In a code channel, sets the session status to
+   * `processing`, or `active` when cleared. Failures are logged and swallowed:
+   * the indicator is a UX nicety, never a reason to fail a turn.
    */
   startTyping(status?: string): Promise<void>;
 
@@ -329,8 +359,13 @@ export interface SlackThread {
 export interface SlackHandle {
   /** Slack channel id. */
   readonly channelId: string;
-  /** Slack thread root ts (or the message ts when not in a thread). */
+  /**
+   * Slack thread root ts (or the message ts when not in a thread). Empty in a
+   * code channel, which is one session across its threads.
+   */
   readonly threadTs: string;
+  /** Whether the session serves a Slack code channel. */
+  readonly codeChannel: boolean;
   /** Slack team id, when the inbound event carried one. */
   readonly teamId: string | undefined;
 
@@ -451,6 +486,10 @@ export function buildSlackBinding(input: {
   readonly botUserId?: string;
   readonly channelId: string;
   readonly threadTs: string;
+  /** Binds the code channel `channelId` as its one session; `threadTs` is ignored. */
+  readonly codeChannel?: boolean;
+  /** In a code channel, the thread replies post in instead of top-level. */
+  readonly replyThreadTs?: () => string | undefined;
   /**
    * Whether `threadTs` already has replies; Slack hides threaded
    * ephemerals until it does. Defaults to true when `threadTs` is set.
@@ -482,12 +521,21 @@ export function buildSlackBinding(input: {
     return response;
   };
   let messages: readonly SlackThreadMessage[] = [];
-  let currentThreadTs = input.threadTs;
-  let threadHasReplies = input.threadHasReplies ?? currentThreadTs !== "";
+  // A code channel session has no thread: it posts top-level and never anchors one.
+  const codeChannel = input.codeChannel === true;
+  let currentThreadTs = codeChannel ? "" : input.threadTs;
+  const hasSessionThread = () => codeChannel || currentThreadTs !== "";
+  let threadHasReplies = input.threadHasReplies ?? hasSessionThread();
   let refreshInFlight: Promise<void> | undefined;
 
+  // A code channel session posts top-level, or in the thread its current turn answers.
+  function postThreadTs(): string {
+    const replyThreadTs = codeChannel ? input.replyThreadTs?.() : undefined;
+    return replyThreadTs || currentThreadTs;
+  }
+
   function handleMessageTs(ts: string): void {
-    if (currentThreadTs || ts === currentThreadTs) return;
+    if (hasSessionThread() || ts === currentThreadTs) return;
     currentThreadTs = ts;
     input.onThreadTsChanged?.(ts);
   }
@@ -497,15 +545,15 @@ export function buildSlackBinding(input: {
     options?: SlackUploadFilesOptions,
   ): Promise<SlackUploadFilesResult> {
     const channelId = options?.channelId ?? input.channelId;
-    const threadTs = options?.threadTs ?? currentThreadTs;
+    const threadTs = options?.threadTs ?? postThreadTs();
     const uploads = files.map((file) => toSlackFileUpload(file, options?.snippetType));
     const result = await uploadSlackFiles(uploads, {
       ...apiOptions,
       channelId: channelId || undefined,
       initialComment: options?.initialComment,
-      threadTs: threadTs || undefined,
+      threadTs: slackThreadTsParam(threadTs),
     });
-    if (threadTs && channelId === input.channelId && threadTs === currentThreadTs) {
+    if (channelId === input.channelId && hasSessionThread() && threadTs === postThreadTs()) {
       input.onPosted?.();
     }
     return result;
@@ -517,7 +565,8 @@ export function buildSlackBinding(input: {
     // Scoped inside the coalescing check so no caller can start an
     // uncoalesced fetch.
     async function fetchAndReplace(): Promise<void> {
-      if (!input.channelId || !currentThreadTs) {
+      // A code channel's history is the whole channel, not one thread.
+      if (!input.channelId || !currentThreadTs || codeChannel) {
         messages = [];
         return;
       }
@@ -552,7 +601,9 @@ export function buildSlackBinding(input: {
     latest: string,
     size: number,
   ): Promise<readonly SlackThreadMessage[] | undefined> {
-    if (!input.channelId || !currentThreadTs) return undefined;
+    if (!input.channelId || !currentThreadTs || codeChannel) {
+      return undefined;
+    }
     let window: Record<string, unknown>[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < WINDOW_MAX_PAGES; page += 1) {
@@ -604,7 +655,7 @@ export function buildSlackBinding(input: {
       if (files.length > 0 && !shouldPostBeforeFiles) {
         const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
-        if (currentThreadTs) threadHasReplies = true;
+        if (hasSessionThread()) threadHasReplies = true;
         const id =
           Array.isArray(result.raw.files) && result.raw.files.length > 0
             ? String((result.raw.files[0] as { id?: unknown }).id ?? "")
@@ -612,13 +663,13 @@ export function buildSlackBinding(input: {
         return { id, raw: result.raw };
       }
 
-      const replyTo = currentThreadTs;
+      const replyTo = postThreadTs();
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, input.channelId, replyTo, apiOptions),
+        buildPostMessageOptions(message, input.channelId, postThreadTs(), apiOptions),
       );
       const id = response.id;
-      if (replyTo) input.onPosted?.();
-      if (currentThreadTs) threadHasReplies = true;
+      if (replyTo || codeChannel) input.onPosted?.();
+      if (hasSessionThread()) threadHasReplies = true;
       handleMessageTs(id);
 
       // markdown / blocks / card + files: message lands first, then
@@ -634,7 +685,7 @@ export function buildSlackBinding(input: {
     },
     async postEphemeral(userId, rawMessage) {
       const message = normalizePostInput(rawMessage);
-      const threadTs = threadHasReplies ? currentThreadTs : "";
+      const threadTs = threadHasReplies ? postThreadTs() : "";
       const response = await postSlackEphemeral({
         ...buildPostMessageOptions(message, input.channelId, threadTs, apiOptions),
         user: userId,
@@ -655,7 +706,13 @@ export function buildSlackBinding(input: {
       return { id: response.id, raw: response.raw };
     },
     async startTyping(status) {
-      if (!input.channelId || !currentThreadTs) return;
+      if (!input.channelId) return;
+      // Slack shows its own working state while a code channel's session processes.
+      if (codeChannel) {
+        await setSlackCodeChannelStatus(request, input.channelId, status ? "processing" : "active");
+        return;
+      }
+      if (!currentThreadTs) return;
       try {
         const normalizedStatus = status === undefined ? "" : truncateTypingStatus(status);
         const body: Record<string, unknown> = {
@@ -689,6 +746,7 @@ export function buildSlackBinding(input: {
     get threadTs() {
       return currentThreadTs;
     },
+    codeChannel,
     teamId: input.teamId,
     request,
     uploadFiles,
@@ -724,7 +782,7 @@ function buildPostMessageOptions(
   const base: SlackMessageOptions = {
     ...apiOptions,
     channel: channelId,
-    threadTs: threadTs || undefined,
+    threadTs: slackThreadTsParam(threadTs),
     unfurlLinks: false,
     unfurlMedia: false,
   };

@@ -81,7 +81,7 @@ export default defineSchedule({
 
 Every run delivers the agent's reply to the channel. To skip a run when there is nothing to report, check that condition in the handler before calling `send`. When only the agent can tell, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool and ask the agent to call it when there is nothing to report; the run then posts nothing.
 
-- `to(channel, target).send(message, { auth })`: starts a session on another channel. It has the same contract as a route handler's `ctx.to(...)` handle.
+- `to(channel, target).send(message, { auth, ...options })`: starts a session on another channel. It has the same contract and [options](./channels/custom#cross-channel-hand-off) as a route handler's `ctx.to(...)` handle.
 - `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `send` call in it.
 - `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `to(...).send(..., { auth: appAuth })` for work the agent does on its own behalf.
 

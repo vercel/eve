@@ -240,6 +240,19 @@ export async function callTeamsConnectorApi(
     readonly serviceUrl: string;
   },
 ): Promise<TeamsApiResponse> {
+  const destination = URL.parse(input.serviceUrl);
+  if (
+    destination === null ||
+    destination.protocol !== "https:" ||
+    destination.username !== "" ||
+    destination.password !== "" ||
+    destination.search !== "" ||
+    destination.hash !== ""
+  ) {
+    throw new Error(
+      "Teams Connector service URL must be an absolute HTTPS URL without credentials, query, or fragment.",
+    );
+  }
   const apiFetch = input.fetch ?? fetch;
   const headers = new Headers();
   headers.set("authorization", `Bearer ${await resolveTeamsAccessToken(input)}`);
@@ -248,6 +261,7 @@ export async function callTeamsConnectorApi(
   const init: RequestInit = {
     headers,
     method: input.method ?? "POST",
+    redirect: "error",
   };
   if (input.body !== undefined) {
     init.body = JSON.stringify(parseJsonObject(input.body));

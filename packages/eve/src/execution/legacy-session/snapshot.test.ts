@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { importConversation, normalizeHistory } from "./snapshot.js";
+import { normalizeHistory } from "#execution/session/imported-conversation.js";
+import { importConversation } from "./snapshot.js";
 import type { LegacySession } from "./snapshot.js";
 import { storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { sessionUsage } from "#harness/session-usage.js";

@@ -9,6 +9,8 @@ import {
   reportingDeployWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { ASK_QUESTION_INPUT_SCHEMA } from "#tools/provided/ask-question.js";
+import { executeAskQuestionTool } from "#tools/provided/ask-question-workflow.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -24,16 +26,27 @@ describe("workflow hook cancellation", () => {
         toolName: "confirm_deploy",
       });
       await runtime.run(async () => {
+        const alice = {
+          attributes: {},
+          authenticator: "test",
+          principalId: "alice",
+          principalType: "user" as const,
+          issuer: "test",
+        };
         const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
             input: { message: 'Run confirm_deploy with service "api"' },
-            serializedContext: buildWorkflowToolSerializedContext({
-              acceptedDeploymentId: "dpl_inline",
-              continuationToken: `http:workflow-answer-delivery-${mode}`,
-              requestInput: true,
-            }),
+            // A typed answer joins the turn only from the principal that started it.
+            serializedContext: {
+              ...buildWorkflowToolSerializedContext({
+                acceptedDeploymentId: "dpl_inline",
+                continuationToken: `http:workflow-answer-delivery-${mode}`,
+                requestInput: true,
+              }),
+              "eve.auth": alice,
+            },
           },
         ]);
         const stream = captureTurnEvents(run);
@@ -45,13 +58,7 @@ describe("workflow hook cancellation", () => {
           expect(question).toBeDefined();
           await resumeSessionInbox(sessionCommandHookToken(run.runId), {
             kind: "send",
-            auth: {
-              attributes: {},
-              authenticator: "test",
-              principalId: "alice",
-              principalType: "user",
-              issuer: "test",
-            },
+            auth: alice,
             delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
             payload:
               mode === "button"
@@ -296,4 +303,194 @@ describe("workflow hook cancellation", () => {
       }
     });
   }, 30_000);
+});
+
+describe("workflow typed answers", () => {
+  // #4923: a typed answer is the person's next message, so its hooks and the
+  // rest of the turn see the request that sent it, as a steering message does,
+  // whatever else its payload carries for the session.
+  it.each([
+    { extra: {}, label: "text" },
+    { extra: { state: { thread: "thread-1" } }, label: "channel-state" },
+    { extra: { __eveClientContext: ["Viewing the deploy page."] }, label: "client-context" },
+  ])(
+    "runs a typed answer's turn under the auth of the request that sent it, with $label",
+    async ({ extra, label }) => {
+      const asker = {
+        attributes: { msg: "asking request" },
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      };
+      const seen: (readonly [string, unknown])[] = [];
+      const runtime = await createWorkflowToolRuntime({
+        agentName: `workflow-tool-answer-auth-${label}`,
+        execute: confirmDeployWorkflow,
+        modules: [
+          {
+            logicalPath: "hooks/observe.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "delivery.consumed"(event, ctx) {
+                    seen.push([event.type, ctx.session.auth.current?.attributes.msg]);
+                  },
+                  "turn.settled"(event, ctx) {
+                    seen.push([event.type, ctx.session.auth.current?.attributes.msg]);
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+        toolName: "confirm_deploy",
+      });
+
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: 'Run confirm_deploy with service "api"' },
+            serializedContext: {
+              ...buildWorkflowToolSerializedContext({
+                continuationToken: `http:workflow-tool-answer-auth-${label}`,
+                requestInput: true,
+              }),
+              "eve.auth": asker,
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await stream.nextTurn();
+          seen.length = 0;
+          await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+            auth: { ...asker, attributes: { msg: "answering request" } },
+            delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+            kind: "send",
+            payload: { message: "Deploy", ...extra },
+          });
+
+          await stream.nextTurn();
+          expect(seen.at(-1)).toEqual(["turn.settled", "answering request"]);
+          expect(new Set(seen.map(([, msg]) => msg))).toEqual(new Set(["answering request"]));
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+    60_000,
+  );
+
+  // #4923: a turn's principal is fixed. Another person's typed text must not
+  // answer the turn's question; it waits and runs as their own turn.
+  it.each([
+    {
+      answers: { alice: "Deploy", bob: "Cancel" },
+      execute: confirmDeployWorkflow,
+      inputSchema: undefined,
+      message: 'Run confirm_deploy with service "api"',
+      output: { approved: true, service: "api" },
+      toolName: "confirm_deploy",
+    },
+    {
+      answers: { alice: "us-east", bob: "eu-west" },
+      execute: executeAskQuestionTool,
+      inputSchema: ASK_QUESTION_INPUT_SCHEMA,
+      message: "Run ask_question and ask which region to deploy to.",
+      output: { answer: "us-east", status: "answered" },
+      toolName: "ask_question",
+    },
+  ])(
+    "keeps another principal's typed answer out of the turn that asked through $toolName",
+    async ({ answers, execute, inputSchema, message, output, toolName }) => {
+      const alice = {
+        attributes: {},
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      };
+      const bob = { ...alice, principalId: "bob" };
+      const seen: (readonly [string, unknown])[] = [];
+      const runtime = await createWorkflowToolRuntime({
+        agentName: `workflow-tool-foreign-answer-${toolName}`,
+        execute,
+        inputSchema,
+        modules: [
+          {
+            logicalPath: "hooks/observe.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "delivery.consumed"(event, ctx) {
+                    seen.push([event.type, ctx.session.auth.current?.principalId]);
+                  },
+                  "turn.settled"(event, ctx) {
+                    seen.push([event.type, ctx.session.auth.current?.principalId]);
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+        toolName,
+      });
+
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message },
+            serializedContext: {
+              ...buildWorkflowToolSerializedContext({
+                continuationToken: `http:workflow-tool-foreign-answer-${toolName}`,
+                requestInput: true,
+              }),
+              "eve.auth": alice,
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const asked = await stream.nextTurn();
+          const callId = filterEventsByType(asked, "call.requested").find(
+            (event) => event.data.capability.name === toolName,
+          )?.data.callId;
+          seen.length = 0;
+          const inbox = sessionCommandHookToken(run.runId);
+          for (const [auth, text] of [
+            [bob, answers.bob],
+            [alice, answers.alice],
+          ] as const) {
+            await resumeSessionInbox(inbox, {
+              auth,
+              delivery: { channelKind: "http", channelName: "test", deliveryId: auth.principalId },
+              kind: "send",
+              payload: { message: text },
+            });
+          }
+
+          const answered = await stream.nextTurn();
+          const result = filterEventsByType(answered, "call.settled").find(
+            (event) => event.data.callId === callId,
+          );
+          expect(result?.data.output).toEqual(output);
+          await stream.nextTurn();
+          expect(seen).toEqual([
+            ["delivery.consumed", "alice"],
+            ["turn.settled", "alice"],
+            ["delivery.consumed", "bob"],
+            ["turn.settled", "bob"],
+          ]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+    60_000,
+  );
 });

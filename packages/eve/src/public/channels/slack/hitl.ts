@@ -20,9 +20,11 @@ import {
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import type { SlackInteractionCardParts } from "#public/channels/slack/renderers.js";
 import { type Answer, parseAnswer, type ValidatedAnswer } from "#shared/input.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
+import type { SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -58,12 +60,10 @@ export const HITL_FREEFORM_MODAL_BLOCK_ID = "eve_freeform_block";
 export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
 
 const HITL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}route:`;
+const HITL_CODE_CHANNEL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}code:`;
 
-/** Slack thread a routed HITL widget answers back to. */
-export interface SlackHitlRoute {
-  readonly channelId: string;
-  readonly threadTs: string;
-}
+/** Slack session a routed HITL widget answers back to. */
+export type SlackHitlRoute = SlackSessionTarget;
 
 /**
  * Maximum radio-button option count before the renderer falls back to
@@ -172,6 +172,12 @@ export function decodeHitlActionId(actionId: string): DecodedHitlActionId | null
     if (first <= 0 || second <= first + 1) return null;
     route = { channelId: encoded.slice(0, first), threadTs: encoded.slice(first + 1, second) };
     encoded = encoded.slice(second + 1);
+  } else if (encoded.startsWith("code:")) {
+    encoded = encoded.slice("code:".length);
+    const end = encoded.indexOf(":");
+    if (end <= 0) return null;
+    route = { channelId: encoded.slice(0, end), codeChannel: true };
+    encoded = encoded.slice(end + 1);
   }
   const button = BUTTON_ACTION_ID_RE.exec(encoded);
   const request = splitEncodedRequest(button?.groups?.requestId ?? encoded);
@@ -188,8 +194,9 @@ export function decodeHitlActionId(actionId: string): DecodedHitlActionId | null
 
 function encodeHitlActionId(request: Interaction, route?: SlackHitlRoute): string {
   const requestIdentity = `${request.request.kind === "approval" ? "tool-approval:" : ""}${request.interactionId}`;
-  return route === undefined
-    ? `${ANSWER_ACTION_PREFIX}${requestIdentity}`
+  if (route === undefined) return `${ANSWER_ACTION_PREFIX}${requestIdentity}`;
+  return route.codeChannel === true
+    ? `${HITL_CODE_CHANNEL_ROUTE_PREFIX}${route.channelId}:${requestIdentity}`
     : `${HITL_ROUTE_PREFIX}${route.channelId}:${route.threadTs}:${requestIdentity}`;
 }
 
@@ -269,11 +276,6 @@ export function renderInteractionBlocks(
   return [prompt];
 }
 
-export interface SlackInteractionPostPart {
-  readonly blocks: unknown[];
-  readonly text: string;
-}
-
 /**
  * Splits approval details from their interactive controls. Slack includes the
  * originating message in `block_actions`, so putting large tool input beside
@@ -282,13 +284,15 @@ export interface SlackInteractionPostPart {
 export function renderInteractionPostParts(
   request: Interaction,
   route?: SlackHitlRoute,
-): {
-  readonly controls: SlackInteractionPostPart;
-  readonly details?: SlackInteractionPostPart;
-} {
+): SlackInteractionCardParts {
   const blocks = renderInteractionBlocks(request, route);
-  const firstBlock = blocks[0];
-  if (!isApprovalRequest(request) || !isBlockType(firstBlock, "card") || blocks.length === 1) {
+  const [firstBlock, ...details] = blocks;
+  if (
+    !isApprovalRequest(request) ||
+    firstBlock === undefined ||
+    !isBlockType(firstBlock, "card") ||
+    details.length === 0
+  ) {
     return {
       controls: { blocks, text: formatInteractionFallbackText(request) },
     };
@@ -296,10 +300,7 @@ export function renderInteractionPostParts(
 
   return {
     controls: { blocks: [firstBlock], text: request.request.prompt },
-    details: {
-      blocks: blocks.slice(1),
-      text: formatInteractionFallbackText(request),
-    },
+    details: { blocks: details, text: formatInteractionFallbackText(request) },
   };
 }
 
@@ -319,17 +320,15 @@ export function formatInteractionFallbackText(request: Interaction): string {
  * the modal to the `view_submission` that closes it so the route can
  * deliver the answer back to the right session.
  */
-export interface HitlFreeformModalMetadata {
+export type HitlFreeformModalMetadata = SlackSessionTarget & {
   readonly continuationToken: string;
-  readonly channelId: string;
   /** Workspace whose app installation supplies credentials for modal follow-up API calls. */
   readonly installationTeamId?: string;
-  readonly threadTs: string;
   /** Slack conversation containing the interactive card. */
   readonly messageChannelId?: string;
   readonly messageTs: string;
   readonly requestId: string;
-}
+};
 
 /**
  * Builds the `views.open` payload for the freeform-answer modal. The

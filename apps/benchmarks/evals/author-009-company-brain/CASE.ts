@@ -3,6 +3,7 @@ import { defineAuthoringCase, emptyProject } from "../../lib/authoring-case.js";
 // A company brain from an empty workspace. Each requirement is graded by its own
 // check, so a run that gets part of the agent right still scores partial credit.
 export default defineAuthoringCase({
+  category: "full-agents",
   startingPoint: emptyProject,
   projectDirectory: "atlas",
   // A whole agent from scratch takes strong models about 10 minutes; weaker ones need longer.

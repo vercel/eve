@@ -1,3 +1,5 @@
+import { createToolChannelTo } from "#execution/tools/channel-to.js";
+import { channelOf } from "#reactions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { HandleEventFn } from "#harness/types.js";
@@ -25,6 +27,7 @@ import {
   ChannelDeliveryKey,
   ChannelInstrumentationKey,
   HandleEventKey,
+  ToolChannelKey,
   StaticModelReferenceKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
@@ -52,6 +55,7 @@ import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
+import { continueTurnAuth } from "#execution/session/principal.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -371,6 +375,7 @@ async function runSessionStepBody(
       delivery?.auth === undefined
         ? undefined
         : attributeAnswers({
+            owner: startedBetweenTurns ? undefined : (previousAuth ?? null),
             responder: delivery.auth,
             state: durableSession.state,
             stepInput: resolved,
@@ -380,17 +385,23 @@ async function runSessionStepBody(
       // initiator. Adapter state from the answer stays: channels record the
       // responder and their prompt cards there, not the reply destination.
       resolved = answers;
-      if (previousAuth === undefined) ctx.delete(AuthKey);
-      else ctx.set(AuthKey, previousAuth);
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
+    // The adapter saw the incoming caller. A responder's answers, an ignored
+    // correction and other input without a message keep a running turn's
+    // identity; a message joining it may update only its principal's claims.
+    let turnAuth = ctx.get(AuthKey);
+    if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
+    else if (delivery !== undefined && !startedBetweenTurns) {
+      turnAuth =
+        resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+    }
+    if (turnAuth === undefined) ctx.delete(AuthKey);
+    else ctx.set(AuthKey, turnAuth);
     if (ignoredActiveDelivery) {
-      // The adapter sees the incoming caller, but an ignored correction must
-      // not change the identity or reply destination of the interrupted work.
-      if (previousAuth === undefined) ctx.delete(AuthKey);
-      else ctx.set(AuthKey, previousAuth);
+      // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;
     } else {
       if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
@@ -661,6 +672,13 @@ async function runSessionStepBody(
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
+            ctx.setVirtualContext(ToolChannelKey, {
+              channel: channelOf(ctx),
+              to: createToolChannelTo({
+                delegated: hasDelegatedSessionContext(input.serializedContext),
+                loadBundle: () => ctx.require(BundleKey),
+              }),
+            });
             const schemaSession =
               firstCall && resolved?.outputSchema !== undefined
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }

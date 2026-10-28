@@ -1,19 +1,26 @@
 import type { Sandbox } from "@vercel/agent-eval";
 
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
+import { crmLocalEnvSetup } from "./setups/crm-local-env.js";
+import { helpdeskExtensionSetup } from "./setups/helpdesk-extension.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
 import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
+import { tallyAppSetup } from "./setups/tally-app.js";
 import { vercelSetup } from "./setups/vercel.js";
 
 const sessionSetups: readonly AuthoringSetup[] = [
+  crmLocalEnvSetup,
+  helpdeskExtensionSetup,
   inventoryOpenApiSetup,
   northstarFulfillmentSetup,
+  tallyAppSetup,
   vercelSetup,
 ];
 
 interface FixtureBootstrap {
   readonly startingPoint: "scaffolded" | "empty";
   readonly projectDirectory?: string;
+  readonly skipSandboxPrewarm?: boolean;
   readonly revision: string;
   readonly setupIds: readonly string[];
 }
@@ -58,12 +65,21 @@ export function createNativeAuthoringSetup(options: {
       if (bootstrap.projectDirectory === undefined) {
         throw new Error("An empty native fixture must declare its project directory.");
       }
+      let build = `npm --prefix ${bootstrap.projectDirectory} run build`;
+      if (bootstrap.skipSandboxPrewarm === true) {
+        // Kept outside the workspace so the flag doesn't hint at the case's answer.
+        build = "eve-benchmark-build";
+        await sandbox.writeFiles({
+          "/usr/local/bin/eve-benchmark-build": `#!/bin/sh\ncd ${shellQuote(bootstrap.projectDirectory)} && exec npm exec -- eve build --skip-sandbox-prewarm\n`,
+        });
+        await run(sandbox, "chmod +x /usr/local/bin/eve-benchmark-build", "build wrapper");
+      }
       await sandbox.writeFiles({
         "package.json": `${JSON.stringify({
           private: true,
           scripts: {
             typecheck: `npm --prefix ${bootstrap.projectDirectory} run typecheck`,
-            build: `npm --prefix ${bootstrap.projectDirectory} run build`,
+            build,
           },
         })}\n`,
       });
@@ -80,7 +96,7 @@ export function createNativeAuthoringSetup(options: {
       "local sandbox and grader dependencies",
     );
 
-    const context = setupContext(sandbox, bootstrap.projectDirectory);
+    const context = setupContext(sandbox, options.packageSpec, bootstrap.projectDirectory);
     for (const setup of setups) await setup.onSession?.(context);
     if (options.treatment === "baseline") await run(sandbox, "rm -f AGENTS.md CLAUDE.md GEMINI.md");
     if (bootstrap.startingPoint === "scaffolded") {
@@ -101,7 +117,11 @@ export function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
   });
 }
 
-function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSetupContext {
+function setupContext(
+  sandbox: Sandbox,
+  packageSpec: string,
+  projectDirectory?: string,
+): AuthoringSetupContext {
   const workspace =
     projectDirectory === undefined
       ? sandbox.getWorkingDirectory()
@@ -109,6 +129,7 @@ function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSet
   return {
     workspace,
     artifactsRoot: "/tmp/photon",
+    packageSpec,
     run: async (command, workingDirectory = workspace) =>
       run(sandbox, command, command, undefined, workingDirectory),
     write: async (path, content) =>
