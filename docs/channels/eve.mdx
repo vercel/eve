@@ -35,10 +35,6 @@ eve link
 eve add channel/web
 ```
 
-`eve init --channel-web-nextjs` keeps its existing scaffolding behavior and does
-not provision authentication. Sign-in setup runs through `eve add channel/web`
-or the terminal UI's channel picker.
-
 The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
 channel verifies the same session, while retaining Vercel OIDC and local
 development access. In an agent workspace, setup configures only the selected
@@ -109,7 +105,7 @@ deployment, `accepted` (HTTP 202) when a background preparation hint has been qu
 `unsupported` when the World or owner cannot prepare, or `no_active_session` when no live
 owner exists. Other successful statuses use HTTP 200. Acceptance does not mean the handoff
 has completed. Idle preparation preserves the session ID, stream, history, and expiry;
-active work is not interrupted. See the [frontend guide](../guides/frontend/overview#returned-state)
+active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
 for client usage and deployment routing.
 
 `GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.

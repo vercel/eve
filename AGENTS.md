@@ -62,8 +62,8 @@ pnpm docs:check         # docs frontmatter and nav validation
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
 pnpm test:integration   # integration tests (several minutes; leave the full run to CI)
-pnpm test:scenario      # scenario tests (2–5 min; requires pnpm build first)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:scenario      # scenario tests (2–5 min; Turbo builds prerequisites)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
 pnpm test:webchat       # web chat template in headless Chromium (needs playwright-core's chromium-headless-shell)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
@@ -202,7 +202,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts <path-or-patter
 ```
 
 Add `-t "<name>"` to filter by test name. If you touched anything under
-`#compiled/*`, run `pnpm --filter eve build:compiled` first — the tier configs
+`#compiled/*`, run `pnpm build:compiled` first — the tier configs
 do not rebuild it.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app

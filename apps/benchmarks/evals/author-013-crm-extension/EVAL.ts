@@ -117,7 +117,7 @@ test("add_note always asks for approval", async () => {
   expect(typeof policy).toBe("function");
   for (const note of ["short", "x".repeat(500)]) {
     const toolInput = { customerId: customer.id, email: customer.email, note };
-    const request = { callId: "call-1", session: {}, toolInput, toolName: "x" };
+    const request = { callId: "call-1", session: graderSession, toolInput, toolName: "x" };
     const decision = await (
       await sessionStorage()
     ).run({ context: session }, () => policy(request));
@@ -265,6 +265,13 @@ function stubFetch() {
   return fetch;
 }
 
+/** The session eve hands tools and approval policies: one conversation, in its first turn. */
+const graderSession = {
+  id: "session-1",
+  auth: { current: null, initiator: null },
+  turn: { id: "turn-1", sequence: 0 },
+};
+
 /**
  * Runs a tool call the way eve does: with a call context, inside a session whose state the
  * tools can read and write. Pass the same session to calls that belong to one conversation.
@@ -278,6 +285,8 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     toolName: "graded",
     messages: [],
     channel: { kind: "eve" },
+    // eve passes the session with every call; a tool may read its ID or the current turn.
+    session: graderSession,
   };
   return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }

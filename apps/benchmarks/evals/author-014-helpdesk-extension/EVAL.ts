@@ -65,7 +65,12 @@ test("asks for approval before closing a ticket", async () => {
   const policy = typeof close.approval === "function" ? close.approval : close.approval?.request;
   expect(typeof policy).toBe("function");
   const toolInput = { ticketId: "T-7", resolution: "Refund issued." };
-  const decision = await policy({ callId: "call-1", session: {}, toolInput, toolName: "x" });
+  const decision = await policy({
+    callId: "call-1",
+    session: graderSession,
+    toolInput,
+    toolName: "x",
+  });
   expect(requiresApproval(decision)).toBe(true);
 
   // Once approved, the call still closes the ticket in the helpdesk.
@@ -238,7 +243,7 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   );
   const ctx = {
     agent: { name: "support" },
-    session: { id: "session-1", auth: { current: null, initiator: null } },
+    session: graderSession,
     position: { line: facts.length - 1, index: 0 },
     view,
     turn: { id: "turn-1" },
@@ -256,6 +261,13 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   return output;
 }
 
+/** The session eve hands tools, hooks, and approval policies: one conversation, in its first turn. */
+const graderSession = {
+  id: "session-1",
+  auth: { current: null, initiator: null },
+  turn: { id: "turn-1", sequence: 0 },
+};
+
 /**
  * Runs a tool call the way eve does: with a call context, inside a session whose state the
  * tools can read and write. Pass the same session to calls that belong to one conversation.
@@ -269,6 +281,8 @@ async function runTool(tool: any, input: unknown, session = new SessionState()):
     toolName: "graded",
     messages: [],
     channel: { kind: "eve" },
+    // eve passes the session with every call; a tool may read its ID or the current turn.
+    session: graderSession,
   };
   return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }

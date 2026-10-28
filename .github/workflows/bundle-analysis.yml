@@ -9,19 +9,33 @@ on:
       - synchronize
       - labeled
     paths:
+      - ".github/actions/sandbox-image/**"
       - ".github/workflows/bundle-analysis.yml"
-      - "e2e/fixtures/agent-tools-sandbox/**"
+      - ".nvmrc"
+      - "apps/docs/lib/evals/eve-code-benchmark.json"
+      - "apps/docs/lib/evals/eve-code-format.ts"
       - "apps/fixtures/weather-agent/**"
+      - "docs/**"
+      - "e2e/fixtures/agent-tools-sandbox/**"
+      - "e2e/fixtures/e2e-config/**"
       - "package.json"
       - "packages/eve/**"
+      - "packages/eve-catalog/**"
+      - "packages/eve-code/extension/**"
+      - "packages/eve-computer-use/extension/**"
+      - "packages/eve-git/extension/**"
+      - "packages/tracing/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "tsconfig.json"
+      - "turbo.json"
       - "scripts/init-install-report.mjs"
       - "scripts/build-profile-report.mjs"
       - "scripts/nitro-bundle-report-compare.mjs"
       - "scripts/nitro-bundle-report-budget.mjs"
       - "scripts/nitro-bundle-report.mjs"
       - "scripts/package-publish-report.mjs"
+      - "scripts/sandbox-image-tag.mjs"
 
 concurrency:
   group: weather-agent-bundle-analysis-${{ github.event.pull_request.number || github.ref }}
@@ -232,20 +246,12 @@ jobs:
         run: |
           echo "Pull request base sandbox benchmark failed; build timing will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build eve package
-        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: pnpm --filter eve build
-
       - name: Build weather-agent for size analysis
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: >-
-          VERCEL=1 pnpm --filter weather-agent
-          exec eve build --skip-sandbox-prewarm
+        run: VERCEL=1 pnpm build:weather-analysis
 
       - name: Build sandbox benchmark in Vercel mode
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        env:
-          SANDBOX_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile.json
         run: |
           token_args=()
           if [ -n "${VERCEL_TOKEN:-}" ]; then
@@ -267,7 +273,7 @@ jobs:
             VERCEL_ENV=preview \
             VERCEL_TARGET_ENV=preview \
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-            pnpm --filter agent-tools-sandbox exec eve build --profile "$SANDBOX_BUILD_PROFILE"
+            pnpm build:sandbox-analysis
 
       - name: Generate bundle report
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
@@ -304,7 +310,7 @@ jobs:
         env:
           BASELINE_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile-base.json
           BASELINE_BUILD_PROFILE_LABEL: ${{ steps.baseline.outputs.label }}
-          BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile.json
+          BUILD_PROFILE: ${{ github.workspace }}/e2e/fixtures/agent-tools-sandbox/.eve/bundle-analysis-profile.json
           BUILD_PROFILE_REPORT_JSON: ${{ runner.temp }}/sandbox-build-profile-report.json
           BUILD_PROFILE_REPORT_MARKDOWN: ${{ runner.temp }}/sandbox-build-profile-report.md
           HAS_BASELINE_BUILD_PROFILE: ${{ github.event_name == 'pull_request' && steps.baseline_sandbox_build.outcome == 'success' }}
@@ -353,6 +359,7 @@ jobs:
             ${{ runner.temp }}/weather-agent-bundle-report.md
             ${{ runner.temp }}/sandbox-build-profile*.json
             ${{ runner.temp }}/sandbox-build-profile*.md
+            ${{ github.workspace }}/e2e/fixtures/agent-tools-sandbox/.eve/bundle-analysis-profile.json
             ${{ runner.temp }}/weather-agent-analysis-report.md
 
       - name: Update pull request comment

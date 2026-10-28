@@ -21,13 +21,21 @@ const matrix = {
   worlds: [{ name: "vercel" }, { name: "postgres", package: "@workflow/world-postgres" }],
 };
 const fixtures = {
-  "agent-one": { dir: "e2e/fixtures/agent-one", evalIds: ["a", "b"] },
+  "agent-one": {
+    dir: "e2e/fixtures/agent-one",
+    evalIds: ["a", "b"],
+    packageJson: { name: "agent-one" },
+  },
   "agent-two": {
     dir: "e2e/fixtures/agent-two",
     evalIds: ["c"],
-    packageJson: { e2e: { worlds: ["vercel"] } },
+    packageJson: { name: "agent-two", e2e: { worlds: ["vercel"] } },
   },
-  "agent-stress": { dir: "e2e/fixtures/agent-stress", evalIds: ["s"] },
+  "agent-stress": {
+    dir: "e2e/fixtures/agent-stress",
+    evalIds: ["s"],
+    packageJson: { name: "agent-stress" },
+  },
 };
 const select = (overrides = {}, narrow = {}) =>
   selectBenchmark({
@@ -59,6 +67,7 @@ test("expands fixtures × models × attempts and mock worlds the fixture selects
     leg_id: "live__agent-one__alpha__local__1",
     kind: "live",
     fixture: "agent-one",
+    package: "agent-one",
     dir: "e2e/fixtures/agent-one",
     model_name: "alpha",
     model_id: "acme/alpha",
@@ -239,7 +248,11 @@ test("the committed registry is valid", () => {
   const selection = selectBenchmark({
     registry: committed,
     matrix: committedMatrix,
-    findFixture: () => ({ dir: "fixture", evalIds: ["eval"] }),
+    findFixture: () => ({
+      dir: "fixture",
+      evalIds: ["eval"],
+      packageJson: { name: "fixture" },
+    }),
   });
   assert.equal(selection.models.length, committed.models.length);
 });

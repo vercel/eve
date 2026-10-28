@@ -317,7 +317,7 @@ try {
 
 Construction does not start reads. `observe()` activates a reference-counted scope and returns an idempotent cleanup function. Root streaming also activates child following; framework bindings activate and release scopes after mount. The store continues refreshing admitted children within an active scope even if `followWhile` closes the root stream. There is no full-tree catch-up barrier.
 
-`followAgents: true` recursively follows all eligible recorded children within fixed depth, admission, and request limits. A predicate such as `({ depth }) => depth === 1` selects only immediate children. See [child observations](../frontend/overview#returned-state) for limits, states, and cursor semantics. Child conversations are whole-session views; their messages do not replace authoritative call results.
+`followAgents: true` recursively follows all eligible recorded children within fixed depth, admission, and request limits. A predicate such as `({ depth }) => depth === 1` selects only immediate children. See [child observations](../frontend/use-eve-agent#child-agents) for limits, states, and cursor semantics. Child conversations are whole-session views; their messages do not replace authoritative call results.
 
 Stop the old scope and construct a new store when the principal or tenant changes. Token refresh callbacks resolve again for each request without changing observation identity. For a cross-origin browser connection, expose `x-eve-observation-key` in the channel's CORS configuration alongside the stream version and tail headers.
 

@@ -40,7 +40,10 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { discoverEvalIds } from "../../.github/scripts/discover-e2e-fixtures.mjs";
+import {
+  discoverEvalIds,
+  validateE2ePackageName,
+} from "../../.github/scripts/discover-e2e-fixtures.mjs";
 import { resolveModelReleases } from "./catalog.mjs";
 import { fixtureDigest } from "./digest.mjs";
 import { evalFlags, releasePublishedAt, releaseTag } from "./release.mjs";
@@ -118,7 +121,11 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {}, ba
     }
     if (found.evalIds.length === 0)
       throw new Error(`e2e/benchmark.json: fixture "${name}" has no *.eval.ts files.`);
-    return [{ name, ...found }];
+    const packageName = validateE2ePackageName(
+      found.packageJson?.name,
+      `${found.dir}/package.json`,
+    );
+    return [{ name, packageName, ...found }];
   });
 
   const selectedModels = narrowNames(models, narrow.models, "model");
@@ -240,6 +247,7 @@ function leg({ kind, fixture, model_name, model_id, world = { name: "local" }, a
     leg_id: [kind, fixture.name, model_name, world.name, attempt].join("__"),
     kind,
     fixture: fixture.name,
+    package: fixture.packageName,
     dir: fixture.dir,
     model_name,
     model_id,

@@ -482,12 +482,6 @@
       "default": "./dist/src/public/channels/linear/index.js"
     },
     "./package.json": "./package.json",
-    "./internal/self-modification/agent": {
-      "eve-source": "./dist/src/self-modification/agent.js",
-      "types": "./dist/src/self-modification/agent.d.ts",
-      "import": "./dist/src/self-modification/agent.js",
-      "default": "./dist/src/self-modification/agent.js"
-    },
     "./internal/self-modification/sandbox": {
       "eve-source": "./dist/src/self-modification/sandbox.js",
       "types": "./dist/src/self-modification/sandbox.d.ts",
@@ -577,24 +571,23 @@
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && pnpm run build:js && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
+    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "node ./scripts/build-js.mjs",
-    "build:types": "pnpm run build:compiled && tsc -p tsconfig.build.json",
+    "build:types": "tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
-    "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
-    "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:webchat": "pnpm run build:js && vitest run --config vitest.browser.config.ts",
-    "test:framework-fixtures": "pnpm run build:compiled && vitest run --config vitest.framework-fixtures.config.ts",
-    "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
-    "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
-    "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
-    "test:watch": "pnpm run build:compiled && vitest --config vitest.unit.config.ts",
-    "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
+    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
+    "test:webchat": "vitest run --config vitest.browser.config.ts",
+    "test:framework-fixtures": "vitest run --config vitest.framework-fixtures.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:scenario": "vitest run --config vitest.scenario.config.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:watch": "vitest --config vitest.unit.config.ts",
+    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
-    "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
+    "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
     "nitro": "3.0.260903-beta",
@@ -639,7 +632,7 @@
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
-    "@vercel/schedules": "0.0.0-alpha.11",
+    "@vercel/schedules": "0.0.0-alpha.19",
     "@vercel/sdk": "1.28.8",
     "@workflow/core": "5.2.3",
     "@workflow/errors": "5.0.5",
