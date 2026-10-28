@@ -588,8 +588,8 @@ export function SessionTimeline(): JSX.Element {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    // Jump to the end when the whole conversation appears; follow along smoothly while playing.
-    list.scrollTo({ top: list.scrollHeight, behavior: playing ? "smooth" : "auto" });
+    // The full conversation opens at its start; a replay follows new messages at the end.
+    list.scrollTo(playing ? { top: list.scrollHeight, behavior: "smooth" } : { top: 0 });
   }, [shown, platform, playing]);
 
   const play = () => {
@@ -604,10 +604,16 @@ export function SessionTimeline(): JSX.Element {
 
   return (
     <figure aria-label="Example eve sessions in Slack, Teams, and WhatsApp" className="m-0">
-      {/* No frame: the conversation sits on the page, fills from the bottom like a chat, and
-          fades out toward the top as older messages scroll up. */}
+      {/* No frame: the conversation sits on the page. In full it opens at its start and fades
+          out toward the bottom; a replay fills from the bottom like a chat and fades out toward
+          the top as older messages scroll up. */}
       <ol
-        className="-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [mask-image:linear-gradient(to_bottom,transparent,black_40%)] [scrollbar-width:none] [&>li:first-child]:mt-auto"
+        className={cn(
+          "-mx-1 flex h-[26rem] list-none flex-col overflow-y-auto overscroll-contain px-1 pt-0 pb-2 [scrollbar-width:none] [&>li:first-child]:mt-auto",
+          playing
+            ? "[mask-image:linear-gradient(to_bottom,transparent,black_40%)]"
+            : "[mask-image:linear-gradient(to_bottom,black_60%,transparent)]",
+        )}
         key={platform}
         ref={listRef}
       >
