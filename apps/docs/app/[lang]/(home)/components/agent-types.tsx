@@ -34,16 +34,10 @@ import { AppWindow, HomeSection, PrefetchLink } from "./section";
 const logoClassName = "size-3.5 shrink-0 grayscale";
 
 const FACTORY_STATIONS = [
-  { name: "classifier", running: "Classifying the report", result: "Bug, small scope" },
-  {
-    name: "analyst",
-    running: "Tracing the cause",
-    result: "Traced it to the cart merge on sign-in",
-  },
   {
     name: "implementer",
     running: "Writing the fix",
-    result: "Pushed eve/eng-142, 6 checks passed",
+    result: "Fixed the cart merge on sign-in, 6 checks passed",
   },
   { name: "reviewer", running: "Reviewing the change", result: "Approved after 1 fix" },
   {
@@ -58,7 +52,7 @@ const FACTORY_STATIONS = [
  * its reply with the ticket, each station running then finishing, opening the pull request,
  * then its card.
  */
-const FACTORY_DEMO = [500, 700, 1200, 1000, 900, 900, 1100, 900, 1000, 600];
+const FACTORY_DEMO = [500, 700, 1200, 1100, 1000, 1100, 1000, 600];
 
 const SAM: Author = { name: "Sam" };
 const FOREMAN: Author = { name: "foreman", icon: Factory };
@@ -74,9 +68,10 @@ const foremanAvatar = "bg-purple-700";
 function SoftwareFactoryPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? FACTORY_DEMO.length;
-  const reviewing = shown >= 10;
+  // The last stage brings the pull request's card, and the ticket moves to review.
+  const reviewing = shown >= FACTORY_DEMO.length;
   return (
-    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:24rem]">
+    <ol className="m-0 flex list-none flex-col p-0 px-4 pb-4 [--reply-width:27.5rem]">
       {shown >= 1 ? (
         <SlackMessage
           author={SAM}
@@ -277,7 +272,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             avatarColor={brainAvatar}
             className={cn(
               // Dana's questions run a line each; the agent's answer keeps to its table's width.
-              "[--reply-width:24rem]",
+              "[--reply-width:27.5rem]",
               demo && agentMessageIn,
             )}
             continued={false}
@@ -290,7 +285,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
               steps={BRAIN_STEPS}
             />
             {shown >= 7 ? (
-              <p className={cn("mt-2", demo && fadeIn)}>
+              <p className={cn("mt-2 text-pretty", demo && fadeIn)}>
                 Repeat customers placed 44% of orders in October, up from 38% in August.
               </p>
             ) : null}
@@ -463,10 +458,11 @@ function ThreadReply({ demo }: { demo: boolean }) {
 }
 
 // WhatsApp's voice recorder: every tenth of a second a bar for the voice's level joins at the
-// right and the rest shift left, a 2px bar and a 3px gap at a time, keeping the latest 30.
+// right and the bars scroll left, a 2px bar and a 3px gap each, across a 156px strip.
 const BAR_MS = 100;
 const BAR_PITCH = 5;
-const BAR_COUNT = 30;
+const WAVE_WIDTH = 156;
+const BAR_COUNT = WAVE_WIDTH / BAR_PITCH - 1;
 
 /**
  * The voice's level at bar `t`, as a bar height in px: mostly full and a little uneven, with a
@@ -544,63 +540,84 @@ function WebAppClient() {
  * The call's waveform. While the call is live it records, scrolling left as bars join; once it
  * ends, the recorded bars play back on click, filling in bar by bar like a voice message,
  * holding full for a moment, and resetting. A second click stops playback.
+ *
+ * Each bar sits at a fixed place on a strip, and one clock both moves the strip and counts the
+ * bars, so the scroll stays even. A bar renders a step before it scrolls into view, so it is
+ * in place by the time it shows.
  */
 function Waveform({ live, from }: { live: boolean; from: number }) {
+  // Where this recording started, fixed at mount: `from` follows the call's timer, which
+  // re-renders every second, and a moving origin would jolt the bars.
+  const [origin] = useState(from);
   // Bars recorded so far, counted from the start of the call.
-  const [recorded, setRecorded] = useState(from);
+  const [recorded, setRecorded] = useState(origin);
   // How many bars have played, or null when stopped.
   const [played, setPlayed] = useState<number | null>(null);
-  const row = useRef<HTMLSpanElement>(null);
+  const strip = useRef<HTMLSpanElement>(null);
 
-  useEffect(() => {
-    if (!live) return;
-    const timer = setInterval(() => setRecorded((count) => count + 1), BAR_MS);
-    return () => clearInterval(timer);
+  // Where the strip sits once `progress` bars have recorded: the newest at the right edge.
+  const offset = (progress: number) => WAVE_WIDTH - BAR_PITCH - (progress - origin) * BAR_PITCH;
+
+  useLayoutEffect(() => {
+    const node = strip.current;
+    if (!node) return;
+    if (!live) {
+      node.style.transform = `translateX(${offset(recorded)}px)`;
+      return;
+    }
+    const step = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const start = performance.now() - (recorded - origin) * BAR_MS;
+    let frame = requestAnimationFrame(function tick(now) {
+      const progress = origin + (now - start) / BAR_MS;
+      node.style.transform = `translateX(${offset(step ? Math.floor(progress) : progress)}px)`;
+      setRecorded(Math.floor(progress));
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+    // Restarts only when the call goes live or ends; `recorded` seeds the clock's start.
   }, [live]);
 
-  // Each new bar pushes the row a bar to the left; starting it a bar to the right and gliding
-  // back makes the bars scroll rather than step.
-  useLayoutEffect(() => {
-    if (recorded === from || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    row.current?.animate([{ transform: `translateX(${BAR_PITCH}px)` }, { transform: "none" }], {
-      duration: BAR_MS,
-      easing: "linear",
-    });
-  }, [recorded, from]);
-
-  const first = Math.max(0, recorded - BAR_COUNT);
-  const bars = Array.from({ length: recorded - first }, (_, i) => first + i);
+  const first = Math.max(0, recorded - BAR_COUNT - 1);
+  // While live, one bar past the newest, still outside the strip's right edge.
+  const bars = Array.from({ length: recorded - first + (live ? 1 : 0) }, (_, i) => first + i);
+  const playable = bars.slice(-BAR_COUNT);
 
   useEffect(() => {
     if (played === null) return;
-    const done = played === bars.length;
+    const done = played === playable.length;
     const timer = setTimeout(() => setPlayed(done ? null : played + 1), done ? 600 : 110);
     return () => clearTimeout(timer);
-  }, [played, bars.length]);
+  }, [played, playable.length]);
 
   const wave = (
-    <span className="flex items-center gap-[3px]" ref={row}>
-      {bars.map((t, i) => (
-        <span
-          className={cn(
-            "w-[2px] shrink-0 rounded-full transition-colors duration-150",
-            !live && played !== null && i < played
-              ? "bg-gray-1000"
-              : cn("bg-gray-alpha-600", !live && "group-hover:bg-gray-alpha-700"),
-          )}
-          key={t}
-          style={{ height: voiceLevel(t) }}
-        />
-      ))}
-      {/* Where the recording continues. */}
-      {live ? <span className="size-[2px] shrink-0 rounded-full bg-gray-alpha-600" /> : null}
+    <span
+      className="absolute inset-y-0 left-0"
+      ref={strip}
+      style={{ transform: `translateX(${offset(origin)}px)` }}
+    >
+      {bars.map((t) => {
+        const index = playable.indexOf(t);
+        return (
+          <span
+            className={cn(
+              "absolute top-1/2 w-[2px] -translate-y-1/2 rounded-full transition-colors duration-150",
+              !live && played !== null && index !== -1 && index < played
+                ? "bg-gray-1000"
+                : cn("bg-gray-alpha-600", !live && "group-hover:bg-gray-alpha-700"),
+            )}
+            key={t}
+            style={{ height: voiceLevel(t), left: (t - origin) * BAR_PITCH }}
+          />
+        );
+      })}
     </span>
   );
+  // Faded at both ends, so bars ease in at the right and out at the left.
   const frame =
-    "ml-auto hidden h-6 w-[9.75rem] shrink-0 items-center justify-end overflow-hidden @sm:flex";
+    "relative ml-auto hidden h-6 shrink-0 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_20%,black_85%,transparent)] @sm:block";
 
   return live ? (
-    <span aria-hidden className={frame}>
+    <span aria-hidden className={frame} style={{ width: WAVE_WIDTH }}>
       {wave}
     </span>
   ) : (
@@ -612,6 +629,7 @@ function Waveform({ live, from }: { live: boolean; from: number }) {
         frame,
       )}
       onClick={() => setPlayed(played === null ? 0 : null)}
+      style={{ width: WAVE_WIDTH }}
       type="button"
     >
       {wave}
@@ -654,7 +672,7 @@ function VoiceClient() {
         <Waveform from={(call.seconds * 1000) / BAR_MS} key={call.id} live={call.live} />
         {/* Not through cn: tailwind-merge reads text-label-12 and text-white as one conflict. */}
         <button
-          className={`ml-auto hidden shrink-0 cursor-pointer rounded-full px-3 py-1 text-label-12 text-white focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @[16rem]:inline @sm:ml-3 ${
+          className={`ml-auto hidden shrink-0 cursor-pointer rounded-full px-3 py-1 text-label-12 text-white focus-visible:shadow-(--ds-focus-ring) focus-visible:outline-none @[16rem]:inline @sm:ml-0 ${
             call.live ? "bg-red-700" : "bg-green-700"
           }`}
           onClick={() =>
