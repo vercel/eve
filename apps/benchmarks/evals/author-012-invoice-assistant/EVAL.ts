@@ -75,11 +75,17 @@ test("runs and deploys the agent with the Next.js app through withEve", () => {
   expect(source).toMatch(/export\s+default\s+withEve\s*\(/);
 });
 
+/** Principal types eve and its docs use for callers that aren't a signed-in person. */
+const nonPersonTypes = ["anonymous", "app", "local-dev", "runtime", "service"];
+
 test("admits signed-in Tally users as themselves", async () => {
   for (const user of [maya, sam]) {
     const { status, auth } = await authenticate({ cookie: sessionCookie(user) });
     expect(status, user.userId).toBe(202);
-    expect(auth?.principalType, user.userId).toBe("user");
+    // eve leaves `principalType` free-form; "user" is the convention, but `tally_user` still
+    // names a person. Only non-person types fail.
+    expect(auth?.principalType, user.userId).toMatch(/\S/);
+    expect(nonPersonTypes, user.userId).not.toContain(auth?.principalType);
     expect(String(auth?.principalId), user.userId).toContain(user.userId);
   }
 });
