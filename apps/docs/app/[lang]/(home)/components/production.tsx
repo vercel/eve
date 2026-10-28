@@ -333,7 +333,7 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
   {
     title: "Durable execution & scheduling",
     icon: <IconWorkflow size={16} />,
-    text: "Checkpoints every step. Survives crashes, restarts, and days-long waits. Runs on a cron schedule, too.",
+    text: "Checkpoints every step. Survives crashes, restarts, and days-long waits. Runs on crons, too.",
     href: "/docs/concepts/execution-model-and-durability",
   },
   {
@@ -349,15 +349,15 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     href: "/docs/evals/overview",
   },
   {
-    title: "Connections",
+    title: "Connections & subagents",
     icon: <IconLinked size={16} />,
-    text: "Connect to services over MCP and OpenAPI. Credentials stay in the runtime, never in the model.",
+    text: "Connect to services over MCP and OpenAPI, or delegate to focused subagents. Credentials stay in the runtime.",
     href: "/docs/connections",
   },
   {
-    title: "Agent identity",
+    title: "Agent identity & sandboxes",
     icon: <IconShieldCheck size={16} />,
-    text: "Bring any OIDC provider. Act as the agent, or as the signed-in user with their approved permissions.",
+    text: "Bring any OIDC provider and act as the agent or the signed-in user. Code runs in an isolated sandbox per session.",
     href: "/docs/guides/auth-and-route-protection",
   },
 ];
