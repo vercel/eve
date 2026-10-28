@@ -115,6 +115,26 @@ pnpm docs:check    # docs frontmatter and nav validation
 
 All of these run in CI, so running them locally before pushing saves a round trip.
 
+### Public API reports
+
+`packages/eve/public-api/` records every public entry's exported names (`.json`)
+and signatures (`.api.md`). `pnpm guard:invariants` regenerates declarations from
+current source in a temporary directory and checks both reports; no prior build
+is needed. Internal package entries are excluded. Experimental entries are
+recorded for review, not given a new compatibility promise.
+
+After reviewing an intentional API change, update the reports:
+
+```bash
+node scripts/public-exports.mjs --write
+node scripts/public-signatures.mjs --write
+```
+
+Review the generated diff alongside the source and include migration guidance
+for breaking changes. The signature reports include referenced, non-exported
+types so changes to a field or parameter are visible even when export names do
+not change. API Extractor owns their formatting; do not edit the reports by hand.
+
 ### Extension distribution compatibility
 
 `eve extension build` records its exact eve build version and a distribution

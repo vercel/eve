@@ -159,7 +159,7 @@
  *             `eve/events`; the client) never import a schema module by
  *             value: schemas serve tests and development only.
  *
- *   rule 55 — Public named exports match checker-generated per-entry lists.
+ *   rule 55 — Public names and signatures match per-entry API reports.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -171,6 +171,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { checkPublicExports } from "./public-exports.mjs";
+import { checkPublicSignatures } from "./public-signatures.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
@@ -1941,7 +1942,7 @@ async function main() {
   violations.push(...state.rule52);
   violations.push(...state.rule53);
 
-  for (const issue of await checkPublicExports()) {
+  for (const issue of [...(await checkPublicExports()), ...(await checkPublicSignatures())]) {
     violations.push({ rule: 55, ...issue });
   }
 
