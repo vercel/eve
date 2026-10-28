@@ -3,13 +3,11 @@ import type { AgentInfoResult } from "#client/types.js";
 export function createTestAgentInfoResult(
   input: {
     readonly agentRoot?: string;
-    readonly appRoot?: string;
     readonly modelId?: string;
     readonly name?: string;
   } = {},
 ): AgentInfoResult {
   const agentRoot = input.agentRoot ?? "/tmp/test-agent/agent";
-  const appRoot = input.appRoot ?? "/tmp/test-agent";
   const owner = { kind: "application" as const };
   const configBinding = {
     backing: {
@@ -22,8 +20,6 @@ export function createTestAgentInfoResult(
   };
   return {
     agent: {
-      agentRoot,
-      appRoot,
       config: {
         binding: configBinding,
         logicalPath: "agent.ts",
@@ -71,7 +67,7 @@ export function createTestAgentInfoResult(
     skills: { dynamic: [], static: [] },
     subagents: { local: [], total: 0 },
     tools: { dynamic: [], static: [] },
-    version: 5,
+    version: 6,
     workspace: { resourceRoot: null, rootEntries: [] },
   };
 }

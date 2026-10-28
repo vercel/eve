@@ -67,7 +67,7 @@ export function initialPromptPlaceholder(
     instructions.length === 1 &&
     instructionsFile?.owner.kind === "application" &&
     instructionsFile.logicalPath === SCAFFOLDED_AGENT_PATHS.instructions.slice("agent/".length) &&
-    instructionsFile.content.trim() === AGENT_INSTRUCTIONS_TEMPLATE.trim();
+    instructionsFile.content?.trim() === AGENT_INSTRUCTIONS_TEMPLATE.trim();
 
   return isScaffold && !hasCapabilities
     ? "Ask me to connect a channel, edit instructions, add a tool…"

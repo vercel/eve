@@ -46,7 +46,6 @@ const NEWER_VERIFIED_TARGET = await resolveTestVercelTarget({
 
 const INFO: AgentInfoResult = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
-  appRoot: "/tmp/weather-agent",
   modelId: "gpt-5",
   name: "Weather Agent",
 });
