@@ -2,34 +2,26 @@
 
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
-import { type JSX, useState } from "react";
+import type { JSX } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 import { EveLogoShader } from "./eve-logo-shader";
-import { type InstallAudience, InstallSwitcher } from "./install-switcher";
 import { PrefetchLink } from "./section";
 
 export function GetStarted(): JSX.Element {
-  const [audience, setAudience] = useState<InstallAudience>("humans");
-
   return (
     <section
       aria-labelledby="get-started-title"
-      className="relative isolate flex flex-col items-center gap-8 pt-16 pb-16 text-center sm:pb-24 md:pt-48"
+      className="relative isolate pt-16 pb-16 sm:pb-24 md:pt-48"
     >
-      {/* The shader sizes itself in em, so the heading's font size sets the logo's scale. */}
-      <div className="relative z-10 max-w-5xl text-heading-40 sm:text-heading-48 lg:text-heading-56">
-        <EveLogoShader audience={audience} />
+      {/* The shader sizes itself in em, so this row's heading size sets the logo's scale. On
+          desktop it sits centered behind the heading and actions. */}
+      <div className="relative z-10 flex flex-col gap-8 text-heading-40 sm:text-heading-48 md:flex-row md:items-center md:justify-between lg:text-heading-56">
+        <EveLogoShader />
         <h2 className="relative text-balance text-gray-1000" id="get-started-title">
           Build your first agent today
         </h2>
-      </div>
-      <div className="z-10 flex flex-col items-center gap-6">
-        <InstallSwitcher
-          className="items-center"
-          onAudienceChange={setAudience}
-          source="home_footer"
-        />
-        <div className="flex flex-wrap justify-center gap-3">
+        {/* The row sets heading type for the shader; the actions take back their own. */}
+        <div className="relative flex flex-wrap gap-3 leading-normal tracking-normal">
           <Button
             className="w-fit rounded-full text-base"
             href="https://vercel.com/new/agent"
