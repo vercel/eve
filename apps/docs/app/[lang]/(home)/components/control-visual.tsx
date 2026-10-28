@@ -5,44 +5,36 @@ import { cn } from "@/lib/utils";
 
 // The homepage visuals follow vercel.com's enterprise control visuals: set straight in a 16:9
 // frame, black, white, and gray, thin lines, one black label. Each is drawn on a 320 × 180
-// canvas and scaled with its stage through `cqw` sizes (16px type at a 360px stage).
+// canvas and scaled with the frame through `cqw` sizes (16px type at a 360px frame).
 export const view = { width: 320, height: 180 };
 
 export function pct(value: number, total: number) {
   return `${(value / total) * 100}%`;
 }
 
-/**
- * The 16:9 frame a visual renders in: an optional SVG scene on the canvas with HTML laid over
- * it. The stage fills the frame unless `stage` caps it, which keeps type at the same size in
- * wider frames; a capped stage sits centered.
- */
+/** The 16:9 frame a visual renders in: an optional SVG scene on the canvas with HTML over it. */
 export function Visual({
   caption,
   children,
   scene,
-  stage,
 }: {
   caption: string;
   children?: ReactNode;
   scene?: ReactNode;
-  stage?: string;
 }): JSX.Element {
   return (
-    <figure className="m-0 flex aspect-video w-full items-center justify-center overflow-hidden">
-      <div className={cn("@container relative aspect-video w-full", stage)}>
-        {scene ? (
-          <svg
-            aria-hidden
-            className="absolute inset-0 size-full"
-            fill="none"
-            viewBox={`0 0 ${view.width} ${view.height}`}
-          >
-            {scene}
-          </svg>
-        ) : null}
-        {children}
-      </div>
+    <figure className="@container relative m-0 aspect-video w-full overflow-hidden">
+      {scene ? (
+        <svg
+          aria-hidden
+          className="absolute inset-0 size-full"
+          fill="none"
+          viewBox={`0 0 ${view.width} ${view.height}`}
+        >
+          {scene}
+        </svg>
+      ) : null}
+      {children}
       <figcaption className="sr-only">{caption}</figcaption>
     </figure>
   );
@@ -78,7 +70,7 @@ export function LimitLine({ id, x, y1, y2 }: { id: string; x: number; y1: number
   );
 }
 
-/** Geist's small gray low-contrast badge, in `em` so it scales with the stage. */
+/** Geist's small gray low-contrast badge, in `em` so it scales with the frame. */
 export function GrayBadge({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return (
     <span className="inline-flex h-[1.75em] shrink-0 items-center gap-[0.375em] rounded-full bg-gray-200 px-[0.75em] font-medium text-[0.625em] text-gray-1000 tracking-[0.2px] [&>svg]:size-[1.1em]">

@@ -1,7 +1,6 @@
 import { SiImessage } from "@icons-pack/react-simple-icons";
 import {
   IconCheck,
-  IconClock,
   IconLinked,
   IconMessage,
   IconRoute,
@@ -25,10 +24,6 @@ import {
   view,
 } from "./control-visual";
 import { HomeSection } from "./section";
-
-// Cards here run two to a row, so each visual draws on a stage capped at the width of a
-// three-up card, keeping its type at the same size as the rest of the page.
-const stage = "max-w-[30rem]";
 
 const hub = { x: 160, y: 90 };
 const rings = [44, 80];
@@ -108,7 +103,6 @@ function ChannelHub() {
           })}
         </>
       }
-      stage={stage}
     >
       {CHANNELS.map(({ angle, label, logo, ring }) => {
         const { x, y } = channelPoint(ring, angle);
@@ -151,10 +145,7 @@ const TENANTS = [
 
 function TenantCapabilities() {
   return (
-    <Visual
-      caption="One deployment resolves capabilities per person: Alice gets memory and CRM tools, Bob memory and schedules, and Carol memory and legal skills."
-      stage={stage}
-    >
+    <Visual caption="One deployment resolves capabilities per person: Alice gets memory and CRM tools, Bob memory and schedules, and Carol memory and legal skills.">
       <RuledList
         header={
           <>
@@ -175,57 +166,6 @@ function TenantCapabilities() {
           </li>
         ))}
       </RuledList>
-    </Visual>
-  );
-}
-
-const DIFF: { mark: " " | "-" | "+"; text: string }[] = [
-  { mark: " ", text: 'import { defineAgent } from "eve";' },
-  { mark: " ", text: "" },
-  { mark: " ", text: "export default defineAgent({" },
-  { mark: "-", text: '  model: "openai/gpt-6-luna-fast",' },
-  { mark: "+", text: '  model: "anthropic/claude-opus-5.5",' },
-  { mark: " ", text: "});" },
-];
-
-function ModelDiff() {
-  return (
-    <Visual
-      caption="A one-line change in agent/agent.ts swaps the model from openai/gpt-6-luna-fast to anthropic/claude-opus-5.5."
-      stage={stage}
-    >
-      <div className="absolute inset-0 [mask-image:linear-gradient(to_right,black_85%,transparent)]">
-        <div className="absolute top-[calc(8cqw+1em)] right-0 left-[8%] select-none text-[4.4cqw]">
-          <div className="flex flex-col gap-[1.25em]">
-            <span className="pl-[1em] font-mono text-[0.8125em] text-gray-900 leading-none">
-              agent/agent.ts
-            </span>
-            <pre className="m-0 border-gray-alpha-400 border-t pt-[0.5em] font-mono text-[0.625em] leading-[2]">
-              {DIFF.map((line, i) => (
-                <div
-                  className={cn(
-                    "grid grid-cols-[1.6em_auto] whitespace-pre",
-                    line.mark === "-" && "text-gray-700 line-through decoration-gray-500",
-                    line.mark === "+" && "bg-gray-alpha-100 text-gray-1000",
-                    line.mark === " " && "text-gray-1000",
-                  )}
-                  // Lines have no stable identity beyond their position in this fixed snippet.
-                  key={i}
-                >
-                  <span aria-hidden className="text-center text-gray-700 no-underline">
-                    {line.mark}
-                  </span>
-                  <span>
-                    {line.mark === "-" ? <span className="sr-only">Removed: </span> : null}
-                    {line.mark === "+" ? <span className="sr-only">Added: </span> : null}
-                    {line.text || " "}
-                  </span>
-                </div>
-              ))}
-            </pre>
-          </div>
-        </div>
-      </div>
     </Visual>
   );
 }
@@ -291,7 +231,6 @@ function DeterminismModes() {
           })}
         </>
       }
-      stage={stage}
     >
       <div className="absolute inset-0 select-none text-[4.4cqw]">
         {MODES.map((mode, i) => (
@@ -344,13 +283,6 @@ const PRIMARY: {
     visual: <TenantCapabilities />,
   },
   {
-    title: "Any model, no rewrite",
-    text: "Swap models with a one-line edit. Provider fallback included. Route different models to different tasks.",
-    href: "/docs/agent-config#set-the-model",
-    icon: <IconSparkles aria-hidden size={16} />,
-    visual: <ModelDiff />,
-  },
-  {
     title: "Determinism where you need it",
     text: "Fully agentic loops, deterministic workflows, or both in one run. You choose per task.",
     href: "/docs/tools/workflows",
@@ -360,6 +292,12 @@ const PRIMARY: {
 ];
 
 const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[] = [
+  {
+    title: "Any model, no rewrite",
+    icon: <IconSparkles size={16} />,
+    text: "Swap models with a one-line edit. Provider fallback included. Route different models to different tasks.",
+    href: "/docs/agent-config#set-the-model",
+  },
   {
     title: "Durable execution",
     icon: <IconWorkflow size={16} />,
@@ -385,12 +323,6 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     href: "/docs/connections",
   },
   {
-    title: "Scheduling",
-    icon: <IconClock size={16} />,
-    text: "Crons, plus schedules the agent sets itself.",
-    href: "/docs/schedules",
-  },
-  {
     title: "Agent identity",
     icon: <IconShieldCheck size={16} />,
     text: "Bring any OIDC provider. Act as the agent, or as the signed-in user with their approved permissions.",
@@ -401,9 +333,10 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
 export function Production(): JSX.Element {
   return (
     <HomeSection id="production" title="Everything you need to ship to production">
-      <ul className="m-0 grid list-none gap-x-6 gap-y-16 p-0 md:grid-cols-2">
+      <ul className="m-0 grid list-none gap-x-6 gap-y-16 p-0 md:grid-cols-12">
         {PRIMARY.map((feature) => (
           <FeatureCard
+            className="md:col-span-6 lg:col-span-4"
             href={feature.href}
             icon={feature.icon}
             key={feature.title}
