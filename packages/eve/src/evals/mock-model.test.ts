@@ -3,12 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
-import { mockModel as eveMockModel, type MockModelRequest } from "#evals/mock-model.js";
-import { toAiSdkLanguageModel } from "#internal/runtime-model.js";
-
-// These tests drive the mock through the AI SDK directly, as eve's runtime does.
-const mockModel = (...args: Parameters<typeof eveMockModel>) =>
-  toAiSdkLanguageModel(eveMockModel(...args));
+import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 
 describe("mockModel", () => {
   it("keeps a session's call ids unique, and each session's scripted ids its own", async () => {
