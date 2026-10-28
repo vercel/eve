@@ -32,7 +32,8 @@ body:has([data-nights-route]) {
 /* geistcn's loading-dots blink (packages/geistcn/src/styles/animations.css), and the home
    conversation's motion, matching vercel.com/sandbox's agent chat (vercel-marketing
    sandbox/components/chat.tsx and globals.css): bubbles scale in from 75% at their corner
-   over 300ms ease-in-out, actions fade in over 200ms ease-out, and in-progress text shimmers. */
+   over 300ms ease-in-out, actions fade in over 200ms ease-out, and in-progress text shimmers.
+   Larger bubbles set a closer start scale (--bubble-from) so they travel about as far. */
 @theme {
   --animate-blink: blink 1.4s infinite both;
   --animate-bubble-in: bubble-in 300ms ease-in-out both;
@@ -44,7 +45,7 @@ body:has([data-nights-route]) {
   @keyframes bubble-in {
     from {
       opacity: 0;
-      transform: scale(0.75);
+      transform: scale(var(--bubble-from, 0.75));
     }
   }
 

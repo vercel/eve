@@ -456,6 +456,10 @@ function Attachment({ children }: { children: ReactNode }) {
   );
 }
 
+// The agent's replies are wider and taller than people's short messages, so they start closer
+// to full size to travel about as far as they scale in.
+const agentEntrance = "[--bubble-from:0.9]";
+
 /** Slack: avatar, name, Agent badge, time; consecutive messages fold under the first. */
 function ThreadMessage({
   author,
@@ -472,6 +476,7 @@ function ThreadMessage({
     <li
       className={cn(
         "grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
+        author.icon && agentEntrance,
         continued ? "pt-2" : "pt-4",
       )}
     >
@@ -518,7 +523,7 @@ function TeamsMessage({
       className={cn(
         "motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
         isAgent
-          ? "grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5"
+          ? cn("grid origin-top-left grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5", agentEntrance)
           : "flex origin-top-right flex-col items-end",
         continued ? "pt-1" : "pt-4",
       )}
@@ -671,7 +676,9 @@ function Bubble({
     <li
       className={cn(
         "flex motion-safe:animate-bubble-in motion-reduce:animate-fade-in",
-        outgoing ? "origin-top-right justify-end pr-2" : "origin-top-left justify-start pl-2",
+        outgoing
+          ? "origin-top-right justify-end pr-2"
+          : cn("origin-top-left justify-start pl-2", agentEntrance),
         continued ? "pt-1.5" : "pt-4",
       )}
     >
