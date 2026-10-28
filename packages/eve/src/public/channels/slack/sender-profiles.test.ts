@@ -1,94 +1,133 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createSlackSenderProfileResolver } from "#public/channels/slack/sender-profiles.js";
+import type { SlackApiResponse, SlackWorkspaceHandle } from "#public/channels/slack/api.js";
+import {
+  createCachedSlackSenderProfileLookup,
+  fetchSlackSenderProfile,
+  resolveSlackSenderProfiles,
+  type SlackSenderProfileLookup,
+} from "#public/channels/slack/sender-profiles.js";
 
-function usersInfo(users: Record<string, Record<string, unknown>>) {
-  return vi.fn(async (_operation: string, body: unknown) => {
+function workspace(users: Record<string, Record<string, unknown>>) {
+  const request = vi.fn(async (_operation: string, body: unknown): Promise<SlackApiResponse> => {
     const user = users[(body as { user: string }).user];
     return user === undefined ? { ok: false, error: "user_not_found" } : { ok: true, user };
   });
+  const slack: SlackWorkspaceHandle = { teamId: "T1", request };
+  return { request, slack };
 }
 
-describe("createSlackSenderProfileResolver", () => {
+describe("fetchSlackSenderProfile", () => {
   it("prefers the display name and includes the email Slack returns", async () => {
-    const request = usersInfo({
+    const { slack } = workspace({
       U1: { real_name: "Alice Doe", profile: { display_name: "alice", email: "a@example.com" } },
       U2: { profile: { display_name: "", real_name: "Bob Roe" } },
     });
 
-    const profiles = await createSlackSenderProfileResolver()({
-      request,
-      teamId: "T1",
-      userIds: ["U1", "U2", "U1"],
+    await expect(fetchSlackSenderProfile({ userId: "U1", slack })).resolves.toEqual({
+      name: "alice",
+      email: "a@example.com",
     });
-
-    expect(profiles.get("U1")).toEqual({ name: "alice", email: "a@example.com" });
-    expect(profiles.get("U2")).toEqual({ name: "Bob Roe" });
-    expect(request).toHaveBeenCalledTimes(2);
+    await expect(fetchSlackSenderProfile({ userId: "U2", slack })).resolves.toEqual({
+      name: "Bob Roe",
+    });
   });
 
+  it("throws with a reinstall hint when the users:read scope is missing", async () => {
+    const slack = { request: async () => ({ ok: false, error: "missing_scope" }) };
+
+    await expect(fetchSlackSenderProfile({ userId: "U1", slack })).rejects.toThrow(
+      /users:read scope.*reinstall the Slack app/u,
+    );
+  });
+});
+
+describe("createCachedSlackSenderProfileLookup", () => {
   it("keeps profiles per workspace and user for an hour", async () => {
     let now = 0;
-    const resolve = createSlackSenderProfileResolver(() => now);
-    const request = usersInfo({ U1: { profile: { real_name: "Alice" } } });
-    const lookup = (teamId: string) => resolve({ request, teamId, userIds: ["U1"] });
+    const lookup = createCachedSlackSenderProfileLookup(() => now);
+    const { request, slack } = workspace({ U1: { profile: { real_name: "Alice" } } });
+    const get = (teamId: string) => lookup({ userId: "U1", teamId, slack });
 
-    await lookup("T1");
+    await get("T1");
     now = 59 * 60 * 1000;
-    expect((await lookup("T1")).get("U1")).toEqual({ name: "Alice" });
+    await expect(get("T1")).resolves.toEqual({ name: "Alice" });
     expect(request).toHaveBeenCalledTimes(1);
 
-    await lookup("T2");
+    await get("T2");
     expect(request).toHaveBeenCalledTimes(2);
 
     now = 61 * 60 * 1000;
-    await lookup("T1");
+    await get("T1");
     expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("retries a failed lookup after a minute instead of an hour", async () => {
     let now = 0;
-    const resolve = createSlackSenderProfileResolver(() => now);
-    const request = usersInfo({});
-    const lookup = () => resolve({ request, teamId: "T1", userIds: ["U1"] });
+    const lookup = createCachedSlackSenderProfileLookup(() => now);
+    const { request, slack } = workspace({});
+    const get = () => lookup({ userId: "U1", teamId: "T1", slack });
 
-    expect((await lookup()).get("U1")).toEqual({});
+    await expect(get()).resolves.toBeUndefined();
     now = 59_000;
-    await lookup();
+    await get();
     expect(request).toHaveBeenCalledTimes(1);
 
     now = 61_000;
-    await lookup();
+    await get();
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("resolves an empty profile when the request throws", async () => {
-    const request = vi.fn(async () => {
-      throw new Error("network down");
-    });
-
-    const profiles = await createSlackSenderProfileResolver()({
-      request,
-      teamId: "T1",
-      userIds: ["U1"],
-    });
-
-    expect(profiles.get("U1")).toEqual({});
-  });
-
-  it("shares no cached profiles between resolvers", async () => {
-    const withEmail = usersInfo({
+  it("shares no cached profiles between lookups", async () => {
+    const withEmail = workspace({
       U1: { profile: { real_name: "Alice", email: "a@example.com" } },
     });
-    const withoutEmail = usersInfo({ U1: { profile: { real_name: "Alice" } } });
+    const withoutEmail = workspace({ U1: { profile: { real_name: "Alice" } } });
 
-    await createSlackSenderProfileResolver()({ request: withEmail, teamId: "T1", userIds: ["U1"] });
-    const other = await createSlackSenderProfileResolver()({
-      request: withoutEmail,
+    await createCachedSlackSenderProfileLookup()({ userId: "U1", teamId: "T1", ...withEmail });
+    const other = await createCachedSlackSenderProfileLookup()({
+      userId: "U1",
       teamId: "T1",
-      userIds: ["U1"],
+      ...withoutEmail,
     });
 
-    expect(other.get("U1")).toEqual({ name: "Alice" });
+    expect(other).toEqual({ name: "Alice" });
+  });
+});
+
+describe("resolveSlackSenderProfiles", () => {
+  it("calls the lookup once per distinct sender with the workspace", async () => {
+    const { slack } = workspace({});
+    const lookup = vi.fn<SlackSenderProfileLookup>(async ({ userId }) =>
+      userId === "U_EMPTY" ? undefined : { name: userId.toLowerCase() },
+    );
+
+    const profiles = await resolveSlackSenderProfiles({
+      lookup,
+      slack,
+      teamId: "T_INSTALL",
+      userIds: ["U1", "U_EMPTY", "U1"],
+    });
+
+    expect(lookup).toHaveBeenCalledTimes(2);
+    expect(lookup).toHaveBeenCalledWith({ userId: "U1", teamId: "T_INSTALL", slack });
+    expect([...profiles]).toEqual([["U1", { name: "u1" }]]);
+  });
+
+  it("omits a sender whose lookup throws", async () => {
+    const { slack } = workspace({});
+    const lookup: SlackSenderProfileLookup = async ({ userId }) => {
+      if (userId === "U_BAD") throw new Error("cache down");
+      return { name: "Alice" };
+    };
+
+    const profiles = await resolveSlackSenderProfiles({
+      lookup,
+      slack,
+      teamId: "T1",
+      userIds: ["U_BAD", "U1"],
+    });
+
+    expect([...profiles]).toEqual([["U1", { name: "Alice" }]]);
   });
 });

@@ -217,6 +217,29 @@ describe("slackChannel sender profiles", () => {
     );
   });
 
+  it("uses an authored lookup instead of the built-in users.info cache", async () => {
+    const lookup = vi.fn(async ({ userId }: { readonly userId: string }) => ({
+      name: `cached-${userId}`,
+    }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+      senderProfiles: lookup,
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }), send);
+
+    expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ userId: "U01", teamId: "T01" }));
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(JSON.stringify("message" in input ? input.message : "")).toContain(
+      "id: U01\\nname: cached-U01\\n</sender>",
+    );
+    expect(fetchMock.mock.calls.map(([request]) => String(request))).not.toContainEqual(
+      expect.stringContaining("users.info"),
+    );
+  });
+
   it("looks up no profiles when the option is off", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },

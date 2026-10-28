@@ -2,6 +2,8 @@
 "eve": patch
 ---
 
-Slack channels can add each sender's name and email to model-visible message metadata with the new `senderProfiles` option.
+Slack channels can add each sender's name and email to model-visible message metadata with the new `senderProfiles` option, using the built-in cached `users.info` lookup or your own.
+
+Pass `senderProfiles: true` for an in-memory cache, or a lookup function to own fetching and caching; `fetchSlackSenderProfile` is the uncached `users.info` call to wrap.
 
 Model-visible Slack messages now group their metadata into `<sender>` (`type`, `id`, and with `senderProfiles`, `name` and `email`), `<bot>` (`id`, `mentioned`), and `<thread>` (`team_id`, `channel_id`, `thread_ts`, `message_ts`) blocks instead of top-level lines such as `sender_id`, `bot_user_id`, and `is_mentioned`. Update any instructions or evals that match the old field names.
