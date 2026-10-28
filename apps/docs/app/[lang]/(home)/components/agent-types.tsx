@@ -466,7 +466,7 @@ const WAVEFORM = [3, 6, 10, 14, 9, 16, 20, 13, 7, 4, 8, 13, 18, 12, 7, 4, 3, 6, 
 /** Customer support chat docked in a product, shown inside a browser window. */
 function WebAppClient() {
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-200">
+    <div className="flex min-h-0 flex-col overflow-hidden material-large">
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-gray-alpha-400 border-b px-3">
         {[0, 1, 2].map((dot) => (
           <span className="size-2 rounded-full bg-gray-alpha-400" key={dot} />
@@ -475,14 +475,14 @@ function WebAppClient() {
           app.acme.com/orders
         </span>
       </div>
-      <div className="relative min-h-0 flex-1 p-3">
+      <div className="relative min-h-0 flex-1 bg-background-200 p-3">
         <div aria-hidden className="hidden flex-col gap-2 sm:flex">
           <span className="text-copy-13 text-gray-1000">Orders</span>
           {["w-3/5", "w-2/5", "w-1/2"].map((width) => (
             <span className={`h-2 rounded-full bg-gray-alpha-200 ${width}`} key={width} />
           ))}
         </div>
-        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 rounded-lg border border-gray-alpha-400 bg-background-100 p-2.5 shadow-lg sm:left-auto sm:w-60">
+        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 rounded-lg border border-gray-alpha-400 bg-background-100 p-2.5 shadow-lg sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
           <p className="ml-auto rounded-2xl bg-gray-1000 px-3 py-1 text-copy-13 text-background-100">
             Where's my order #4821?
@@ -499,7 +499,7 @@ function WebAppClient() {
 /** A phone call to a clinic's front desk, with live waveform and call controls. */
 function VoiceClient() {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-gray-alpha-400 bg-background-200 p-3">
+    <div className="flex flex-col gap-3 p-3 material-large">
       <div className="flex items-center gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gray-alpha-200 text-gray-1000">
           {voiceLogo({ "aria-hidden": true, className: logoClassName })}
@@ -510,7 +510,7 @@ function VoiceClient() {
             Front desk · 00:42
           </span>
         </span>
-        <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] sm:flex">
+        <span aria-hidden className="ml-auto hidden h-6 items-center gap-[3px] md:flex">
           {WAVEFORM.map((height, i) => (
             <span
               className="w-[2px] rounded-full bg-gray-alpha-600"
@@ -520,7 +520,7 @@ function VoiceClient() {
             />
           ))}
         </span>
-        <span className="ml-3 hidden shrink-0 rounded-full bg-red-700 px-3 py-1 text-label-12 text-white sm:inline">
+        <span className="ml-auto hidden shrink-0 rounded-full bg-red-700 px-3 py-1 text-label-12 text-white sm:inline md:ml-3">
           End
         </span>
       </div>
@@ -545,7 +545,7 @@ const IMESSAGE_THREAD: { sent: boolean; text: string }[] = [
 /** A personal planning thread in an iMessage-style app. */
 function IMessageClient() {
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-200">
+    <div className="flex min-h-0 flex-col overflow-hidden material-large">
       <div className="flex shrink-0 flex-col items-center gap-1 border-gray-alpha-400 border-b py-2.5">
         <span className="flex size-8 items-center justify-center rounded-full bg-gradient-to-b from-[#A5A9B4] to-[#858994] font-medium text-[13px] text-white dark:from-[#636366] dark:to-[#48484A]">
           P
@@ -582,7 +582,7 @@ function IMessageClient() {
 
 function AgenticAppsPreview() {
   return (
-    <figure className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_9.5rem] gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4 sm:p-4">
+    <figure className="grid h-full grid-cols-[minmax(0,1fr)_9.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4">
       <figcaption className="sr-only">
         The same kind of agent in three clients: customer support chat in a web app, a voice call to
         a clinic's front desk, and a personal planner in iMessage.
@@ -605,6 +605,8 @@ interface UseCase {
   cta: string;
   /** What the agent does, a short title and line each. */
   features: { title: string; text: string }[];
+  /** The example draws its own windows, so it skips the shared one. */
+  ownWindows?: boolean;
   /** Stage delays for a "Play demo" replay, for an example that has one. */
   demo?: number[];
   /** The example; `stage` is set while a demo plays or after it ends. */
@@ -657,6 +659,7 @@ const USE_CASES: UseCase[] = [
       { title: "Voice", text: "Calls that run tools and ask for approval." },
       { title: "iMessage", text: "Threads that share memory with web and Slack." },
     ],
+    ownWindows: true,
     preview: () => <AgenticAppsPreview />,
   },
 ];
@@ -844,9 +847,13 @@ export function AgentTypes(): JSX.Element {
             id={`${baseId}-panel`}
             role="tabpanel"
           >
-            <AppWindow className="h-[30rem] sm:h-[26rem]">
-              {selected.preview(demo?.stage)}
-            </AppWindow>
+            {selected.ownWindows ? (
+              <div className="h-[30rem] sm:h-[26rem]">{selected.preview()}</div>
+            ) : (
+              <AppWindow className="h-[30rem] sm:h-[26rem]">
+                {selected.preview(demo?.stage)}
+              </AppWindow>
+            )}
           </div>
         </div>
       </div>
