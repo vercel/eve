@@ -493,13 +493,15 @@ function WebAppClient() {
               </span>
             ))}
           </span>
+          <span className="hidden h-24 rounded-md bg-linear-to-b from-gray-100 to-background-100 @[20rem]:block" />
         </div>
-        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 p-2.5 material-menu sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
+        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-2 p-2 material-menu sm:left-auto sm:w-60 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
-          <p className="ml-auto rounded-2xl bg-gray-1000 px-3 py-1 text-copy-13 text-background-100">
+          {/* The menu's 12px corners less its 8px padding, so the bubbles nest concentrically. */}
+          <p className="ml-auto rounded-[4px] bg-gray-1000 px-3 py-1 text-copy-13 text-background-100">
             Where's my order #4821?
           </p>
-          <p className="rounded-2xl bg-gray-alpha-200 px-3 py-1 text-copy-13 text-gray-1000">
+          <p className="rounded-[4px] bg-gray-alpha-200 px-3 py-1 text-copy-13 text-gray-1000">
             It shipped yesterday and arrives Thursday.
           </p>
         </div>
