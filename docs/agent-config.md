@@ -327,8 +327,8 @@ export default defineAgent({
 });
 ```
 
-Set `sessionUsage: false` to leave sessions uncapped. A callback that returns
-`false` also leaves them uncapped. eve calls a configured callback before each model call once
+Set `sessionUsage: false` to leave sessions uncapped. A callback that always
+returns `false` has the same effect. eve calls a configured callback before each model call once
 the window has usage. The model call that crosses a limit is allowed to finish
 because exact usage arrives after the call completes. Before the next model
 call, eve pauses the turn (`turn.paused`) and sends a deterministic

@@ -8,7 +8,7 @@ The coding capabilities come from eve's built-in [code extension](https://eve.de
 
 ```txt
 agent/
-  agent.ts             model, reasoning, compaction
+  agent.ts             model and reasoning
   instructions.md      identity and delivery rules
   sandbox.ts           Vercel Sandbox with gh, git, and TypeScript tooling
   extensions/code.ts   mounts eve/extensions/code
