@@ -66,7 +66,7 @@ test("gives the agent both tools and the extension's instructions", () => {
   expect(info.tools).not.toContain("lookup_customer");
   expect(info.tools).not.toContain("add_note");
   // The extension contributes its own fragment beside the agent's instructions.
-  expect(info.instructions).toContain(`instructions/${mount().namespace}`);
+  expect(info.instructions).toMatch(new RegExp(`instructions/${mount().namespace}(?:__|\\.)`));
   expect(extensionInstructions()).toMatch(/look\w*\s+(?:\w+\s+){0,3}up|lookup|look-up/i);
   expect(extensionInstructions()).toMatch(/note/i);
 });
@@ -127,14 +127,20 @@ test("add_note always asks for approval", async () => {
   expect(compiled?.requiresApproval).toBe(true);
 });
 
-test("honors a configured base URL", async () => {
+test("honors a configured key and base URL", async () => {
   const handle = await loadExtension();
-  handle({ apiKey: "test-crm-key", baseUrl: "https://crm.internal.example" });
+  handle({ apiKey: "bound-key", baseUrl: "https://crm.internal.example" });
   const fetch = stubFetch();
   await lookUpThenAddNote();
-  const origins = (await requests(fetch)).map((call) => new URL(call.url).origin);
-  expect(origins.length).toBeGreaterThanOrEqual(2);
-  expect(new Set(origins)).toEqual(new Set(["https://crm.internal.example"]));
+  const calls = await requests(fetch);
+  expect(calls.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(calls.map((call) => new URL(call.url).origin))).toEqual(
+    new Set(["https://crm.internal.example"]),
+  );
+  // Another agent mounting the package with its own key gets that key, not this env's.
+  expect(new Set(calls.map((call) => call.headers.get("authorization")))).toEqual(
+    new Set(["Bearer bound-key"]),
+  );
 });
 
 const customer = { id: "cus_1", email: "ada@example.com", name: "Ada Lovelace" };
@@ -157,12 +163,19 @@ function sourceRoot(): string {
   return join(packageRoot, source);
 }
 
+/** The extension's instruction sources: a flat `instructions.*` file, an `instructions/` directory, or both. */
 function extensionInstructions(): string {
-  for (const name of ["instructions.md", "instructions.ts"]) {
-    const path = `${sourceRoot()}/${name}`;
-    if (existsSync(path)) return readFileSync(path, "utf8");
-  }
-  return "";
+  const root = sourceRoot();
+  const flat = ["instructions.md", "instructions.ts"].map((name) => join(root, name));
+  const nested = existsSync(join(root, "instructions"))
+    ? readdirSync(join(root, "instructions"), { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => join(entry.parentPath, entry.name))
+    : [];
+  return [...flat, ...nested]
+    .filter((path) => existsSync(path))
+    .map((path) => readFileSync(path, "utf8"))
+    .join("\n");
 }
 
 /** The agent's mount of the package, wherever the agent put it and whatever it named it. */

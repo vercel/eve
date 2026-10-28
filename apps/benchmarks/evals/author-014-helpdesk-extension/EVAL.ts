@@ -201,8 +201,8 @@ const newTicket = { customerEmail: "ada@example.com", subject: "Refund", body: "
 
 /**
  * Runs one call through the tool eve would load for it, then hands the settled call to every
- * `call.settled` subscriber. eve logs a throwing hook without failing the call, so the grader
- * does too. `toolResultFrom` recognizes a tool by the definition eve loaded under its name;
+ * `call.settled` subscriber. A hook that throws during a turn fails that turn in eve, so the
+ * grader rethrows it rather than letting an outage pass. `toolResultFrom` recognizes a tool by the definition eve loaded under its name;
  * eve records that while it loads tools, so the grader records it the same way.
  */
 async function runCall(name: string, input: unknown): Promise<unknown> {
@@ -250,9 +250,7 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   for (const file of hookFiles()) {
     const events = (await load(file))?.events ?? {};
     for (const handler of [events["call.settled"], events["*"]].filter(Boolean)) {
-      try {
-        await handler(facts.at(-1), ctx);
-      } catch {}
+      await handler(facts.at(-1), ctx);
     }
   }
   return output;
