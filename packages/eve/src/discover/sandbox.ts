@@ -95,12 +95,13 @@ export async function discoverSandboxSource(input: {
     moduleBaseName: SANDBOX_DEFINITION_BASE_NAME,
   });
   if (rootCandidates.moduleFileNames.length > 0) {
+    const rootFileNames = rootCandidates.moduleFileNames.map((name) => `"${name}"`).join(", ");
     diagnostics.push(
       createDiscoverErrorDiagnostic({
         code: DISCOVER_MODULE_SLOT_COLLISION,
         message:
-          `Found both ${rootCandidates.moduleFileNames.map((name) => `"${name}"`).join(", ")} and "sandbox/". ` +
-          'Move the definition to "sandbox/sandbox.ts".',
+          `Found both ${rootFileNames} and "sandbox/". ` +
+          `Move ${rootFileNames} into "sandbox/sandbox.ts", or delete it if that file already exists.`,
         sourcePath: directoryPath,
       }),
     );

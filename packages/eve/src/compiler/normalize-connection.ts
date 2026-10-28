@@ -79,7 +79,7 @@ export async function compileConnectionDefinition(
   const protocol = readStampedConnectionProtocol(loaded);
   if (protocol === undefined) {
     throw new Error(
-      `Export defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "${source.logicalPath}".`,
+      `Connection "${source.logicalPath}" exports a plain object. Wrap it in defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "eve/connections"; plain objects no longer default to MCP.`,
     );
   }
 

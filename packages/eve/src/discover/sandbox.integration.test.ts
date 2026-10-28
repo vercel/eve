@@ -229,7 +229,9 @@ describe("discoverSandboxSource (memory)", () => {
       expect(result.diagnostics).toEqual([
         expect.objectContaining({
           code: DISCOVER_MODULE_SLOT_COLLISION,
-          message: expect.stringContaining('Move the definition to "sandbox/sandbox.ts"'),
+          message: expect.stringContaining(
+            'Move "sandbox.ts" into "sandbox/sandbox.ts", or delete it if that file already exists.',
+          ),
         }),
       ]);
       expect(result.sandbox).toBeNull();

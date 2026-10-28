@@ -944,7 +944,7 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
-      'Export defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "connections/issues.ts"',
+      'Connection "connections/issues.ts" exports a plain object. Wrap it in defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "eve/connections"; plain objects no longer default to MCP.',
     );
   });
 
