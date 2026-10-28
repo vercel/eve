@@ -1,6 +1,6 @@
 "use client";
 
-import { IconChevronRightSmall, IconPlusCircle } from "@vercel/geistdocs/assets/icons";
+import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import { type JSX, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
@@ -333,6 +333,22 @@ export function AgentTypes(): JSX.Element {
 
   return (
     <HomeSection
+      action={
+        <Button
+          className="w-fit rounded-full"
+          Component={PrefetchLink}
+          href={selected.template ? templatePath(selected.template) : canonicalRoutes.templates}
+          onClick={() =>
+            track(analyticsEvents.templateOpened, {
+              source: "home_examples",
+              template: selected.template ?? "gallery",
+            })
+          }
+          size="large"
+        >
+          {selected.cta}
+        </Button>
+      }
       id="agent-types"
       lede="Start from a working template, or build your own from scratch."
       title="Agents that run your company, power your product, or are personal"
@@ -385,26 +401,11 @@ export function AgentTypes(): JSX.Element {
 
         <div
           aria-labelledby={`${baseId}-tab-${selected.id}`}
-          className="flex min-w-0 flex-col gap-6 lg:col-span-8"
+          className="flex min-w-0 flex-col lg:col-span-8"
           id={`${baseId}-panel`}
           role="tabpanel"
         >
           <Frame className="flex h-[30rem] flex-col sm:h-[24rem]">{selected.preview}</Frame>
-          <Button
-            className="w-fit self-end rounded-full"
-            Component={PrefetchLink}
-            href={selected.template ? templatePath(selected.template) : canonicalRoutes.templates}
-            onClick={() =>
-              track(analyticsEvents.templateOpened, {
-                source: "home_examples",
-                template: selected.template ?? "gallery",
-              })
-            }
-            size="large"
-            suffix={<IconChevronRightSmall size={16} />}
-          >
-            {selected.cta}
-          </Button>
         </div>
       </div>
     </HomeSection>
