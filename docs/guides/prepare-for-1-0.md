@@ -153,14 +153,7 @@ Every error `eve/client` throws now extends `EveError` and carries a stable snak
 
 `SessionNotActiveError.code` is `session_not_ready` (with `retryable: true`) while a session is still starting, otherwise `session_not_active`; `EVE_SESSION_NOT_ACTIVE` is gone. `ClientError.code` is now `http_error` instead of `undefined` when the response carried no code.
 
-The opaque `inbox` field is now `hint` on `ClientSessionState`, `client.sessions.attach()` options, and `initialSession`:
-
-```diff
--const session = client.sessions.attach(saved.sessionId, { streamIndex: saved.streamIndex, inbox: saved.inbox });
-+const session = client.sessions.attach(saved.sessionId, saved);
-```
-
-Persist `hint` with the rest of the state and pass it back unchanged; eve may extend it. A previously saved `inbox` value is ignored, which only costs a slower lookup on the next send. The HTTP body field stays `inbox`, so this rename does not affect server compatibility. `session.snapshot()` now returns the full state, including `hint`. See [Faster sends with `hint`](./client/overview#faster-sends-with-hint).
+`session.snapshot()` now returns the full `ClientSessionState`, including the opaque `inbox` value, instead of only `sessionId` and `streamIndex`. Persist it as is and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](./client/overview#faster-sends-with-inbox).
 
 ## Update agent-info readers
 
