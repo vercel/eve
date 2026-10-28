@@ -197,12 +197,14 @@ jobs:
           if [[ -z "$version" ]]; then
             version="$(npm view eve version)"
           fi
-          # A version published moments ago can take a short time to appear.
-          for attempt in $(seq 1 12); do
-            if tarball="$(npm view "eve@${version}" dist.tarball 2>/dev/null)" && [[ -n "$tarball" ]]; then
+          # npm has taken over 10 minutes to serve a version that publish just
+          # reported, and the publish step can leave a stale packument in the
+          # npm cache, so poll online for up to 15 minutes.
+          for attempt in $(seq 1 90); do
+            if tarball="$(npm view --prefer-online "eve@${version}" dist.tarball 2>/dev/null)" && [[ -n "$tarball" ]]; then
               break
             fi
-            if [[ "$attempt" == 12 ]]; then
+            if [[ "$attempt" == 90 ]]; then
               echo "::error::eve@${version} is not visible on npm; rerun this job to move the latest sandbox image tags." >&2
               exit 1
             fi
@@ -219,13 +221,18 @@ jobs:
             exit 1
           fi
 
+          # Retag with buildx rather than skopeo: skopeo annotates indexes of
+          # zstd layers, which `--preserve-digests` rejects
+          # (containers/skopeo#2627). With one source, buildx pushes the source
+          # manifest bytes unchanged; `--prefer-index=false` keeps VCR's
+          # single-platform manifest from being wrapped in an index.
           for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
             wanted="$(docker buildx imagetools inspect --raw "${image}:${tag}" | sha256sum)"
             current="$(docker buildx imagetools inspect --raw "${image}:latest" 2>/dev/null | sha256sum || true)"
             if [[ "$wanted" == "$current" ]]; then
               echo "${image}:latest already serves ${tag}."
             else
-              skopeo copy --all --preserve-digests "docker://${image}:${tag}" "docker://${image}:latest"
+              docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${tag}"
               echo "Moved ${image}:latest to ${tag} (eve@${version})."
             fi
           done
