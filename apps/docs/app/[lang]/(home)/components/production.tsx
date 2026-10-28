@@ -22,7 +22,16 @@ import {
 import type { JSX, ReactNode } from "react";
 import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "./control-visual";
+import {
+  FeatureCard,
+  GrayBadge,
+  RuledList,
+  monochromeLogo,
+  ruledRow,
+  Visual,
+  pct,
+  view,
+} from "./control-visual";
 import { HomeSection } from "./section";
 
 // The visibility radar from vercel.com's enterprise page: a guard at the center, dashed rings,
@@ -46,22 +55,18 @@ const radarRings = [
   to: ringPoint(r, center + sweep),
 }));
 
-// Slack and Teams have no single-color simple icon, so their brand marks take the text color;
-// Teams' white letter takes the chip's color so it stays cut out.
-const monochrome = "[&_path]:fill-current [&_path[fill=white]]:fill-background-100";
-
 // One chip every 36° around the guard, alternating between the middle and outer rings, so each
 // ring holds five spaced 72° apart and the layout mirrors left to right.
 const CHANNELS = (
   [
     { label: "WhatsApp", logo: <SiWhatsapp /> },
     { label: "GitHub", logo: <SiGithub /> },
-    { label: "Slack", logo: logos.slack({ className: monochrome }) },
+    { label: "Slack", logo: logos.slack({ className: monochromeLogo }) },
     { label: "Linear", logo: <SiLinear /> },
     { label: "Discord", logo: <SiDiscord /> },
     { label: "Telegram", logo: <SiTelegram /> },
     { label: "Google Chat", logo: <SiGooglechat /> },
-    { label: "Microsoft Teams", logo: logos.teams({ className: monochrome }) },
+    { label: "Microsoft Teams", logo: logos.teams({ className: monochromeLogo }) },
     { label: "iMessage", logo: <SiImessage /> },
     { label: "Web", logo: logos.web({}) },
   ] satisfies { label: string; logo: ReactNode }[]

@@ -8,6 +8,10 @@ import { cn } from "@/lib/utils";
 // canvas and scaled with the frame through `cqw` sizes (16px type at a 360px frame).
 export const view = { width: 320, height: 180 };
 
+// Slack and Teams have no single-color simple icon, so their brand marks take the text color;
+// Teams' white letter takes the background color so it stays cut out.
+export const monochromeLogo = "[&_path]:fill-current [&_path[fill=white]]:fill-background-100";
+
 export function pct(value: number, total: number) {
   return `${(value / total) * 100}%`;
 }
