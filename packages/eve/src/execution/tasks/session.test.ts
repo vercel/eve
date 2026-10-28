@@ -98,7 +98,7 @@ describe("between-turn cancellation", () => {
           .mockResolvedValueOnce({ kind: "cancel", turnId })
           .mockResolvedValue(undefined),
       },
-      queue: new SessionInputQueue(),
+      queue: new SessionInputQueue([]),
       hasWorkingTasks: () =>
         workingTasks(readTaskTable(cursor.sessionState.snapshot.session.state)).length > 0,
     });
