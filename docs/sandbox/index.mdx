@@ -168,9 +168,9 @@ To run sandboxes on a backend eve does not ship, define a provider with `defineS
 | [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
 | [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
 
-For SDK-specific just-bash commands or filesystem factories, use `JustBashSandbox.environment()`
-from `eve/sandbox/just-bash`. `DefaultSandbox` keeps only `autoInstall` and `prepare` for its
-just-bash fallback.
+For SDK-specific just-bash commands or filesystem factories, use the experimental options of
+`JustBashSandbox.environment()` from `eve/sandbox/just-bash`. `DefaultSandbox` keeps only
+`autoInstall` and `prepare` for its just-bash fallback.
 
 ## Lifecycle
 

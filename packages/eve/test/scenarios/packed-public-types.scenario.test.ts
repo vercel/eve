@@ -41,6 +41,7 @@ const integrations: Record<string, readonly string[]> = {
   "eve/channels/linq": ["chat", "@linqapp/sdk"],
   "eve/channels/photon": ["chat"],
   "eve/sandbox/just-bash": ["just-bash"],
+  "eve/experimental/sandbox/just-bash": ["just-bash"],
   "eve/instrumentation/otel": ["@opentelemetry/api"],
 };
 const entries = Object.entries(manifest.exports)
