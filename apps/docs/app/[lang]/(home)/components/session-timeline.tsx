@@ -554,8 +554,10 @@ function Bubble({
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          "relative max-w-[min(80%,22rem)] rounded-[7.5px] text-copy-14 text-gray-1000 shadow-[0_1px_0.5px_var(--ds-gray-alpha-400)]",
-          outgoing ? "bg-gray-200" : "bg-background-100",
+          // A drop-shadow edge follows the tail too, which a box-shadow border would skip.
+          "relative max-w-[min(80%,22rem)] rounded-[7.5px] text-copy-14 text-gray-1000 [filter:drop-shadow(0_0_0.5px_var(--ds-gray-alpha-600))_drop-shadow(0_1px_0.5px_var(--ds-gray-alpha-300))]",
+          // The agent's bubbles share one width, so a run of them lines up on both edges.
+          outgoing ? "bg-gray-200" : "w-full bg-background-100",
           !continued && (outgoing ? "rounded-tr-none" : "rounded-tl-none"),
         )}
       >
