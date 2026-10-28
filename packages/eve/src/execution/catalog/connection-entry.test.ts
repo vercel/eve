@@ -7,6 +7,7 @@ import { once } from "#tools/approval/policies.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
+import type { ToolSchema } from "#tools/schema.js";
 
 import { connectionEntry } from "./connection-entry.js";
 
@@ -101,5 +102,57 @@ describe("connection approval context", () => {
     const perTool = once();
     const { request } = setup(undefined, perTool);
     expect(await request("delete_issue")).toBe(await perTool({} as ApprovalContext));
+  });
+});
+
+describe("connection tool calls", () => {
+  // Expected failure until #5509 is fixed: the call rejects the `null` default its own check filled in.
+  it.fails("runs a call whose omitted argument defaults to null", async () => {
+    // Pydantic publishes `query: str = None` as a string property that defaults to null.
+    const search: ConnectionToolMetadata = {
+      description: "Search issues.",
+      inputSchema: { properties: { query: { default: null, type: "string" } }, type: "object" },
+      name: "search_issues",
+    };
+    const executeTool = vi.fn<ConnectionClient["executeTool"]>(async () => ({ content: [] }));
+    const connection = {
+      connectionName: "tracker",
+      description: "Issue tracker.",
+      logicalPath: "connections/tracker.ts",
+      protocol: "mcp",
+      sourceId: "tracker",
+      sourceKind: "module",
+      url: "https://tracker.example.com/mcp",
+    } as ResolvedConnectionDefinition;
+    const client: ConnectionClient = {
+      close: async () => {},
+      connect: async () => undefined,
+      executeTool,
+      getToolMetadata: async () => [search],
+    };
+    const registry: ConnectionRegistry = {
+      dispose: async () => {},
+      getClient: () => client,
+      getConnectionApproval: () => undefined,
+      getConnectionNames: () => ["tracker"],
+      getConnections: () => [connection],
+    };
+    const entry = connectionEntry(registry, connection, "search_issues");
+
+    // The harness validates the model's input, then runs the tool on the validated value.
+    await contextStorage.run(new ContextContainer(), async () => {
+      const checked = await (entry.inputSchema as ToolSchema)["~standard"].validate({});
+      expect(checked).toEqual({ value: { query: null } });
+      await entry.execute!((checked as { value: unknown }).value, {
+        messages: [],
+        toolCallId: "call-search",
+      });
+    });
+
+    expect(executeTool).toHaveBeenCalledWith(
+      "search_issues",
+      { query: null },
+      expect.objectContaining({ callId: "call-search" }),
+    );
   });
 });
