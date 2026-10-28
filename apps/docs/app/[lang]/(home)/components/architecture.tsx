@@ -121,6 +121,23 @@ const CHANNELS = [
   "Telegram",
 ];
 
+// More surfaces from eve's channel docs (Linq, Photon, Twilio) and the Chat SDK adapter
+// catalog, shown only on desktop, where the channel card has room for them.
+const MORE_CHANNELS = [
+  "iMessage",
+  "SMS",
+  "Email",
+  "Gmail",
+  "Instagram",
+  "Messenger",
+  "X",
+  "Notion",
+  "GitLab",
+  "Webex",
+  "Mattermost",
+  "LINE",
+];
+
 const CAPTIONS: Record<Mode, string> = {
   managed:
     "Fully managed via Vercel. Sandboxes, durable workflows, model routing, and observability handled for you.",
@@ -292,6 +309,11 @@ export function ArchitectureDiagram() {
                 <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
                   {CHANNELS.map((channel) => (
                     <span key={channel} className="text-gray-1000 text-copy-14">
+                      {channel}
+                    </span>
+                  ))}
+                  {MORE_CHANNELS.map((channel) => (
+                    <span key={channel} className="hidden text-gray-1000 text-copy-14 lg:block">
                       {channel}
                     </span>
                   ))}
