@@ -8,6 +8,7 @@ import {
   GitMerge,
   GitPullRequestArrow,
   Headset,
+  Reply,
   ScanSearch,
   ShieldAlert,
   ShieldCheck,
@@ -328,21 +329,23 @@ const WHATSAPP_BEATS: Beat[] = [
       <>
         <span className="block font-semibold">Send a replacement?</span>
         A new one ships today and arrives Thursday.
+        <br />
+        <span className="mt-1 inline-block text-copy-13 text-gray-900">Order #4821</span>
       </>
     ),
-    attachment: (
-      <>
-        <ChatButton>Send replacement</ChatButton>
-        <ChatButton>Refund instead</ChatButton>
-      </>
-    ),
+    attachment: <ReplyButtons labels={["Send replacement", "Refund instead"]} />,
     delay: 1600,
   },
   {
     kind: "message",
     author: "Maya",
     time: "9:13 AM",
-    body: "Send replacement",
+    body: (
+      <>
+        <Quote author="Acme">Send a replacement?</Quote>
+        Send replacement
+      </>
+    ),
     delay: 2400,
   },
   {
@@ -463,38 +466,115 @@ function ThreadMessage({
   );
 }
 
-/** WhatsApp: people on the right in dark bubbles, the agent on the left in light ones. */
+// WhatsApp's chat UI in monochrome: incoming bubbles white, outgoing light gray where
+// WhatsApp uses green, the read ticks and reply-button labels gray where it uses blue.
+
+/** The tail WhatsApp gives the first bubble in a run, at its top outer corner. */
+function BubbleTail({ outgoing }: { outgoing: boolean }) {
+  return (
+    <svg
+      aria-hidden
+      className={cn(
+        "absolute top-0 h-[13px] w-2",
+        outgoing ? "-right-2 text-gray-200" : "-left-2 text-background-100",
+      )}
+      viewBox="0 0 8 13"
+    >
+      <path
+        d={
+          outgoing
+            ? "M5.19 1H0v11.19l6.47-8.62C7.53 2.16 6.96 1 5.19 1z"
+            : "M1.53 3.57 8 12.19V1H2.81C1.04 1 .47 2.16 1.53 3.57z"
+        }
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function ReadTicks() {
+  return (
+    <svg aria-label="Read" className="h-2.5 w-4" fill="none" role="img" viewBox="0 0 16 10">
+      <path
+        d="M1 5.5 3.75 8.25 10 1.5M6.5 7.25l1 1L13.75 1.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.25"
+      />
+    </svg>
+  );
+}
+
+/** A tapped reply quotes the message it answers, like any WhatsApp reply. */
+function Quote({ author, children }: { author: string; children: string }) {
+  return (
+    <span className="mb-1 block rounded-[5px] border-gray-700 border-l-4 bg-gray-alpha-100 px-2 py-1">
+      <span className="block font-medium text-copy-13 text-gray-1000">{author}</span>
+      <span className="block truncate text-copy-13 text-gray-900">{children}</span>
+    </span>
+  );
+}
+
+/** Reply buttons sit inside the message bubble, one per row under a divider. */
+function ReplyButtons({ labels }: { labels: string[] }) {
+  return labels.map((label) => (
+    <span
+      className="flex h-10 items-center justify-center gap-1.5 border-gray-alpha-300 border-t font-medium text-copy-14 text-gray-1000"
+      key={label}
+    >
+      <Reply aria-hidden className="size-4" />
+      {label}
+    </span>
+  ));
+}
+
 function Bubble({
   author,
+  time,
+  continued,
   attachment,
   children,
 }: {
   author: Author;
+  time: string;
+  continued: boolean;
   attachment?: ReactNode;
   children: ReactNode;
 }) {
-  const fromAgent = Boolean(author.icon);
+  const outgoing = !author.icon;
   return (
     <li
       className={cn(
-        "flex flex-col gap-1 pt-2 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
-        fromAgent ? "items-start" : "items-end",
+        "flex motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+        outgoing ? "justify-end pr-2" : "justify-start pl-2",
+        continued ? "pt-0.5" : "pt-3",
       )}
     >
       <span className="sr-only">{author.name}</span>
       <div
         className={cn(
-          "max-w-[min(85%,22rem)] text-pretty rounded-xl px-3 py-2 text-copy-14",
-          fromAgent
-            ? "rounded-bl-sm bg-background-100 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]"
-            : "rounded-br-sm bg-gray-1000 text-background-100",
+          "relative max-w-[min(80%,22rem)] rounded-[7.5px] text-copy-14 text-gray-1000 shadow-[0_1px_0.5px_var(--ds-gray-alpha-400)]",
+          outgoing ? "bg-gray-200" : "bg-background-100",
+          !continued && (outgoing ? "rounded-tr-none" : "rounded-tl-none"),
         )}
       >
-        {children}
+        {continued ? null : <BubbleTail outgoing={outgoing} />}
+        {/* As in WhatsApp, a spacer at the end of the text reserves room for the time, so it
+            shares the last line when it fits and takes its own line when it doesn't. */}
+        <div className="relative text-pretty px-2 pt-1.5 pb-2">
+          {children}
+          <span
+            aria-hidden
+            className={cn("inline-block", outgoing ? "w-[5.5rem]" : "w-[4.25rem]")}
+          />
+          <span className="absolute right-2 bottom-1.5 inline-flex items-center gap-1 text-[11px] text-gray-900 leading-none tabular-nums">
+            {time}
+            {outgoing ? <ReadTicks /> : null}
+          </span>
+        </div>
+        {attachment}
       </div>
-      {attachment ? (
-        <div className="flex w-full max-w-[min(85%,22rem)] flex-col gap-1">{attachment}</div>
-      ) : null}
     </li>
   );
 }
@@ -636,7 +716,13 @@ export function SessionTimeline(): JSX.Element {
           const author = AUTHORS[beat.author];
           if (platform === "whatsapp") {
             return (
-              <Bubble attachment={beat.attachment} author={author} key={i}>
+              <Bubble
+                attachment={beat.attachment}
+                author={author}
+                continued={beat.author === authorOf(beats[i - 1])}
+                key={i}
+                time={beat.time}
+              >
                 {beat.body}
               </Bubble>
             );
