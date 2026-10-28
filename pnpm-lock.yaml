@@ -1976,6 +1976,8 @@ importers:
       zod-validation-error:
         specifier: 5.0.0
         version: 5.0.0(zod@4.5.4)
+    linkDirectory: false
+    publishDirectory: .package
 
   packages/eve-catalog:
     devDependencies:
@@ -2078,6 +2080,8 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.5.4
+    linkDirectory: false
+    publishDirectory: .package
 
 packages:
 

@@ -14,9 +14,18 @@
         "!.output/**",
         "!.svelte-kit/**",
         "!.turbo/**",
+        "!.package/**",
+        "!.package-staging-*/**",
         "!node_modules/**"
       ],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**", ".output/**", ".vercel/output/**"]
+      "outputs": [
+        "dist/**",
+        ".package/**",
+        ".next/**",
+        "!.next/cache/**",
+        ".output/**",
+        ".vercel/output/**"
+      ]
     },
     "build:types": {
       "dependsOn": ["^build:types"],

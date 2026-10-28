@@ -1,0 +1,15 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/scripts/stage-package.mjs",
+        "$TURBO_ROOT$/scripts/write-package-changelog.mjs",
+        "$TURBO_ROOT$/scripts/copy-package-license.mjs",
+        "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/NOTICE"
+      ]
+    }
+  }
+}

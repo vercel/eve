@@ -57,6 +57,10 @@ Thumbs.db
 # IDE/editor
 .codex/
 .githooks/
+/packages/eve/.package/
+/packages/eve/.package-staging-*/
+/packages/tracing/.package/
+/packages/tracing/.package-staging-*/
 .vscode/
 .idea/
 

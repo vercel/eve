@@ -38,7 +38,6 @@
     "bin",
     "dist",
     "!dist/CHANGELOG.md",
-    "CHANGELOG.md",
     "docs",
     "NOTICE",
     "README.md"
@@ -569,18 +568,19 @@
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "directory": ".package",
+    "linkDirectory": false
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
+    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "node ./scripts/build-js.mjs",
     "build:types": "tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
-    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
-    "postpack": "node ../../scripts/restore-package-changelog.mjs .",
+    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/stage-package.mjs .",
     "test:webchat": "vitest run --config vitest.browser.config.ts",
     "test:framework-fixtures": "vitest run --config vitest.framework-fixtures.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",

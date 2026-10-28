@@ -10,6 +10,11 @@
         "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/scripts/stage-package.mjs",
+        "$TURBO_ROOT$/scripts/write-package-changelog.mjs",
+        "$TURBO_ROOT$/scripts/copy-package-license.mjs",
+        "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/NOTICE",
         "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-format.ts",
         "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-benchmark.json",
         "!.generated/**",
@@ -98,7 +103,7 @@
     },
     "test:tui": {
       "cache": false,
-      "dependsOn": ["build:js"],
+      "dependsOn": ["build"],
       "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"]
     },
     "test:watch": {
