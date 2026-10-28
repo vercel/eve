@@ -1,5 +1,23 @@
 # @vercel/agent-runs
 
+## 0.0.3
+
+### Release @vercel/agent-runs@0.0.3 | 2026-10-28 | patch
+
+### 🐛 Bug Fixes
+
+- Resolve catalog dependencies in staged packages so npm can install them. [#5554](https://github.com/vercel/eve/pull/5554)
+
+- Restore current release notes to `CHANGELOG.md` at the package root. [#5552](https://github.com/vercel/eve/pull/5552)
+
+### Other Changes
+
+See the [full list of changes](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.2...%40vercel%2Fagent-runs%400.0.3).
+
+### Contributors
+
+- [@chadhietala](https://github.com/chadhietala)
+
 ## 0.0.2
 
 ### Release @vercel/agent-runs@0.0.2 | 2026-10-28 | patch
