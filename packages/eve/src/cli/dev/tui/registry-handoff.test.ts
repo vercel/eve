@@ -12,8 +12,7 @@ describe("registry terminal handoff", () => {
   });
 
   it.each([
-    [undefined, "selfmod__registry_add"],
-    [undefined, "registry_add"],
+    ["self-modification__agent", "selfmod__registry_add"],
     ["other-agent", "registry_add"],
   ])("ignores registry-shaped results from %s / %s", (subagent, tool) => {
     expect(registryHandoffAddress(subagent, tool, handoff)).toBeUndefined();
