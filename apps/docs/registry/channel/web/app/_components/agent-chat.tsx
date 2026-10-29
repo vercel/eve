@@ -45,9 +45,15 @@ const AGENT_NAME = WEB_CHAT_AGENT ?? DEFAULT_AGENT_NAME;
 export function AgentChat({
   sessionId,
   sessionless = false,
+  commands: offerCommands = false,
 }: {
   readonly sessionId?: string;
   readonly sessionless?: boolean;
+  /**
+   * Offers the agent's eve channel slash commands, such as /new and /clear, from the composer.
+   * Off by default, so a deployed chat only gains commands its owner chose to offer.
+   */
+  readonly commands?: boolean;
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
@@ -87,6 +93,7 @@ export function AgentChat({
 
   // The agent's eve channel commands, such as /new and /clear. A server without them offers none.
   useEffect(() => {
+    if (!offerCommands) return;
     let active = true;
     agent.commands().then(
       (loaded) => active && setCommands(loaded),
@@ -95,7 +102,7 @@ export function AgentChat({
     return () => {
       active = false;
     };
-  }, [agent.commands]);
+  }, [agent.commands, offerCommands]);
   const suggestions = commandSuggestions(draft, commands);
 
   const fillCommand = (command: ChannelCommandInfo) => {

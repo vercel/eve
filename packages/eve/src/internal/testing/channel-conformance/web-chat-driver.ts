@@ -28,13 +28,14 @@ const INSTALL_ROOT = join(tmpdir(), "eve-web-chat-template");
 const EVE_SOURCE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 const ENTRY_ID = "virtual:web-chat-entry";
-// Mounts the template's chat the way its `app/page.tsx` does, without Next's server.
+// Mounts the template's chat the way its `app/page.tsx` does, without Next's server, with the
+// opt-in slash commands on.
 const ENTRY_SOURCE = `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "@/app/_components/agent-chat";
 import "@/app/globals.css";
-createRoot(document.getElementById("root")).render(createElement(AgentChat));
+createRoot(document.getElementById("root")).render(createElement(AgentChat, { commands: true }));
 `;
 const PAGE_HTML =
   '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>';

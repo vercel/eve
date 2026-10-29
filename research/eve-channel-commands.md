@@ -143,7 +143,8 @@ export default eveChannel({
   way the TUI does: `send` goes through `send()`, and `end` calls `newSession()`.
 - `parseSlashCommand(text, commands)` from `eve/client` reads typed text as a listed command, by
   name or alias. UIs own presentation: the result's `message` isn't added to `messages`.
-- The Web Chat template loads commands on mount, suggests matches while `/name` is typed (Tab
+- The Web Chat template offers commands only when the page opts in with `<AgentChat commands />`, so
+  an agent's defaults never appear in a deployed chat unannounced. When on, it loads commands on mount, suggests matches while `/name` is typed (Tab
   completes the first), runs matches instead of sending them, shows `message` in the conversation,
   and navigates to a fresh chat when a command ended the session.
 
