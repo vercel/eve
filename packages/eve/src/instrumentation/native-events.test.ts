@@ -493,6 +493,38 @@ describe("interactions", () => {
     ]);
   });
 
+  it("names who decided an approval, from their response's delivery", async () => {
+    const { commit, heard } = session({ capturesContent: true });
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(requested("call_0", { kind: "tool", name: "deploy" }));
+    await commit(approval("i_0", { callId: "call_0" }));
+    await commit(
+      {
+        data: { deliveryId: "d_approver", principal: { id: "slack:T1:U2", type: "user" } },
+        type: "delivery.admitted",
+      },
+      {
+        data: {
+          deliveryId: "d_approver",
+          interactionId: "i_0",
+          responseId: "r_0",
+          value: { optionId: "approve" },
+        },
+        type: "response.submitted",
+      } as SessionEvent,
+    );
+    await commit({
+      data: { cause: { responseId: "r_0" }, interactionId: "i_0", outcome: "accepted" },
+      scope: turn,
+      type: "interaction.settled",
+    } as SessionEvent);
+
+    expect(of(heard, "interaction.settled")).toMatchObject([
+      { responder: { id: "slack:T1:U2", type: "user" } },
+    ]);
+  });
+
   it("places a request about the turn on its latest run, and keeps sign-ins out", async () => {
     const { commit, heard } = session();
     await commit(...opening);

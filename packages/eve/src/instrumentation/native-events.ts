@@ -26,6 +26,8 @@ import { askedCall, decidingAnswer } from "#protocol/session-projection/reader.j
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { copyView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { Cause } from "#protocol/session-events/envelope.js";
+import { instrumentationPrincipal } from "#instrumentation/principal-summary.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -349,6 +351,7 @@ function instrumentationEventsOf(
           interactionId: row.interactionId,
           kind: row.request.kind,
           outcome: event.data.outcome,
+          responder: responderOf(line.view!, event.data.cause),
           scope,
           type: "interaction.settled",
         },
@@ -357,6 +360,17 @@ function instrumentationEventsOf(
     default:
       return [];
   }
+}
+
+/** Who decided a request: the principal of the delivery that carried the deciding response. */
+function responderOf(view: SessionView, cause: Cause | undefined) {
+  if (cause === undefined || !("responseId" in cause)) return undefined;
+  const response = view.responses[cause.responseId];
+  const principal =
+    response === undefined ? undefined : view.deliveries[response.deliveryId]?.principal;
+  return principal === undefined
+    ? undefined
+    : instrumentationPrincipal(principal.type, principal.id);
 }
 
 /** A turn's run's current attempt; a context change's run is no step of a turn. */

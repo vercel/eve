@@ -56,6 +56,11 @@ export function createAgentApprovalInstrumentation(input: {
       return;
     const approval = (await toolFor(sessionId, turnId, callId))?.findApproval(event.interactionId);
     if (approval === undefined) return;
+    if (event.responder !== undefined)
+      approval.attributes({
+        "agent.approval.responder.type": event.responder.type,
+        "agent.approval.responder.id": event.responder.id,
+      });
     if (event.outcome === "failed") await approval.fail(event.error);
     else
       await approval.complete({

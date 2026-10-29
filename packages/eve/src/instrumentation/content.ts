@@ -37,6 +37,10 @@ export function withInstrumentationDecision(
         ...event,
         error: decision.recordOutputs ? event.error : undefined,
         answer: decision.recordInputs ? event.answer : undefined,
+        responder:
+          event.responder === undefined || (decision.recordInputs && decision.recordOutputs)
+            ? event.responder
+            : Object.freeze({ type: event.responder.type }),
       });
     case "call.settled":
       return decision.recordOutputs

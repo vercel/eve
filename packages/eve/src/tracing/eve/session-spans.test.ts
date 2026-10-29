@@ -285,6 +285,46 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
+  it("records who approved a call on its approval span, the id only with content", async () => {
+    for (const records of [false, true]) {
+      const { commit, spans } = session(() => ({
+        emit: true,
+        recordInputs: records,
+        recordOutputs: records,
+      }));
+      await commit(...opening);
+      await commit(requested("call_deploy", "deploy"));
+      await commit(approval("call_deploy"));
+      await commit(
+        {
+          data: { deliveryId: "d_approver", principal: { id: "slack:T1:U2", type: "user" } },
+          type: "delivery.admitted",
+        },
+        {
+          data: {
+            deliveryId: "d_approver",
+            interactionId: "i_call_deploy",
+            responseId: "r_0",
+            value: { optionId: "approve" },
+          },
+          type: "response.submitted",
+        } as SessionEvent,
+      );
+      await commit({
+        data: { cause: { responseId: "r_0" }, interactionId: "i_call_deploy", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const [span] = (await spans()).filter((each) => each.name === "agent.approval");
+      expect(span?.attributes["agent.approval.responder.type"]).toBe("user");
+      expect(span?.attributes["agent.approval.responder.id"]).toBe(
+        records ? "slack:T1:U2" : undefined,
+      );
+    }
+  });
+
   it("ends what a cancelled turn leaves running as cancelled, and a failed call with its code", async () => {
     const { commit, spans } = session();
     await commit(...opening);
