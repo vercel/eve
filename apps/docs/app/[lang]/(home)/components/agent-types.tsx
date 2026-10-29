@@ -1216,7 +1216,7 @@ export function AgentTypes(): JSX.Element {
           </div>
           <div
             aria-labelledby={`${baseId}-tab-${selected.id}`}
-            className="min-w-0 lg:col-span-7 lg:row-start-1"
+            className="min-w-0 select-none lg:col-span-7 lg:row-start-1"
             id={`${baseId}-panel`}
             role="tabpanel"
           >

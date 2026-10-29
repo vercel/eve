@@ -741,7 +741,8 @@ export function SessionTimeline(): JSX.Element {
       aria-label="Example eve sessions in Slack, Teams, and WhatsApp"
       className="relative m-0 mb-16 ml-auto w-full max-w-[30rem]"
     >
-      <AppWindow title={conversation.label}>
+      {/* The conversation is illustration, not copy; its buttons and reactions stay clickable. */}
+      <AppWindow className="select-none" title={conversation.label}>
         {/* The conversation fades out over the outer 40px of an edge with messages scrolled past
             it. In full it opens at its start; a replay fills from the bottom like a chat. */}
         <div className="relative overflow-hidden" ref={bodyRef}>
