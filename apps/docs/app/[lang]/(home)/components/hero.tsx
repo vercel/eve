@@ -1,6 +1,47 @@
+import { Badge } from "@vercel/geistdocs/components/badge";
+import { cacheLife } from "next/cache";
 import type { JSX } from "react";
 import { InstallSwitcher } from "./install-switcher";
 import { SessionTimeline } from "./session-timeline";
+
+/** eve's version on npm's `latest` tag, refreshed hourly; null if the registry can't be reached. */
+async function latestVersion(): Promise<string | null> {
+  "use cache";
+  cacheLife("hours");
+
+  try {
+    const response = await fetch("https://registry.npmjs.org/-/package/eve/dist-tags");
+    if (!response.ok) return null;
+    const { latest } = (await response.json()) as { latest?: unknown };
+    return typeof latest === "string" ? latest : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The line under the install command: the current release, the license, and Beta. */
+async function ReleaseLabels(): Promise<JSX.Element> {
+  const version = await latestVersion();
+  return (
+    <div className="flex items-center justify-center gap-2 text-copy-13 text-gray-900">
+      {version ? (
+        <>
+          <span className="tabular-nums">v{version}</span>
+          <span aria-hidden className="text-gray-700">
+            ·
+          </span>
+        </>
+      ) : null}
+      <span>Apache-2.0</span>
+      <span aria-hidden className="text-gray-700">
+        ·
+      </span>
+      <Badge size="sm" variant="pill">
+        Beta
+      </Badge>
+    </div>
+  );
+}
 
 export function Hero({ tagline }: { tagline: string }): JSX.Element {
   return (
@@ -14,7 +55,11 @@ export function Hero({ tagline }: { tagline: string }): JSX.Element {
         <p className="max-w-[34rem] text-pretty text-copy-18 text-gray-900 sm:text-copy-20">
           {tagline}
         </p>
-        <InstallSwitcher className="mt-2" source="home_hero" />
+        {/* As wide as the command, so the labels center under it. */}
+        <div className="mt-2 flex w-fit flex-col gap-3">
+          <InstallSwitcher source="home_hero" />
+          <ReleaseLabels />
+        </div>
       </div>
       <div className="min-w-0 lg:col-span-5 lg:col-start-8">
         <SessionTimeline />
