@@ -208,7 +208,7 @@ test("version-packages assembles changesets across bump types and preserves old 
   );
   await write(
     ".changeset/d.md",
-    '---\n"eve": patch\n"@vercel/agent-runs": patch\n---\n\nImprove the new tool.\n',
+    '---\n"eve": patch\n"@vercel/agent-runs": patch\n---\n\nImprove the new tool.\n\n- Faster startup.\n- Lower memory use.\n',
   );
   git("add", ".changeset/a.md", ".changeset/d.md");
   git("commit", "-qm", "feat: Add a tool");
@@ -288,12 +288,14 @@ test("version-packages assembles changesets across bump types and preserves old 
         String.raw`## 1\.1\.0`,
         String.raw`Released ${date} · \[Compare with 1\.0\.0\]\(https://github\.com/vercel/eve/compare/eve%401\.0\.0\.\.\.eve%401\.1\.0\)`,
         String.raw`### Breaking Changes`,
-        String.raw`- Add a new tool\. ${pull(10)}`,
-        String.raw`  Migrate old callers to the new tool\.`,
-        String.raw`  Thanks @Alice\.
+        String.raw`- Add a new tool\.
+  Migrate old callers to the new tool\.
+  Thanks @Alice\. ${pull(10)}
 - Remove the legacy helper\. ${pull(12)}`,
         String.raw`### Features`,
         String.raw`- Improve the new tool\. ${pull(10)}`,
+        String.raw`  - Faster startup\.
+  - Lower memory use\.`,
         String.raw`### Bug Fixes`,
         String.raw`- Correct the setup guide\.
   The guide now lists the required token\. ${pull(11)}`,
@@ -311,6 +313,8 @@ test("version-packages assembles changesets across bump types and preserves old 
         String.raw`Released ${date} · \[Compare with 1\.0\.0\]\(https://github\.com/vercel/eve/compare/%40vercel%2Fagent-runs%401\.0\.0\.\.\.%40vercel%2Fagent-runs%401\.0\.1\)`,
         String.raw`### Features`,
         String.raw`- Improve the new tool\. ${pull(10)}`,
+        String.raw`  - Faster startup\.
+  - Lower memory use\.`,
       ].join("\n\n"),
       "u",
     ),

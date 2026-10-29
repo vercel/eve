@@ -11,13 +11,13 @@ const headings = {
 };
 const blockLine = /^(?:\s*(?:[-*+]|\d+[.)])\s|\s{4}|#|>|```|~~~|\|)/u;
 
-// A single prose paragraph of details joins the summary so each entry reads as
-// one paragraph; anything richer follows the summary as indented blocks.
+// Prose details fold into the summary's paragraph so lists stay tight; a blank
+// line inside any item would make CommonMark space out the whole list. Lists,
+// code, quotes, and tables cannot fold, so they follow as indented blocks.
 function renderEntry(summary, details, link) {
-  const prose =
-    details && !/\n\s*\n/u.test(details) && !details.split("\n").some((l) => blockLine.test(l));
+  const prose = details && !details.split("\n").some((line) => blockLine.test(line));
   const body = prose
-    ? `${summary}\n${details} ${link}`
+    ? `${summary}\n${details.replace(/\n\s*\n/gu, "\n")} ${link}`
     : `${summary} ${link}${details ? `\n\n${details}` : ""}`;
   return `- ${body
     .split("\n")
