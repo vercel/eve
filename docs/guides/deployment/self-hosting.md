@@ -115,7 +115,7 @@ Connection sign-in links and the callback URLs a parent passes to [remote agents
 WORKFLOW_LOCAL_BASE_URL=https://support.example.com eve start --host 0.0.0.0
 ```
 
-The Workflow world also delivers its queued work to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes). With the local world, keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world).
+With the local world, queued work is also delivered to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world). The Postgres world delivers queued work inside each process, so its deliveries don't use this origin.
 
 For an agent mounted under a path prefix, also set `EVE_PUBLIC_ROUTE_PREFIX`; see [Run workspace members](./self-hosted-operations#run-workspace-members).
 

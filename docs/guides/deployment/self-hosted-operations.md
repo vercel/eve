@@ -30,7 +30,7 @@ Use the [Postgres world](./workflow-worlds#use-the-postgres-world) to serve an a
 Configure each replica the same way, with two differences:
 
 - Run schedules on one replica only; see [Run schedules](#run-schedules).
-- Give every replica access to the same sandboxes. A session records its sandbox, and the next replica to run the session resumes it. A Docker sandbox lives on the Docker daemon of the host that created it, and a replica that can't find it starts a fresh sandbox without the earlier files. For replicas on several hosts, use a provider every replica can reach, such as [Vercel Sandbox](../../sandbox/vercel) or a [custom provider](../../sandbox/custom-providers).
+- Give every replica access to the same sandboxes. A session records its sandbox, and the next replica to run the session resumes it. A Docker sandbox lives on the Docker daemon of the host that created it. A replica that can't find it starts a fresh sandbox without the earlier files if its own daemon has the build's sandbox image, and fails with `SandboxTemplateNotProvisionedError` otherwise. For replicas on several hosts, use a provider every replica can reach, such as [Vercel Sandbox](../../sandbox/vercel) or a [custom provider](../../sandbox/custom-providers).
 
 ## Run schedules
 
