@@ -147,6 +147,13 @@ the coding agent creates. A setup can seed an existing app instead, as `lib/setu
 from `fixtures/tally/`; pin its eve dependency to the setup context's `packageSpec`. Put reusable setup under `lib/setups/`. Native runs support one-turn
 cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
 
+Graders that call authored code use `lib/grader-kit.ts`: it runs tool calls the way eve does
+(context, session state, approvals, fresh call IDs), resolves `defineDynamic()` definitions, and
+imports the project's own eve. agent-eval hides only `EVAL.ts` from the agent, so a grader can't
+import it. Put the grader-kit markers after the grader's imports, run `pnpm grader-kit:sync`, and
+edit the kit in `lib/`, never in a copy; a test fails when a copy drifts. Prefer extending the kit
+over hand-faking eve in one grader.
+
 ## Partial credit
 
 A run passes only when every grader test passes. Each run's `result.json` also records
