@@ -44,7 +44,7 @@ The agent adds its own commands through the [eve channel's `commands`](../channe
 | `/clear`   | Cancel the running turn and every working task, then clear the session's model-message history and keep the session. |
 | `/compact` | Compact the current session's context.                                                                               |
 
-An agent's own `commands` add to these. When an agent removes one of `/new`, `/clear`, or `/compact`, or the server predates commands, the TUI says so instead of sending it to the model. `/cancel`, Esc, and Ctrl+C cancel a running turn whatever commands the agent offers.
+An agent's own `commands` add to these. `/cancel`, Esc, and Ctrl+C are the TUI's own and cancel a running turn whatever commands the agent offers.
 
 ## Set up a new agent
 

@@ -396,7 +396,7 @@ export default eveChannel({
 
 ### Slash commands
 
-`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. The channel always offers `sessionCommands` unless you remove them: `/new` (alias `/reset`), `/clear`, `/compact`, and `/cancel`. These are the conversation controls the terminal UI shows.
+`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. The channel always offers `sessionCommands` unless you remove them: `/new` (alias `/reset`), `/clear`, and `/compact`. Cancelling stays with each client, which knows the turn it's showing, such as the terminal UI's `/cancel` or Web Chat's Stop button.
 
 Declare your own commands with `defineCommand` from `eve/channels`; a `commands` record adds them to the defaults. This one hands the conversation to a person on the support team:
 
@@ -447,7 +447,7 @@ The key is the command name, typed as `/escalate the refund failed twice`; `alia
 A same-named entry in the record replaces a default. To drop or rename defaults, pass `commands` as a function. It receives `sessionCommands` and returns the full set:
 
 ```ts
-commands: ({ clear, compact }) => ({ clear, compact, escalate }), // no /new or /cancel
+commands: ({ clear, compact }) => ({ clear, compact, escalate }), // no /new
 ```
 
 `run` returns an optional result:

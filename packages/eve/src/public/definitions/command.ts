@@ -94,7 +94,9 @@ export function defineCommand(definition: CommandDefinition): CommandDefinition 
 }
 
 /**
- * The eve channel's default commands: `new` (alias `reset`), `clear`, `compact`, and `cancel`.
+ * The eve channel's default commands: `new` (alias `reset`), `clear`, and `compact`. Cancelling
+ * stays with each client, which knows the turn it's showing, such as the terminal UI's `/cancel`
+ * or Web Chat's Stop button.
  * `eveChannel({ commands })` adds its own to them; pass `commands` as a function to change or drop
  * them.
  */
@@ -122,14 +124,6 @@ export const sessionCommands = {
     async run({ session }) {
       await session.compact();
       return { message: "Compaction requested." };
-    },
-  }),
-  cancel: defineCommand({
-    description: "Cancel the running turn",
-    session: "required",
-    async run({ session }) {
-      await session.cancel();
-      return { message: "Cancellation requested." };
     },
   }),
 } satisfies CommandDefinitions;

@@ -207,20 +207,6 @@ describe("withChannelPromptCommands for a command without arguments", () => {
   });
 });
 
-describe("session controls the channel doesn't offer", () => {
-  it("answers them instead of sending them to the model", () => {
-    const commands = withChannelPromptCommands(PROMPT_COMMANDS, []);
-    expect(parsePromptCommand("/reset", commands)).toEqual({ type: "unavailable", name: "new" });
-    expect(parsePromptCommand("/clear", commands)).toEqual({ type: "unavailable", name: "clear" });
-    expect(parsePromptCommand("/clear the cache", commands)).toBeNull();
-
-    const offered = withChannelPromptCommands(PROMPT_COMMANDS, [
-      { name: "clear", description: "Clear", arguments: "none", session: "required" },
-    ]);
-    expect(parsePromptCommand("/clear", offered)).toMatchObject({ type: "channel", name: "clear" });
-  });
-});
-
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
     expect(isPromptControlCommand("/exit")).toBe(true);
