@@ -215,7 +215,7 @@ For connection tools that can create, modify, delete, transmit, purchase, messag
 
 ### Send the approver to the server
 
-An approved connection call runs as the requester: its `auth` token and `ctx.session.auth.current` stay the requester's. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, with access to their credentials, so the server can act for the approver where you choose to:
+[Approval is consent only](/docs/human-in-the-loop): it never changes who the turn runs as. An approved connection call keeps the requester's identity, so `ctx.session.auth.current` and the connection's `auth` token stay the requester's, and later calls in the turn are unaffected. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, with access to their credentials. That's a separate identity your code explicitly sends to the server, not a replacement for the requester:
 
 ```ts title="agent/connections/gateway.ts"
 import { defineMcpClientConnection } from "eve/connections";
