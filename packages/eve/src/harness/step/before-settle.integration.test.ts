@@ -8,6 +8,7 @@ import type { HarnessSession, StepResult } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { AgentLoopDefinition } from "#shared/loop-stage.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
@@ -43,6 +44,35 @@ function reply(text: string): StreamResult {
   };
 }
 
+/** The model delivers `value` for the turn's output schema. */
+function deliver(value: unknown): StreamResult {
+  const parts: StreamPart[] = [
+    { type: "stream-start", warnings: [] },
+    {
+      input: JSON.stringify(value),
+      toolCallId: "reply-1",
+      toolName: REPLY_TOOL_NAME,
+      type: "tool-call",
+    },
+    {
+      finishReason: { raw: undefined, unified: "tool-calls" },
+      type: "finish",
+      usage: {
+        inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 50, total: 50 },
+        outputTokens: { reasoning: 0, text: 8, total: 8 },
+      },
+    },
+  ];
+  return {
+    stream: new ReadableStream<StreamPart>({
+      start(controller) {
+        for (const part of parts) controller.enqueue(part);
+        controller.close();
+      },
+    }),
+  };
+}
+
 function lastUserText(prompt: Prompt): string {
   const message = prompt.findLast((entry) => entry.role === "user");
   if (message === undefined || typeof message.content === "string") return "";
@@ -50,12 +80,17 @@ function lastUserText(prompt: Prompt): string {
 }
 
 /** Runs one turn of Alice's question with `loop`, answering each model call with `answers`. */
-async function runTurn(loop: AgentLoopDefinition, answers: readonly string[]) {
+async function runTurn(
+  loop: AgentLoopDefinition,
+  answers: readonly unknown[],
+  outputSchema?: HarnessSession["outputSchema"],
+) {
   const prompts: string[] = [];
   const model = new MockLanguageModelV3({
     doStream: async ({ prompt }) => {
       prompts.push(lastUserText(prompt));
-      return reply(answers[Math.min(prompts.length, answers.length) - 1] ?? "");
+      const answer = answers[Math.min(prompts.length, answers.length) - 1];
+      return outputSchema === undefined ? reply(String(answer)) : deliver(answer);
     },
   });
   const session: HarnessSession = {
@@ -63,6 +98,7 @@ async function runTurn(loop: AgentLoopDefinition, answers: readonly string[]) {
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:before-settle-session",
     history: [],
+    outputSchema,
     sessionId: "before-settle-session",
   };
   const events: SessionEvent[] = [];
@@ -124,6 +160,33 @@ describe("experimental.loop.beforeSettle", () => {
       }),
     );
     expect(issues).toEqual([]);
+  });
+
+  it("reads a delivered structured value, and keeps the schema for the continued call", async () => {
+    const outputSchema = {
+      additionalProperties: false,
+      properties: { sources: { items: { type: "string" }, type: "array" } },
+      required: ["sources"],
+      type: "object",
+    } as const;
+    const seen: unknown[] = [];
+
+    const { result } = await runTurn(
+      {
+        beforeSettle: ({ output }) => {
+          seen.push(output);
+          return (output as { sources: string[] }).sources.length > 0
+            ? undefined
+            : { continue: { note: "List at least one source." } };
+        },
+      },
+      [{ sources: [] }, { sources: ["Smith v. Jones"] }],
+      outputSchema,
+    );
+
+    expect(seen).toEqual([{ sources: [] }, { sources: ["Smith v. Jones"] }]);
+    expect(result.settledTurn).toEqual({ output: { sources: ["Smith v. Jones"] } });
+    expect(result.session.outputSchema).toBeUndefined();
   });
 
   it("settles without asking once the turn reaches maxContinuations", async () => {
