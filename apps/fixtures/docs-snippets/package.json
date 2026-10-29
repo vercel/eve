@@ -8,10 +8,13 @@
   "dependencies": {
     "@vercel/connect": "catalog:",
     "eve": "workspace:*",
+    "next": "catalog:",
+    "react": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
     "typescript": "catalog:"
   }
 }

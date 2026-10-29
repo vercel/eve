@@ -10,7 +10,7 @@
  * support files they import. A section that repeats another page's snippets
  * holds a `same-as.txt` naming that section's directory instead. This check fails when a page and its fixture
  * differ, when a fixture section no longer matches a heading, or when a
- * fully covered page gains a titled `ts` block without a fixture.
+ * fully covered page gains a titled `ts` or `tsx` block without a fixture.
  *
  * The fixture is the source of truth: `--write` copies fixture files into the
  * pages.
@@ -46,7 +46,7 @@ function parseBlocks(source) {
     }
     cursor = fence.lastIndex;
     const title = /\btitle="([^"]+)"/u.exec(match[2])?.[1];
-    if (match[1] !== "ts" || title === undefined) continue;
+    if (!["ts", "tsx"].includes(match[1]) || title === undefined) continue;
     const start = match.index + match[0].indexOf("\n") + 1;
     blocks.push({ section, title, code: match[3], start, end: start + match[3].length });
   }
@@ -60,10 +60,11 @@ function listDirs(dir) {
 }
 
 function findSectionDirs(dir) {
-  const entries = listDirs(dir);
-  if (entries.includes("agent") || entries.includes("evals")) return [dir];
-  if (existsSync(join(dir, SAME_AS))) return [dir];
-  return entries.flatMap((entry) => findSectionDirs(join(dir, entry)));
+  const docKey = relative(fixtureRoot, dir);
+  const isPage = [".md", ".mdx"].some((ext) => existsSync(join(docsDir, docKey + ext)));
+  return listDirs(dir).flatMap((entry) =>
+    isPage ? [join(dir, entry)] : findSectionDirs(join(dir, entry)),
+  );
 }
 
 const failures = [];
