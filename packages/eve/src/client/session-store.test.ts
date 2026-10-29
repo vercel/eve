@@ -210,6 +210,26 @@ describe("SessionStore acceptance and observation", () => {
     await current.runCommand("new");
     expect(current.snapshot.session).toBeUndefined();
   });
+  it("returns but doesn't apply a command result that lands after newSession()", async () => {
+    const server = agent();
+    const fetchAgent = vi.mocked(fetch).getMockImplementation()!;
+    const response = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async (request, init) =>
+      new URL(String(request)).pathname.includes("/commands/")
+        ? await response.promise
+        : await fetchAgent(request, init),
+    );
+    const current = store({ initialSession });
+
+    const pending = current.runCommand("standup");
+    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+    current.newSession();
+    response.resolve(Response.json({ ok: true, send: "Draft my standup." }));
+
+    expect(await pending).toEqual({ send: "Draft my standup." });
+    expect(server.posts).toEqual([]);
+  });
+
   it("preserves refreshed inbox handles in saved snapshots and session-change callbacks", async () => {
     agent();
     const fetchAgent = vi.mocked(fetch).getMockImplementation()!;

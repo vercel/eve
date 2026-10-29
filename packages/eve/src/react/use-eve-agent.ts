@@ -260,10 +260,17 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   const compact = useCallback(() => store.compact(), [store]);
   const commands = useCallback(() => store.commands(), [store]);
   const runCommand = useCallback(
-    (
+    async (
       name: string,
       commandOptions?: { readonly argument?: string; readonly signal?: AbortSignal },
-    ) => store.runCommand(name, commandOptions),
+    ) => {
+      const result = await store.runCommand(name, commandOptions);
+      // The store started a new session; prewarm it the way this hook's newSession() does.
+      if (result.controls?.includes("end") === true) {
+        setPrewarmResetGeneration((generation) => generation + 1);
+      }
+      return result;
+    },
     [store],
   );
   const newSession = useCallback(() => {

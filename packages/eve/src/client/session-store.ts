@@ -330,17 +330,25 @@ export class SessionStore {
    * Runs one of the eve channel's slash commands in this store's session, when it has one, and
    * applies what the command returned: `end` starts a fresh local session, and `send` goes out as
    * the caller's next message. Resolves with the result so the caller can show its `message`.
+   * When `newSession()` runs before the command returns, its result is returned but not applied.
    */
   async runCommand(
     name: string,
     options: { readonly argument?: string; readonly signal?: AbortSignal } = {},
   ): Promise<ChannelCommandResult> {
-    const sessionId = this.#session?.id;
-    const result = await this.#commandClient().runCommand(name, {
+    const client = this.#commandClient();
+    // A prewarm still creating the session would otherwise send the command without it.
+    await this.#creation?.catch(() => undefined);
+    const session = this.#session;
+    const result = await client.runCommand(name, {
       ...options,
-      ...(sessionId !== undefined && { sessionId }),
+      ...(session !== undefined && { sessionId: session.id }),
     });
+    // A newSession() while the command ran replaced the conversation it belongs to.
+    if (this.#session !== session) return result;
     if (result.controls?.includes("end") === true) this.newSession();
+    // Read what the controls changed, even when `followWhile` closed the stream.
+    else if (result.controls !== undefined && session !== undefined) this.#ensureStream();
     if (result.send !== undefined) await this.send({ message: result.send });
     return result;
   }

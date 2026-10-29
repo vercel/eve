@@ -62,8 +62,10 @@ export function AgentChat({
   const [commandNotice, setCommandNotice] = useState<string>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasSubmittedMessage = useRef(false);
+  // The session this page's route names. A command that ends it, such as /new, clears it.
+  const routeSessionId = useRef(sessionId);
   const replaceSessionRoute = (nextSessionId: string) => {
-    if (sessionId !== undefined) return;
+    if (routeSessionId.current !== undefined) return;
     // Framework routers (Next.js, TanStack Router) patch window.history; navigating
     // through them would remount this route and detach the active stream.
     History.prototype.replaceState.call(
@@ -85,9 +87,15 @@ export function AgentChat({
           },
     resume: sessionId !== undefined,
     onSessionChange(session) {
-      if (hasSubmittedMessage.current && session !== undefined) {
-        replaceSessionRoute(session.sessionId);
+      if (!hasSubmittedMessage.current) return;
+      if (session === undefined) {
+        // A command ended the session and the store started over. Stay on the page; a `send`
+        // from the same command names the next session here once it exists.
+        routeSessionId.current = undefined;
+        History.prototype.replaceState.call(window.history, window.history.state, "", "/s");
+        return;
       }
+      replaceSessionRoute(session.sessionId);
     },
   });
 
@@ -138,7 +146,7 @@ export function AgentChat({
   const hasConversationContent =
     sessionless || !isEmpty || errorMessage !== undefined || commandNotice !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
-  const activeSessionId = sessionId ?? agent.session?.sessionId;
+  const activeSessionId = agent.session?.sessionId ?? routeSessionId.current;
   // A session that ended outside eve never settles its requests, so they stay open, yet it
   // accepts no answer. Once the server says so, stop offering them.
   const sessionEnded =
@@ -176,11 +184,6 @@ export function AgentChat({
         const result = await agent.runCommand(command.command.name, {
           argument: command.argument,
         });
-        // The command ended this session, so start over the way "New chat" does.
-        if (result.controls?.includes("end") === true) {
-          window.location.assign("/s");
-          return;
-        }
         if (result.message !== undefined) setCommandNotice(result.message);
       } catch (error) {
         setCommandNotice(error instanceof Error ? error.message : "The command failed.");

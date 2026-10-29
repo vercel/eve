@@ -1185,7 +1185,6 @@ const attachmentRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
-/** The contract's rules, grouped by the kind of behavior they cover. */
 const COMMAND_GREETING = "Hello before clearing.";
 const AFTER_COMMAND = "Hello after clearing.";
 
@@ -1211,6 +1210,7 @@ const commandRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
+/** The contract's rules, grouped by the kind of behavior they cover. */
 export const channelContractSections = [
   { title: "Questions", rules: questionRules },
   { title: "Tool approvals", rules: approvalRules },
