@@ -51,7 +51,7 @@ describe("value deltas", () => {
   });
 
   // https://github.com/vercel/eve/issues/5635
-  it.fails("carry one added row of a session projection table, not the whole table", () => {
+  it("carry one added row of a session projection table, not the whole table", () => {
     const base = emptySessionView();
     for (let index = 0; index < 100; index++) {
       settleCall(base, `call_${index}`, `Alice's report ${index}`);
@@ -63,6 +63,22 @@ describe("value deltas", () => {
 
     expect(JSON.stringify(delta)).toContain("Bob's reply");
     expect(JSON.stringify(delta)).not.toContain("Alice's report");
+    expect(applyValueDelta(base, delta)).toStrictEqual(next);
+  });
+
+  it("copy dictionaries in snapshots and rebuild them as dictionaries", () => {
+    const table: Record<string, string> = Object.create(null);
+    table["__proto__"] = "Alice's row";
+    const snapshot = snapshotValue(table);
+    // A fold edits a table in place.
+    table.bob = "Bob's row";
+
+    const rebuilt = applyValueDelta(snapshot, diffValue(snapshot, table));
+
+    expect(Object.keys(snapshot)).toEqual(["__proto__"]);
+    expect(Object.getPrototypeOf(rebuilt)).toBeNull();
+    expect(rebuilt).toStrictEqual(table);
+    expect(applyValueDelta({ ...table }, diffValue({ ...table }, table))).toStrictEqual(table);
   });
 });
 
