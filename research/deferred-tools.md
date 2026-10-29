@@ -930,7 +930,7 @@ tests. The third holds all of the new tests.
   pass unit tests on their own, but the e2e suites are only meaningful with
   [3/3] stacked on top.
 - **Docs and changesets go with the implementation.** [1/3] and [2/3] each
-  update the docs for the behavior they change and carry a `minor`
+  update the docs for the behavior they change and carry a `major`
   changeset.
 
 ## Tests and rollout
@@ -1014,7 +1014,7 @@ Everything in this section lands in [3/3].
   - `connections/overview`, `connections/mcp`, `guides/dynamic-capabilities`
     (bare map keys, and the connection prefix rule), and `extensions` (the
     reserved names and how mount prefixes nest with connections).
-- **Changesets,** one `minor` in each of [1/3] and [2/3]. Together they:
+- **Changesets,** one `major` in each of [1/3] and [2/3]. Together they:
   - remove `connection_search`, `connection_execute`, and `load_skill`;
   - reserve the `eve` namespace in every agent;
   - reject names that start with a connection's prefix, which an existing

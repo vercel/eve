@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-10-21"
+last_updated: "2026-10-29"
 ---
 
 # Native code mode
@@ -551,7 +551,7 @@ installed as soon as it publishes.
 | [2/3] Types   | Output-type notes on direct tools; output validation for program calls; OpenAPI output schemas; the build warning                                                                                                                                                                                                                                                              |
 | [3/3] Tests   | Every new test, below                                                                                                                                                                                                                                                                                                                                                          |
 
-Docs and a `minor` changeset go with [1/3]: it adds a public option, changes
+Docs and a `major` changeset go with [1/3]: it adds a public option, changes
 the protocol, and removes `eve/tools/workflow`. [2/3] carries a `patch`.
 
 ### Tests

@@ -631,7 +631,7 @@ internal-agents it touches 5 files with `ctx.agent`, 39 reading `subagent.called
 
 The work lands as a stack of pull requests managed with `gh stack`, on top of this plan's PR.
 Each PR is one coherent step from the one below it: it passes CI on its own, updates the docs and
-fixtures for the behavior it changes, and carries a changeset (`minor` when it breaks a public
+fixtures for the behavior it changes, and carries a changeset (`major` when it breaks a stable public
 API). Main may lack features between PRs, never correctness. **Hold the Changesets release from
 PR 1 until PR 10 merges**, so no release ships without background work and then without its
 replacement.

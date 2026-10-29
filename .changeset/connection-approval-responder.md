@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
 A connection's `headers` and `toolCall.providedArguments` callbacks now receive `ctx.approval.responder` while an approved tool call runs, so an MCP or OpenAPI server can act for the person who approved it.

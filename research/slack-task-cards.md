@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/pull/4028
 status: implemented
-last_updated: "2026-09-30"
+last_updated: "2026-10-29"
 ---
 
 # Slack task cards and composable rendering
@@ -384,7 +384,7 @@ root session ─ own events ─► renderers.events ─► replies, questions, s
 
 ## Removed and changed
 
-Everything below is breaking, which is allowed before 1.0.
+Everything below is breaking.
 
 - **Removed:** `slackChannel({ activity })`, `experimental_slackActivityStatus`,
   `experimental_slackActivityTree`, `experimental_slackActivityPlan`,

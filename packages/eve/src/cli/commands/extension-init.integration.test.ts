@@ -177,7 +177,7 @@ describe("runExtensionInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     const printed = output.messages.join("\n");
-    expect(printed).toContain("npx eve@latest extension init <name>");
+    expect(printed).toMatch(/npx eve@\S+ extension init <name>/u);
     expect(printed).toContain("does not start eve dev");
     expect(printed).toContain("eve extension build");
   });

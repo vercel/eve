@@ -8,7 +8,7 @@ last_updated: "2026-10-29"
 
 ## Decision
 
-Before 1.0, reject unrecognized top-level fields in framework-owned HTTP JSON
+Reject unrecognized top-level fields in framework-owned HTTP JSON
 request bodies with **400 Bad Request**. Name the unknown field and list the
 accepted fields for the matched route. This PR implements the breaking change for
 session creation, follow-up messages and answers, and session controls.

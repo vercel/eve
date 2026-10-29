@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/pull/5028
 status: implemented
-last_updated: "2026-10-19"
+last_updated: "2026-10-29"
 ---
 
 # Session usage limit as a function
@@ -55,7 +55,7 @@ through its config, never through durable session state.
 
 ## Compatibility
 
-This is a breaking change to `defineAgent`, made before 1.0 without a shim.
+This is a breaking change to `defineAgent`, made without a shim.
 Sessions created before the change keep their stored numeric limits in durable
 state, which the runtime now ignores; they start on the new limit with a window
 covering their whole history. Pending continuation prompts from older

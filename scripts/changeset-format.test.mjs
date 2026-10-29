@@ -395,6 +395,10 @@ test("version-packages releases candidates and collects them into the stable rel
     const changelog = await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8");
     return { version, notes: changelog.slice(0, changelog.indexOf("\n## ", 10)) };
   };
+  // A private extension fixture whose wildcard peer must survive prerelease versioning.
+  const extension = '{"name":"ext","private":true,"peerDependencies":{"eve":"*"}}';
+  await mkdir(join(root, "packages/ext"));
+  await commit("packages/ext/package.json", extension, "chore: Add an extension");
   await commit(".changeset/pre.json", '{ "mode": "pre", "tag": "rc" }\n', "chore: Enter rc");
   const breaking = await commit(
     ".changeset/a.md",
@@ -412,6 +416,7 @@ test("version-packages releases candidates and collects them into the stable rel
 
   const rc0 = await release(env);
   assert.equal(rc0.version, "2.0.0-rc.0");
+  assert.equal(await readFile(join(root, "packages/ext/package.json"), "utf8"), extension);
   assert.match(rc0.notes, /### Breaking Changes\n\n- Remove the legacy helper\./u);
   assert.ok(rc0.notes.includes(compare("1.0.0", "2.0.0-rc.0")));
 

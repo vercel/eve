@@ -255,7 +255,7 @@ them never need `major`. When a stable API needs an incompatible replacement,
 add the replacement beside it, mark the old API `@deprecated`, and remove it in
 the next major release.
 
-When `.changeset/pre.json` exists, `main` is in Changesets prerelease mode:
+When `.changeset/pre.json` has `"mode": "pre"`, `main` is in Changesets prerelease mode:
 each release PR publishes the next prerelease, such as `1.0.0-rc.1`, under the
 npm dist-tag named in that file, and `latest` stays on the last stable release.
 Maintainers enter and leave prerelease mode with `pnpm changeset pre enter <tag>`
