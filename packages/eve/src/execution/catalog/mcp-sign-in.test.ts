@@ -100,6 +100,7 @@ function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   });
 
   let token: string | undefined;
+  let instanceId: string | undefined;
   const startAuthorization = vi.fn(async ({ callbackUrl }: { callbackUrl: string }) => ({
     challenge: { url: `https://idp.example.com/authorize?redirect=${callbackUrl}` },
   }));
@@ -118,6 +119,9 @@ function setup(mode: ServerMode, approval?: ApprovalPolicy) {
     }),
     connectionName: "kennel",
     description: "Pet boarding.",
+    get instanceId() {
+      return instanceId;
+    },
     protocol: "mcp",
     protocolVersionDiscovery: false,
     url: URL,
@@ -164,6 +168,10 @@ function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   return {
     seen,
     startAuthorization,
+    /** Resolves `kennel` to another instance from here on, as a changed connection does. */
+    switchInstance: (id: string) => {
+      instanceId = id;
+    },
     search: (query: string) =>
       contextStorage.run(ctx, () =>
         catalog.advertised.get(SEARCH_TOOL_NAME)!.execute!({ query }, options),
@@ -300,7 +308,7 @@ describe("MCP connections sign in only when the server asks", () => {
 
 // #5564: the harness rechecks a call's approval before it runs again after the sign-in it stopped for.
 describe("a connection call with an approval policy runs after the sign-in it stopped for", () => {
-  it.fails("when the policy approved it without asking a person", async () => {
+  it("when the policy approved it without asking a person", async () => {
     const kennel = setup("public-list-401", () => "approved");
 
     expect(await kennel.approve("kennel__pet_invoice")).toMatchObject({ denied: false });
@@ -313,7 +321,7 @@ describe("a connection call with an approval policy runs after the sign-in it st
     expect(await kennel.execute("kennel__pet_invoice")).toBe("pet_invoice ok");
   });
 
-  it.fails("when a person approved it", async () => {
+  it("when a person approved it", async () => {
     const kennel = setup("public-list-401", () => "user-approval");
 
     expect(await kennel.approve("kennel__pet_invoice")).toMatchObject({ awaitsPerson: true });
@@ -327,5 +335,19 @@ describe("a connection call with an approval policy runs after the sign-in it st
       denied: false,
     });
     expect(await kennel.execute("kennel__pet_invoice")).toBe("pet_invoice ok");
+  });
+
+  it("unless its connection resolves to another instance by then", async () => {
+    const kennel = setup("public-list-401", () => "approved");
+
+    await kennel.approve("kennel__pet_invoice");
+    expect(isAuthorizationSignal(await kennel.execute("kennel__pet_invoice"))).toBe(true);
+
+    kennel.finishSignIn();
+    kennel.switchInstance("kennel-bob");
+    await kennel.approve("kennel__pet_invoice", { recheck: true });
+    await expect(kennel.execute("kennel__pet_invoice")).rejects.toThrow(
+      "The connection for this tool call changed or is unavailable.",
+    );
   });
 });
