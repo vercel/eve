@@ -216,11 +216,8 @@ export async function bootInitialOwner(
           : [input.continuationConflictCommand]),
         ...caught,
       ];
-      if (payloads.length > 0) {
-        await settleContinuationConflictStep({
-          payloads,
-          continuationToken,
-        });
+      for (const payload of payloads) {
+        await settleContinuationConflictStep({ payload, continuationToken });
       }
       // This run never becomes the session, so nothing else would end its stream.
       await closeSessionStreamStep({ sessionWritable });

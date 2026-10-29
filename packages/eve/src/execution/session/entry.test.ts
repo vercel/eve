@@ -207,10 +207,11 @@ describe("bootInitialOwner", () => {
 
     expect(inbox.release).toHaveBeenCalledOnce();
     expect(inbox.dispose).not.toHaveBeenCalled();
-    expect(settleContinuationConflictStep).toHaveBeenCalledWith({
-      continuationToken: "channel:conversation-1",
-      payloads: [continuationConflictCommand, followUp, delivered],
-    });
+    expect(vi.mocked(settleContinuationConflictStep).mock.calls).toEqual(
+      [continuationConflictCommand, followUp, delivered].map((payload) => [
+        { continuationToken: "channel:conversation-1", payload },
+      ]),
+    );
   });
 
   it("hands nothing over when a losing run has no command and caught nothing", async () => {

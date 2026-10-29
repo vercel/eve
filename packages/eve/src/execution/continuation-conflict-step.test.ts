@@ -22,17 +22,10 @@ describe("settleContinuationConflictStep", () => {
     resumeSessionInboxMock.mockResolvedValue({ runId: "wrun_owner" });
   });
 
-  it("forwards a losing candidate's payloads to the continuation owner in order", async () => {
-    const followUp = { auth: null, kind: "send" as const, payload: { message: "follow-up" } };
-    await settleContinuationConflictStep({
-      continuationToken: "slack:C1:T1",
-      payloads: [command, followUp],
-    });
+  it("forwards a losing candidate's payload to the continuation owner unchanged", async () => {
+    await settleContinuationConflictStep({ continuationToken: "slack:C1:T1", payload: command });
 
-    expect(resumeSessionInboxMock.mock.calls).toEqual([
-      ["slack:C1:T1", command],
-      ["slack:C1:T1", followUp],
-    ]);
+    expect(resumeSessionInboxMock.mock.calls).toEqual([["slack:C1:T1", command]]);
   });
 
   it("surfaces a vanished alias", async () => {
@@ -40,7 +33,7 @@ describe("settleContinuationConflictStep", () => {
     resumeSessionInboxMock.mockRejectedValue(error);
 
     await expect(
-      settleContinuationConflictStep({ continuationToken: "slack:C1:T1", payloads: [command] }),
+      settleContinuationConflictStep({ continuationToken: "slack:C1:T1", payload: command }),
     ).rejects.toBe(error);
   });
 });

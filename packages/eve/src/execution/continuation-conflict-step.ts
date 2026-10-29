@@ -6,14 +6,15 @@ export type ContinuationConflictPayload =
   | Extract<SessionCommand, { readonly kind: "send" }>
   | DeliverHookPayload;
 
-/** Hands a losing session candidate's payloads, in order, to the session that owns the continuation. */
+/**
+ * Hands one of a losing session candidate's payloads to the session that owns the continuation.
+ * One step per payload, so a retry never resends a payload the owner already accepted.
+ */
 export async function settleContinuationConflictStep(input: {
-  readonly payloads: readonly ContinuationConflictPayload[];
+  readonly payload: ContinuationConflictPayload;
   readonly continuationToken: string;
 }): Promise<void> {
   "use step";
 
-  for (const payload of input.payloads) {
-    await resumeSessionInbox(input.continuationToken, payload);
-  }
+  await resumeSessionInbox(input.continuationToken, input.payload);
 }
