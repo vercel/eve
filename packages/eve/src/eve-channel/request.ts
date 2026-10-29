@@ -296,6 +296,22 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   return turnId === null || typeof turnId === "string" ? { turnId } : {};
 }
 
+export async function parseRewindBody(
+  req: Request,
+): Promise<{ readonly turnId: string } | Response> {
+  const payload = await parseOptionalJsonRequest(req);
+  if (payload instanceof Response) return payload;
+  const rejection = rejectUnknownFields(payload, ["turnId"]);
+  if (rejection !== undefined) return rejection;
+  if (typeof payload.turnId !== "string" || payload.turnId.length === 0) {
+    return Response.json(
+      { error: "Expected 'turnId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  return { turnId: payload.turnId };
+}
+
 export async function parseResetBody(
   req: Request,
 ): Promise<{ readonly reason?: string } | Response> {

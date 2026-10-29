@@ -90,6 +90,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `POST /eve/v1/session/:sessionId` (send a follow-up, respond to an input request, or prepare an idle session with an empty body)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
+- `POST /eve/v1/session/:sessionId/rewind` (select a previous conversation turn)
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
 - `POST /eve/v1/session/:sessionId/end` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
@@ -255,6 +256,10 @@ See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-t
 ### Clear context
 
 Post to `/eve/v1/session/:sessionId/clear` to stop the running turn and its tasks and remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+
+### Rewind context
+
+Rewind is experimental, and its behavior may change in a minor release. Post `{ "turnId": "turn_0" }` to `/eve/v1/session/:sessionId/rewind` to keep that settled turn and discard later turns from the conversation and model history. Like a clear, a rewind stops the running turn and its tasks, and discards task results the model hasn't read. It doesn't undo files, state, or external side effects. The delivery settles asynchronously. When the turn's history is no longer available, such as after a compaction, the rewind changes nothing: `context.settled` reports `REWIND_UNAVAILABLE`, and a running turn continues. A stranded session cannot run the rewind, so the route returns `409 session_stranded`.
 
 ### Compact context
 

@@ -64,6 +64,10 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
+  readHistoryBoundaries,
+  writeHistoryBoundaries,
+} from "#execution/session/history-boundaries.js";
+import {
   checksSessionEvents,
   foldOrphanedLines,
   openSessionEventPublisher,
@@ -113,6 +117,8 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
+  /** An earlier attempt published lines that this attempt had to recover. */
+  interrupted?: boolean;
 }
 
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
@@ -130,16 +136,56 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
       },
     );
   }
-  return await withSessionStateDelta(input, (state) =>
-    runSessionStep({
-      ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-    }),
-  );
+  const pendingAttributes: PendingStepAttributes = {};
+  const before = storedProjection(input.sessionState.snapshot.session.state).view.position;
+  return await withSessionStateDelta(input, async (state) => {
+    const result = await runSessionStep(
+      {
+        ...state,
+        serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+      },
+      pendingAttributes,
+    );
+    const session = result.sessionState.snapshot.session;
+    const projection = storedProjection(session.state).view;
+    const turnId = projection.session.latestTurnId;
+    const turn = turnId === undefined ? undefined : projection.turns[turnId];
+    let boundaries = readHistoryBoundaries(session.state);
+    // A clear must invalidate even zero-length boundaries; compaction may replace the history
+    // with an identical-looking prefix. Treat both conservatively.
+    if (state.input?.control === "clear" || result.compacted === true) boundaries = [];
+    if (
+      pendingAttributes.interrupted !== true &&
+      state.input?.control === undefined &&
+      result.action === "parked" &&
+      turn !== undefined &&
+      turn.status === "settled" &&
+      turn.closedAt !== undefined &&
+      turn.closedAt > before
+    ) {
+      boundaries = [
+        ...boundaries.filter((boundary) => boundary.turnId !== turn.turnId),
+        { turnId: turn.turnId, follows: turn.follows, length: result.history.length },
+      ];
+    }
+    if (boundaries.length === 0 && readHistoryBoundaries(session.state).length === 0) return result;
+    return {
+      ...result,
+      sessionState: {
+        ...result.sessionState,
+        snapshot: {
+          ...result.sessionState.snapshot,
+          session: { ...session, state: writeHistoryBoundaries(session.state, boundaries) },
+        },
+      },
+    };
+  });
 }
 
-async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
-  const pendingAttributes: PendingStepAttributes = {};
+async function runSessionStep(
+  input: TurnStepInput,
+  pendingAttributes: PendingStepAttributes,
+): Promise<DurableStepResult> {
   try {
     return await runSessionStepBody(input, pendingAttributes);
   } finally {
@@ -171,6 +217,7 @@ async function runSessionStepBody(
     orphaned.length > 0 || input.recover !== undefined
       ? readInterruptedAttempt(nextLinePosition(ctx), orphaned)
       : undefined;
+  pendingAttributes.interrupted = interrupted !== undefined;
   if (orphaned.length > 0) {
     enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
   }
@@ -635,6 +682,7 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        rewindTo: input.input?.control === "rewind" ? input.input.rewindTo : undefined,
         controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,

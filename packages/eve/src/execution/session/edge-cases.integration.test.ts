@@ -275,7 +275,7 @@ interface Session {
   ) => Promise<void>;
   readonly answerAndSend: (interactionId: string, message: string) => Promise<string>;
   readonly control: (
-    kind: "cancel" | "clear" | "compact" | "reset",
+    kind: "cancel" | "clear" | "compact" | "rewind" | "reset",
     extra?: object,
   ) => Promise<void>;
   /** The approvals opened so far, oldest first. */
@@ -1736,6 +1736,60 @@ describe("work delegated to a child session", () => {
     expect(last).not.toContain("call_agent");
     expect(last).not.toContain(ended!.data.taskId);
   });
+  it("stops a working task when the conversation is rewound before it, and its result never arrives", async () => {
+    const never = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-rewind-working-task",
+      {
+        message: "First message",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:"))
+            return heldReply("Child deployed.", never.wait);
+          prompts.push(prompt);
+          if (!prompt.includes("Delegate the deploy")) return "ok";
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          return "The deploy is underway.";
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.next("first turn");
+        await session.send("Delegate the deploy; no need to wait on it.");
+        await session.until(
+          "underway",
+          (event) =>
+            event.type === "content.completed" &&
+            event.data.kind === "text" &&
+            event.data.value === "The deploy is underway.",
+        );
+        await session.control("rewind", { turnId: "turn_0" });
+        await session.until("rewound", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.until(
+          "next turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_2",
+        );
+      },
+    );
+
+    const [ended] = ofType(events, "task.ended");
+    expect(ended?.data).toMatchObject({ outcome: "cancelled" });
+    const last = prompts.at(-1)!;
+    expect(last).toContain("First message");
+    expect(last).not.toContain("Delegate the deploy");
+    expect(last).not.toContain(ended!.data.taskId);
+  });
 });
 
 describe("deliveries a child session reads", () => {
@@ -1851,6 +1905,116 @@ describe("deliveries a child session reads", () => {
 });
 
 describe("controls between turns", () => {
+  it("rewinds durable model history and continues from the selected turn", async () => {
+    const prompts: string[] = [];
+    const model = scriptedModel((_prompt, raw) => {
+      prompts.push(JSON.stringify(raw));
+      return "ok";
+    });
+    const { events } = await withSession(
+      "edge-rewind-history",
+      {
+        message: "First message",
+        model,
+        tools: [],
+      },
+      async (session) => {
+        await session.next("first turn");
+        await session.send("Discarded message");
+        await session.next("second turn");
+        await session.control("rewind", { turnId: "missing" });
+        const refused = await session.until(
+          "unavailable rewind",
+          (event) => event.type === "context.settled" && event.data.kind === "rewind",
+        );
+        expect(refused).toContainEqual(
+          expect.objectContaining({
+            type: "context.settled",
+            data: expect.objectContaining({
+              outcome: "failed",
+              error: expect.objectContaining({ code: "REWIND_UNAVAILABLE" }),
+            }),
+          }),
+        );
+        await session.control("rewind", { turnId: "turn_0" });
+        const change = await session.until(
+          "rewind",
+          (event) => event.type === "context.settled" && event.data.kind === "rewind",
+        );
+        expect(change).toContainEqual(
+          expect.objectContaining({
+            type: "context.settled",
+            data: expect.objectContaining({ outcome: "completed", selects: { turnId: "turn_0" } }),
+          }),
+        );
+        await session.send("Replacement message");
+        await session.next("replacement turn");
+      },
+    );
+    expect(prompts[2]).toContain("First message");
+    expect(prompts[2]).toContain("Replacement message");
+    expect(prompts[2]).not.toContain("Discarded message");
+    expect(events.filter((event) => event.type === "turn.started").at(-1)).toMatchObject({
+      data: { follows: "turn_0" },
+    });
+  });
+
+  it.each(["turn_0", "missing"])(
+    "stops a running turn only for a rewind that applies (to %s)",
+    async (target) => {
+      const release = gate();
+      const prompts: string[] = [];
+      const { events } = await withSession(
+        `edge-rewind-running-turn-${target}`,
+        {
+          message: "First message",
+          model: scriptedModel(({ said }, raw) => {
+            prompts.push(JSON.stringify(raw));
+            if (said("Write a long story.")) return heldReply("The end.", release.wait, "Once");
+            return "ok";
+          }),
+          tools: [],
+        },
+        async (session) => {
+          await session.next("first turn");
+          await session.send("Write a long story.");
+          await session.until("generating", (event) => event.type === "content.delta");
+          await session.control("rewind", { turnId: target });
+          if (target === "missing") release.open();
+          await session.until(
+            "rewind",
+            (event) => event.type === "context.settled" && event.data.kind === "rewind",
+          );
+          await session.send("Next message");
+          await session.until(
+            "next turn",
+            (event) => event.type === "turn.settled" && event.data.turnId === "turn_2",
+          );
+        },
+      );
+      const rewind = ofType(events, "context.settled").find(
+        (event) => event.data.kind === "rewind",
+      );
+      if (target === "turn_0") {
+        expect(turnOutcomes(events)).toEqual([
+          "turn_0:completed",
+          "turn_1:cancelled",
+          "turn_2:completed",
+        ]);
+        expect(rewind?.data).toMatchObject({ outcome: "completed", selects: { turnId: "turn_0" } });
+        expect(prompts.at(-1)).not.toContain("Write a long story.");
+      } else {
+        expect(turnOutcomes(events)).toEqual([
+          "turn_0:completed",
+          "turn_1:completed",
+          "turn_2:completed",
+        ]);
+        expect(rewind?.data).toMatchObject({ outcome: "failed" });
+        expect(prompts.at(-1)).toContain("Write a long story.");
+      }
+    },
+  );
+
   it.each([1, 4])(
     "keeps summary usage when a context.settled hook cancels with %s model calls per step",
     async (modelCallsPerStep) => {

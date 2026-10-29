@@ -393,11 +393,13 @@ Compaction summarizes context without adding a user message. User-role instructi
 
 Clear removes model-message history in place, including static and dynamic user-role instructions, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It does not delete data from a memory provider's external store, and the next turn recalls again. Unchanged user-role instructions are not inserted again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each settles its interaction. Clear starts over: unlike a compaction, it doesn't wait for an active turn. It stops the running turn as an unguarded cancel does, so the turn settles `cancelled`, the calls it waits on stop, and working tasks end with `task.ended` facts, then clears. A stopped task never reports into the cleared conversation. The clear is a context change with `kind: "clear"`.
 
+Rewind, which is experimental, keeps a settled turn and removes the turns after it from the conversation and model history. It stops the running turn and working tasks as a clear does, and selects that turn with `context.settled` `kind: "rewind"`. A rewind to a turn whose history is no longer available, such as one before a compaction or clear, fails with `REWIND_UNAVAILABLE` and stops nothing.
+
 A cancel stops turns, not a compaction or clear: one that arrives while either runs settles `ignored`, and the change finishes. A cancel, clear, or compact sent to a prewarmed session before its first message has nothing to act on, and settles `ignored` once the session starts.
 
 End terminally retires the exact session ID. An ended ID never becomes a new session; create another session explicitly for a fresh conversation. All controls return delivery receipts when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
 
-A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. End still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear and compact cannot repair a stranded owner; use end instead.
+A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. End still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear, rewind, and compact cannot repair a stranded owner; use end instead.
 
 ## Reconnect and rewind
 

@@ -24,9 +24,15 @@ for await (const event of delivery.stream()) {
 
 The cancellation delivery settles when the command is applied, including a no-op for a turn that already ended. Continue reading the original message's delivery to observe its outcome and advance its cursor. A live idle session also accepts cancellation; it does not return a separate `no_active_turn` result.
 
+`session.rewind(turnId)` is experimental. It keeps the specified settled turn and removes its later turns from the current conversation and model history. Like a clear, it stops the running turn and its tasks, but doesn't undo files, durable state, or external side effects. A turn becomes unavailable after a compaction or clear; check `context.settled` and the delivery's result for failure.
+
 Between turns, `session.compact()` queues context compaction without sending model input. `session.clear()` removes model-message history while retaining the session and its durable resources; a turn still running is cancelled first, and its tasks stop. Client `messages` and `transcriptOf()` then leave out everything before the clear. Await their deliveries before sending another turn:
 
 ```ts
+// Keep the selected turn and discard its later conversation turns.
+const rewind = await session.rewind("turn_0");
+const rewindResult = await rewind.result();
+
 const compaction = await session.compact();
 for await (const event of compaction.stream()) {
   if (event.type === "context.settled") console.log(event.data.outcome);

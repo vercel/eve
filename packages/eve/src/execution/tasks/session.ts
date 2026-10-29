@@ -42,12 +42,17 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 export async function cancelWorkingTasks(
   cursor: SessionStateCursor,
   reason: Exclude<TaskCancelReason, "task-cancel">,
-  options: { readonly turnCalls?: boolean } = {},
+  options: { readonly turnCalls?: boolean; readonly discardResults?: boolean } = {},
 ): Promise<void> {
   const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
   const turnCalls = options.turnCalls === true && mayWaitOnWorkflowToolRuns(cursor);
-  if (taskIds.length === 0 && !turnCalls) return;
-  await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds, turnCalls }));
+  const discardResults =
+    options.discardResults === true &&
+    sessionTaskTable(cursor).tasks.some((task) => task.results.length > 0);
+  if (taskIds.length === 0 && !turnCalls && !discardResults) return;
+  await cursor.advance((state) =>
+    cancelTasksStep({ ...state, reason, taskIds, turnCalls, discardResults }),
+  );
 }
 
 /** An unreadable run registry counts as waiting, so the step runs and logs it. */

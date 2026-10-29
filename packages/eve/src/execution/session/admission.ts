@@ -13,6 +13,7 @@ import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
 } from "#execution/session-inbox/protocol.js";
+import { findRewindBoundary } from "#execution/session/history-boundaries.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
@@ -73,6 +74,13 @@ export async function admitSessionInboxPayload(
       }
       return { admission, kind: "delivery" };
     }
+    case "rewind":
+      input.queue.enqueueControl("rewind", { ...controlOrigin(command), turnId: command.turnId });
+      // Like a clear, a rewind that can apply stops the running turn and its tasks first. One that
+      // can't leaves them, and reports its failure once it runs.
+      return rewindApplies(input.cursor, command.turnId)
+        ? { kind: "cancel" }
+        : { kind: "consumed" };
     case "clear":
       // A clear starts over: it stops the running turn and its tasks, as a reset does, then runs.
       input.queue.enqueueControl("clear", controlOrigin(command));
@@ -94,6 +102,17 @@ export async function admitSessionInboxPayload(
       return origin === undefined ? { kind: "cancel" } : { kind: "cancel", origin };
     }
   }
+}
+
+/** Whether a rewind to `turnId` finds the model history it keeps. */
+export function rewindApplies(cursor: SessionStateCursor, turnId: string): boolean {
+  return (
+    findRewindBoundary(
+      cursor.sessionState.snapshot.session.state,
+      cursor.history.length,
+      turnId,
+    ) !== undefined
+  );
 }
 
 /** The delivery a control arrived as. */

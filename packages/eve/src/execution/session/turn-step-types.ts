@@ -23,7 +23,8 @@ export interface RuntimeActionResultStepInput {
  * was in flight is appended ahead of that action's result in the same step.
  */
 export interface TurnStepPayload {
-  readonly control?: "clear" | "compact";
+  readonly control?: "clear" | "compact" | "rewind";
+  readonly rewindTo?: string;
   /** The delivery the control arrived as. */
   readonly controlDelivery?: ControlDelivery;
   readonly delivery?: DeliverHookPayload;

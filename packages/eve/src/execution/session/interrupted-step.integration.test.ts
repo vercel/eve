@@ -3,6 +3,10 @@ import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import { createCompactionConfig } from "#execution/session.js";
 import {
+  readHistoryBoundaries,
+  writeHistoryBoundaries,
+} from "#execution/session/history-boundaries.js";
+import {
   readInterruptedAttempt,
   recoverInterruptedStep,
 } from "#execution/session/interrupted-step.js";
@@ -60,6 +64,57 @@ function openTurnSession(sessionId: string) {
   ctx.set(SessionIdKey, sessionId);
   return { ctx, session: withOpenTurn(session, { sequence: 1, turnId: "turn-1" }) };
 }
+
+it("recovers a published rewind from its checkpointed boundary", async () => {
+  const session: HarnessSession = {
+    agent: { system: "", tools: [], dynamicModel: true },
+    compaction: createCompactionConfig(),
+    continuationToken: "test",
+    sessionId: "rewind-recovery",
+    history: [
+      { role: "assistant", content: "kept" },
+      { role: "assistant", content: "discarded" },
+    ],
+    state: writeHistoryBoundaries(undefined, [
+      { turnId: "turn_0", follows: null, length: 1 },
+      { turnId: "turn_1", follows: "turn_0", length: 2 },
+    ]),
+  };
+  const started = {
+    type: "context.started" as const,
+    data: { changeId: "change_1", kind: "rewind" },
+  };
+  const settled = {
+    type: "context.settled" as const,
+    data: {
+      changeId: "change_1",
+      kind: "rewind",
+      outcome: "completed" as const,
+      selects: { turnId: "turn_0" },
+    },
+  };
+  const ctx = new ContextContainer();
+  ctx.set(SessionIdKey, session.sessionId);
+  enterSessionProjection(ctx, withPublished(session, [started, settled]).state);
+  const result = await recoverInterruptedStep({
+    admission: [],
+    ctx,
+    control: { kind: "rewind" },
+    attempt: readInterruptedAttempt(0, [
+      { position: 0, line: { at: "2026-10-21T00:00:00.000Z", facts: [started, settled] } },
+    ]),
+    publish: vi.fn(async () => session),
+    session,
+    stepInput: undefined,
+  });
+  expect("result" in result && result.result.history).toEqual([
+    { role: "assistant", content: "kept" },
+  ]);
+  if (!("result" in result)) throw new Error("Expected a settled control.");
+  expect(readHistoryBoundaries(result.result.sessionState.snapshot.session.state)).toEqual([
+    { turnId: "turn_0", follows: null, length: 1 },
+  ]);
+});
 
 it("fails the turn with what a step's last attempt threw", async () => {
   const { ctx, session } = openTurnSession("exhausted-session");

@@ -324,6 +324,9 @@ export class SessionStore {
   clear(): Promise<Delivery> {
     return this.#control((session) => session.clear());
   }
+  rewind(turnId: string): Promise<Delivery> {
+    return this.#control((session) => session.rewind(turnId));
+  }
   end(): Promise<Delivery> {
     return this.#control((session) => session.end());
   }

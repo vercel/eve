@@ -58,6 +58,7 @@ interface CreateExecutionNodeStepInput {
   readonly capabilities?: SessionCapabilities;
   /** Runs only a context clear and returns to the parked session. */
   readonly clearOnly?: boolean;
+  readonly rewindTo?: string;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
   readonly controlDelivery?: ToolLoopHarnessConfig["controlDelivery"];
@@ -90,6 +91,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
+    rewindTo: input.rewindTo,
     compactOnly: input.compactOnly,
     controlDelivery: input.controlDelivery,
     handleEvent: input.handleEvent,

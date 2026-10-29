@@ -186,7 +186,7 @@ export function controlAdmitted(delivery: ControlDelivery, control: string): Ses
 
 export interface ControlSettlement {
   readonly control: ControlDelivery;
-  readonly source: "cancel" | "clear" | "compact";
+  readonly source: "cancel" | "clear" | "compact" | "rewind";
   readonly outcome: "ignored" | "applied";
 }
 

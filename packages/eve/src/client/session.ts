@@ -194,6 +194,12 @@ export class ClientSession {
     return this.#control("clear", options);
   }
 
+  /** Rewinds the conversation to the given last-kept turn. */
+  async rewind(turnId: string, options?: { readonly signal?: AbortSignal }): Promise<Delivery> {
+    if (turnId.length === 0) throw new Error("rewind() requires a turn id.");
+    return this.#control("rewind", { ...options, turnId });
+  }
+
   /** Queues context compaction without sending model input. */
   async compact(options?: { readonly signal?: AbortSignal }): Promise<Delivery> {
     return this.#control("compact", options);
@@ -208,7 +214,7 @@ export class ClientSession {
   }
 
   async #control(
-    kind: "cancel" | "clear" | "compact" | "end",
+    kind: "cancel" | "clear" | "compact" | "rewind" | "end",
     options?: {
       readonly signal?: AbortSignal;
       readonly turnId?: string | null;

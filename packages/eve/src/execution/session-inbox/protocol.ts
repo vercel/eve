@@ -12,7 +12,7 @@ type DecodedSessionInbox =
   | SessionPrewarmPayload
   | DeliverHookPayload
   | SessionTimeoutHookPayload
-  | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
+  | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "rewind" | "reset" }>;
 
 /** Invalid current-generation inbox payload. Historical wire shapes are not accepted. */
 export class SessionInboxPayloadError extends Error {
@@ -71,6 +71,14 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       )
         throw new SessionInboxPayloadError("Invalid session prewarm hint.");
       return value as SessionPrewarmPayload;
+    case "rewind":
+      if (typeof payload.turnId !== "string" || payload.turnId.length === 0) {
+        throw new SessionInboxPayloadError("Rewind requires a nonempty turnId.");
+      }
+      if (typeof payload.deliveryId !== "string" || payload.deliveryId.length === 0) {
+        throw new SessionInboxPayloadError("Session controls require a nonempty deliveryId.");
+      }
+      return value as DecodedSessionInbox;
     case "cancel":
     case "clear":
     case "compact":

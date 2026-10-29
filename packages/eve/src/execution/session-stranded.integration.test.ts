@@ -393,7 +393,7 @@ describe("stranded sessions", () => {
     });
   });
 
-  it("ends a stranded session on an explicit reset and refuses to clear it", async () => {
+  it("ends a stranded session on an explicit reset and refuses to clear or rewind it", async () => {
     const test = await createTestRuntime({ agent: { name: "stranded-session-reset" } });
     await test.run(async () => {
       const continuationToken = "http:stranded-session-reset";
@@ -404,6 +404,12 @@ describe("stranded sessions", () => {
         await expect(
           runtime.dispatchSession({
             command: { deliveryId: "clear-delivery", kind: "clear" },
+            sessionId: stranded.runId,
+          }),
+        ).rejects.toBeInstanceOf(SessionStrandedError);
+        await expect(
+          runtime.dispatchSession({
+            command: { deliveryId: "rewind-delivery", kind: "rewind", turnId: "turn_0" },
             sessionId: stranded.runId,
           }),
         ).rejects.toBeInstanceOf(SessionStrandedError);

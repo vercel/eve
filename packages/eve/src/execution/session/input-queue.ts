@@ -3,12 +3,14 @@ import { DELIVERY_IDEMPOTENCY_WINDOW } from "#channel/delivery-idempotency.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
-export type SessionControl = "clear" | "compact" | "expired" | "reset";
+export type SessionControl = "clear" | "compact" | "rewind" | "expired" | "reset";
 
 /** The delivery a control arrived as: its id, and who sent it. */
 export interface ControlOrigin {
   readonly deliveryId: string;
   readonly auth?: SessionAuthContext | null;
+  /** Target turn carried by a rewind control. */
+  readonly turnId?: string;
 }
 
 export interface DeliveryAdmission {

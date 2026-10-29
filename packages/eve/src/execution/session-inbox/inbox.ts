@@ -178,6 +178,7 @@ export function isInterrupt(value: SessionInboxPayload): boolean {
   return (
     value.kind === "cancel" ||
     value.kind === "clear" ||
+    value.kind === "rewind" ||
     value.kind === "reset" ||
     value.kind === "session-timeout" ||
     value.kind === "session-failure"

@@ -197,6 +197,7 @@ export type SessionCommand =
   | { readonly kind: "prewarm"; readonly targetDeploymentId?: string }
   | ({ readonly kind: "compact" } & SessionControlIdentity)
   | ({ readonly kind: "clear" } & SessionControlIdentity)
+  | ({ readonly kind: "rewind"; readonly turnId: string } & SessionControlIdentity)
   | ({ readonly kind: "reset"; readonly reason?: string } & SessionControlIdentity);
 
 /**
@@ -214,7 +215,7 @@ export interface SessionControlOptions {
 
 /** A control command as one delivery: a fresh id, and the sender when known. */
 export function controlCommand<
-  TCommand extends { readonly kind: "cancel" | "clear" | "compact" | "reset" },
+  TCommand extends { readonly kind: "cancel" | "clear" | "compact" | "rewind" | "reset" },
 >(
   command: TCommand,
   options?: SessionControlOptions,
@@ -252,7 +253,7 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
         ? CancelTurnResult
         : TCommand extends { readonly kind: "compact" }
           ? CompactSessionResult
-          : TCommand extends { readonly kind: "clear" }
+          : TCommand extends { readonly kind: "clear" | "rewind" }
             ? ClearSessionResult
             : EndSessionResult;
 

@@ -48,6 +48,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     prewarm: vi.fn().mockResolvedValue({ status: "accepted" }),
     compact: vi.fn().mockResolvedValue(receipt),
     clear: vi.fn().mockResolvedValue(receipt),
+    rewind: vi.fn().mockResolvedValue(receipt),
     end: vi.fn().mockResolvedValue(receipt),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
@@ -133,6 +134,12 @@ describe("eve ID-addressed session routes", () => {
     ["/eve/v1/session/:sessionId/cancel", { message: "Hello" }, "message", "turnId"],
     ["/eve/v1/session/:sessionId/compact", { turnId: "turn_1" }, "turnId", "(none)"],
     ["/eve/v1/session/:sessionId/clear", { reason: "Start fresh" }, "reason", "(none)"],
+    [
+      "/eve/v1/session/:sessionId/rewind",
+      { turnId: "turn_0", reason: "extra" },
+      "reason",
+      "turnId",
+    ],
     ["/eve/v1/session/:sessionId/end", { turnId: "turn_1" }, "turnId", "reason"],
     ["/eve/v1/session/:sessionId/reset", { turnId: "turn_1" }, "turnId", "reason"],
   ] as const)(
@@ -167,6 +174,23 @@ describe("eve ID-addressed session routes", () => {
       expect(onMessage).not.toHaveBeenCalled();
     },
   );
+
+  it("dispatches a rewind for a valid turn and rejects a missing target", async () => {
+    const session = createFixedSession();
+    const handler = route("POST", "/eve/v1/session/:sessionId/rewind");
+    const request = (body: object) =>
+      new Request("https://eve.test/eve/v1/session/wrun_A/rewind", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    expect((await handler(request({}), createArgs(session))).status).toBe(400);
+    expect(session.rewind).not.toHaveBeenCalled();
+    expect((await handler(request({ turnId: "turn_0" }), createArgs(session))).status).toBe(202);
+    expect(session.rewind).toHaveBeenCalledWith(
+      "turn_0",
+      expect.objectContaining({ auth: expect.anything() }),
+    );
+  });
 
   it("reports multiple unknown names in order without their values", async () => {
     const response = await route("POST", "/eve/v1/session/:sessionId")(

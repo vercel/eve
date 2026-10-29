@@ -43,6 +43,9 @@ export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:ses
 /** Stable route pattern for clearing one exact session ID. */
 export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
 
+/** Stable route pattern for rewinding one session's conversation. */
+export const EVE_SESSION_REWIND_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/rewind`;
+
 /** Stable route pattern for ending one exact session ID. */
 export const EVE_SESSION_END_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/end`;
 
@@ -167,6 +170,11 @@ export function createEveSessionCompactRoutePath(sessionId: string): string {
 /** Builds the ID-addressed clear route for one session. */
 export function createEveSessionClearRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
+}
+
+/** Builds the ID-addressed rewind route for one session. */
+export function createEveSessionRewindRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/rewind`;
 }
 
 /** Builds the ID-addressed end route for one session. */

@@ -18,6 +18,10 @@ import {
 import { currentProjection, saveSessionProjection } from "#harness/session-machine/current.js";
 import { fail, receive, stopInterruptedSteps } from "#harness/session-machine/transitions.js";
 import { replaceSessionHistory } from "#harness/compaction/step.js";
+import {
+  findRewindBoundary,
+  writeHistoryBoundaries,
+} from "#execution/session/history-boundaries.js";
 import { controlAdmitted, fact } from "#harness/facts.js";
 import type {
   ControlDelivery,
@@ -46,6 +50,7 @@ export interface InterruptedAttempt {
   readonly sessionEnded: SessionOutcome | undefined;
   /** It cleared the history. */
   readonly cleared: boolean;
+  readonly rewoundTo?: string;
   /** It settled a turn: the last one, with the reply's text. */
   readonly settledTurn?: { readonly failed: boolean; readonly text?: string };
 }
@@ -59,6 +64,7 @@ export function readInterruptedAttempt(
   const settledInteractions = new Set<string>();
   let sessionEnded: SessionOutcome | undefined;
   let cleared = false;
+  let rewoundTo: string | undefined;
   let settledTurn: InterruptedAttempt["settledTurn"];
   const call = (callId: string) => {
     let found = calls.get(callId);
@@ -102,11 +108,25 @@ export function readInterruptedAttempt(
           break;
         case "context.settled":
           if (event.data.kind === "clear" && event.data.outcome === "completed") cleared = true;
+          if (
+            event.data.kind === "rewind" &&
+            event.data.outcome === "completed" &&
+            event.data.selects !== null
+          )
+            rewoundTo = event.data.selects?.turnId;
           break;
       }
     }
   }
-  return { calls, cleared, sessionEnded, settledInteractions, settledTurn, since };
+  return {
+    calls,
+    cleared,
+    sessionEnded,
+    settledInteractions,
+    settledTurn,
+    since,
+    rewoundTo,
+  };
 }
 
 /**
@@ -136,7 +156,7 @@ export async function recoverInterruptedStep(input: {
   readonly admission: readonly SessionEvent[];
   /** The control the step applies, with the delivery it arrived as. */
   readonly control?: {
-    readonly kind: "clear" | "compact";
+    readonly kind: "clear" | "compact" | "rewind";
     readonly delivery?: ControlDelivery;
   };
   /** The error the step's last attempt threw, when every attempt failed. */
@@ -202,6 +222,18 @@ export async function recoverInterruptedStep(input: {
         turn: { remembered: view().turn.remembered, suspended: [] },
       });
       session = replaceSessionHistory(cleared, []);
+    }
+    if (attempt.rewoundTo !== undefined) {
+      const found = findRewindBoundary(session.state, session.history.length, attempt.rewoundTo);
+      if (found === undefined) {
+        throw new Error(
+          "Cannot recover the published rewind: its history boundary is unavailable.",
+        );
+      }
+      session = replaceSessionHistory(
+        { ...session, state: writeHistoryBoundaries(session.state, found.retained) },
+        session.history.slice(0, found.boundary.length),
+      );
     }
     const { delivery, kind } = input.control;
     const status =
