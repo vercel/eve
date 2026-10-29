@@ -36,9 +36,9 @@ export default eveChannel({
 
 ## The ordered auth walk
 
-`auth` takes a single authenticator or an array that eve walks in order. Each entry has three possible outcomes:
+`auth` takes a single `AuthFn` or an array that eve walks in order. Each entry has three possible outcomes:
 
-- returns a verified identity, optionally with eve-channel permissions: accept the request and stop the walk
+- returns a `SessionAuthContext`: accept the request and stop the walk
 - returns `null` / `undefined`: skip to the next entry
 - **throws**: reject with a specific status
 
@@ -117,7 +117,7 @@ Verifies a bearer JWT against the [Vercel OIDC issuer](https://vercel.com/docs/o
 
 Auth fails closed: routes reject unauthenticated traffic by default, and the OIDC user branch verifies `external_sub` against `VERCEL_PROJECT_ID` and the deployment environment, returning `false` when either is unset. An external-subject token cannot authenticate on a deployment that hasn't pinned its project.
 
-`vercelOidc` accepts only subject strings and returns identity, not channel permissions. To permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve`. It uses the same verifier and adds subject-based grants; see [tool replacement permission](#tool-replacement-permission).
+To also permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve`. It takes the same options, and its subject entries can grant [tool replacement permission](#tool-replacement-permission).
 
 #### `subjects` patterns and `vercelSubject(...)`
 
@@ -293,7 +293,7 @@ Subagent sessions are persistent by default, but they do not preserve caller aut
 
 ## What reaches `ctx.session.auth`
 
-Inside runtime code, `ctx.session.auth` carries the identity portion of the channel's route-auth result (the walk above) forward as the caller snapshot. Request-local channel permissions are not part of that snapshot:
+Inside runtime code, `ctx.session.auth` carries the result of the channel's route auth (the walk above) forward as the caller snapshot:
 
 - `auth.current`: the caller on the active inbound turn.
 - `auth.initiator`: the caller that started the durable session.
@@ -307,46 +307,21 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 ## Tool replacement permission
 
-Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` from the target's server-side auth configuration. Request JSON cannot grant permission. For Vercel OIDC callers, use `eveVercelOidc`:
+Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` in the verified route authentication result. The target's server configuration grants permission; request JSON cannot. With `eveVercelOidc`, put the grant on a `subjects` entry, as in the [tool stubs example](../evals/tool-stubs#permit-tool-replacement). Any matching entry with the grant permits replacement; other entries do not revoke it. Implicit current-project acceptance and user principals do not inherit project grants.
 
-```ts title="agent/channels/eve.ts"
-import { vercelSubject } from "eve/channels/auth";
-import { eveChannel, eveVercelOidc } from "eve/channels/eve";
-
-export default eveChannel({
-  auth: [
-    eveVercelOidc({
-      subjects: [
-        vercelSubject({ teamSlug: "acme", projectName: "app" }),
-        {
-          subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }),
-          allowToolStubs: true,
-        },
-      ],
-    }),
-  ],
-});
-```
-
-Both projects can authenticate; only the eval runner's verified service/runtime principal receives replacement permission. `eveVercelOidc` uses the shared Vercel OIDC verifier and declares its Bearer challenge automatically. Plain subject strings and implicit current-project acceptance grant ordinary access only. User principals never receive this helper's grant.
-
-`vercelSubject` defaults to production; set `environment` to another environment or `"*"` deliberately. Subject patterns use the same AWS IAM-style `*` matching as `vercelOidc`. Any matching entry with `allowToolStubs: true` grants permission; entries without it or with `false` do not revoke another match's grant.
-
-The auth walk still stops at the first accepted result. Replace the original `vercelOidc` entry with `eveVercelOidc` rather than adding it later: grants are not merged across authenticators.
-
-Custom authenticators can still return the flag after verifying their caller. Annotate grant-bearing callbacks with `EveAuthFn` (and named results with `EveAuthResult`) from `eve/channels/eve`. For example, this alternative channel permits stubs only in local development:
+Custom authenticators return the same grant after verifying their caller; type standalone callbacks as `EveAuthFn` from `eve/channels/eve`. For example, this alternative channel permits stubs only in local development:
 
 ```ts
 import { localDev } from "eve/channels/auth";
-import { eveChannel, type EveAuthFn } from "eve/channels/eve";
+import { eveChannel } from "eve/channels/eve";
 
 const authenticate = localDev();
-const authenticateWithStubs: EveAuthFn = async (request) => {
-  const caller = await authenticate(request);
-  return caller ? { ...caller, allowToolStubs: true } : null;
-};
-
-export default eveChannel({ auth: authenticateWithStubs });
+export default eveChannel({
+  auth: async (request) => {
+    const caller = await authenticate(request);
+    return caller ? { ...caller, allowToolStubs: true } : null;
+  },
+});
 ```
 
 The channel checks the grant before forwarded-principal handling or `onMessage` projection. It removes the grant before using the identity for forwarding, audience classification, or session persistence. This is an authentication-result permission, not a session attribute.

@@ -78,9 +78,9 @@ Every connection must use the helper for its protocol. A plain object is no long
 
 Use `defineOpenAPIConnection` for OpenAPI connections. Keep the helper inside the dynamic factory when authoring a dynamic connection. See [Connections](../connections).
 
-## Move tool replacement grants to eve-channel auth
+## Move tool replacement grants to `eveVercelOidc`
 
-For Vercel OIDC configurations with `{ subject, allowToolStubs }` entries, rename the helper and move its import to `eve/channels/eve`. Keep the subject declarations unchanged:
+`vercelOidc` from `eve/channels/auth` now only authenticates. If a `subjects` entry sets `allowToolStubs`, switch to `eveVercelOidc`, which takes the same options:
 
 ```diff
 -import { vercelOidc } from "eve/channels/auth";
@@ -92,11 +92,7 @@ For Vercel OIDC configurations with `{ subject, allowToolStubs }` entries, renam
  });
 ```
 
-`eveVercelOidc` uses the same verifier and automatically declares Bearer challenges. A matching subject entry with `allowToolStubs: true` grants permission only to verified service/runtime principals, not users. Plain strings and implicit current-project acceptance do not grant permission. Replace the original auth entry rather than adding the new helper after it: the first successful authenticator wins. See the [complete channel configuration](./auth-and-route-protection#tool-replacement-permission).
-
-Generic `vercelOidc` from `eve/channels/auth` remains identity-only and accepts only subject strings. Identity-only configurations need no helper rename. For named grant-bearing options, use `EveVercelOidcOptions` from `eve/channels/eve` instead of `VercelOidcOptions`.
-
-Custom eve-channel callbacks can still return `allowToolStubs`. Change grant-bearing `AuthFn` / `AuthResult` annotations to `EveAuthFn` / `EveAuthResult` from `eve/channels/eve`; identity-only callbacks keep their existing types. The grant remains request-local, not a persisted or forwarded session attribute. Session creation with stubs and stub verification require it; later messages and result reads retain ordinary channel auth and your application's session-access policy. See [Tool stubs](../evals/tool-stubs#permit-tool-replacement).
+If a custom callback returns `allowToolStubs`, type it as `EveAuthFn` (or its result as `EveAuthResult`) from `eve/channels/eve` instead of `AuthFn` / `AuthResult`.
 
 ## Choose one sandbox layout
 
