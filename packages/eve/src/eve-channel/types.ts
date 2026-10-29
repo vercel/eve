@@ -3,7 +3,7 @@ import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
-import type { AuthFn } from "#public/channels/auth.js";
+import type { AuthFn, AuthResult } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { FetchFileFunction } from "#shared/channel-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -17,6 +17,18 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 export type { ForwardedAssertion, TrustedForwarders } from "#channel/forwarded-principal.js";
+
+/** Verified caller identity and request-local permissions for the eve HTTP channel. */
+export interface EveAuthResult extends AuthResult {
+  /**
+   * Allows creating sessions with tool replacements and reading stub verification results.
+   * Omitted or false denies both operations. Never persisted or forwarded as session identity.
+   */
+  readonly allowToolStubs?: boolean;
+}
+
+/** An eve-channel authenticator; ordinary identity-only authenticators also satisfy this type. */
+export type EveAuthFn = AuthFn<Request, EveAuthResult>;
 
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
@@ -96,11 +108,13 @@ export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | nul
  */
 export interface EveChannelConfig {
   /**
-   * Route auth policy: a single {@link AuthFn} or an ordered array walked by {@link routeAuth}.
-   * The first entry returning a {@link SessionAuthContext} wins; `null` / `undefined` skips to
+   * Route auth policy: a single {@link EveAuthFn} or an ordered array walked by {@link routeAuth}.
+   * The first entry returning an {@link EveAuthResult} wins; `null` / `undefined` skips to
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
+   * Ordinary authenticators grant no tool-replacement permission; return `allowToolStubs: true`
+   * from an eve-channel callback to grant it for that request.
    */
-  readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
+  readonly auth: EveAuthFn | readonly EveAuthFn[];
   /**
    * Conversation audience classification, fixed when the session is created.
    *

@@ -1,0 +1,7 @@
+---
+"eve": minor
+---
+
+Tool-stub grants on Vercel OIDC subjects move from `vercelOidc` to the new `eveVercelOidc` helper in `eve/channels/eve`.
+
+`vercelOidc` and `AuthResult` from `eve/channels/auth` now carry identity only. Rename grant-bearing `vercelOidc` calls to `eveVercelOidc`; the options are unchanged. Type custom callbacks that return `allowToolStubs` as `EveAuthFn` from `eve/channels/eve`.

@@ -91,6 +91,7 @@ import {
 import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
 
 export * from "#eve-channel/types.js";
+export { eveVercelOidc, type EveVercelOidcOptions } from "#eve-channel/auth.js";
 
 const log = createLogger("eve.channel");
 

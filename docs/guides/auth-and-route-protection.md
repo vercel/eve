@@ -117,7 +117,7 @@ Verifies a bearer JWT against the [Vercel OIDC issuer](https://vercel.com/docs/o
 
 Auth fails closed: routes reject unauthenticated traffic by default, and the OIDC user branch verifies `external_sub` against `VERCEL_PROJECT_ID` and the deployment environment, returning `false` when either is unset. An external-subject token cannot authenticate on a deployment that hasn't pinned its project.
 
-Subject entries can also be objects: `{ subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }), allowToolStubs: true }`. This explicitly permits that verified service/runtime caller to create [stubbed eval sessions](../evals/tool-stubs). Plain subject strings and implicit current-project acceptance grant ordinary access only. Custom authenticators can return the same permission in their authentication result; it is not part of persisted or forwarded session identity.
+To also permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve`. It takes the same options, and its subject entries can grant [tool replacement permission](#tool-replacement-permission).
 
 #### `subjects` patterns and `vercelSubject(...)`
 
@@ -307,9 +307,9 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 ## Tool replacement permission
 
-Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` in the verified route authentication result. The target's server configuration grants permission; request JSON cannot. With `vercelOidc`, put the grant on a `subjects` entry as shown above. Any matching entry with the grant permits replacement; other entries do not revoke it. Implicit current-project acceptance and user principals do not inherit project grants.
+Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` in the verified route authentication result. The target's server configuration grants permission; request JSON cannot. With `eveVercelOidc`, put the grant on a `subjects` entry, as in the [tool stubs example](../evals/tool-stubs#permit-tool-replacement). Any matching entry with the grant permits replacement; other entries do not revoke it. Implicit current-project acceptance and user principals do not inherit project grants.
 
-Custom authenticators return the same grant after verifying their caller. For example, this alternative channel permits stubs only in local development:
+Custom authenticators return the same grant after verifying their caller; type standalone callbacks as `EveAuthFn` from `eve/channels/eve`. For example, this alternative channel permits stubs only in local development:
 
 ```ts
 import { localDev } from "eve/channels/auth";

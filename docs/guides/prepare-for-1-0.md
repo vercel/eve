@@ -78,6 +78,22 @@ Every connection must use the helper for its protocol. A plain object is no long
 
 Use `defineOpenAPIConnection` for OpenAPI connections. Keep the helper inside the dynamic factory when authoring a dynamic connection. See [Connections](../connections).
 
+## Move tool replacement grants to `eveVercelOidc`
+
+`vercelOidc` from `eve/channels/auth` now only authenticates. If a `subjects` entry sets `allowToolStubs`, switch to `eveVercelOidc`, which takes the same options:
+
+```diff
+-import { vercelOidc } from "eve/channels/auth";
++import { eveVercelOidc } from "eve/channels/eve";
+
+-vercelOidc({
++eveVercelOidc({
+   subjects: [{ subject: evalRunner, allowToolStubs: true }],
+ });
+```
+
+If a custom callback returns `allowToolStubs`, type it as `EveAuthFn` (or its result as `EveAuthResult`) from `eve/channels/eve` instead of `AuthFn` / `AuthResult`.
+
 ## Choose one sandbox layout
 
 If both `agent/sandbox.ts` and `agent/sandbox/` exist, move the definition to `agent/sandbox/sandbox.ts`. The combination now fails discovery instead of silently ignoring the root definition.
