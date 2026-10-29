@@ -7,12 +7,15 @@ type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
+  | { type: "cancel" }
   | { type: "exit" }
   | { type: "help" }
   | { type: "info" }
   | { type: "loglevel"; argument: string }
   | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string }
+  /** A session control the agent's eve channel doesn't offer, answered without sending it. */
+  | { type: "unavailable"; name: string }
   /** A command the agent's eve channel offers, run on the server. */
   | { type: "channel"; name: string; argument: string; session: "optional" | "required" };
 
@@ -59,6 +62,17 @@ const PROMPT_COMMAND_DEFINITIONS = [
     typeahead: { maxArguments: 2, loadingLabel: "models" },
     build: (argument) => ({ type: "extension", name: "model", argument }),
     targets: ["local"],
+  },
+  // Stays local: cancelling needs the TUI's view of which turn is running, which the channel's
+  // /cancel can't see.
+  {
+    name: "cancel",
+    history: "keep",
+    aliases: [],
+    description: "Cancel the running turn",
+    takesArgument: false,
+    build: () => ({ type: "cancel" }),
+    targets: ["local", "remote"],
   },
   {
     name: "login",
@@ -238,8 +252,27 @@ export function withChannelPromptCommands(
         session: command.session,
       }),
     }));
-  return added.length === 0 ? builtins : [...builtins, ...added];
+  const offered = new Set([...taken, ...added.flatMap((spec) => [spec.name, ...spec.aliases])]);
+  // The TUI used to own these. Without them in the channel, typing one would send it to the
+  // model, so answer it instead.
+  const unavailable = SESSION_CONTROLS.filter(({ name }) => !offered.has(name)).map(
+    ({ name, aliases }): PromptCommandSpec => ({
+      name,
+      aliases: aliases.filter((alias) => !offered.has(alias)),
+      description: "Not offered by this agent's eve channel",
+      takesArgument: false,
+      history: "omit",
+      build: () => ({ type: "unavailable", name }),
+    }),
+  );
+  return [...builtins, ...added, ...unavailable];
 }
+
+const SESSION_CONTROLS = [
+  { name: "new", aliases: ["reset"] },
+  { name: "clear", aliases: [] },
+  { name: "compact", aliases: [] },
+] as const;
 
 function terminalLine(text: string): string {
   return stripTerminalControls(stripAnsi(text.split(/\r?\n/u, 1)[0] ?? "")).trim();

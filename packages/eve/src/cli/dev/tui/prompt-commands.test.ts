@@ -10,6 +10,10 @@ import {
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
+  it("parses /cancel, which stays local", () => {
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+  });
+
   it("parses /exit and its /quit alias", () => {
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
@@ -200,6 +204,20 @@ describe("withChannelPromptCommands for a command without arguments", () => {
       name: "clear",
     });
     expect(parsePromptCommand("/clear the cache", [clear!])).toBeNull();
+  });
+});
+
+describe("session controls the channel doesn't offer", () => {
+  it("answers them instead of sending them to the model", () => {
+    const commands = withChannelPromptCommands(PROMPT_COMMANDS, []);
+    expect(parsePromptCommand("/reset", commands)).toEqual({ type: "unavailable", name: "new" });
+    expect(parsePromptCommand("/clear", commands)).toEqual({ type: "unavailable", name: "clear" });
+    expect(parsePromptCommand("/clear the cache", commands)).toBeNull();
+
+    const offered = withChannelPromptCommands(PROMPT_COMMANDS, [
+      { name: "clear", description: "Clear", arguments: "none", session: "required" },
+    ]);
+    expect(parsePromptCommand("/clear", offered)).toMatchObject({ type: "channel", name: "clear" });
   });
 });
 

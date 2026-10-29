@@ -544,7 +544,7 @@ export class EveTUIRunner {
       this.#promptCommandHandler = options.promptCommandHandler;
     }
     this.#builtinPromptCommands = options.availablePromptCommands ?? PROMPT_COMMANDS;
-    this.#availablePromptCommands = this.#builtinPromptCommands;
+    this.#availablePromptCommands = withChannelPromptCommands(this.#builtinPromptCommands, []);
     if (options.remote !== undefined) {
       this.#remoteAuthFlow = options.remote.runAuthFlow;
       this.#remoteConnection = createRemoteConnectionController({
@@ -831,6 +831,21 @@ export class EveTUIRunner {
         return;
       case "channel":
         return await this.#runChannelCommand(command);
+      case "unavailable":
+        this.#finishCommand({
+          kind: "result",
+          summary: `/${command.name} isn't offered by this agent`,
+        });
+        return;
+      case "cancel": {
+        const working = hasOpenTurn(this.#store.snapshot);
+        if (working) this.#cancelTurn();
+        this.#finishCommand({
+          kind: "result",
+          summary: working ? "Cancellation requested" : "No active turn to cancel",
+        });
+        return;
+      }
     }
   }
 
@@ -886,7 +901,7 @@ export class EveTUIRunner {
     try {
       channel = await this.#client.commands();
     } catch {
-      return;
+      channel = [];
     }
     if (this.#disposed || revision !== this.#channelCommandsRevision) return;
     this.#availablePromptCommands = withChannelPromptCommands(this.#builtinPromptCommands, channel);
