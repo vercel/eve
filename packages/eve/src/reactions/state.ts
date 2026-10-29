@@ -50,8 +50,11 @@ export interface ReactionsState {
   readonly cancelledTurnId?: string;
   /** The hook whose cancel stopped `cancelledTurnId`, which may continue the turn. */
   readonly cancelledBy?: string;
-  /** The hook that cancelled input before its turn opened, until that turn starts. */
-  readonly cancelledOpeningBy?: string;
+  /**
+   * A hook that cancelled input before its turn opened, with the deliveries that commit admitted,
+   * until the next turn starts: that turn is the one it cancelled only if one of them caused it.
+   */
+  readonly cancelledOpening?: { readonly by: string; readonly deliveryIds: readonly string[] };
 }
 
 /** A command a hook queued for the running turn, waiting for the session to act on it. */

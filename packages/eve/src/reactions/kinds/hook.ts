@@ -188,7 +188,13 @@ async function runHandler(call: {
       for (const command of requested)
         if (command.type === "cancel") {
           // The turn opens after this commit; it's the hook's to continue once it settles.
-          writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledOpeningBy: id });
+          const deliveryIds = call.input.facts.flatMap((fact) =>
+            fact.type === "delivery.admitted" ? [fact.data.deliveryId] : [],
+          );
+          writeReactionsState(ctx, {
+            ...readReactionsState(ctx),
+            cancelledOpening: { by: id, deliveryIds },
+          });
           beforeTurn({
             hook: label,
             ...(command.reason !== undefined && { reason: command.reason }),

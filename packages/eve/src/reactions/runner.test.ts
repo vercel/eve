@@ -729,6 +729,33 @@ describe("runReactions", () => {
       expect(readReactionsState(ctx).continuation).toBeUndefined();
     });
 
+    it.each([
+      ["the turn its input opens", "d_alice", "turn-1"],
+      ["no unrelated turn, once the session ignored its input", "d_bob", undefined],
+    ])("binds a cancel before the turn opened to %s", async (_name, cause, bound) => {
+      const ctx = session(noTools, [
+        {
+          events: { "delivery.admitted": (_event: unknown, ctx: HookContext) => ctx.cancel() },
+          slug: "guard",
+        },
+      ]);
+      const cancelBeforeTurn = () => {};
+      await commit(ctx, {
+        cancelBeforeTurn,
+        written: written(1, "delivery.admitted", { deliveryId: "d_alice" }),
+      });
+      await commit(ctx, {
+        written: written(2, "turn.started", {
+          cause: { deliveryId: cause },
+          follows: null,
+          turnId: "turn-1",
+        }),
+      });
+      const state = readReactionsState(ctx);
+      expect(state.cancelledTurnId).toBe(bound);
+      expect(state.cancelledOpening).toBeUndefined();
+    });
+
     const control = (control: string) =>
       written(2, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
 

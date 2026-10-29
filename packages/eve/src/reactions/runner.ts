@@ -438,18 +438,22 @@ function stopsContinuations(event: WrittenEvent["event"]): boolean {
 }
 
 /**
- * A cancel from a hook before its turn opened stops the turn the input opens: once that turn
- * starts, it's the turn the hook cancelled, before the commit's hooks see it settle.
+ * A cancel from a hook before its turn opened stops the turn its input opens. The next turn to
+ * start is that turn only if one of the cancelled deliveries caused it; input the session ignored
+ * opens no turn, so an unrelated turn just clears the record. Bound before the commit's hooks
+ * see the turn settle.
  */
 function bindOpeningCancel(
   state: ReactionsState,
   written: readonly WrittenEvent[],
 ): ReactionsState {
-  const { cancelledOpeningBy, ...rest } = state;
-  if (cancelledOpeningBy === undefined) return state;
+  const { cancelledOpening, ...rest } = state;
+  if (cancelledOpening === undefined) return state;
   const started = written.find(({ event }) => event.type === "turn.started")?.event;
   if (started?.type !== "turn.started") return state;
-  return { ...rest, cancelledBy: cancelledOpeningBy, cancelledTurnId: started.data.turnId };
+  const { cause, turnId } = started.data;
+  const opened = "deliveryId" in cause && cancelledOpening.deliveryIds.includes(cause.deliveryId);
+  return opened ? { ...rest, cancelledBy: cancelledOpening.by, cancelledTurnId: turnId } : rest;
 }
 
 function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): ReactionsState {
