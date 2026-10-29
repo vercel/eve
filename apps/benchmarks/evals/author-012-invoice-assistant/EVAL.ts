@@ -106,8 +106,8 @@ test("turns away requests without a valid Tally session", async () => {
 });
 
 test("find_invoices lists only the caller's organization", async () => {
-  const tool = await load(`${agentRoot}/tools/find_invoices.ts`);
   const find = async (user: User, input: Record<string, unknown>) => {
+    const tool = await toolFor("find_invoices", user);
     const parsed = await parseInput(tool, input);
     expect(parsed.success, JSON.stringify(input)).toBe(true);
     return JSON.stringify(await tool.execute(parsed.data, await toolContext(user)));
@@ -129,6 +129,7 @@ test("find_invoices lists only the caller's organization", async () => {
   expect(mentions(overdue, 1042)).toBe(false);
 
   // The model controls tool input, so input naming another org must not reach it.
+  const tool = await toolFor("find_invoices", maya);
   for (const input of [{ orgId: "org_harbor" }, { organizationId: "org_harbor" }]) {
     const parsed = await parseInput(tool, input);
     if (!parsed.success) continue;
@@ -138,20 +139,24 @@ test("find_invoices lists only the caller's organization", async () => {
 });
 
 test("send_reminder reminds clients only within the caller's organization", async () => {
-  const tool = await load(`${agentRoot}/tools/send_reminder.ts`);
+  const leoTool = await toolFor("send_reminder", leo);
   const before = await reminderCount("org_brightside", "inv_1042");
-  await tool.execute(await invoiceInput(tool, "inv_1042"), await toolContext(leo));
+  await leoTool.execute(await invoiceInput(leoTool, "inv_1042"), await toolContext(leo));
   expect(await reminderCount("org_brightside", "inv_1042")).toBe(before + 1);
 
   const harborBefore = await reminderCount("org_harbor", "inv_2001");
-  const input = await invoiceInput(tool, "inv_2001");
-  const context = await toolContext(maya);
-  await settle(() => tool.execute(input, context));
+  const tool = await toolFor("send_reminder", maya);
+  if (tool !== null) {
+    const input = await invoiceInput(tool, "inv_2001");
+    const context = await toolContext(maya);
+    await settle(() => tool.execute(input, context));
+  }
   expect(await reminderCount("org_harbor", "inv_2001")).toBe(harborBefore);
 });
 
 test("asks an owner to confirm before voiding", async () => {
-  const tool = await load(`${agentRoot}/tools/void_invoice.ts`);
+  const tool = await toolFor("void_invoice", maya);
+  expect(tool, "an owner has no void_invoice tool").not.toBeNull();
   const input = await invoiceInput(tool, "inv_1044");
   expect(decision(await approve(tool, maya, input))).toBe("ask");
 
@@ -162,8 +167,10 @@ test("asks an owner to confirm before voiding", async () => {
 });
 
 test("never voids for members or across organizations", async () => {
-  const tool = await load(`${agentRoot}/tools/void_invoice.ts`);
   const attempt = async (user: User, invoiceId: string) => {
+    // A tool hidden from this person is a refusal too.
+    const tool = await toolFor("void_invoice", user);
+    if (tool === null) return;
     const input = await invoiceInput(tool, invoiceId);
     // A policy may refuse outright or refuse the person's approval; otherwise the
     // call has to refuse when it runs, even after the person who asked approved it.
@@ -184,7 +191,7 @@ test("never voids for members or across organizations", async () => {
 });
 
 test("draft_invoice creates a draft in the caller's organization", async () => {
-  const tool = await load(`${agentRoot}/tools/draft_invoice.ts`);
+  const tool = await toolFor("draft_invoice", sam);
   const input = await firstParsed(tool, draftCandidates("Pinecrest Hotel"));
   await tool.execute(input, await toolContext(sam));
   const invoices = await import(moduleUrl(`${projectRoot}/lib/invoices.ts`));
@@ -618,6 +625,34 @@ async function invoiceStatus(orgId: string, invoiceId: string): Promise<string |
 async function reminderCount(orgId: string, invoiceId: string): Promise<number> {
   const invoices = await import(moduleUrl(`${projectRoot}/lib/invoices.ts`));
   return (await invoices.getInvoice(orgId, invoiceId))?.reminders.length ?? 0;
+}
+
+/**
+ * The tool a person gets: the file's tool, or what a `defineDynamic()` resolves to for them,
+ * as eve does when it lists tools for a session. Null when it's hidden from them.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function toolFor(name: string, user: User): Promise<any> {
+  const definition = await load(`${agentRoot}/tools/${name}.ts`);
+  // A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
+  // Packages before the pre-1.0 cleanup exposed it as `{ kind: "eve:dynamic", evaluate }`.
+  const evaluate =
+    definition?.[Symbol.for("eve.dynamic")] ??
+    (definition?.kind === "eve:dynamic" ? definition.evaluate : undefined);
+  if (typeof evaluate !== "function") return definition;
+  const { session } = await toolContext(user);
+  const resolved = await evaluate({
+    session,
+    channel: { kind: "http", metadata: {} },
+    view: {},
+    turn: null,
+    now: new Date(),
+    model: { id: "openai/gpt-5.5" },
+    memo: async (key: unknown, fn: (occurrence: unknown) => unknown) =>
+      fn({ idempotencyKey: JSON.stringify(key), abortSignal: new AbortController().signal }),
+    messages: async () => [],
+  });
+  return resolved ?? null;
 }
 
 /**
