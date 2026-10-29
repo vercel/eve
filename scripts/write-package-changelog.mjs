@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const packageRoot = resolve(process.argv[2] ?? ".");
+const outputRoot = resolve(process.argv[3] ?? join(packageRoot, "dist"));
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 const directory = manifest.repository?.directory;
 if (typeof directory !== "string" || !/^packages\/[a-z0-9][a-z0-9-]*$/u.test(directory)) {
@@ -73,5 +74,5 @@ const fullSha =
 const ref = gitRevision && selected === 0 ? (fullSha ?? gitRevision) : `refs/tags/${tag}`;
 const fullHistory = `https://raw.githubusercontent.com/vercel/eve/${ref}/${directory}/CHANGELOG.md`;
 const content = `${releaseHeading}\n\n${preview}${entry}\n\nFor an upgrade across multiple releases, review each version between the installed and target versions in the [target version's changelog](${fullHistory}).\n`;
-await mkdir(join(packageRoot, "dist"), { recursive: true });
-await writeFile(join(packageRoot, "dist", "CHANGELOG.md"), content);
+await mkdir(outputRoot, { recursive: true });
+await writeFile(join(outputRoot, "CHANGELOG.md"), content);

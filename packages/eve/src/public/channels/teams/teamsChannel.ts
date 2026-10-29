@@ -123,9 +123,14 @@ export interface TeamsChannelState {
   tenantId: string | null;
   /** User account that triggered the latest turn/session. */
   triggeringUser: TeamsChannelAccount | null;
-  /** What the default sign-in flow posted for each open sign-in, by connection name. */
+  /** @internal What the default sign-in flow posted for each open sign-in, by connection name. */
   pendingAuthActivityIds?: Record<string, string>;
+  /** @internal Posted question and approval cards, by request id, until eve resolves them. */
   pendingPromptCards?: Record<string, TeamsPendingPromptCard>;
+  /**
+   * Teams account behind each principal that sent a message or answer. The
+   * default handlers name who decided an approval and whom a sign-in is for.
+   */
   approvalResponderAccounts?: Record<string, TeamsChannelAccount>;
 }
 

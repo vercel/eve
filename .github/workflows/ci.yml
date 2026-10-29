@@ -100,7 +100,7 @@ jobs:
         run: pnpm test:unit
 
       - name: Test workflow and guard helpers
-        run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs
+        run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs
 
       - name: Test eval benchmark scripts
         run: pnpm test:eval-benchmark
@@ -164,9 +164,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build workspace packages
-        run: pnpm build
-
       - name: Run scenario tests
         run: pnpm test:scenario
 
@@ -191,9 +188,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Build workspace packages
-        run: pnpm build
 
       - name: Build framework fixtures against the workspace eve dist
         run: pnpm test:framework-fixtures

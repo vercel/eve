@@ -224,5 +224,9 @@ test("lets OpenCode reach outside the project", async (t) => {
   });
   const written = readFileSync(join(home, ".config/opencode/opencode.json"), "utf8");
   assert.equal(written, OPENCODE_GLOBAL_CONFIG);
-  assert.deepEqual(JSON.parse(written).permission, { external_directory: "allow" });
+  assert.deepEqual(JSON.parse(written).permission, {
+    external_directory: "allow",
+    read: "allow",
+    doom_loop: "allow",
+  });
 });

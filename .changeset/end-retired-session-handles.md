@@ -1,0 +1,7 @@
+---
+"eve": minor
+---
+
+Rename `reset()` to `end()` on client sessions, frontend stores/hooks, and channel/Slack handles, and the HTTP retirement endpoint to `POST /eve/v1/session/:sessionId/end` (upgrade the server before using the new client).
+
+Ending keeps the retired ID: use `newSession()` or `client.sessions.create()` for a fresh conversation, or `clear()` to clear context in place; remote-agent and session-history compatibility encodings remain unchanged.

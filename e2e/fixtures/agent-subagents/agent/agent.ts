@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { latestTaskResult, playScript } from "@eve-e2e/config/mock-script";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent, defineDynamic, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 import {
@@ -245,7 +245,7 @@ function findListedTaskId(
   return note?.text.match(pattern)?.[1];
 }
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...agentConfig,
   model: defineDynamic(async (ctx) => {
     const messages = (await ctx.messages()).flatMap((message) => {
@@ -295,3 +295,5 @@ export default defineAgent({
   }),
   reasoning: "high",
 });
+
+export default agent;

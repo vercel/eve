@@ -12,8 +12,16 @@ function discover(packageJson, additionalFixtures = [], evals = [], selectedRegi
   return discoverE2eFixtures({
     registry: selectedRegistry,
     fixtures: [
-      { name: "fixture", dir: "fixtures/fixture", packageJson, evals },
-      ...additionalFixtures,
+      {
+        name: "fixture",
+        dir: "fixtures/fixture",
+        packageJson: { name: "fixture-package", ...packageJson },
+        evals,
+      },
+      ...additionalFixtures.map((fixture) => ({
+        ...fixture,
+        packageJson: { name: `${fixture.name}-package`, ...fixture.packageJson },
+      })),
     ],
   });
 }
@@ -25,9 +33,16 @@ function worldMatrix(result, world) {
 test("omitted e2e.worlds selects every registered world", () => {
   const result = discover({});
 
-  assert.deepEqual(worldMatrix(result, "vercel"), [{ name: "fixture", dir: "fixtures/fixture" }]);
+  assert.deepEqual(worldMatrix(result, "vercel"), [
+    { name: "fixture", package: "fixture-package", dir: "fixtures/fixture" },
+  ]);
   assert.deepEqual(worldMatrix(result, "postgres"), [
-    { name: "fixture", dir: "fixtures/fixture", world_package: "world-postgres" },
+    {
+      name: "fixture",
+      package: "fixture-package",
+      dir: "fixtures/fixture",
+      world_package: "world-postgres",
+    },
   ]);
 });
 
@@ -36,6 +51,19 @@ test("a registered world must retain at least one fixture", () => {
     () => discover({ e2e: { worlds: [] } }),
     /No e2e fixtures select the registered world "vercel"/u,
   );
+});
+
+test("fixtures need a valid package name for Turbo filtering", () => {
+  for (const packageJson of [{}, { name: "fixture$(invalid)" }, { name: "fixture...deps" }]) {
+    assert.throws(
+      () =>
+        discoverE2eFixtures({
+          registry,
+          fixtures: [{ name: "fixture", dir: "fixtures/fixture", packageJson }],
+        }),
+      /every e2e fixture needs a valid package name/u,
+    );
+  }
 });
 
 test("a valid e2e.worlds subset selects only that world", () => {
@@ -48,10 +76,19 @@ test("a valid e2e.worlds subset selects only that world", () => {
   ]);
 
   assert.deepEqual(worldMatrix(result, "vercel"), [
-    { name: "vercel-fixture", dir: "fixtures/vercel-fixture" },
+    {
+      name: "vercel-fixture",
+      package: "vercel-fixture-package",
+      dir: "fixtures/vercel-fixture",
+    },
   ]);
   assert.deepEqual(worldMatrix(result, "postgres"), [
-    { name: "fixture", dir: "fixtures/fixture", world_package: "world-postgres" },
+    {
+      name: "fixture",
+      package: "fixture-package",
+      dir: "fixtures/fixture",
+      world_package: "world-postgres",
+    },
   ]);
 });
 
@@ -99,10 +136,19 @@ test("model shards expand across selected models without multiplying world legs"
     ],
   );
   assert.deepEqual(worldMatrix(result, "vercel"), [
-    { name: "vercel-fixture", dir: "fixtures/vercel-fixture" },
+    {
+      name: "vercel-fixture",
+      package: "vercel-fixture-package",
+      dir: "fixtures/vercel-fixture",
+    },
   ]);
   assert.deepEqual(worldMatrix(result, "postgres"), [
-    { name: "fixture", dir: "fixtures/fixture", world_package: "world-postgres" },
+    {
+      name: "fixture",
+      package: "fixture-package",
+      dir: "fixtures/fixture",
+      world_package: "world-postgres",
+    },
   ]);
 });
 
@@ -111,6 +157,7 @@ test("unsharded fixtures keep one model entry with all evals implicit", () => {
   assert.deepEqual(result.modelMatrix, [
     {
       name: "fixture",
+      package: "fixture-package",
       dir: "fixtures/fixture",
       model_name: "model-a",
       model_id: "provider/model-a",

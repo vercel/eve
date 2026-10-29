@@ -1,0 +1,16 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build:analysis": {
+      "cache": false,
+      "dependsOn": ["eve#build"],
+      "env": [
+        "EVE_SANDBOX_IMAGE_TAG",
+        "VERCEL",
+        "VERCEL_ENV",
+        "VERCEL_PROJECT_ID",
+        "VERCEL_TARGET_ENV"
+      ]
+    }
+  }
+}

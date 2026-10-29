@@ -243,9 +243,7 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
   );
 }
 
-/** The one pipeline a process can register. @internal */
-
-/** What the harness reads at turn time, as opposed to at registration. @internal */
+/** What the harness reads at turn time, as opposed to at registration. */
 export interface OtelHarnessSettings {
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
@@ -256,12 +254,15 @@ export interface OtelHarnessSettings {
   readonly recordOutputs: boolean;
 }
 
-/** @internal */
+/**
+ * A tracing destination's `runtimeContext` for one model attempt; `undefined` adds nothing.
+ * Later destinations win on key collisions.
+ */
 export type RuntimeContextResolver = (
   input: InstrumentationModelStartedInput,
 ) => JsonObject | undefined;
 
-/** @internal */
+/** The one pipeline a process can register. */
 export interface CollectedOtel {
   /**
    * Whether anything declared OpenTelemetry. False means eve should leave the

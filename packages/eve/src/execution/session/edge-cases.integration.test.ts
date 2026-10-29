@@ -23,6 +23,7 @@ import {
   registerInstrumentationProvider,
 } from "#instrumentation/providers.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
+import { toAiSdkLanguageModel } from "#internal/runtime-model.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
   textStreamResult,
@@ -1843,7 +1844,7 @@ describe("controls between turns", () => {
             }),
           },
           message: "Alice's fern has brown tips.",
-          model,
+          model: toAiSdkLanguageModel(model),
           modelCallsPerStep,
           sessionUsage: ({ window }) => {
             if (window.inputTokens < 203_000) return false;

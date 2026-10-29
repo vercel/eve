@@ -22,6 +22,7 @@ interface DeliveryInput {
   readonly inbox?: string;
   readonly createStream: (options?: DeliveryReadOptions) => AsyncIterable<SessionStreamEvent>;
   readonly deliveryId: string;
+  /** @internal */
   readonly receipt?: ClientSendReceipt;
   readonly sessionId: string;
 }
@@ -32,11 +33,12 @@ const sendReceipts = new WeakMap<Delivery, ClientSendReceipt>();
 export class StreamDelivery<TOutput = unknown> implements Delivery<TOutput> {
   readonly sessionId: string;
   readonly deliveryId: string;
+  /** Opaque value to store with the session state; see `ClientSessionState.inbox`. */
   readonly inbox?: string;
   readonly #createStream: DeliveryInput["createStream"];
   #result: DeliveryResult<TOutput> | undefined;
 
-  /** @internal */
+  /** Built by the eve client for each command the server accepts. */
   constructor(input: DeliveryInput) {
     this.sessionId = input.sessionId;
     this.inbox = input.inbox;

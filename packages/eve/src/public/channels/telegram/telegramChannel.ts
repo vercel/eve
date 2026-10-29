@@ -109,7 +109,7 @@ export interface TelegramChannelState extends TelegramHitlState {
    * reads it from delivery state to answer a pending ForceReply prompt.
    */
   replyToBotMessageId?: string | null;
-  /** Public authorization status messages, keyed by connection name. */
+  /** @internal Public authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
 }
 

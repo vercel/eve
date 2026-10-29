@@ -78,7 +78,8 @@ export interface UseEveAgentReturn {
   readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly newSession: () => void;
-  readonly reset: () => Promise<Delivery>;
+  /** Retires the server-side session; call newSession() to prepare a fresh conversation. */
+  readonly end: () => Promise<Delivery>;
   readonly clear: () => Promise<Delivery>;
   readonly compact: () => Promise<Delivery>;
   /** Submits a message and resolves on acceptance, not execution. */
@@ -228,7 +229,7 @@ class SvelteEveAgent implements UseEveAgentReturn {
   newSession = (): void => {
     this.#store.newSession();
   };
-  reset = (): Promise<Delivery> => this.#store.reset();
+  end = (): Promise<Delivery> => this.#store.end();
   clear = (): Promise<Delivery> => this.#store.clear();
   compact = (): Promise<Delivery> => this.#store.compact();
 

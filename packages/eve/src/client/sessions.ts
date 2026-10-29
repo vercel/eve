@@ -1,6 +1,6 @@
 import { ClientSession, type ClientSessionContext } from "#client/session.js";
 import type { Delivery } from "#client/delivery.js";
-import type { CreateSessionOptions, SendTurnInput } from "#client/types.js";
+import type { ClientSessionState, CreateSessionOptions, SendTurnInput } from "#client/types.js";
 
 /** Result of explicitly creating an ID-addressed client session. */
 export interface CreatedClientSession<TOutput = unknown> {
@@ -17,7 +17,7 @@ export interface CreatedIdleClientSession {
 export class ClientSessions {
   readonly #context: ClientSessionContext;
 
-  /** @internal */
+  /** Built by the eve client, which supplies its transport context. */
   constructor(context: ClientSessionContext) {
     this.#context = context;
   }
@@ -38,7 +38,7 @@ export class ClientSessions {
   /** Attaches a fixed handle to a known session ID without performing I/O. */
   attach(
     sessionId: string,
-    options?: { readonly streamIndex?: number; readonly inbox?: string },
+    options?: Partial<Pick<ClientSessionState, "inbox" | "streamIndex">>,
   ): ClientSession {
     if (sessionId.length === 0) throw new Error("sessionId must be a non-empty string.");
     return new ClientSession(this.#context, {

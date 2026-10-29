@@ -84,7 +84,11 @@ npm install eve@latest ai zod
 
 Declare Node.js 24 in `package.json`, then create `agent/instructions.md` and, when you need runtime configuration, `agent/agent.ts`.
 
-When present, the installed package's `node_modules/eve/dist/CHANGELOG.md` contains that version's release notes and a link to the full changelog through that version. Older packages contain the full history at `node_modules/eve/CHANGELOG.md` instead. For an upgrade across multiple releases, review each version between the installed and target versions in the target version's changelog at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
+The installed package's `node_modules/eve/CHANGELOG.md` contains that version's release notes and a link to the full changelog through that version. For an upgrade across multiple releases, review each version between the installed and target versions in the target version's changelog at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
+
+## Upgrade an existing project
+
+For the coordinated pre-1.0 API cleanup, follow [Prepare for 1.0](./guides/prepare-for-1-0) before updating an existing server, client, or authored agent.
 
 ## Continue with the tutorial
 

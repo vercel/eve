@@ -31,16 +31,18 @@ export const JUST_BASH_VERSION = "3.6.0";
 export const VITEST_VERSION = "5.0.2";
 
 /**
- * OpenCode asks before a tool touches anything outside the project, and a run has nobody to
- * answer: the request is rejected and the session ends. agent-eval's project `opencode.json`
- * allows writes, edits, and commands but not that, so an agent that so much as reads
- * `/usr/local/bin/eve-benchmark-build` stopped there. OpenCode merges its global config under
+ * OpenCode asks before some tool calls, and a run has nobody to answer: the request is
+ * rejected and the session ends. agent-eval's project `opencode.json` allows writes, edits, and
+ * commands, but OpenCode's defaults still ask before touching anything outside the project,
+ * before reading `.env` files, and after three identical calls in a row (`doom_loop`). Agents
+ * stopped at `cat /usr/local/bin/eve-benchmark-build` and at reading the case's `.env.local`.
+ * OpenCode merges its global config under
  * the project's, so this adds the permission without replacing agent-eval's file. Other
  * harnesses never read it, so every run gets it.
  */
 export const OPENCODE_GLOBAL_CONFIG = `${JSON.stringify({
   $schema: "https://opencode.ai/config.json",
-  permission: { external_directory: "allow" },
+  permission: { external_directory: "allow", read: "allow", doom_loop: "allow" },
 })}\n`;
 
 export function createNativeAuthoringSetup(options: {

@@ -45,6 +45,12 @@ export default selfModification({
 
 The bare `eve/self-modification` entry is removed. Mount `eve/extensions/self-modification/local` for development or `eve/extensions/self-modification/remote` for deployed source changes. The local mount does not accept a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/extensions/self-modification/remote` mount.
 
+## Migrate a retired scaffold
+
+The scaffold under `agent/subagents/self-modification/` is no longer supported. The disabled agent helper, including `eve/internal/self-modification/agent`, has been removed. Do not use the old `@eve/self-modification` compatibility package for new installations.
+
+Preserve any authored changes, then remove the old scaffold directory. Run `eve add eve/self-modification` to create the supported local extension mount. Setup rejects the old directory rather than deleting it. The bundled local extension and the separate remote extension remain supported.
+
 ## Propose changes from a deployed agent
 
 `eve/extensions/self-modification/remote` is a separate extension for deployed agents. It adds a subagent that checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment. Changes take effect only after you review, merge, and redeploy.

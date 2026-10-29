@@ -422,6 +422,24 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("<model>");
     expect(help).toContain("--reasoning <effort>");
     expect(help).toContain("-n, --non-interactive");
+    expect(help).not.toContain("--channel-web-nextjs");
+  });
+
+  it("still accepts the hidden --channel-web-nextjs flag", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", "my-agent", "--channel-web-nextjs"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      expect.objectContaining({ channelWebNextjs: true }),
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("does not print the boot banner because interactive onboarding owns its header", async () => {
@@ -606,6 +624,51 @@ describe("eve dev --input", () => {
       } finally {
         vi.doUnmock("#cli/dev/tui/tui.js");
       }
+    },
+  );
+
+  it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
+    "passes --show-* display flags through %s",
+    async (...command) => {
+      const startHost = vi.fn(() => ({
+        start: async () => ({
+          kind: "existing" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:4321/",
+        }),
+        close: async () => {},
+      }));
+      const runDevelopmentTui = await runInteractiveDev(
+        [
+          ...command,
+          "--show-tools",
+          "hidden",
+          "--show-reasoning",
+          "collapsed",
+          "--show-subagents",
+          "full",
+          "--show-connection-auth",
+          "hidden",
+          "--assistant-response-stats",
+          "tokens",
+          "--context-size",
+          "200000",
+          "--logs",
+          "warn",
+        ],
+        { startHost },
+      );
+      expect(runDevelopmentTui).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: "hidden",
+          reasoning: "collapsed",
+          subagents: "full",
+          connectionAuth: "hidden",
+          assistantResponseStats: "tokens",
+          contextSize: 200000,
+          logs: "warn",
+        }),
+      );
     },
   );
 
@@ -1344,37 +1407,15 @@ describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "error",
-      // Collapsed reasoning is the fixed thinking line; `--reasoning full`
+      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
       // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });
   });
 
-  it("passes through every provided display dimension", () => {
-    expect(
-      resolveTuiDisplayOptions({
-        tools: "hidden",
-        reasoning: "collapsed",
-        subagents: "collapsed",
-        connectionAuth: "full",
-        assistantResponseStats: "tokens",
-        contextSize: 200_000,
-        logs: "error",
-      }),
-    ).toEqual({
-      tools: "hidden",
-      reasoning: "collapsed",
-      subagents: "collapsed",
-      connectionAuth: "full",
-      assistantResponseStats: "tokens",
-      contextSize: 200_000,
-      logs: "error",
-    });
-  });
-
   it("omits optional display dimensions that were not provided", () => {
-    const resolved = resolveTuiDisplayOptions({ tools: "full" });
+    const resolved = resolveTuiDisplayOptions({ showTools: "full" });
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("error");

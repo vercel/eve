@@ -10,6 +10,10 @@ Connections live under `agent/connections/`. A static connection's runtime name 
 
 A connection owns its name and every name that starts with `<name>__`, so `linear__list_issues` always means the `linear` connection's `list_issues` tool. The compiler rejects a tool, subagent, or connection whose name is a static connection's name or starts with its `<name>__` prefix. eve applies the same rule to dynamic connections, tools, and subagents when they resolve, except that a dynamic connection with exactly a static connection's name replaces that static connection; see [Naming and conflicts](/docs/guides/dynamic-capabilities#naming-and-conflicts). Both errors name the two sides of the conflict; rename either one.
 
+Static and dynamic connection definitions must use `defineMcpClientConnection`
+or `defineOpenAPIConnection` from `eve/connections`. Plain object exports are
+rejected because they do not identify a protocol.
+
 ## MCP connections
 
 Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model. Each tool's JSON Schema reaches the model as published, minus any arguments you supply with `toolCall.providedArguments`, and eve checks the model's arguments against it before it calls the server.

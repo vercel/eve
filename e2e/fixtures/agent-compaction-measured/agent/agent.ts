@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 const model = mockModel({
@@ -28,9 +28,11 @@ const model = mockModel({
   },
 });
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...e2eAgentConfig(),
   model,
   modelContextWindowTokens: 100_000,
-  compaction: { thresholdPercent: 0.2 },
+  compaction: { threshold: 0.2 },
 });
+
+export default agent;

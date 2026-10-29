@@ -4,7 +4,6 @@ import { renderBenchmarkMarkdown } from "../evals/eve-code-format";
 import { eveCodeBenchmark } from "../evals/eve-code-results";
 import { templateManifest } from "../templates/manifest";
 import { renderAgentRuntimeDiagramMarkdown } from "./agent-runtime-diagram";
-import { templatePath } from "./canonical";
 
 type CardProps = Partial<Record<string, string>>;
 
@@ -20,7 +19,7 @@ const cardMarkdown = new Map<string, (props: CardProps, text: string) => string>
       const template = templateManifest.find((entry) => entry.slug === props.template);
       if (!template) throw new Error(`Unknown template "${props.template}" in a TemplateCard.`);
       const label = `${props.label ?? template.title} template`;
-      return `- **${props.title}**: ${text} See the [${label}](${templatePath(template.slug)}).`;
+      return `- **${props.title}**: ${text} See the [${label}](${template.sourceHref}).`;
     },
   ],
   [

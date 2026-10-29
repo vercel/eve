@@ -189,7 +189,7 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
 }
 
 /**
- * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * `eve/workflow` resolves to the body-side shim. An `eve/workflow/api` import still live
  * after step bodies were stubbed means a body calls the runtime API; fail the
  * build here rather than the driver later.
  */
@@ -201,7 +201,11 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         return resolveWorkflowModulePath(source);
       }
 
-      if (source === "workflow/api" || source === "workflow/runtime") {
+      if (
+        source === "eve/workflow/api" ||
+        source === "workflow/api" ||
+        source === "workflow/runtime"
+      ) {
         const via = importer ? ` (imported by "${importer}")` : "";
         throw new Error(
           `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
@@ -209,7 +213,7 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         );
       }
 
-      if (source !== "workflow") {
+      if (source !== "eve/workflow" && source !== "workflow") {
         return undefined;
       }
 

@@ -125,6 +125,16 @@ try {
     manifest.dependencies.eve = `file:${tarball}`;
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
+    // The shipped Discord template pins the old gateway API. Exercise its documented
+    // pre-1.0 migration only in the upgraded copy, after checking the lockfile unchanged.
+    if (template === "eve-discord-agent-template") {
+      const daemonPath = join(destination, "daemon", "main.ts");
+      const daemon = readFileSync(daemonPath, "utf8")
+        .replace('"eve/channels/discord/gateway"', '"eve/experimental/channels/discord/gateway"')
+        .replaceAll("experimental_runDiscordGatewayRelay", "runDiscordGatewayRelay");
+      writeFileSync(daemonPath, daemon);
+    }
+
     process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
     run("pnpm", ["typecheck"], { cwd: destination });

@@ -79,7 +79,7 @@ interface ChannelAddress<TState = undefined> {
   cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   compact(options?: SessionControlOptions): Promise<Delivery>;
   clear(options?: SessionControlOptions): Promise<Delivery>;
-  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
+  end(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -190,7 +190,7 @@ export function createChannelAddress<TState = undefined>(input: {
           error.owner,
           describeStrandedSession(
             error.owner,
-            "Call reset() on the address, then create() again to start a session from your history.",
+            "Call end() on the address, then create() again to start a session from your history.",
           ),
         );
       }
@@ -259,7 +259,7 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       return commandDelivery(input.runtime, result, command.deliveryId);
     },
-    async reset(options) {
+    async end(options) {
       const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
       const result = await input.runtime.dispatchContinuation({
         command,

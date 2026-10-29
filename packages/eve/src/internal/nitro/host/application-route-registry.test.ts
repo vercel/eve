@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { createApplicationRouteRegistry } from "#internal/nitro/host/application-route-registry.js";
 import {
   EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
@@ -72,7 +73,7 @@ it("mounts only opted-in connection receivers from the compiled manifest", async
       {
         logicalPath: "connections/issues.ts",
         loadNamespace: async () => ({
-          default: {
+          default: defineMcpClientConnection({
             url: "https://issues.example/mcp",
             description: "Issues",
             auth: {
@@ -90,7 +91,7 @@ it("mounts only opted-in connection receivers from the compiled manifest", async
               },
             },
             experimental: { events: { onEvent() {} } },
-          },
+          }),
         }),
       },
     ],

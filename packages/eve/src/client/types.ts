@@ -5,7 +5,6 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
-import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -151,9 +150,9 @@ export interface SendTurnOptions<TOutput = unknown> {
 
   /**
    * Reconnection policy for the response event stream. Omit to use the default
-   * policy, or pass `{ reconnect: false }` when the caller owns cursor recovery.
+   * policy, or pass `false` when the caller owns cursor recovery.
    */
-  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+  readonly reconnect?: false | ReconnectOptions;
 
   /**
    * Abort signal for cancelling the request.
@@ -170,7 +169,11 @@ export interface SendTurnOptions<TOutput = unknown> {
 /** Options for answering pending HITL input requests on a client session. */
 export type RespondTurnOptions<TOutput = unknown> = Omit<SendTurnOptions<TOutput>, "turnPolicy">;
 
-/** @internal Transport envelope used by stores and command adapters. */
+/**
+ * One outbound turn accepted by `SessionStore.send` and passed through `prepareSend`: either a
+ * `message` with {@link SendTurnOptions}, or `answers` to pending input requests with
+ * {@link RespondTurnOptions}. Never both.
+ */
 export type SendTurnPayload<TOutput = unknown> =
   | (SendTurnOptions<TOutput> & {
       readonly answers?: never;
@@ -182,33 +185,26 @@ export type SendTurnPayload<TOutput = unknown> =
       readonly message?: never;
     });
 
-/** Retry and backoff settings for one kind of stream reconnection. */
-export interface StreamReconnectRetryPolicy {
-  /** Initial delay before retrying, in milliseconds. */
+/** Settings for opening client stream connections and retrying bounded reads. */
+export interface ReconnectOptions {
+  /** Initial delay before retrying a connection open, in milliseconds (default: 250). */
   readonly baseDelayMs?: number;
 
-  /** Maximum number of attempts governed by this retry policy. */
+  /**
+   * Maximum attempts to open each HTTP connection (default: 12). Also bounds consecutive
+   * transport failures for `follow: false`; following reads reconnect until stopped.
+   */
   readonly maxAttempts?: number;
 
-  /** Maximum delay between retries, in milliseconds. */
+  /** Maximum delay between connection-open retries, in milliseconds (default: 5000). */
   readonly maxDelayMs?: number;
-}
 
-/** Configurable policy used when automatic stream reconnection is enabled. */
-export interface ResolvedStreamReconnectPolicy {
   /**
-   * Retry policy for opening an HTTP stream connection. Its `maxAttempts` also bounds how many
-   * consecutive transport failures a bounded read (`follow: false`) retries. A read that follows
-   * retries failures for as long as it runs, and stops on what it reads.
+   * HTTP response statuses to retry; replaces the default list
+   * (404, 409, 425, 500, 502, 503, 504).
    */
-  readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
-
-  /** HTTP response statuses that may be retried while opening a stream. */
-  readonly retryableErrorStatuses?: readonly number[];
+  readonly retryableStatuses?: readonly number[];
 }
-
-/** Automatic stream reconnection configuration. */
-export type StreamReconnectPolicy = ResolvedStreamReconnectPolicy | { readonly reconnect: false };
 
 export type { SessionStreamOptions } from "#shared/session.js";
 
@@ -239,18 +235,6 @@ export type CompactResult =
       readonly status: Extract<CompactStatus, "no_active_session">;
     };
 
-/** Result of terminally resetting a client session. */
-export type ResetResult =
-  | {
-      /** The prior session was terminally retired. */
-      readonly previousSessionId: string;
-      readonly status: Extract<ResetStatus, "reset">;
-    }
-  | {
-      /** The fixed session ID was unknown or no longer active. */
-      readonly status: Extract<ResetStatus, "no_active_session">;
-    };
-
 export type { Delivery, DeliveryResult } from "#shared/delivery.js";
 
 /**
@@ -260,7 +244,11 @@ export type { Delivery, DeliveryResult } from "#shared/delivery.js";
  * Serializable cursor for one fixed, ID-addressed client session.
  */
 export interface ClientSessionState {
-  /** Opaque delivery routing hint; preserve it when saving and restoring a session. */
+  /**
+   * Opaque value the server issues so later sends reach the session faster. Persist it with the
+   * rest of the state and pass it back unchanged; eve may change or extend it in any release.
+   * A missing, stale, or rejected value only costs a slower lookup.
+   */
   readonly inbox?: string;
   readonly sessionId: string;
   readonly streamIndex: number;

@@ -550,12 +550,12 @@ describe("stranded sessions", () => {
       try {
         // A stranded owner cannot run, so `created: false` would hand back a dead session.
         await expect(address.create({ auth: null, history })).rejects.toThrow(
-          "Call reset() on the address, then create() again",
+          "Call end() on the address, then create() again",
         );
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(stranded.status).resolves.toBe("running");
 
-        await address.reset();
+        await address.end();
         const result = await address.create({ auth: null, history });
         createdSessionId = result.session.id;
         expect(result.created).toBe(true);

@@ -23,7 +23,6 @@ import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import type { CardElement } from "#public/channels/slack/cards.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackHitlRoute } from "#public/channels/slack/hitl.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -45,6 +44,7 @@ import {
   type SlackBotToken,
   type SlackHandle,
   type SlackThread,
+  type SlackPostInput,
   type SlackWorkspaceHandle,
 } from "#public/channels/slack/api.js";
 import {
@@ -287,11 +287,13 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * first non-empty line as the next typing indicator, surfacing the
    * model's pre-tool narration instead of the action label. Cleared at
    * `turn.started` and after use.
+   * @internal
    */
   pendingToolCallMessage?: string | null;
   /**
    * The thread status the default renderer last set. A later model step shows
    * it again, as does a new task card, which Slack clears the status for.
+   * @internal
    */
   threadStatus?: SlackThreadStatus | null;
   /**
@@ -300,10 +302,11 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * sign-in `interaction.opened` handler; the matching
    * sign-in `interaction.settled` handler edits it in place to surface the
    * resolution outcome.
+   * @internal
    */
   pendingAuthMessageTs?: Record<string, string>;
   /**
-   * The messages holding open or recently answered approvals, questions, and budget prompts.
+   * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
    * the `pendingApprovalCards` field that earlier versions wrote, so cards posted before an
    * upgrade keep their buttons.
@@ -312,12 +315,14 @@ export interface SlackChannelState extends UndeliveredReplyState {
   /**
    * Each recent turn's tool calls and the task card eve last wrote for it, by
    * turn id. The default `turn.paused` handler names the working tasks.
+   * @internal
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
   /**
    * Tasks that settled since the turn's last model step: each named agent, or
    * `null` for another task. The default `step.started` handler shows
    * `Reviewing results...` for the step that reads them.
+   * @internal
    */
   pendingTaskResults?: {
     readonly names: readonly (string | null)[];
@@ -333,6 +338,7 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * Whether eve has posted in this thread. Once it has, deleting the root
    * leaves a tombstone that keeps the thread, so the final reply skips the
    * deleted-root check.
+   * @internal
    */
   postedInThread?: boolean;
 }
@@ -423,13 +429,14 @@ export interface SlackCodeChannelTarget {
 
 /**
  * Pre-agent post issued by `slackChannel().receive` when the caller
- * provides `target.initialMessage`. Mirrors `ctx.thread.post`'s card
- * variant so the same `Card({...})` construction can be reused.
+ * provides `target.initialMessage`. Accepts the same explicit message forms
+ * as `ctx.thread.post`: Markdown, text, blocks, or a card, plus optional files.
+ *
+ * Unlike `thread.post({ text, files })`, which sends one message with the files
+ * attached, this posts the root message first and then uploads files as a
+ * threaded reply. Upload failures are logged, not thrown, so the run still starts.
  */
-export interface SlackInitialMessage {
-  readonly card: CardElement;
-  readonly fallbackText?: string;
-}
+export type SlackInitialMessage = SlackPostInput;
 
 /**
  * Options for one turn requested by a generic Slack event handler.
@@ -499,11 +506,11 @@ export interface SlackInboundEventContext {
   clear(input: {
     readonly target: SlackSessionTarget;
   }): ReturnType<ChannelSource<SlackChannelState>["clear"]>;
-  /** Resets the current session for one Slack thread. */
-  reset(input: {
+  /** Retires the current session for one Slack thread without creating a replacement. */
+  end(input: {
     readonly reason?: string;
     readonly target: SlackSessionTarget;
-  }): ReturnType<ChannelSource<SlackChannelState>["reset"]>;
+  }): ReturnType<ChannelSource<SlackChannelState>["end"]>;
   /** Resolves the current session for one Slack thread. */
   resolveSession(input: { readonly target: SlackSessionTarget }): ReturnType<ChannelResolveSession>;
   /** The complete signed Events API callback envelope. */
@@ -1202,7 +1209,7 @@ async function receiveOnSlack(
 
   let threadTs = requestedThreadTs;
   if (initialMessage) {
-    const { thread } = buildSlackBinding({
+    const { thread, slack } = buildSlackBinding({
       api: deps.api,
       botToken: deps.credentials?.botToken,
       channelId,
@@ -1210,14 +1217,17 @@ async function receiveOnSlack(
       installationTeamId,
       teamId: deps.teamId,
     });
-    const postInput: { card: CardElement; fallbackText?: string } = {
-      card: initialMessage.card,
-    };
-    if (initialMessage.fallbackText !== undefined) {
-      postInput.fallbackText = initialMessage.fallbackText;
-    }
-    const posted = await thread.post(postInput);
+    // Upload-only posts return a file ID, not a message ts; always anchor the root first.
+    const { files, ...rootMessage } = initialMessage;
+    const posted = await thread.post(rootMessage);
     threadTs = posted.id;
+    if (files?.length) {
+      try {
+        await slack.uploadFiles(files);
+      } catch (error) {
+        log.warn("file upload after initial message post failed", { error });
+      }
+    }
   }
 
   // Threadless proactive runs need distinct identities until their first
@@ -1874,7 +1884,7 @@ async function dispatchSlackEvent(input: {
     clear: ({ target }) => sourceFor(target).clear(),
     compact: ({ target }) => sourceFor(target).compact(),
     envelope: input.envelope,
-    reset: ({ reason, target }) => sourceFor(target).reset({ reason }),
+    end: ({ reason, target }) => sourceFor(target).end({ reason }),
     resolveSession: ({ target }) => input.resolveSession(slackSessionToken(target)),
     respond: (answers, { auth, target }) =>
       sourceFor(target).respond(answers, {
