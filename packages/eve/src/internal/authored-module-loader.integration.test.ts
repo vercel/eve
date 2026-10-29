@@ -1511,7 +1511,7 @@ export const result = true;
   // Rolldown can host its runtime helpers in a shared chunk that imports back
   // from a chunk needing them, so the source graph is acyclic but the chunks
   // are not: rolldown/rolldown#11341.
-  it.fails("evaluates authored modules whose shared chunks import each other", async () => {
+  it("evaluates authored modules whose shared chunks import each other", async () => {
     const tool = (body: readonly string[]) =>
       [...body, 'export default { description: "Read the schema.", execute() { return value; } };']
         .join("\n")
