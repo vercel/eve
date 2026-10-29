@@ -142,23 +142,35 @@ Verifies a bearer JWT from any OIDC issuer, such as your company SSO. eve reads 
 
 A verified caller has `authenticator: "oidc"`, `principalType: "service"`, `issuer` and `subject` from the token's `iss` and `sub`, and `principalId` set to `<issuer>:<subject>`. Non-standard string and string-array claims become `attributes`, so a `groups` claim is `ctx.session.auth.current.attributes.groups`. Standard claims (`iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `jti`) are omitted.
 
-When tokens identify people, relabel the caller as a user. User-scoped connections, such as `connect()` from `@vercel/connect/eve`, require a `user` principal:
+User-scoped connections, such as `connect()` from `@vercel/connect/eve`, require a `user` principal. When the issuer also mints machine tokens, such as client-credentials grants, for the same audience, relabel only tokens that carry a person claim. Otherwise a machine token would get user-scoped connections. This example keys on `email`; use whichever claim your identity provider sets only on user tokens:
 
 ```ts title="agent/channels/eve.ts"
 import { type AuthFn, localDev, oidc } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 
 const sso = oidc({ issuer: "https://sso.example.com", audiences: ["my-agent"] });
+const dev = localDev();
 
+// Only tokens that name a person become users. Machine tokens from the same
+// issuer have no email claim and stay "service" principals.
 const employee: AuthFn<Request> = async (request) => {
   const caller = await sso(request);
-  return caller ? { ...caller, principalType: "user" } : null;
+  if (!caller) return null;
+  return typeof caller.attributes.email === "string"
+    ? { ...caller, principalType: "user" }
+    : caller;
 };
 
-export default eveChannel({ auth: [employee, localDev()] });
+// Local `eve dev` only. allowToolStubs lets `eve eval` stub tools.
+const localWithStubs: AuthFn<Request> = async (request) => {
+  const caller = await dev(request);
+  return caller ? { ...caller, allowToolStubs: true } : null;
+};
+
+export default eveChannel({ auth: [employee, localWithStubs] });
 ```
 
-In production this channel admits only tokens from that issuer and audience, because `localDev()` never accepts a request outside a development server.
+In production this channel admits only tokens from that issuer and audience, as users when they name a person and as services otherwise, because `localDev()` never accepts a request outside a development server.
 
 ### Custom verifiers
 

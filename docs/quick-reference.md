@@ -3,7 +3,7 @@ title: "Quick Reference"
 description: "Copy-ready snippets for the requirements most agents need: tools, approvals, Slack, SSO, connections, per-user tools, subagents, skills, schedules, webhooks, memory, and evals."
 ---
 
-Each snippet is the smallest complete version of one requirement, checked against the current API. Copy the ones you need, then follow the link only when you need an option the snippet doesn't show. For end-to-end designs that combine several features, such as multi-tenant credentials, see [Patterns](./patterns/multi-tenant-auth.md). Every capability is a file: its path under `agent/` gives its name, so `agent/tools/get_order.ts` is the tool `get_order`.
+Each snippet is the smallest complete version of one requirement, and CI typechecks every one against the current API. Copy the ones you need, then follow the link only when you need an option the snippet doesn't show. For end-to-end designs that combine several features, such as multi-tenant credentials, see [Patterns](./patterns/multi-tenant-auth.md). Every capability is a file: its path under `agent/` gives its name, so `agent/tools/get_order.ts` is the tool `get_order`.
 
 ## Start a project
 
@@ -13,7 +13,7 @@ cd my-agent
 npm run typecheck && npm run build
 ```
 
-`agent/instructions.md` is the system prompt and `agent/agent.ts` sets the model. Add files only for what you need. Install other packages you import, such as `@vercel/connect`, with `npm install`. See [Getting Started](./getting-started.mdx) and [Agent Files](./reference/agent-files.md).
+`agent/instructions.md` is the system prompt and `agent/agent.ts` sets the model. Add files only for what you need. The scaffold already installs `eve`, `zod`, `ai`, and `@vercel/connect`; add any other package you import with `npm install`. See [Getting Started](./getting-started.mdx) and [Agent Files](./reference/agent-files.md).
 
 ## Know what an agent can do by default
 
@@ -48,7 +48,7 @@ export default defineTool({
 });
 ```
 
-Validate input in the schema or in `execute` before any side effect. A thrown error reaches the model as a tool error. See [Tools](./tools) (`tools/overview.mdx`).
+Validate input in the schema or in `execute` before any side effect. A thrown error reaches the model as a tool error. See [Tools](./tools/overview.mdx).
 
 ## Require approval for some calls
 
@@ -69,11 +69,11 @@ export default defineTool({
 });
 ```
 
-`"user-approval"` pauses for a person, `"not-applicable"` runs without asking, and `{ type: "denied", reason }` refuses. For a fixed policy, use `always()`, `once()`, or `never()` from `eve/tools/approval`. Connections take the same `approval` option. See [Human in the Loop](./human-in-the-loop#approvals) (`tools/human-in-the-loop.md`).
+`"user-approval"` pauses for a person, `"not-applicable"` runs without asking, and `{ type: "denied", reason }` refuses. For a fixed policy, use `always()`, `once()`, or `never()` from `eve/tools/approval`. Connections take the same `approval` option. See [Human in the Loop](./tools/human-in-the-loop.md#approvals).
 
 ## Add Slack
 
-With a Vercel Connect connector:
+### With a Vercel Connect connector
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -84,7 +84,7 @@ export default slackChannel({
 });
 ```
 
-With your own Slack app credentials in environment variables:
+### With your own Slack app credentials
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
@@ -97,7 +97,7 @@ export default slackChannel({
 });
 ```
 
-`slackChannel()` with no `credentials` reads the same two variables. The defaults answer app mentions and DMs, reply in the thread, and render approvals as buttons. Each sender becomes a `user` principal. See [Slack](./channels/slack.mdx).
+`slackChannel()` with no `credentials` reads the same two variables. The defaults answer app mentions and DMs, reply in the thread, and render approvals as buttons. Human senders become `user` principals; other bots become `service` principals. See [Slack](./channels/slack.mdx).
 
 ## Protect the HTTP API with your SSO
 
@@ -108,9 +108,14 @@ import { eveChannel } from "eve/channels/eve";
 const sso = oidc({ issuer: "https://sso.example.com", audiences: ["my-agent"] });
 const dev = localDev();
 
+// Only tokens that name a person become users. Machine tokens from the same
+// issuer have no email claim and stay "service" principals.
 const employee: AuthFn<Request> = async (request) => {
   const caller = await sso(request);
-  return caller ? { ...caller, principalType: "user" } : null;
+  if (!caller) return null;
+  return typeof caller.attributes.email === "string"
+    ? { ...caller, principalType: "user" }
+    : caller;
 };
 
 // Local `eve dev` only. allowToolStubs lets `eve eval` stub tools.
@@ -123,7 +128,7 @@ export default eveChannel({ auth: [employee, localWithStubs] });
 ```
 
 - `auth` entries run in order. The first to return a principal wins, and a request nobody accepts gets a `401`. `localDev()` never accepts anything in production, so this channel admits only SSO tokens there.
-- `oidc()` fetches the issuer's discovery document, verifies signature, issuer, audience, and expiry, and labels the caller `authenticator: "oidc"`, `principalType: "service"`. Relabel it `"user"`, as above, when tokens identify people. User-scoped connections, such as `connect()` below, require a `user` principal.
+- `oidc()` fetches the issuer's discovery document, verifies signature, issuer, audience, and expiry, and labels the caller `authenticator: "oidc"`, `principalType: "service"`. Relabel it `"user"` only when the token carries a claim your identity provider sets only for people, such as `email` above, so machine tokens with the same issuer and audience don't get user-scoped connections. User-scoped connections, such as `connect()` below, require a `user` principal.
 - Custom string and string-array claims become `ctx.session.auth.current.attributes`, so a `groups` claim is `attributes.groups`. Standard claims (`iss`, `sub`, `aud`, `exp`, …) are omitted from `attributes`; the token's `sub` is `subject`.
 
 See [Authentication](./guides/auth-and-route-protection.md). To pick credentials or policy per tenant, see [Multi-Tenant Auth](./patterns/multi-tenant-auth.md).
@@ -138,11 +143,11 @@ export default defineMcpClientConnection({
   url: "https://mcp.notion.com/mcp",
   description: "Search and read Notion pages as the signed-in user.",
   auth: connect({ connector: "mcp.notion.com/my-agent", principalType: "user" }),
-  tools: { allow: ["search", "fetch"] },
+  tools: { allow: ["notion-search", "notion-fetch"] },
 });
 ```
 
-The model reaches its tools as `notion__search` and `notion__fetch`. `principalType: "user"` uses the caller's own grant and asks them to sign in on first use; `"app"` acts as the agent. For a static token, use `auth: { getToken: async () => ({ token: process.env.API_TOKEN! }) }`. Use `tools: { block: [...] }` to hide specific tools instead. See [Connections](./connections) (`connections/overview.mdx`) and [MCP](./connections/mcp.mdx).
+`tools.allow` takes the server's own tool names; the model sees them as `notion__notion-search` and `notion__notion-fetch`. `principalType: "user"` uses the caller's own grant and asks them to sign in on first use; `"app"` acts as the agent. For a static token, use `auth: { getToken: async () => ({ token: process.env.API_TOKEN! }) }`. Use `tools: { block: [...] }` to hide specific tools instead. See [Connections](./connections/overview.mdx) and [MCP](./connections/mcp.mdx).
 
 ## Turn an OpenAPI contract into tools
 
@@ -238,7 +243,7 @@ export default defineWorkflowTool({
 });
 ```
 
-`description` is required. Without `tool: false`, the parent model can call the subagent directly as a tool. Share code between agents by re-exporting from one file, as the researcher's connection does. See [Subagents](./subagents) (`subagents/index.mdx`) and [Workflow Tools](./tools/workflows.mdx#delegate-work-ctxagent).
+`description` is required. Without `tool: false`, the parent model can call the subagent directly as a tool. Share code between agents by re-exporting from one file, as the researcher's connection does. See [Subagents](./subagents/index.mdx) and [Workflow Tools](./tools/workflows.mdx#delegate-work-ctxagent).
 
 ## Load knowledge only when it's needed
 
@@ -281,10 +286,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { defineChannel, POST } from "eve/channels";
 import slack from "./slack";
 
-function verify(body: string, signature: string | null): boolean {
+const MAX_AGE_SECONDS = 300;
+
+function verify(body: string, timestamp: string | null, signature: string | null): boolean {
   const secret = process.env.ALERTS_WEBHOOK_SECRET;
-  if (!secret || !signature) return false;
-  const expected = createHmac("sha256", secret).update(body).digest();
+  if (!secret || !timestamp || !signature) return false;
+  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!(age <= MAX_AGE_SECONDS)) return false;
+  const expected = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest();
   const given = Buffer.from(signature, "hex");
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
@@ -293,7 +302,8 @@ export default defineChannel({
   routes: [
     POST("/webhooks/alerts", async (request, ctx) => {
       const body = await request.text();
-      if (!verify(body, request.headers.get("x-signature"))) {
+      const { headers } = request;
+      if (!verify(body, headers.get("x-timestamp"), headers.get("x-signature"))) {
         return new Response("invalid signature", { status: 401 });
       }
       const alert = JSON.parse(body) as { id: string };
@@ -313,7 +323,7 @@ export default defineChannel({
 });
 ```
 
-Routes mount at the path you give, here `POST /webhooks/alerts`. Verify the raw body before parsing, and return early so a rejected request never reaches the agent. The Slack post starts a thread that people can continue by mentioning the app. See [Custom Channels](./channels/custom.mdx#cross-channel-hand-off). To post without an agent turn, with retries, see [Durable Cross-Channel Notifications](./patterns/durable-cross-channel-notifications.md).
+Routes mount at the path you give, here `POST /webhooks/alerts`. Verify the raw body before parsing, and return early so a rejected request never reaches the agent. Signing the timestamp with the body and rejecting stale requests stops a captured request from being replayed later. A replay inside the five-minute window still gets through, so dedupe on the provider's delivery ID if a duplicate thread matters. Match the header names and signed string to your provider's scheme. The Slack post starts a thread that people can continue by mentioning the app. See [Custom Channels](./channels/custom.mdx#cross-channel-hand-off). To post without an agent turn, with retries, see [Durable Cross-Channel Notifications](./patterns/durable-cross-channel-notifications.md).
 
 ## Remember facts across conversations
 
@@ -328,7 +338,7 @@ export default defineMemory({
 });
 ```
 
-A fixed string scope gives everyone one shared memory. Use `byPrincipal` from `eve/memory/scope` for one memory per person. See [Memory](./memory) (`memory/overview.mdx`) and [Multi-Tenant Memory](./patterns/multi-tenant-memory.md).
+A fixed string scope gives everyone one shared memory. Use `byPrincipal` from `eve/memory/scope` for one memory per person. See [Memory](./memory/overview.mdx) and [Multi-Tenant Memory](./patterns/multi-tenant-memory.md).
 
 ## Test with an eval and a stubbed tool
 

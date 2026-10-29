@@ -231,6 +231,14 @@ function checkLinks(rootDir) {
         .replace(/\.mdx?$/, "");
       if (resolvedUrl === "/docs") continue; // docs root / index
       if (renderedUrls.has(resolvedUrl)) continue;
+      // The site resolves file links (`./tools/overview.mdx`) to the page's
+      // URL, and they also work for agents reading the raw files.
+      if (isRel && /\.mdx?$/.test(target)) {
+        const file = relative(rootDir, resolve(dirname(abs), target))
+          .split("\\")
+          .join("/");
+        if (existsSync(resolve(rootDir, file)) && !isExcluded(file)) continue;
+      }
       failures.push({
         root: "docs",
         file: rel,
