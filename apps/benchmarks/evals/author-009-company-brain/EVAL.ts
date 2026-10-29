@@ -274,7 +274,10 @@ test("admits only company SSO tokens on the HTTP API", () => {
   expect(auth).toMatch(/\baudiences?\s*:/);
   expect(auth).toMatch(/["']atlas["']/);
   // localDev() never authenticates a production request; every other helper would.
-  expect(source).not.toMatch(/\b(?:placeholderAuth|vercelOidc|httpBasic|jwtHmac|none)\s*\(/);
+  // Comments may name the helpers they rule out.
+  expect(withoutComments(source)).not.toMatch(
+    /\b(?:placeholderAuth|vercelOidc|httpBasic|jwtHmac|none)\s*\(/,
+  );
 });
 
 test("run_sql sends read-only queries to the warehouse", async () => {
@@ -351,8 +354,8 @@ test("reads Notion as the signed-in employee through a narrow MCP connection", a
     resolvedSource(path).includes("mcp.notion.com/mcp"),
   );
   expect(file).toBeDefined();
-  const connection = await load(file!);
-  expect(connection.url).toBe("https://mcp.notion.com/mcp");
+  const connection = await notionConnection(file!);
+  expect(connection?.url).toBe("https://mcp.notion.com/mcp");
   expectOnlySearchAndFetch(connection.tools?.allow);
   expect(connection.tools?.block).toBeUndefined();
 
@@ -362,14 +365,14 @@ test("reads Notion as the signed-in employee through a narrow MCP connection", a
 });
 
 test("shows revenue_forecast only to the finance group", async () => {
-  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const definition = await load(forecastFile());
   expect(forecastTool(await resolveDynamic(definition, ["eng", "finance"]))).toBeDefined();
   expect(forecastTool(await resolveDynamic(definition, ["eng"]))).toBeUndefined();
   expect(forecastTool(await resolveDynamic(definition, undefined))).toBeUndefined();
 });
 
 test("revenue_forecast reads the quarter's forecast", async () => {
-  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const definition = await load(forecastFile());
   const tool = forecastTool(await resolveDynamic(definition, ["finance"]));
   expect(tool).toBeDefined();
   const requests = stubWarehouse();
@@ -388,7 +391,7 @@ test("revenue_forecast reads the quarter's forecast", async () => {
 });
 
 test("the weekly summary gets the revenue forecast", async () => {
-  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const definition = await load(forecastFile());
   const tool = forecastTool(await resolveDynamic(definition, "schedule"));
   const requests = stubWarehouse();
   if (tool !== undefined) {
@@ -491,8 +494,8 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
     /mcp\.notion\.com\/mcp/.test(resolvedSource(path)),
   );
   expect(file).toBeDefined();
-  const connection = await load(file!);
-  expect(connection.url).toBe("https://mcp.notion.com/mcp");
+  const connection = await notionConnection(file!);
+  expect(connection?.url).toBe("https://mcp.notion.com/mcp");
   expectOnlySearchAndFetch(connection.tools?.allow);
   const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
   expect(auth?.vercelConnect?.connector).toBe("mcp.notion.com/atlas");
@@ -529,13 +532,16 @@ test("keeps metric definitions in a skill loaded on demand", async () => {
         };
       }),
   );
-  const skill = [...packaged, ...singleFile, ...defined].find(({ text }) => /one-time/i.test(text));
-  expect(skill).toBeDefined();
+  // One skill for all three definitions, or one skill per metric.
+  const skills = [...packaged, ...singleFile, ...defined].filter(({ text }) =>
+    /one-time|paid seat|retention/i.test(text),
+  );
+  expect(skills.some(({ text }) => /one-time/i.test(text))).toBe(true);
   // Only a packaged SKILL.md must describe itself; a single file falls back to its name.
-  if (skill!.file.endsWith("/SKILL.md")) {
-    expect(readFileSync(skill!.file, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
+  for (const { file } of skills.filter(({ file }) => file.endsWith("/SKILL.md"))) {
+    expect(readFileSync(file, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
   }
-  const reference = skill!.text;
+  const reference = skills.map(({ text }) => text).join("\n");
   expect(reference).toMatch(/ARR/);
   // Prose wraps and may spell numbers out: "active 12\nmonths ago", "twelve months".
   expect(reference).toMatch(/\b(?:30|thirty)\s+days\b/i);
@@ -604,6 +610,40 @@ test("ships an eve eval with run_sql stubbed", { timeout: 120_000 }, () => {
   });
   expect(listed.trim()).not.toBe("");
 });
+
+// Strips line and block comments, leaving URLs such as `https://` intact.
+function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+}
+
+/**
+ * The Notion connection a signed-in employee gets: a static definition, or what a
+ * dynamic connection resolves to, either a single definition or a map containing it.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function notionConnection(file: string): Promise<any> {
+  const definition = await load(file);
+  if (dynamicEvaluator(definition) === undefined) return definition;
+  // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+  const resolved: any = await resolveDynamic(definition, ["eng"]);
+  if (resolved === null || resolved === undefined) return undefined;
+  if (typeof resolved.url === "string") return resolved;
+  return Object.values(resolved).find(
+    // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+    (entry: any) => typeof entry?.url === "string" && entry.url.includes("mcp.notion.com"),
+  );
+}
+
+/** `tools/revenue_forecast.ts`, or a dynamic tool map that defines `revenue_forecast`. */
+function forecastFile(): string {
+  const named = `${agentRoot}/tools/revenue_forecast.ts`;
+  if (existsSync(named)) return named;
+  const map = sourceFiles("tools", /\.ts$/).find(
+    (file) =>
+      dirname(file) === `${agentRoot}/tools` && /\brevenue_forecast\b/.test(resolvedSource(file)),
+  );
+  return map ?? named;
+}
 
 function instructionsSource(): string {
   for (const name of ["instructions.md", "instructions.ts"]) {

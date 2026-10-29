@@ -233,7 +233,8 @@ beforeEach(() => {
   vi.stubEnv("METRICS_TOKEN", "test-metrics-token");
   // No test reaches the real network. GitHub answers the way it would for the failed PR in
   // these payloads: the App gets an installation token, and the Checks and Actions read
-  // endpoints a triage might consult list one failed run and the PR itself reads back, so a
+  // endpoints a triage might consult list one failed run (by suite, commit, or workflow run)
+  // and the PR itself reads back, so a
   // channel hook that looks the failure up through `ctx.github` before starting the turn works as
   // it would in production.
   // Any other GitHub call is a 404.
@@ -261,6 +262,19 @@ async function offlineGitHub(input: unknown, init?: RequestInit): Promise<Respon
     };
     if (/\/check-suites\/\d+\/check-runs$|\/commits\/[^/]+\/check-runs$/.test(path)) {
       return Response.json({ total_count: 1, check_runs: [failedRun] });
+    }
+    if (path === "/repos/pinecone-labs/ledger/actions/runs") {
+      const workflowRun = {
+        id: 881,
+        name: "CI",
+        status: "completed",
+        conclusion: "failure",
+        head_sha: "4f1c2e9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+        check_suite_id: 777001,
+        pull_requests: [{ number: 31 }],
+        html_url: "https://github.com/pinecone-labs/ledger/actions/runs/881",
+      };
+      return Response.json({ total_count: 1, workflow_runs: [workflowRun] });
     }
     if (/\/actions\/runs\/\d+\/jobs$/.test(path)) {
       return Response.json({ total_count: 1, jobs: [{ ...failedRun, steps: [] }] });

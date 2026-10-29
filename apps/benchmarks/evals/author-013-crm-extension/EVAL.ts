@@ -357,19 +357,40 @@ async function lookUpThenAddNote(): Promise<void> {
 }
 
 /**
- * Whether add_note, given only an email, looks the customer up by it before it writes the note.
+ * Whether add_note does the lookup itself, so a note can't land on the wrong record: given only
+ * an email, it looks the customer up by it before posting; or, given an email and a customer ID,
+ * it looks the email up before posting, and refuses an ID that isn't that email's record.
  * Binds the configuration through the extension's handle rather than the agent's mount: the
  * mount binds once, and later tests rely on it binding after the handle tests.
  */
 async function addNoteLooksUpFirst(): Promise<boolean> {
-  const fetch = stubFetch();
   try {
     (await loadExtension())({ apiKey: "test-crm-key" });
-    await runTool(await loadTool("add_note"), { email: customer.email, note: "Prefers email." });
   } catch {
     return false;
   }
-  const calls = await requests(fetch);
+  const note = "Prefers email.";
+  if (looksUpThenPosts(await addNoteCalls({ email: customer.email, note }), customer.id))
+    return true;
+  const verified = await addNoteCalls({ email: customer.email, customerId: customer.id, note });
+  if (!looksUpThenPosts(verified, customer.id)) return false;
+  const mismatched = await addNoteCalls({ email: customer.email, customerId: "cus_other", note });
+  return !(mismatched ?? []).some((call) => call.method === "POST");
+}
+
+/** The requests one add_note call makes, or null when its schema or execution rejects it. */
+async function addNoteCalls(input: Record<string, unknown>) {
+  const fetch = stubFetch();
+  try {
+    await runTool(await loadTool("add_note"), input);
+  } catch {
+    return null;
+  }
+  return requests(fetch);
+}
+
+function looksUpThenPosts(calls: Awaited<ReturnType<typeof requests>> | null, customerId: string) {
+  if (calls === null) return false;
   const lookup = calls.findIndex((call) => {
     const url = new URL(call.url);
     return (
@@ -380,7 +401,7 @@ async function addNoteLooksUpFirst(): Promise<boolean> {
   });
   const post = calls.findIndex(
     (call) =>
-      call.method === "POST" && new URL(call.url).pathname === `/v1/customers/${customer.id}/notes`,
+      call.method === "POST" && new URL(call.url).pathname === `/v1/customers/${customerId}/notes`,
   );
   return lookup !== -1 && post > lookup;
 }

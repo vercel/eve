@@ -790,6 +790,7 @@ async function invoiceInput(tool: unknown, invoiceId: string) {
   const extras = Object.entries({
     reason: "Issued twice by mistake.",
     note: "Friendly reminder.",
+    message: "Friendly reminder.",
     tone: "friendly",
   });
   const extraSets = Array.from({ length: 2 ** extras.length }, (_, mask) =>
