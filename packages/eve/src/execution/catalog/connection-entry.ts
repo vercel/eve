@@ -23,7 +23,7 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { isApprovalRecheck, inheritApprovalContext } from "#approval/evaluation.js";
 import { approvalDecision } from "#approval/status.js";
-import type { AuthorizationSignal } from "#harness/authorization.js";
+import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
@@ -55,10 +55,11 @@ const CONNECTION_CHANGED_MESSAGE =
   "The connection for this tool call changed or is unavailable. Request a new tool call and approval.";
 
 /**
- * Connection instance each parked call was sent for approval against, keyed by
- * call id. When a person approves the call, it runs only if its connection
- * still resolves to that instance; a changed instance or a missing pin (the map
- * is bounded) rejects it.
+ * Connection instance each parked call was sent for approval against or
+ * stopped for sign-in on, keyed by call id. When the call runs after a person
+ * approves it or the sign-in completes, it runs only if its connection still
+ * resolves to that instance; a changed instance or a missing pin (the map is
+ * bounded) rejects it.
  */
 const ConnectionApprovalPinsKey = new ContextKey<Readonly<Record<string, string>>>(
   "eve.connectionApprovalPins",
@@ -144,6 +145,21 @@ async function callConnectionTool(
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
+  const result = await runConnectionTool(registry, connection, toolName, rawInput, options);
+  // The call runs again after the sign-in, and its approval recheck expects a pin.
+  if (connection.approval !== undefined && isAuthorizationSignal(result)) {
+    pinApprovedInstance(options.toolCallId, connection);
+  }
+  return result;
+}
+
+async function runConnectionTool(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  toolName: string,
+  rawInput: unknown,
+  options: ToolExecuteOptions,
+): Promise<unknown> {
   const session = await completeConnectionSignIn(registry, connection);
   const { auth, client, scoped } = session;
   const listing = await listConnectionTools(connection, session);
@@ -383,7 +399,7 @@ async function authorizeApprovalResponse(
   return await response(context);
 }
 
-/** Records the instance a parked call was first sent for approval against. */
+/** Records the instance a parked call was first sent for approval against or stopped on. */
 function pinApprovedInstance(callId: string, connection: ResolvedConnectionDefinition): void {
   const ctx = loadContext();
   if (ctx.get(ConnectionApprovalPinsKey)?.[callId] !== undefined) return;
