@@ -121,12 +121,11 @@ describe("eve channel commands", () => {
       ).json()) as { commands: { name: string }[] };
       return body.commands.map((command) => command.name);
     };
-    expect(await names({ auth: none() })).toEqual(["new", "clear", "compact", "cancel"]);
+    expect(await names({ auth: none() })).toEqual(["new", "clear", "compact"]);
     expect(await names({ auth: none(), commands: { escalate } })).toEqual([
       "new",
       "clear",
       "compact",
-      "cancel",
       "escalate",
     ]);
     expect(

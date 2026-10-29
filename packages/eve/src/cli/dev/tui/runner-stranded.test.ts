@@ -63,11 +63,10 @@ describe("EveTUIRunner with a stranded session", () => {
             {
               name: "new",
               description: "New",
-              arguments: "none",
               aliases: ["reset"],
               session: "required",
             },
-            { name: "clear", description: "Clear", arguments: "none", session: "required" },
+            { name: "clear", description: "Clear", session: "required" },
           ],
         });
       }
