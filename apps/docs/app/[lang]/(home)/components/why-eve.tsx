@@ -198,7 +198,7 @@ for (let attempt = 0; PARTICLES.length < particleCount && attempt < 2000; attemp
 function DataBoundary() {
   return (
     <Visual
-      caption="Data drifts through your runtime from right to left as rounded squares, in focus inside its frame. The models from OpenAI, Anthropic, and Google Gemini stack above and Vercel, the host, below; the data touches neither."
+      caption="Rounded squares represent data in your runtime, with model providers above and a hosting provider below. Choose your model routing and hosting infrastructure when self-hosting."
       scene={
         <>
           <defs>
@@ -348,8 +348,8 @@ export function WhyEve(): JSX.Element {
           title="Own your data"
           visual={<DataBoundary />}
         >
-          Your agent runs in a runtime you own, right next to your data. Vercel never sees it, you
-          decide who gets access, and nothing is stored.
+          Control where your agent runs and who can access it. Self-host with your own workflow
+          storage, sandbox provider, and model routing.
         </FeatureCard>
       </ul>
     </HomeSection>
