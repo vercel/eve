@@ -11,7 +11,11 @@ import type {
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
 export type { GitHubCoAuthor } from "./lib/github-shell.ts";
 export type { GitHubAuthorize, GitHubAuthorizeRequest } from "./lib/github-shell.ts";
-export type { GitHubAuth, GitHubAuthRequest } from "./lib/github-shell.ts";
+export type {
+  GitHubAuth,
+  GitHubAuthRequest,
+  GitHubInstallationDetail,
+} from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
 export type { GitHubAttribution } from "./lib/github-shell.ts";
 

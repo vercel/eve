@@ -1,9 +1,5 @@
 import { posix } from "node:path";
-import {
-  getToken,
-  type ConnectAuthorizationDetail,
-  type ConnectTokenParams,
-} from "@vercel/connect";
+import { getToken } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "eve/tools";
@@ -84,7 +80,14 @@ export interface GitHubAuthRequest {
   /** The `owner/name` repository the command declared. */
   readonly repository: string;
   /** Token params scoping the token to `repository`; pass them to `connect({ tokenParams })`. */
-  readonly tokenParams: { readonly authorizationDetails: ConnectAuthorizationDetail[] };
+  readonly tokenParams: { authorizationDetails: GitHubInstallationDetail[] };
+}
+
+/** The Connect `github_app_installation` authorization detail for one repository. */
+export interface GitHubInstallationDetail {
+  type: "github_app_installation";
+  org: string;
+  repositories: string[];
 }
 
 /**
@@ -107,7 +110,13 @@ interface GitHubShellDependencies {
   /** The calling tool's context, passed to `attribution`. */
   readonly context?: ToolContext;
   readonly auth?: SessionAuthContext | null;
-  readonly getConnectToken?: (connector: string, params: ConnectTokenParams) => Promise<string>;
+  readonly getConnectToken?: (
+    connector: string,
+    params: { authorizationDetails: GitHubInstallationDetail[]; subject: { type: "app" } },
+  ) => Promise<string>;
+  /** Resolves and re-authorizes user-scoped providers; the tool's `ctx.getToken` and `ctx.requireAuth`. */
+  readonly getToken?: ToolContext["getToken"];
+  readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
   /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
   readonly sessionId: string;
@@ -156,14 +165,14 @@ export async function executeGitHubShell(
   const repositories = repositoryNames(declaredRepositories, config.org);
   const repository = declaredRepositories[0]!;
   const auth = dependencies.auth ?? null;
-  const tokenParams = {
+  const tokenParams: GitHubAuthRequest["tokenParams"] = {
     authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
   };
   let userAuth: { provider: ToolAuthProvider; options: ToolAuthOptions } | undefined;
   let token: string;
   if (config.auth) {
-    if (!dependencies.context)
-      throw new Error("User-scoped GitHub access requires a tool context.");
+    if (!dependencies.getToken || !dependencies.requireAuth)
+      throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
     userAuth = {
       provider: config.auth({ connector: config.connector, repository, tokenParams }),
       // One auth key per repository keeps eve's per-step token cache from
@@ -171,7 +180,7 @@ export async function executeGitHubShell(
       // user, so only the first repository prompts a sign-in.
       options: { authKey: `github:${repository.toLowerCase().replace("/", ":")}` },
     };
-    ({ token } = await dependencies.context.getToken(userAuth.provider, userAuth.options));
+    ({ token } = await dependencies.getToken(userAuth.provider, userAuth.options));
   } else {
     token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
       ...tokenParams,
@@ -239,7 +248,7 @@ export async function executeGitHubShell(
   }
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
     // GitHub rejected the caller's token: evict it and sign the caller in again.
-    dependencies.context!.requireAuth(userAuth.provider, userAuth.options);
+    dependencies.requireAuth!(userAuth.provider, userAuth.options);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);

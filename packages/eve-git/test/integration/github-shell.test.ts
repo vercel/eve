@@ -162,16 +162,14 @@ test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401"
   const authRequests: unknown[] = [];
   const getTokenCalls: unknown[][] = [];
   const requireAuthCalls: unknown[][] = [];
-  const context = {
-    async getToken(...args: unknown[]) {
-      getTokenCalls.push(args);
-      return { token: "user-token" };
-    },
-    requireAuth(...args: unknown[]): never {
-      requireAuthCalls.push(args);
-      throw new Error("authorization required");
-    },
-  } as unknown as ToolContext;
+  const getToken: ToolContext["getToken"] = async (...args) => {
+    getTokenCalls.push(args);
+    return { token: "user-token" };
+  };
+  const requireAuth: ToolContext["requireAuth"] = (...args) => {
+    requireAuthCalls.push(args);
+    throw new Error("authorization required");
+  };
   const config = {
     ...CONFIG,
     auth: (request: unknown) => {
@@ -182,7 +180,8 @@ test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401"
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   let stderr = "";
   const dependencies = {
-    context,
+    getToken,
+    requireAuth,
     sessionId: "session-user-auth",
     async getConnectToken(): Promise<string> {
       throw new Error("user-scoped access must not mint app tokens");
