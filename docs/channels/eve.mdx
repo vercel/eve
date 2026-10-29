@@ -396,23 +396,26 @@ export default eveChannel({
 
 ### Slash commands
 
-`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. Declare a command with `defineCommand` from `eve/channels`:
+`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. Declare a command with `defineCommand` from `eve/channels`. This one hands the conversation to a person on the support team:
 
 ```ts title="agent/lib/commands.ts"
 import { defineCommand } from "eve/channels";
 
-import { openIssueCount } from "./issues";
+import { notifySupport } from "./support";
 
-export const triage = defineCommand({
-  description: "Triage open issues",
-  argumentHint: "[label]",
-  aliases: ["t"],
-  async run({ argument }) {
-    const label = argument || "all";
-    return {
-      message: `${await openIssueCount(label)} open issues labeled ${label}`,
-      send: `Triage the open issues labeled ${label}.`,
-    };
+export const escalate = defineCommand({
+  description: "Hand this conversation to a person on the support team",
+  argumentHint: "[reason]",
+  aliases: ["human"],
+  session: "required",
+  async run({ argument, caller, session }) {
+    await session.cancel();
+    await notifySupport({
+      sessionId: session.id,
+      requestedBy: caller?.principalId ?? "anonymous",
+      reason: argument || "No reason given",
+    });
+    return { message: "A teammate has been notified and will pick this up here." };
   },
 });
 ```
@@ -421,15 +424,15 @@ export const triage = defineCommand({
 import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
-import { triage } from "../lib/commands";
+import { escalate } from "../lib/commands";
 
 export default eveChannel({
   auth: [vercelOidc(), localDev()],
-  commands: { triage },
+  commands: { escalate },
 });
 ```
 
-The key is the command name, typed as `/triage`; `aliases` adds more names, such as `/t`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
+The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
 
 `run` receives:
 
@@ -437,18 +440,7 @@ The key is the command name, typed as `/triage`; `aliases` adds more names, such
 - `caller`: the route-auth result.
 - `session`: the client's current session, when it has one. `session.clear()`, `compact()`, `cancel()`, and `end()` apply as the caller and resolve once eve accepts them.
 
-Set `session: "required"` for a command that only makes sense in a conversation. `run` then always receives `session`, clients don't run the command before the first message, and the session-free route answers `409`:
-
-```ts
-export const clear = defineCommand({
-  description: "Clear the session context and keep the session",
-  session: "required",
-  async run({ session }) {
-    await session.clear();
-    return { message: "Clearing the session context." };
-  },
-});
-```
+`session: "required"` marks a command that only makes sense in a conversation, like `/escalate`. `run` then always receives `session`, clients don't run the command before the first message, and the session-free route answers `409`. Omit it for a command that works anywhere; `session` is then present only when the client has one.
 
 `run` returns an optional result:
 

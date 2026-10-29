@@ -28,30 +28,28 @@ Slack is deliberately out of scope for now; see [Later](#later).
 ```ts title="agent/lib/commands.ts"
 import { defineCommand } from "eve/channels";
 
-export const triage = defineCommand({
-  description: "Triage open issues",
-  argumentHint: "[label]",
-  aliases: ["t"],
-  run({ argument, caller, session }) {
-    return { message: "Triage queued", send: `Triage the issues labeled ${argument}.` };
-  },
-});
-
-export const clear = defineCommand({
-  description: "Clear the session context and keep the session",
+export const escalate = defineCommand({
+  description: "Hand this conversation to a person on the support team",
+  argumentHint: "[reason]",
+  aliases: ["human"],
   session: "required",
-  async run({ session }) {
-    await session.clear(); // `session` is typed as present
-    return { message: "Clearing the session context." };
+  async run({ argument, caller, session }) {
+    await session.cancel(); // `session` is typed as present
+    await notifySupport({
+      sessionId: session.id,
+      requestedBy: caller?.principalId ?? "anonymous",
+      reason: argument || "No reason given",
+    });
+    return { message: "A teammate has been notified and will pick this up here." };
   },
 });
 ```
 
 ```ts title="agent/channels/eve.ts"
-export default eveChannel({ auth, commands: { triage, clear } });
+export default eveChannel({ auth, commands: { escalate } });
 
 // After the second PR, omitting `commands` offers `sessionCommands`:
-export default eveChannel({ auth, commands: { ...sessionCommands, triage } });
+export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 ```
 
 **Commands and names**
@@ -119,8 +117,8 @@ export default eveChannel({ auth, commands: { ...sessionCommands, triage } });
 ## Extensions
 
 The eve channel is a single replaceable file, so an extension cannot add commands to it. Instead,
-an extension exports a commands record and the consumer spreads it in: `commands: { ...crm }`.
-The consumer keeps control of the names, so the `crm__` mount prefix doesn't apply. The cost is
+an extension exports a commands record and the consumer spreads it in: `commands: { ...support }`.
+The consumer keeps control of the names, so the `support__` mount prefix doesn't apply. The cost is
 that commands don't appear automatically when the extension is mounted.
 
 ## TODO
