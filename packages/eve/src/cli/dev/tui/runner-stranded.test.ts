@@ -88,7 +88,7 @@ describe("EveTUIRunner with a stranded session", () => {
 });
 
 describe("EveTUIRunner channel commands", () => {
-  it("offers the eve channel's commands and sends what a command returns", async () => {
+  it("offers the eve channel's commands and shows what a command returns", async () => {
     const commandRequests: unknown[] = [];
     const server = new FakeEveServer(reply("Done."), async (input, init) => {
       const path = new URL(String(input)).pathname;
@@ -99,6 +99,7 @@ describe("EveTUIRunner channel commands", () => {
             {
               name: "triage",
               description: "Triage issues",
+              arguments: "text",
               argumentHint: "[label]",
               session: "optional",
             },
@@ -107,7 +108,7 @@ describe("EveTUIRunner channel commands", () => {
       }
       if (path === "/eve/v1/commands/triage") {
         commandRequests.push(JSON.parse(String(init?.body)));
-        return Response.json({ ok: true, message: "Triage queued", send: "Triage the bugs." });
+        return Response.json({ ok: true, message: "Triage queued" });
       }
       return Response.json({ ok: false }, { status: 404 });
     });
@@ -135,9 +136,8 @@ describe("EveTUIRunner channel commands", () => {
 
     expect(commandRequests).toEqual([{ argument: "bugs" }]);
     expect(outcomes).toEqual([{ kind: "result", message: "Triage queued" }]);
-    expect(server.requestsTo("POST", "/eve/v1/session")[0]?.body).toMatchObject({
-      message: "Triage the bugs.",
-    });
+    // eve sends a command's follow-up itself; the TUI never posts one.
+    expect(server.requestsTo("POST", "/eve/v1/session")).toEqual([]);
   });
 
   it("runs a command in the current session and starts fresh after it ends the session", async () => {
@@ -147,11 +147,13 @@ describe("EveTUIRunner channel commands", () => {
       if (path === "/eve/v1/commands") {
         return Response.json({
           ok: true,
-          commands: [{ name: "restart", description: "Restart", session: "required" }],
+          commands: [
+            { name: "restart", description: "Restart", arguments: "none", session: "required" },
+          ],
         });
       }
       commandRuns.push(path);
-      return Response.json({ ok: true, message: "Restarted", controls: ["end"] });
+      return Response.json({ ok: true, message: "Restarted", ended: true });
     });
     vi.stubGlobal("fetch", server.fetch);
     const outcomes: unknown[] = [];

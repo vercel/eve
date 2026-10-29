@@ -405,6 +405,7 @@ import { notifySupport } from "./support";
 
 export const escalate = defineCommand({
   description: "Hand this conversation to a person on the support team",
+  arguments: "text",
   argumentHint: "[reason]",
   aliases: ["human"],
   session: "required",
@@ -432,7 +433,7 @@ export default eveChannel({
 });
 ```
 
-The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. A command without an `argumentHint` takes no argument, so clients run it only when it's typed alone and send `/name some text` as an ordinary message. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
+The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. `arguments: "text"` lets text follow the name; `argumentHint` only displays its shape. A command with the default `arguments: "none"` runs only when it's typed alone: clients send `/name some text` as an ordinary message, and the route answers `400`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
 
 `run` receives:
 
@@ -445,9 +446,11 @@ The key is the command name, typed as `/escalate the refund failed twice`; `alia
 `run` returns an optional result:
 
 - `message` is shown to the caller.
-- `send` is submitted as the caller's next message through the normal message route, so `onMessage` and session auth apply to it as they would to typed input.
+- `send` continues the conversation as the caller. eve delivers it into the command's session through the same path as a typed follow-up, so `onMessage` and session auth apply, and the turn arrives on the session's stream. Only a command that received a `session` can return `send`; a session-free command that tries fails with a `500`.
 
-Return nothing for a command that only has side effects. Every command route uses the channel's `auth` policy. A session-scoped command checks the same thing as the other session routes: the caller passes `auth` and names the session. `GET /eve/v1/commands` returns `{ ok: true, commands: [{ name, description, argumentHint?, aliases?, session }] }`. Both run routes accept `{ argument?: string }` (at most 8,192 characters) and return `{ ok: true, message?, send?, controls? }`. `controls` lists the session controls the command applied (`cancel`, `clear`, `compact`, `end`) so a client can update its view; the terminal UI starts a fresh conversation after `end`. An unknown name or alias returns `404`. A stranded or inactive session returns the same `409` as the other session routes. When `run` throws, the route logs the error and returns a generic `500` with an `errorId`. The TypeScript client exposes the routes as `client.commands()` and `client.runCommand(name, { argument, sessionId })`.
+Return nothing for a command that only has side effects. Every command route uses the channel's `auth` policy. A session-scoped command checks the same thing as the other session routes, that the caller passes `auth` and names the session, and answers `404` for a session that doesn't exist before `run` reads its ID. `GET /eve/v1/commands` returns `{ ok: true, commands: [{ name, description, arguments, argumentHint?, aliases?, session }] }`. Both run routes accept `{ argument?: string }` (at most 8,192 characters) and return `{ ok: true, message?, delivery?, ended? }`. `delivery` is the receipt for the message `send` delivered, and `ended` reports that the command ended the session, so a client starts a new one; the terminal UI does. Clears and compactions show up on the session's stream. An unknown name or alias returns `404`. A stranded or inactive session returns the same `409` as the other session routes. When `run` throws, the route logs the error and returns a generic `500` with an `errorId`. The TypeScript client exposes the routes as `client.commands()` and `client.runCommand(name, { argument, sessionId })`.
+
+These routes are the user-facing layer over the session's controls. `POST /eve/v1/session/:sessionId/clear` and the other control routes, and `session.clear()` in the client, stay the low-level API.
 
 ### Turn context
 

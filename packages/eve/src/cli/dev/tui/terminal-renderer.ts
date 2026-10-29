@@ -3418,11 +3418,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return this.#logs;
   }
 
-  showCancelling(): void {
-    this.#cancelRequested = true;
-    this.#paint();
-  }
-
   /** Replaces the commands typeahead and submission recognize, such as after the agent reloads. */
   setPromptCommands(commands: readonly PromptCommandSpec[]): void {
     this.#availablePromptCommands = commands;

@@ -31,9 +31,10 @@ export interface CommandContext {
 }
 
 /**
- * What a command leaves for the caller. `message` is shown only to the caller. `send` continues
- * the conversation as the caller: the terminal UI submits it as the caller's next message, so the
- * channel's message policy applies to it. Return nothing for a command that only has side effects.
+ * What a command leaves for the caller. `message` is shown only to the caller. `send` continues the
+ * conversation as the caller: eve delivers it into the command's session as the caller's next
+ * message, through the same `onMessage` path as typed input. Only a command that received a
+ * `session` may return `send`. Return nothing for a command that only has side effects.
  */
 export interface CommandResult {
   readonly message?: string;
@@ -44,10 +45,11 @@ interface CommandMetadata {
   /** One-line description shown in command discovery. */
   readonly description: string;
   /**
-   * Argument shape shown after the name, such as `"[reason]"`. A command without one takes no
-   * argument: clients run it only when it's typed alone, so a message that happens to start with
-   * its name stays a message.
+   * Whether the command takes text after its name. With `"none"`, the default, clients run it only
+   * when it's typed alone, so a message that happens to start with its name stays a message.
    */
+  readonly arguments?: "none" | "text";
+  /** Argument shape shown after the name, such as `"[reason]"`. Display only. */
   readonly argumentHint?: string;
   /** Other names that run this command, such as `["reset"]` for `new`. */
   readonly aliases?: readonly string[];
@@ -56,10 +58,7 @@ interface CommandMetadata {
 
 type CommandRun<TContext> = (ctx: TContext) => void | CommandResult | Promise<void | CommandResult>;
 
-/**
- * A slash command a channel offers, such as through `eveChannel({ commands })`. The definition
- * doesn't depend on a channel, so other channels can offer the same commands.
- */
+/** A slash command the eve channel offers its clients through `eveChannel({ commands })`. */
 export interface CommandDefinition extends CommandMetadata {
   /**
    * `"required"` limits the command to a conversation: `run` always receives `session`, and
@@ -72,7 +71,7 @@ export interface CommandDefinition extends CommandMetadata {
 /** Commands keyed by name, without the slash. */
 export type CommandDefinitions = Readonly<Record<string, CommandDefinition>>;
 
-/** Declares a slash command for one or more channels' `commands`. */
+/** Declares a slash command for `eveChannel({ commands })`. */
 export function defineCommand(
   definition: CommandMetadata & {
     readonly session: "required";
@@ -93,7 +92,7 @@ const COMMAND_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
 
 /**
  * Rejects names a person cannot type as `/name`, and names or aliases two commands share. The
- * 32-character cap matches Slack's, so the same commands can move to other channels.
+ * 32-character cap matches Slack's slash commands.
  */
 export function assertCommandNames(
   channel: string,
@@ -145,7 +144,15 @@ export class CommandNeedsSessionError extends Error {
   }
 }
 
-/** Runs a command and keeps only the fields of its result a client reads. */
+/** Thrown when text follows a command that takes no argument. */
+export class CommandTakesNoArgumentError extends Error {
+  constructor(commandName: string) {
+    super(`/${commandName} takes no argument.`);
+    this.name = "CommandTakesNoArgumentError";
+  }
+}
+
+/** Runs a command and keeps only the fields of its result a channel acts on. */
 export async function runCommand(
   found: { readonly name: string; readonly command: CommandDefinition },
   ctx: CommandContext,
@@ -153,10 +160,18 @@ export async function runCommand(
   if (found.command.session === "required" && ctx.session === undefined) {
     throw new CommandNeedsSessionError(found.name);
   }
+  if ((found.command.arguments ?? "none") === "none" && ctx.argument !== "") {
+    throw new CommandTakesNoArgumentError(found.name);
+  }
   const result = await found.command.run(ctx);
   const normalized: { message?: string; send?: string } = {};
   if (typeof result?.message === "string") normalized.message = result.message;
   if (typeof result?.send === "string" && result.send.trim().length > 0) {
+    if (ctx.session === undefined) {
+      throw new Error(
+        `/${found.name} returned \`send\` without a session. Only a command that received a session can send; mark it session: "required".`,
+      );
+    }
     normalized.send = result.send;
   }
   return normalized;

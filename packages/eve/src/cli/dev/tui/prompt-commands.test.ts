@@ -167,11 +167,12 @@ describe("withChannelPromptCommands", () => {
       {
         name: "standup",
         description: "Draft a standup",
+        arguments: "text",
         argumentHint: "[topic]",
         aliases: ["su", "quit"],
         session: "optional",
       },
-      { name: "new", description: "Shadows /new", session: "required" },
+      { name: "new", description: "Shadows /new", arguments: "none", session: "required" },
     ]);
     expect(parsePromptCommand("/standup  today ", commands)).toEqual({
       type: "channel",
@@ -191,11 +192,18 @@ describe("withChannelPromptCommands", () => {
   });
 });
 
-describe("withChannelPromptCommands without an argument hint", () => {
+describe("withChannelPromptCommands for a command without arguments", () => {
   it("matches the command only alone and keeps agent text to one plain line", () => {
     const [clear] = withChannelPromptCommands(
       [],
-      [{ name: "clear", description: "Clear\u001b[31m it\nsecond line", session: "required" }],
+      [
+        {
+          name: "clear",
+          description: "Clear\u001b[31m it\nsecond line",
+          arguments: "none",
+          session: "required",
+        },
+      ],
     );
     expect(clear?.description).toBe("Clear it");
     expect(parsePromptCommand("/clear", [clear!])).toMatchObject({
