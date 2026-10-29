@@ -779,7 +779,7 @@ export function SessionTimeline(): JSX.Element {
               // Messages only animate in during a replay, including the last one as it ends;
               // shown in full, they're simply there.
               className={cn(
-                "m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-28 [&>li:first-child]:mt-auto",
+                "m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-4 md:pb-28 [&>li:first-child]:mt-auto",
                 !playing && !ended && "[&_*]:animate-none [&>*]:animate-none",
               )}
               ref={contentRef}
@@ -864,10 +864,11 @@ export function SessionTimeline(): JSX.Element {
           </div>
         </div>
       </AppWindow>
-      {/* The channel picker stays open, so every conversation is one click away. */}
+      {/* The channel picker stays open, so every conversation is one click away. Below md it
+          gives way to the logo tabs beside the demo control. */}
       <div
         aria-label="Channel"
-        className="absolute -bottom-6 -left-2 z-10 flex w-60 flex-col p-1.5 material-menu md:-left-6 lg:-bottom-12 lg:-left-12"
+        className="absolute -bottom-6 -left-6 z-10 hidden w-60 flex-col p-1.5 material-menu md:flex lg:-bottom-12 lg:-left-12"
         role="radiogroup"
       >
         {CONVERSATIONS.map((c) => {
@@ -888,11 +889,33 @@ export function SessionTimeline(): JSX.Element {
           );
         })}
       </div>
-      <DemoButton
-        className="absolute top-full right-0 mt-4"
-        onClick={playing ? stop : play}
-        playing={playing}
-      />
+      <div className="absolute inset-x-0 top-full mt-4 flex items-center justify-between md:justify-end">
+        {/* On small screens the channels are just their logos, as quiet tabs. */}
+        <div aria-label="Channel" className="flex gap-1 md:hidden" role="radiogroup">
+          {CONVERSATIONS.map((c) => {
+            const selected = c.id === platform;
+            return (
+              <button
+                aria-checked={selected}
+                aria-label={c.label}
+                className={cn(
+                  "flex size-9 cursor-pointer items-center justify-center rounded-md transition-colors [&>svg]:size-4",
+                  selected
+                    ? "bg-gray-alpha-200 text-gray-1000"
+                    : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
+                )}
+                key={c.id}
+                onClick={() => pick(c.id)}
+                role="radio"
+                type="button"
+              >
+                {c.logo("size-4")}
+              </button>
+            );
+          })}
+        </div>
+        <DemoButton onClick={playing ? stop : play} playing={playing} />
+      </div>
     </figure>
   );
 }
