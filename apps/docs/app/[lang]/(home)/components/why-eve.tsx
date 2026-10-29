@@ -89,13 +89,20 @@ function AgentUi() {
               {/* The fill hides overlapping contours and the inner half of the stroke, leaving
                   a 0.5px outer outline. Back windows' logos get the same treatment as the name;
                   the front window shows the filled Next.js mark as the visual's accent. */}
-              <div className="flex items-center gap-[0.35em] whitespace-nowrap font-bold text-[1.25em] text-gray-700 tracking-[-0.01em] [-webkit-text-fill-color:var(--ds-background-100)] [-webkit-text-stroke:1px_currentColor] [paint-order:stroke_fill]">
+              <div className="flex items-center gap-[0.35em] whitespace-nowrap font-bold text-[1.25em] text-gray-700 tracking-[-0.01em]">
                 {back ? (
                   <Logo className="size-[0.9em] shrink-0 overflow-visible fill-background-100 stroke-current [paint-order:stroke_fill] [stroke-width:1px] [vector-effect:non-scaling-stroke] [&_path]:[vector-effect:non-scaling-stroke]" />
                 ) : (
                   <Logo className="size-[0.9em] shrink-0 text-gray-1000" />
                 )}
-                {name}
+                {/* Safari ignores paint-order on HTML text, so the fill is a second, unstroked copy
+                    laid over the stroked one. */}
+                <span className="relative [-webkit-text-fill-color:var(--ds-background-100)]">
+                  <span className="[-webkit-text-stroke:1px_currentColor]">{name}</span>
+                  <span aria-hidden className="absolute inset-0">
+                    {name}
+                  </span>
+                </span>
               </div>
               <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
               <div className="mt-px h-[3.625em] shrink-0 rounded-[3px] bg-linear-to-b from-gray-200 to-background-100" />
