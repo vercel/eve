@@ -9,7 +9,9 @@ import {
   ChannelCommandListSchema,
   type ChannelCommandResult,
   ChannelCommandResultSchema,
+  CommandResponseError,
 } from "#client/commands.js";
+import type { z } from "#compiled/zod/index.js";
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { HealthResponseError } from "#client/health-response-error.js";
 import { HealthResultSchema } from "#client/health-schema.js";
@@ -144,12 +146,13 @@ export class Client {
    *
    * @throws {ClientError} If the server returns a non-successful status, including 404 from a
    * server that predates channel commands.
+   * @throws {CommandResponseError} If a successful response's body is not a command list.
    */
   async commands(
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<readonly ChannelCommandInfo[]> {
-    const payload = await this.#readJson(EVE_COMMANDS_ROUTE_PATH, options);
-    return ChannelCommandListSchema.parse(payload).commands;
+    const payload = await this.#readCommandJson(EVE_COMMANDS_ROUTE_PATH, options);
+    return parseCommandResponse(ChannelCommandListSchema, payload).commands;
   }
 
   /**
@@ -159,6 +162,7 @@ export class Client {
    *
    * @throws {ClientError} If the command is unknown, needs a session it didn't get, the caller is
    * unauthorized, the session can't take it, or it fails.
+   * @throws {CommandResponseError} If a successful response's body is not a command result.
    */
   async runCommand(
     name: string,
@@ -173,13 +177,13 @@ export class Client {
       options.sessionId === undefined
         ? `${EVE_COMMANDS_ROUTE_PATH}/${command}`
         : `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(options.sessionId)}/commands/${command}`;
-    const payload = await this.#readJson(path, {
+    const payload = await this.#readCommandJson(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ argument: options.argument ?? "" }),
       signal: options.signal,
     });
-    const { message, send, controls } = ChannelCommandResultSchema.parse(payload);
+    const { message, send, controls } = parseCommandResponse(ChannelCommandResultSchema, payload);
     const result: { message?: string; send?: string; controls?: typeof controls } = {};
     if (message !== undefined) result.message = message;
     if (send !== undefined) result.send = send;
@@ -204,12 +208,16 @@ export class Client {
   // Internal
   // ---------------------------------------------------------------------------
 
-  async #readJson(path: string, init: RequestInit): Promise<unknown> {
+  async #readCommandJson(path: string, init: RequestInit): Promise<unknown> {
     const response = await this.fetch(path, init);
     if (!response.ok) {
       throw createClientError(response.status, await response.text(), response.headers);
     }
-    return await response.json();
+    try {
+      return await response.json();
+    } catch {
+      throw new CommandResponseError();
+    }
   }
 
   async #resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers> {
@@ -277,6 +285,17 @@ export class Client {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function parseCommandResponse<T>(schema: z.ZodType<T>, payload: unknown): T {
+  const result = schema.safeParse(payload);
+  if (result.success) return result.data;
+  throw new CommandResponseError(
+    result.error.issues.slice(0, 5).map((issue) => {
+      const path = issue.path.join(".");
+      return path.length === 0 ? issue.message : `${path}: ${issue.message}`;
+    }),
+  );
+}
 
 async function resolveTokenValue(value: TokenValue): Promise<string> {
   return typeof value === "function" ? value() : value;

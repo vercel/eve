@@ -432,7 +432,7 @@ export default eveChannel({
 });
 ```
 
-The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
+The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. A command without an `argumentHint` takes no argument, so clients run it only when it's typed alone and send `/name some text` as an ordinary message. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
 
 `run` receives:
 

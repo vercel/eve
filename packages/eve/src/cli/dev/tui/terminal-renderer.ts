@@ -3426,6 +3426,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Replaces the commands typeahead and submission recognize, such as after the agent reloads. */
   setPromptCommands(commands: readonly PromptCommandSpec[]): void {
     this.#availablePromptCommands = commands;
+    // An open composer re-matches what's typed, so a dropped command stops being offered.
+    if (this.#inputActive) this.#syncTypeahead(this.#inputText);
+    this.#paint();
   }
 
   /**

@@ -37,6 +37,7 @@
   "ClientSessionState",
   "ClientSessionStrandedError",
   "ClientSessions",
+  "CommandResponseError",
   "ConversationAgentSession",
   "ConversationState",
   "CreateSessionOptions",

@@ -43,7 +43,11 @@ export interface CommandResult {
 interface CommandMetadata {
   /** One-line description shown in command discovery. */
   readonly description: string;
-  /** Argument shape shown after the name, such as `"[label]"`. */
+  /**
+   * Argument shape shown after the name, such as `"[reason]"`. A command without one takes no
+   * argument: clients run it only when it's typed alone, so a message that happens to start with
+   * its name stays a message.
+   */
   readonly argumentHint?: string;
   /** Other names that run this command, such as `["reset"]` for `new`. */
   readonly aliases?: readonly string[];
