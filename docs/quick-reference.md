@@ -15,6 +15,18 @@ npm run typecheck && npm run build
 
 `agent/instructions.md` is the system prompt and `agent/agent.ts` sets the model. Add files only for what you need. Install other packages you import, such as `@vercel/connect`, with `npm install`. See [Getting Started](./getting-started.mdx) and [Agent Files](./reference/agent-files.md).
 
+## Look up a type when typecheck leaves a question open
+
+When a type error or an option isn't covered here, look the export up in `SOURCE_MAP.json` instead of searching `dist/`. It sits next to this page in the installed package and maps every public export to the import paths that export it, the `.d.ts` line that declares it (starting at its JSDoc), and the module that implements it. The file is large, so grep for the exact name and read only the declaration it points to:
+
+```bash
+grep '"ToolContext"' node_modules/eve/docs/SOURCE_MAP.json
+# "ToolContext": [{"import":["eve/tools"],"kind":"type","types":"dist/src/tools/definition.d.ts:<line>"}]
+sed -n '<line>,+60p' node_modules/eve/dist/src/tools/definition.d.ts
+```
+
+The implementation files are minified, so the `.d.ts` declaration and its JSDoc are the useful part.
+
 ## Know what an agent can do by default
 
 Every agent, including each subagent, starts with eve's optional default tools: `bash`, `read_file`, and `write_file` in its own sandbox, `web_fetch`, `web_search` (for supported providers), and, on the root only, `agent`, which delegates to a copy of the root. Set `defaultTools: false` in `agent.ts` to remove them, then add back only what you need, such as `export { default } from "eve/tools/bash";` in `agent/tools/bash.ts`. The catalog tools `eve__search`, `eve__tool`, and `eve__skill` appear whenever the agent has connections or skills to reach. A subagent never inherits its parent's tools, connections, or skills. See [Built-in Tools](./concepts/built-in-tools.md).

@@ -599,7 +599,7 @@
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
+    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ./scripts/generate-source-map.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "node ./scripts/build-js.mjs",
     "build:types": "tsc -p tsconfig.build.json",
