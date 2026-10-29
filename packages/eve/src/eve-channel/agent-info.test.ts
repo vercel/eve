@@ -8,15 +8,15 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { attachAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
 import { EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 
-const caller = (principalType: string, allowAgentInfo?: boolean): EveAuthFn => {
-  return () => ({
+const caller =
+  (principalType: string, allowAgentInfo?: boolean): EveAuthFn =>
+  () => ({
+    allowAgentInfo,
     attributes: {},
     authenticator: "test",
     principalId: "caller",
     principalType,
-    ...(allowAgentInfo === undefined ? {} : { allowAgentInfo }),
   });
-};
 
 afterEach(() => {
   vi.unstubAllEnvs();
