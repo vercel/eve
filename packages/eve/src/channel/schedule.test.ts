@@ -310,7 +310,7 @@ describe("ScheduleDispatcher", () => {
       }
     });
     // https://github.com/vercel/eve/issues/5598
-    it.fails("tags to() sends with the Vercel deployment running the schedule", async () => {
+    it("tags to() sends with the Vercel deployment running the schedule", async () => {
       vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
       try {
         const runtime = createMockRuntime();
