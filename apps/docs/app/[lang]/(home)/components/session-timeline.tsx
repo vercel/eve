@@ -630,19 +630,27 @@ export function SessionTimeline(): JSX.Element {
       return;
     }
     setTyping(false);
-    const show = setTimeout(
-      () => {
-        setTypingAuthor(next.kind === "message" ? AUTHORS[next.author] : undefined);
-        setTyping(next.kind === "message");
-      },
-      Math.min(500, next.delay * 0.4),
+    // The first message opens the conversation on its own, shortly after the start: a typing
+    // indicator alone in an empty window reads as nothing happening.
+    const first = count === 0;
+    const show = first
+      ? undefined
+      : setTimeout(
+          () => {
+            setTypingAuthor(next.kind === "message" ? AUTHORS[next.author] : undefined);
+            setTyping(next.kind === "message");
+          },
+          Math.min(500, next.delay * 0.4),
+        );
+    const timer = setTimeout(
+      () => setCount((n) => n + 1),
+      first ? Math.min(300, next.delay) : next.delay,
     );
-    const timer = setTimeout(() => setCount((n) => n + 1), next.delay);
     return () => {
       clearTimeout(show);
       clearTimeout(timer);
     };
-  }, [playing, next]);
+  }, [playing, next, count]);
 
   // Before paint: the full conversation opens at its start; a replay snaps to its end, so the
   // newest line always settles clear of the dock, then glides there from where the content was
