@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { copyView, emptySessionView } from "#protocol/session-projection/fold.js";
-import type { CallRow } from "#protocol/session-projection/tables.js";
+import type { CallRow, SessionView } from "#protocol/session-projection/tables.js";
 import { applyValueDelta, diffValue, snapshotValue } from "#shared/value-delta.js";
 
 describe("value deltas", () => {
@@ -54,10 +54,10 @@ describe("value deltas", () => {
   it.fails("carry one added row of a session projection table, not the whole table", () => {
     const base = emptySessionView();
     for (let index = 0; index < 100; index++) {
-      base.calls[`call_${index}`] = settledCall(`call_${index}`, `Alice's report ${index}`);
+      settleCall(base, `call_${index}`, `Alice's report ${index}`);
     }
     const next = copyView(base);
-    next.calls.call_100 = settledCall("call_100", "Bob's reply");
+    settleCall(next, "call_100", "Bob's reply");
 
     const delta = diffValue(snapshotValue(base), next);
 
@@ -66,8 +66,9 @@ describe("value deltas", () => {
   });
 });
 
-function settledCall(callId: string, output: string): CallRow {
-  return {
+/** Adds a settled call to `view` in place, as a fold does. */
+function settleCall(view: SessionView, callId: string, output: string): void {
+  (view.calls as Record<string, CallRow>)[callId] = {
     callId,
     capability: { kind: "tool", name: "search_notes" },
     introducedAt: 1,
