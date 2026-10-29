@@ -52,8 +52,8 @@ export class CommandResponseError extends EveError {
 
 /**
  * Reads `/name argument` as one of `commands`, by name or alias. Returns `undefined` for anything
- * else, including text after a command whose `arguments` is `"none"`; a client should send those
- * as ordinary messages.
+ * else, including text after a command without `input`; a client should send those as ordinary
+ * messages.
  */
 export function parseSlashCommand(
   text: string,
@@ -67,7 +67,7 @@ export function parseSlashCommand(
   );
   const argument = (match[2] ?? "").trim();
   // A command that takes no arguments stays a message when text follows it: "/clear the cache".
-  if (command === undefined || (command.arguments === "none" && argument !== "")) {
+  if (command === undefined || (command.input === undefined && argument !== "")) {
     return undefined;
   }
   return { command, argument };

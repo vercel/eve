@@ -238,7 +238,7 @@ After `end()`, call `newSession()` to clear the retired conversation. With `prew
 
 ## Slash commands
 
-An agent can offer slash commands through its [eve channel's `commands`](../../channels/eve#slash-commands); the default channel offers `/new`, `/clear`, `/compact`, and `/cancel`. `commands()` lists them, and `parseSlashCommand` from `eve/client` reads typed text as one of them:
+An agent can offer slash commands through its [eve channel's `commands`](../../channels/eve#slash-commands); the default channel offers `/new`, `/clear`, and `/compact`. Cancelling stays with your UI, through `cancel()`. `commands()` lists them, and `parseSlashCommand` from `eve/client` reads typed text as one of them:
 
 ```tsx
 import { parseSlashCommand, type ChannelCommandInfo } from "eve/client";
