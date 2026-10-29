@@ -191,10 +191,8 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     text: stepOutput,
     ...(delivered && { output: finalOutput }),
   };
-  return decideAfterModel(
-    step,
-    { lastStep, unread: responseTail.at(-1)?.role === "tool" },
-    (settling, output) => settleTurn(settling, { result, stepOutput: toText(output) }),
+  return decideAfterModel(step, lastStep, (settling, output) =>
+    settleTurn(settling, { result, stepOutput: toText(output) }),
   );
 }
 

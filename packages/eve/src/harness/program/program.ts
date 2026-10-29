@@ -1,3 +1,4 @@
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { JsonValue } from "#shared/json.js";
 
 // A session program is a function of the session that says what should happen next. eve
@@ -34,9 +35,20 @@ export interface ProgramTurn {
   readonly lastStep?: ModelStep;
 }
 
+/** Where eve has to shrink the history: what asked, and eve's own way of doing it. */
+export interface Compaction {
+  /** `automatic`: the prompt eve measured is over the threshold. `manual`: `session.compact()`. */
+  readonly reason: "automatic" | "manual";
+  /** eve's compaction: older turns become a summary checkpoint, and recent ones stay whole. */
+  native(history: readonly HarnessModelMessage[]): Promise<HarnessModelMessage[]>;
+}
+
 export interface ProgramContext {
   /** The running turn, or `null` between turns. */
   readonly turn: ProgramTurn | null;
+  readonly history: readonly HarnessModelMessage[];
+  /** Present where eve has to shrink the history. */
+  readonly compaction?: Compaction;
   readonly tasks: { readonly working: readonly string[] };
   readonly signal: AbortSignal | undefined;
 }
@@ -52,7 +64,14 @@ export type Next =
    */
   | { readonly settle: { readonly output: JsonValue | null } };
 
+/** What a program says should be true. A field it leaves out is eve's own. */
 export interface Plan {
+  /**
+   * The history the session keeps. eve reads it only where it has to shrink the history, inside
+   * the context change it opens there, and checks it unless it's what `compaction.native`
+   * returned.
+   */
+  readonly history?: Lazy<readonly HarnessModelMessage[]>;
   readonly next?: Lazy<Next>;
 }
 

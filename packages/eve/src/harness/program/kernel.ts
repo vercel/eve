@@ -8,13 +8,22 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
+import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { checkHistory } from "./check.js";
 import { nativeNext, nativeProgram } from "./native.js";
-import { force, type ModelStep, type Next, type ProgramContext } from "./program.js";
+import {
+  type Compaction,
+  force,
+  type ModelStep,
+  type Next,
+  type Program,
+  type ProgramContext,
+} from "./program.js";
 
 // The kernel side of a program: eve asks it where it decides, then applies the answer through
 // the rules no program can change. A turn doesn't end while its tasks work, a note needs to say
-// something, a turn gets a bounded number of notes, and a failing program fails the turn with a
-// message that doesn't reveal why.
+// something, a turn gets a bounded number of notes, a history passes eve's checks, and a failing
+// program fails with a message that doesn't reveal why. A field the program leaves out is eve's.
 
 const log = createLogger("harness.program");
 
@@ -34,34 +43,46 @@ export type Settle = (step: Step, output: JsonValue | null) => Promise<StepResul
 
 /** What eve knows where it decides, beyond the session itself. */
 interface Decision {
-  readonly lastStep: ModelStep;
-  readonly unread: boolean;
+  readonly lastStep?: ModelStep;
+  /** The history the decision is about, where it isn't the session's: a request's. */
+  readonly history?: readonly HarnessModelMessage[];
+  readonly compaction?: Compaction;
 }
 
 function programContext(step: Step, decision: Decision): ProgramContext {
-  const turnId = step.position().turnId;
+  const turnId = activeTurnIdOf(step.view().projection);
+  const history = decision.history ?? step.session.history;
   return {
+    ...(decision.compaction !== undefined && { compaction: decision.compaction }),
+    history,
     signal: step.config.abortSignal,
     tasks: { working: workingTaskIds(step.session) },
-    turn: {
-      continuations: continuationsOf(step.session.history, turnId),
-      id: turnId,
-      lastStep: decision.lastStep,
-      unread: decision.unread,
-    },
+    turn:
+      turnId === undefined
+        ? null
+        : {
+            continuations: continuationsOf(step.session.history, turnId),
+            id: turnId,
+            ...(decision.lastStep !== undefined && { lastStep: decision.lastStep }),
+            unread: history.at(-1)?.role === "tool",
+          },
   };
+}
+
+function programOf(step: Step): Program {
+  return step.config.program ?? nativeProgram;
 }
 
 /** Asks the session's program what the turn does after a model step, and does it. */
 export async function decideAfterModel(
   step: Step,
-  decision: Decision,
+  lastStep: ModelStep,
   settle: Settle,
 ): Promise<StepResult> {
-  const ctx = programContext(step, decision);
+  const ctx = programContext(step, { lastStep });
   let next: Next;
   try {
-    next = (await force((step.config.program ?? nativeProgram)(ctx).next)) ?? { model: {} };
+    next = (await force(programOf(step)(ctx).next)) ?? nativeNext(ctx);
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
     log.error("the session program threw; failing the turn", { error, turnId: ctx.turn?.id });
@@ -110,6 +131,54 @@ async function applyNext(
     return await settle(step, next.settle.output);
   }
   return await invalid(step, "returned a next step eve doesn't know");
+}
+
+/**
+ * The history the session's program keeps where eve has to shrink it, inside the change eve
+ * opened. eve's own compaction's result applies as it is, and its failures are its own; anything
+ * else the program returns is checked first, and a program that throws fails the change with a
+ * message that doesn't reveal why.
+ */
+export async function programHistory(
+  step: Step,
+  input: {
+    readonly messages: readonly HarnessModelMessage[];
+    readonly reason: Compaction["reason"];
+    readonly limit: number;
+    readonly native: (history: HarnessModelMessage[]) => Promise<HarnessModelMessage[]>;
+  },
+): Promise<HarnessModelMessage[]> {
+  const natives = new WeakSet<object>();
+  const failures = new WeakSet<object>();
+  const compaction: Compaction = {
+    native: async (history) => {
+      try {
+        const compacted = await input.native([...history]);
+        natives.add(compacted);
+        return compacted;
+      } catch (error) {
+        if (typeof error === "object" && error !== null) failures.add(error);
+        throw error;
+      }
+    },
+    reason: input.reason,
+  };
+  const ctx = programContext(step, { compaction, history: input.messages });
+  let history: readonly HarnessModelMessage[] | undefined;
+  try {
+    history = await force(programOf(step)(ctx).history ?? (() => compaction.native(ctx.history)));
+  } catch (error) {
+    throwIfTurnAborted(step.config.abortSignal);
+    if (typeof error === "object" && error !== null && failures.has(error)) throw error;
+    log.error("the session program's history threw", { error, turnId: ctx.turn?.id });
+    throw new Error(PROGRAM_FAILED.message, { cause: error });
+  }
+  if (history === undefined) return [...input.messages];
+  if (natives.has(history)) return history as HarnessModelMessage[];
+  return checkHistory(input.messages, history, {
+    automatic: input.reason === "automatic",
+    limit: input.limit,
+  });
 }
 
 async function invalid(step: Step, reason: string): Promise<StepResult> {

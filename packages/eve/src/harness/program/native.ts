@@ -13,4 +13,7 @@ export function nativeNext({ turn }: Pick<ProgramContext, "turn">): Next {
   return { settle: { output: last.endsTurn ? null : last.text } };
 }
 
-export const nativeProgram: Program = (ctx) => ({ next: () => nativeNext(ctx) });
+export const nativeProgram: Program = (ctx) => ({
+  history: () => (ctx.compaction === undefined ? ctx.history : ctx.compaction.native(ctx.history)),
+  next: () => nativeNext(ctx),
+});

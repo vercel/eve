@@ -30,6 +30,7 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
+import { programHistory } from "#harness/program/kernel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
@@ -209,15 +210,6 @@ export interface HistoryRewriteContext {
   readonly summarize: CompactionSummarizer;
 }
 
-/** Rewrites the history under an open change: eve's default summarizes older turns. */
-export type HistoryRewrite = (
-  messages: HarnessModelMessage[],
-  ctx: HistoryRewriteContext,
-) => Promise<readonly ModelMessage[]>;
-
-const defaultRewrite: HistoryRewrite = (messages, ctx) =>
-  compactMessages(messages, ctx.config, ctx.summarize, ctx.force, ctx.historyTokens);
-
 /**
  * Rewrites `messages` under an announced change, then settles it and its summary run and replaces
  * the session's history. The run opens with its first summary call unless it's already open: the
@@ -271,10 +263,20 @@ async function rewriteHistory(
     // compaction fails before it rewrites the history the capture couldn't keep.
     const captureFailure = takeCompactionCaptureFailure(step.ctx);
     if (captureFailure !== undefined) throw captureFailure;
-    rewritten = await defaultRewrite(
-      validateHarnessModelMessages(input.messages),
-      historyContext(step.session, { ...input, summarize }),
-    );
+    const rewrite = historyContext(step.session, { ...input, summarize });
+    rewritten = await programHistory(step, {
+      limit: rewrite.config.threshold,
+      messages: validateHarnessModelMessages(input.messages),
+      native: (history) =>
+        compactMessages(
+          history,
+          rewrite.config,
+          rewrite.summarize,
+          rewrite.force,
+          rewrite.historyTokens,
+        ) as Promise<HarnessModelMessage[]>,
+      reason: input.force ? "manual" : "automatic",
+    });
   } catch (error) {
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
