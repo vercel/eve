@@ -49,6 +49,8 @@ export default defineAgent({
 
 The package must export a default factory or `createWorld()` function. Read credentials and host options from runtime environment variables. Install a world built against the same `@workflow/*` line as your eve release. The current line is `5.0.0-beta`, and the runtime rejects incompatible protocol versions.
 
+To release new builds on `@workflow/world-postgres` while earlier builds finish their in-flight runs, see [Run multiple deployments on Postgres](./postgres-multi-deployment).
+
 See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workflow software development kit (SDK) abstraction.
 
 ## Recover a stranded session

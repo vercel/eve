@@ -1,5 +1,5 @@
 {
   "title": "Deployment",
   "defaultOpen": false,
-  "pages": ["overview", "vercel", "self-hosting"]
+  "pages": ["overview", "vercel", "self-hosting", "postgres-multi-deployment"]
 }
