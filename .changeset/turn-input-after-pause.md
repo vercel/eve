@@ -2,6 +2,6 @@
 "eve": patch
 ---
 
-`ctx.turn.input` keeps the turn's input after the turn pauses for an approval, a question, or a sign-in.
+`ctx.turn.input` keeps the turn's input after the turn pauses for an approval, a question, a sign-in, or a budget answer.
 
-It used to read empty for the rest of the turn, so a dynamic value or `auto()` evaluated after the pause saw no input.
+Dynamic values no longer see empty input after the pause, including `auto()` if its per-turn memo was invalidated.
