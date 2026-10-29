@@ -3,7 +3,8 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { Card, CardText } from "#compiled/chat/index.js";
+import { Card, CardText } from "#public/channels/slack/cards.js";
+import type { SlackPostInput } from "#public/channels/slack/api.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import {
@@ -13,7 +14,12 @@ import {
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
-import { slackChannel, type SlackChannelState } from "#public/channels/slack/slackChannel.js";
+import { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+import {
+  slackChannel,
+  type SlackChannelConfig,
+  type SlackChannelState,
+} from "#public/channels/slack/slackChannel.js";
 
 const SIGNING_SECRET = "test-signing-secret";
 
@@ -21,11 +27,21 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubEnv("SLACK_SIGNING_SECRET", SIGNING_SECRET);
-  fetchMock = vi.fn(async (request: string | URL | Request) =>
-    String(request).includes("conversations.info")
-      ? Response.json({ channel: { is_private: false }, ok: true })
-      : Response.json({ ok: true, ts: "1700000001.000001" }),
-  );
+  fetchMock = vi.fn(async (request: string | URL | Request) => {
+    const url = String(request);
+    if (url.includes("conversations.info"))
+      return Response.json({ channel: { is_private: false }, ok: true });
+    if (url.endsWith("files.getUploadURLExternal"))
+      return Response.json({
+        ok: true,
+        upload_url: "https://files.slack.com/upload/report",
+        file_id: "F01",
+      });
+    if (url.startsWith("https://files.slack.com/upload/")) return new Response("OK");
+    if (url.endsWith("files.completeUploadExternal"))
+      return Response.json({ ok: true, files: [{ id: "F01" }] });
+    return Response.json({ ok: true, ts: "1700000001.000001" });
+  });
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -189,6 +205,83 @@ describe("slackChannel inactive prompt press", () => {
   });
 });
 
+describe("slackChannel messageContext.users", () => {
+  it("resolves the author before the mention hook and adds names to the turn", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      const url = String(request);
+      if (url.includes("users.info"))
+        return Response.json({
+          ok: true,
+          user: {
+            profile: { display_name: "alice", real_name: "Alice Doe", email: "alice@example.com" },
+          },
+        });
+      if (url.includes("conversations.info"))
+        return Response.json({ channel: { is_private: false }, ok: true });
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+    const onAppMention = vi.fn<NonNullable<SlackChannelConfig["onAppMention"]>>((ctx, message) => ({
+      auth: defaultSlackAuth(message, ctx),
+    }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      messageContext: { users: true },
+      onAppMention,
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }), send);
+
+    expect(onAppMention.mock.calls[0]?.[1].author).toMatchObject({
+      displayName: "alice",
+      fullName: "Alice Doe",
+    });
+    expect(onAppMention.mock.calls[0]?.[1].author?.email).toBeUndefined();
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    const turn = JSON.stringify("message" in input ? input.message : "");
+    expect(turn).toContain("id: U01\\ndisplay_name: alice\\nreal_name: Alice Doe\\n</sender>");
+    expect(turn).not.toContain("alice@example.com");
+    expect(input.auth?.attributes).toMatchObject({ full_name: "Alice Doe" });
+  });
+
+  it("uses an authored resolve instead of the built-in users.info cache", async () => {
+    const resolve = vi.fn(async ({ userId }: { readonly userId: string }) => ({
+      realName: `cached-${userId}`,
+      email: "alice@example.com",
+    }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      messageContext: { users: { email: true, resolve } },
+      onAppMention: () => ({ auth: null }),
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }), send);
+
+    expect(resolve).toHaveBeenCalledWith({ userId: "U01", teamId: "T01" }, expect.any(Function));
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(JSON.stringify("message" in input ? input.message : "")).toContain(
+      "id: U01\\nreal_name: cached-U01\\nemail: alice@example.com\\n</sender>",
+    );
+    expect(fetchMock.mock.calls.map(([request]) => String(request))).not.toContainEqual(
+      expect.stringContaining("users.info"),
+    );
+  });
+
+  it("looks up no profiles when the option is off", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+    });
+
+    await firePost(channel, mention({ ts: "1700000000.000001" }));
+
+    expect(fetchMock.mock.calls.map(([request]) => String(request))).not.toContainEqual(
+      expect.stringContaining("users.info"),
+    );
+  });
+});
+
 describe("slackChannel thread history", () => {
   it("adds earlier replies as history when a mention starts the thread's session", async () => {
     const threadTs = "1700000000.000001";
@@ -257,7 +350,7 @@ describe("slackChannel thread history", () => {
       { id: "1700000000.000002", role: "assistant" },
       { id: "1700000000.000003", role: "user" },
     ]);
-    expect(history?.[0]?.text).toContain("sender_id: U_ROOT");
+    expect(history?.[0]?.text).toContain("id: U_ROOT");
     expect(history?.[1]?.text).toBe("Deploys are green.");
   });
 
@@ -303,6 +396,72 @@ describe("slackChannel thread history", () => {
       }),
     );
   });
+
+  it.each<{ message: SlackPostInput; expected: Record<string, unknown> }>([
+    { message: { markdown: "*Alice's update*" }, expected: { markdown_text: "*Alice's update*" } },
+    { message: { text: "Alice's update" }, expected: { text: "Alice's update" } },
+    {
+      message: {
+        text: "Alice's report",
+        files: [{ data: Buffer.from("report"), filename: "report.txt" }],
+      },
+      expected: { text: "Alice's report" },
+    },
+    {
+      message: { blocks: [{ type: "divider" }], text: "Update" },
+      expected: { blocks: [{ type: "divider" }], text: "Update" },
+    },
+    {
+      message: { card: Card({ children: [CardText("Update")] }), fallbackText: "Notification" },
+      expected: {
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Update" } }],
+        text: "Notification",
+      },
+    },
+  ])(
+    "posts an initial $message message and routes the turn under its root",
+    async ({ message, expected }) => {
+      const channel = slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        async onEvent(ctx) {
+          await ctx.send("follow up", {
+            auth: null,
+            target: { channelId: "C01", initialMessage: message },
+          });
+        },
+      });
+      const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+      await firePost(
+        channel,
+        signed(
+          JSON.stringify({
+            event: { type: "reaction_added", user: "U01" },
+            event_id: "EvInitial",
+            team_id: "T01",
+            type: "event_callback",
+          }),
+        ),
+        send,
+      );
+      expect(slackCalls("chat.postMessage")).toEqual([
+        expect.objectContaining({ channel: "C01", ...expected }),
+      ]);
+      expect(slackCalls("chat.postMessage")[0]).not.toHaveProperty("thread_ts");
+      expect(send).toHaveBeenCalledWith("C01:1700000001.000001", expect.anything());
+      if (message.files?.length) {
+        expect(slackCalls("files.completeUploadExternal")).toEqual([
+          expect.objectContaining({ channel_id: "C01", thread_ts: "1700000001.000001" }),
+        ]);
+        expect(
+          fetchMock.mock.calls.findIndex(([url]) => String(url).endsWith("chat.postMessage")),
+        ).toBeLessThan(
+          fetchMock.mock.calls.findIndex(([url]) =>
+            String(url).endsWith("files.getUploadURLExternal"),
+          ),
+        );
+      }
+    },
+  );
 
   it("rejects a generic event send's invalid key before posting its initial message", async () => {
     let sendError: unknown;

@@ -115,12 +115,13 @@ async function writeWorkspaceExternalFixture(input: {
   await writeFile(
     join(appRoot, "agent", "agent.ts"),
     [
-      "export default {",
+      'import { defineAgent } from "eve";',
+      "export default defineAgent({",
       "  build: {",
       '    externalDependencies: ["fixture-workspace-external"],',
       "  },",
       '  model: "openai/gpt-5.4-mini",',
-      "};",
+      "});",
       "",
     ].join("\n"),
   );
@@ -342,10 +343,11 @@ describe("app runtime dependency tracing", () => {
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
 
         '  model: "openai/gpt-5.4-mini",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -448,7 +450,12 @@ describe("app runtime dependency tracing", () => {
     );
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
-      ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "openai/gpt-5.4-mini",',
+        "});",
+        "",
+      ].join("\n"),
     );
     await writeFile(join(appRoot, "agent", "instructions.md"), "Trace CJS path globals.\n");
 
@@ -562,12 +569,12 @@ describe("app runtime dependency tracing", () => {
       );
       await writeFile(
         join(appRoot, "agent", "agent.ts"),
-        'export default { model: "openai/gpt-5.4-mini" };\n',
+        'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });\n',
       );
       await writeFile(join(appRoot, "agent", "instructions.md"), "Trace Workflow assets.\n");
       await writeFile(
         join(appRoot, "agent", "subagents", "researcher", "agent.ts"),
-        'export default { description: "Research.", model: "openai/gpt-5.4-mini" };\n',
+        'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research.", model: "openai/gpt-5.4-mini" });\n',
       );
       await writeFile(
         join(appRoot, "agent", "subagents", "researcher", "instructions.md"),
@@ -639,7 +646,12 @@ describe("app runtime dependency tracing", () => {
       );
       await writeFile(
         join(appRoot, "agent", "agent.ts"),
-        ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
+        [
+          "import { defineAgent } from 'eve';\nexport default defineAgent({",
+          '  model: "openai/gpt-5.4-mini",',
+          "});",
+          "",
+        ].join("\n"),
       );
       await writeFile(join(appRoot, "agent", "instructions.md"), "Optional engine tracing.\n");
 
@@ -713,13 +725,14 @@ describe("app runtime dependency tracing", () => {
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         "  build: {",
         '    externalDependencies: ["fixture-trace-only-dep"],',
         "  },",
 
         '  model: "openai/gpt-5.4-mini",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -818,13 +831,14 @@ describe("app runtime dependency tracing", () => {
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         "  build: {",
         '    externalDependencies: ["fixture-external-only-dep", "fixture-external-wrapper"],',
         "  },",
 
         '  model: "openai/gpt-5.4-mini",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -997,10 +1011,11 @@ describe("app runtime dependency tracing", () => {
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  build: { externalDependencies: ["fixture-dynamic-subagent-dep"] },',
         '  model: "openai/gpt-5.4-mini",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1197,10 +1212,11 @@ describe("app runtime dependency tracing", () => {
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
 
         '  model: "openai/gpt-5.4-mini",',
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1278,7 +1294,12 @@ describe("app runtime dependency tracing", () => {
       );
       await writeFile(
         join(appRoot, "agent", "agent.ts"),
-        ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
+        [
+          "import { defineAgent } from 'eve';\nexport default defineAgent({",
+          '  model: "openai/gpt-5.4-mini",',
+          "});",
+          "",
+        ].join("\n"),
       );
       await writeFile(
         join(appRoot, "agent", "instructions.md"),
@@ -1346,7 +1367,12 @@ describe("app runtime dependency tracing", () => {
     );
     await writeFile(
       join(appRoot, "agent", "agent.ts"),
-      ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "openai/gpt-5.4-mini",',
+        "});",
+        "",
+      ].join("\n"),
     );
     await writeFile(join(appRoot, "agent", "instructions.md"), "Verify hosted instrumentation.\n");
     await mkdir(join(appRoot, "agent", "instrumentation"), { recursive: true });

@@ -245,7 +245,7 @@ describe("dispatchChannelRequest", () => {
       async clear() {
         return { sessionId: "sess_target", status: "accepted" };
       },
-      async reset() {
+      async end() {
         return { previousSessionId: "sess_target", status: "reset" };
       },
       async getLineStream() {
@@ -511,7 +511,7 @@ describe("dispatchChannelRequest", () => {
     );
   });
 
-  it("supplies a channel-scoped reset helper", async () => {
+  it("supplies a channel-scoped end helper", async () => {
     const runtimeForTest = createRuntime({
       dispatchContinuation: vi.fn().mockResolvedValue({
         previousSessionId: "sess_previous",
@@ -525,7 +525,7 @@ describe("dispatchChannelRequest", () => {
         {
           handler: async (_req, args) =>
             Response.json(
-              await args.from("direct:+15551234567:+15557654321").reset({
+              await args.from("direct:+15551234567:+15557654321").end({
                 reason: "User requested /new",
               }),
             ),

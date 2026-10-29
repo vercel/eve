@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -90,10 +89,21 @@ export type InternalAgentModelDefinition = {
 };
 
 /**
- * A concrete model handle: an AI Gateway model id string or an AI SDK
- * `LanguageModel` instance.
+ * A language model instance eve calls directly, such as one returned by `anthropic()` or
+ * `openai()` from `eve/models/*`, or by an AI SDK provider. Any AI SDK language model
+ * (specification `v2`, `v3`, or `v4`) is assignable. eve invokes `doGenerate` and `doStream`
+ * itself, so their call options and results stay opaque here.
  */
-export type PublicAgentStaticModelDefinition = string | LanguageModel;
+export interface EveLanguageModel {
+  readonly specificationVersion: "v2" | "v3" | "v4";
+  readonly provider: string;
+  readonly modelId: string;
+  doGenerate(options: never): PromiseLike<unknown>;
+  doStream(options: never): PromiseLike<unknown>;
+}
+
+/** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
+export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
@@ -149,7 +159,7 @@ export interface InternalAgentCompactionDefinition {
 
 /**
  * Configures conversation compaction: when the model context window fills past
- * `thresholdPercent`, eve summarizes earlier turns to reclaim space. Every
+ * `threshold`, eve summarizes earlier turns to reclaim space. Every
  * field is optional; omit the block to use eve's defaults.
  */
 export interface PublicAgentCompactionDefinition {
@@ -173,7 +183,7 @@ export interface PublicAgentCompactionDefinition {
    *
    * eve defaults to `0.9` when this is omitted.
    */
-  readonly thresholdPercent?: number;
+  readonly threshold?: number;
 }
 
 /**
@@ -198,11 +208,11 @@ export interface AgentLimitsDefinition {
    * or fails it when nobody can answer. Approving starts a new window.
    *
    * Subagent sessions without their own `sessionUsage` use the root agent's.
-   * Set `sessionUsage: () => false` to leave sessions uncapped.
+   * Set `sessionUsage: false` to leave sessions uncapped.
    *
    * @default ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000
    */
-  readonly sessionUsage?: SessionUsageLimit;
+  readonly sessionUsage?: SessionUsageLimit | false;
 }
 
 /**
@@ -354,7 +364,7 @@ export type InternalAgentDefinition = {
  */
 export interface CompiledAgentLimitsDefinition {
   readonly sessionTimeoutMs?: number | false;
-  readonly sessionUsage?: true;
+  readonly sessionUsage?: boolean;
 }
 
 /**

@@ -18,7 +18,7 @@ const APP_ROOT_OPTIONS = { packageName: "hooks-scenario-agent" } as const;
  * and arrive on the runtime hook registry with live handlers attached.
  */
 
-const AGENT_SOURCE = `export default { model: "openai/gpt-5.4" };\n`;
+const AGENT_SOURCE = `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n`;
 
 const AUDIT_HOOK_SOURCE = `export default {
   events: {
@@ -88,10 +88,10 @@ describe("authored hooks end-to-end", () => {
     await writeFile(join(agentRoot, "hooks", "audit.mjs"), AUDIT_HOOK_SOURCE);
     await writeFile(
       join(agentRoot, "subagents", "researcher", "agent.mjs"),
-      `export default {
+      `import { defineAgent } from "eve";\nexport default defineAgent({
   model: "openai/gpt-5.4",
   description: "Investigate one task in depth.",
-};
+});
 `,
     );
     await writeFile(

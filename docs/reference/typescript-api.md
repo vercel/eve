@@ -5,6 +5,8 @@ description: "The define* helpers, the runtime ctx, and where each one is import
 
 This is the public surface of the `eve` package: the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The package's export map defines the full contract; source files that are not reachable through an exported package subpath are framework internals.
 
+For changes to an existing application, follow [Prepare for 1.0](../guides/prepare-for-1-0).
+
 Identity comes from the filesystem, not a field you set. A tool at `agent/tools/get_weather.ts` is `get_weather`, and a connection at `agent/connections/linear.ts` is `linear`, so no definition carries a `name` or `id`.
 
 Most files look the same: import a helper, default-export the result.
@@ -33,18 +35,18 @@ export default defineTool({
 Install the framework packages for the integration you import. These are optional peers of eve;
 using another entry does not require them.
 
-| Entry                                      | Required integration packages                         |
-| ------------------------------------------ | ----------------------------------------------------- |
-| `eve/react`                                | `react` 19 (and its React typings in TypeScript apps) |
-| `eve/vue`                                  | `vue` 3.5 or later in v3                              |
-| `eve/svelte`                               | `svelte` 5                                            |
-| `eve/next`                                 | `next` 16 and `react` 19                              |
-| `eve/sveltekit`, `eve/tanstack`            | `vite` 8.3.1 or later in v8                           |
-| `eve/nuxt`                                 | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
-| Chat SDK, Linq, and Photon channels        | `chat` 4.42 or later in v4                            |
-| `eve/channels/linq`                        | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
-| `eve/sandbox/just-bash`                    | `just-bash` 3.6 or later in v3                        |
-| `@vercel/connect/eve` with eve connections | `@vercel/connect` 2.5.2 or later in v2                |
+| Entry                                                         | Required integration packages                         |
+| ------------------------------------------------------------- | ----------------------------------------------------- |
+| `eve/react`                                                   | `react` 19 (and its React typings in TypeScript apps) |
+| `eve/vue`                                                     | `vue` 3.5 or later in v3                              |
+| `eve/svelte`                                                  | `svelte` 5                                            |
+| `eve/next`                                                    | `next` 16 and `react` 19                              |
+| `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.1 or later in v8                           |
+| `eve/nuxt`                                                    | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
+| Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
+| `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
+| `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
+| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.5.2 or later in v2                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
@@ -137,7 +139,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 
 | Import                                                                            | Holds                                                                                                             |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                           |
+| `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types, `TokenUsage`                             |
 | `eve/tools`                                                                       | `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, tool types                                    |
 | `eve/tools/{bash,read_file,write_file,web_fetch,glob,grep}`                       | Individual reusable tool definitions                                                                              |
 | `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |
@@ -146,6 +148,8 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/tools/workflow`                                                              | Runtime-generated `workflow` tool factory                                                                         |
 | `eve/tools/sleep`                                                                 | Opt-in durable `sleep` tool                                                                                       |
 | `eve/tools/no_reply`                                                              | Opt-in `noReply` tool definition                                                                                  |
+| [`eve/workflow`](../tools/workflows#workflow-imports)                             | Durable `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, `getWorkflowMetadata`, hook types |
+| [`eve/workflow/api`](../tools/workflows#workflow-imports)                         | `start`, `getRun`, `resumeHook`, `WorkflowRun`, and `WorkflowRunStatus` for routes and steps                      |
 | `eve/connections`                                                                 | `defineMcpClientConnection`, `defineOpenAPIConnection`, `defineDynamic`                                           |
 | `eve/channels`                                                                    | `defineChannel`, `disableRoute`, route verbs, `isChannel`, channel metadata types                                 |
 | `eve/channels/eve`                                                                | `eveChannel`                                                                                                      |
@@ -166,9 +170,9 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | [`eve/sandbox/vercel`](../sandbox/vercel)                                         | `VercelSandbox` and Vercel environment, session, and mount types                                                  |
 | [`eve/sandbox/just-bash`](../sandbox/just-bash)                                   | `JustBashSandbox` and just-bash environment types                                                                 |
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `InstrumentationEvent<K>`, lifecycle provider types            |
-| `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                 |
+| `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy, span processor, and exporter types   |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                     |
-| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`                                                                             |
+| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`, `EveLanguageModel`                                                         |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                               |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                       |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                               |
@@ -178,8 +182,8 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                            |
 | `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                     |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
-| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, response errors                                         |
-| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, authenticated `Session`, and `SessionNotActiveError` |
+| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
+| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
 | [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Facts, opaque `SessionView`, immutable observations, and query/fold functions                                     |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |
 
@@ -188,13 +192,35 @@ have one home, `eve/sessions`; client factories and transport-specific types sta
 `SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session.
 `ChannelContext` from `eve/channels` separates session information from continuation aliasing.
 
-`HistoryMessage` and the sandbox session, process, result, and method-option types are eve-owned. Their declarations do not change with your app's AI SDK peer version. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
+`HistoryMessage`, `EveLanguageModel`, `TokenUsage`, the sandbox session, process, result, and method-option types, the `SpanProcessor`, `SpanProcessorOrName`, and `SpanExporter` types from `eve/instrumentation/otel`, and the Linq and Photon credential and webhook-verifier types are eve-owned. Their declarations do not change with your app's AI SDK, OpenTelemetry, or channel-adapter versions. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
 
-The `exports` field in `packages/eve/package.json` lists every package entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. The CLI setup wizard is not a public authoring API; Agent Builder's scaffold integration lives at `eve/internal/scaffold`.
+## Stability policy
+
+The `exports` field in `packages/eve/package.json` lists every package entry point.
+`eve/experimental/*` and `eve/internal/*` have no compatibility promise. The same
+applies to `experimental` fields in stable definitions, such as
+`defineAgent({ experimental })`, connection `experimental.events`, and
+`JustBashSandbox.environment({ experimental })`.
+
+Event union types name today's values. Adding fact types, outcomes, or interaction
+kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add)
+is not a breaking change. Keep a default branch when switching on those values.
+
+Values eve passes into code you implement can also gain members in a minor
+release, such as a sandbox provider's `onSessionEnd()` `reason`, the provider
+context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values, for
+example with a default branch, instead of switching exhaustively.
+
+`eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose
+types from the `chat` package (Chat SDK v4) as part of their contract. They track
+`chat` v4, so a future breaking `chat` major may require a corresponding eve change.
+
+The CLI setup wizard is not a public authoring API; Agent Builder's scaffold
+integration lives at `eve/internal/scaffold`.
 
 ## Direct provider models
 
-`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return eve-owned model instances using the vendored providers. They accept only an optional model ID. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return AI SDK language models that use eve's credentials, so you can also pass them to AI SDK functions such as `generateText`. They accept only an optional model ID. `EveLanguageModel`, exported from `eve` and `eve/models`, is the model instance type `agent.ts` accepts; every AI SDK language model satisfies it. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
 
 Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
 

@@ -22,6 +22,7 @@
   "DynamicSubagentDefinition",
   "DynamicSubagentResult",
   "DynamicTurn",
+  "EveLanguageModel",
   "Memo",
   "Occurrence",
   "RemoteAgentDefinition",
@@ -29,10 +30,8 @@
   "RemoteAgentUrl",
   "SessionFrame",
   "SessionUsageLimit",
-  "WorkspaceAgentDefinition",
-  "WorkspaceAgentTransport",
+  "TokenUsage",
   "defineAgent",
   "defineDynamic",
-  "defineRemoteAgent",
-  "defineWorkspaceAgent"
+  "defineRemoteAgent"
 ]

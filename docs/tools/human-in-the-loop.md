@@ -100,7 +100,7 @@ approval: ({ session, toolInput }) => {
 },
 ```
 
-For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
+A boolean is a supported shorthand, returned synchronously or as a promise: `true` means `"user-approval"` and `false` means `"not-applicable"`.
 
 Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. A denied call never starts: it settles `call.settled` with `outcome: "rejected"`, `cause: { policy: "approval" }`, and a `TOOL_EXECUTION_DENIED` output, whether the policy denies it as the model calls it or when an approved call is checked again. A tool that runs and throws settles `failed`. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by a remembered `once()` approval records the same `{ policy: "approval" }`; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
@@ -266,7 +266,9 @@ A message from the parent agent to a subagent never answers the subagent's tool 
 
 Approval is consent only. An approved tool call runs with the requesting user's identity, connections, and credentials, including its policy recheck. The approver's access is never lent to the call. Subsequent tool calls in the turn also stay with the original owner.
 
-A `defineTool` tool can still act on the approver's behalf when it chooses to. While an approved `defineTool` call runs, `ctx.approval.responder` is the principal who approved it, and `ctx.approval.responder.getToken(provider)` resolves that person's token for an inline provider, as `ctx.getToken(provider)` does for the requester. `ctx.session.auth.current` stays the requester. `ctx.approval` is absent for calls that needed no approval, and workflow tools don't receive it. `ctx.approval.responder.getToken(provider)` never starts a sign-in: when the approver has no token, it throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"`.
+For auditing, traces record both people: the turn span's `agent.principal.current.*` attributes name the requester, and the approval span's `agent.approval.responder.type` and `agent.approval.responder.id` name who approved or denied the call. An approved call's tool span also records its approver as `agent.tool.approver.type` and `agent.tool.approver.id`, since the tool can act on the approver's behalf. All of these ids follow one rule: they are recorded only when the trace policy records both inputs and outputs and the conversation is public or running in development. Otherwise only the type is recorded.
+
+A `defineTool` tool can still act on the approver's behalf when it chooses to. While an approved `defineTool` call runs, `ctx.approval.responder` is the principal who approved it, and `ctx.approval.responder.getToken(provider)` resolves that person's token for an inline provider, as `ctx.getToken(provider)` does for the requester. `ctx.session.auth.current` stays the requester. `ctx.approval` is absent for calls that needed no approval, and workflow tools don't receive it. `ctx.approval.responder.getToken(provider)` never starts a sign-in: when the approver has no token, it throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"`. A connection's `headers` and `toolCall.providedArguments` callbacks receive the same `ctx.approval.responder` while an approved connection call runs; see [Send the approver to the server](/docs/connections#send-the-approver-to-the-server).
 
 ```ts
 export default defineTool({

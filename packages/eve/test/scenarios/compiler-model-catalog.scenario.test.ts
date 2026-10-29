@@ -54,7 +54,12 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/default-compaction-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/default-compaction-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
@@ -116,7 +121,12 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/primary-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/primary-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
@@ -158,12 +168,13 @@ describe("compiler model catalog", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "example/primary-model",',
         "  compaction: {",
         '    model: "example/summary-model",',
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -228,7 +239,12 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/cached-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/cached-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
 
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -267,7 +283,12 @@ describe("compiler model catalog", () => {
     const second = await compileAgent({ startPath: appRoot });
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/new-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/new-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
     const third = await compileAgent({ startPath: appRoot });
 
@@ -295,12 +316,13 @@ describe("compiler model catalog", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "example/primary-model-thinking",',
         "  compaction: {",
         '    model: "example/summary-model-thinking",',
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -358,12 +380,13 @@ describe("compiler model catalog", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "example/stale-primary-model",',
         "  compaction: {",
         '    model: "example/stale-summary-model",',
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -436,7 +459,12 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/missing-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/missing-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
     await mkdir(join(appRoot, ".eve", "cache"), {
       recursive: true,
@@ -473,7 +501,12 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/missing-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/missing-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => mockCatalogResponse([]));
@@ -495,7 +528,12 @@ describe("compiler model catalog", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "example/uncached-model",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "example/uncached-model",',
+        "});",
+        "",
+      ].join("\n"),
     );
 
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("catalog offline"));
@@ -518,10 +556,11 @@ describe("compiler model catalog", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "example/unlisted-model",',
         "  modelContextWindowTokens: 128_000,",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -566,10 +605,11 @@ describe("compiler model catalog", () => {
         "  },",
         "};",
         "",
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         "  model: sourceModel,",
         "  modelContextWindowTokens: 128_000,",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -600,14 +640,15 @@ describe("compiler model catalog", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "example/unlisted-primary-model",',
         "  modelContextWindowTokens: 128_000,",
         "  compaction: {",
         '    model: "example/unlisted-summary-model",',
         "    modelContextWindowTokens: 64_000,",
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );

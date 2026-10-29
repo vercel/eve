@@ -27,6 +27,8 @@ The state is deliberately small:
 interface ClientSessionState {
   sessionId: string;
   streamIndex: number;
+  /** Opaque; persist it and pass it back unchanged. eve may extend it. */
+  inbox?: string;
 }
 ```
 
@@ -41,15 +43,14 @@ Attach a fixed handle to the saved ID and restore its cursor:
 import type { ClientSessionState } from "eve/client";
 
 const saved = (await loadSessionState()) as ClientSessionState;
-const session = client.sessions.attach(saved.sessionId, {
-  streamIndex: saved.streamIndex,
-});
+const session = client.sessions.attach(saved.sessionId, saved);
 
 const response = await session.send("Now shorten it.");
 console.log((await response.result()).message);
 ```
 
-`attach()` performs no request. Every later operation targets exactly
+Pass the whole saved state so its optional [`inbox`](./overview#faster-sends-with-inbox) value
+reaches later sends. `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId`; it never follows or creates a replacement.
 
 `send()` correlates its response with the message accepted by the server. If the
@@ -63,14 +64,17 @@ If a configured reconnect limit ends the stream before the accepted turn reaches
 a boundary, collecting its response throws. A partial stream is not a completed
 result.
 
-## Waiting, completed, and reset sessions
+<a id="waiting-completed-and-reset-sessions" />
+
+## Waiting, completed, and ended sessions
 
 A session that hasn't ended (`session.ended`) accepts another message through the
-same handle. A terminal or reset session does not. Start a fresh conversation
+same handle. An ended session does not. Start a fresh conversation
 explicitly with another `client.sessions.create(firstTurn)` call.
 
 ```ts
-const reset = await session.reset({ reason: "Start over" });
+const ended = await session.end({ reason: "Start over" });
+await ended.result();
 const { session: fresh, delivery } = await client.sessions.create({ message: "Begin again." });
 ```
 
@@ -102,9 +106,7 @@ The shared `Client` owns the base URL, auth, headers, and redirect policy. Each
 read:
 
 ```ts
-const session = client.sessions.attach(saved.sessionId, {
-  streamIndex: saved.streamIndex,
-});
+const session = client.sessions.attach(saved.sessionId, saved);
 
 for await (const event of session.stream()) {
   console.log(event.type);

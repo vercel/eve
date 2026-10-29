@@ -170,10 +170,10 @@ function normalizeAgentLimitsDefinition(
     );
   }
   if (record.sessionUsage !== undefined) {
-    normalizedDefinition.sessionUsage = expectFunction<SessionUsageLimit>(
-      record.sessionUsage,
-      message,
-    );
+    normalizedDefinition.sessionUsage =
+      record.sessionUsage === false
+        ? false
+        : expectFunction<SessionUsageLimit>(record.sessionUsage, message);
   }
   return normalizedDefinition;
 }
@@ -321,7 +321,12 @@ function normalizeAgentCompactionDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["compaction"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "thresholdPercent"], message);
+  if ("thresholdPercent" in record) {
+    throw new Error(
+      `${message} Rename "compaction.thresholdPercent" to "compaction.threshold" (a fraction from 0 to 1).`,
+    );
+  }
+  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "threshold"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
 
   if (record.model !== undefined) {
@@ -340,19 +345,19 @@ function normalizeAgentCompactionDefinition(
     );
   }
 
-  if (record.thresholdPercent !== undefined) {
-    const thresholdPercent = record.thresholdPercent;
+  if (record.threshold !== undefined) {
+    const threshold = record.threshold;
 
     if (
-      typeof thresholdPercent !== "number" ||
-      !Number.isFinite(thresholdPercent) ||
-      thresholdPercent < 0 ||
-      thresholdPercent > 1
+      typeof threshold !== "number" ||
+      !Number.isFinite(threshold) ||
+      threshold < 0 ||
+      threshold > 1
     ) {
       throw new Error(message);
     }
 
-    normalizedDefinition.thresholdPercent = thresholdPercent;
+    normalizedDefinition.threshold = threshold;
   }
 
   return normalizedDefinition;

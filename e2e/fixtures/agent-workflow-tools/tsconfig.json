@@ -11,7 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": false,
     "noEmit": true,
-    "types": ["node", "eve/workflow-modules"],
+    "types": ["node"],
     "allowImportingTsExtensions": true,
     "paths": {
       "@/*": ["./*"]

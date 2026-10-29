@@ -3,40 +3,28 @@ title: "Overview"
 description: "Put an eve agent behind a browser chat UI with useEveAgent."
 ---
 
-Use this guide when you already have a browser application and need to connect it to an eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
+`useEveAgent` connects a browser UI to an eve agent. It starts a session, sends messages, and streams the agent's reply into state you can render. This page uses React; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) work the same way.
 
-## The integration model
+## How it works
 
-A browser UI is a client of the agent's HTTP routes (the [eve channel](../../channels/overview)). Two layers wire it up:
+Your app and the agent share an origin. The browser calls the agent at `/eve/v1/*`, and a framework integration or your hosting routes those requests to the agent:
 
-- **Routing** makes the agent reachable from the browser. A framework integration can mount eve on your app's origin: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin), or [TanStack Start](./tanstack) (the `eveTanStack` Vite plugin). If the frontend and agents are peer services, use your deployment platform or reverse proxy instead. The hook works with either setup; pass `baseUrl` for a different origin or a named path mount.
-- **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin eve routes such as `/eve/v1/session`.
+- [Next.js](./nextjs)
+- [Nuxt](./nuxt)
+- [SvelteKit](./sveltekit)
+- [TanStack Start](./tanstack)
 
-The framework pages walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), [SvelteKit](./sveltekit), and [TanStack Start](./tanstack). See [Project Structure](../../concepts/project-structure#configure-a-web-deployment) to choose between a framework integration and peer services.
+To generate a working chat app, run `eve add channel/web`. For scripts and server code that don't render UI, use the [Client SDK](../client/overview).
 
-For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
-
-## Authenticate browser requests
-
-A same-origin framework integration sends your application cookies with every eve request. For bearer tokens or another non-cookie scheme, pass `auth` or `headers` to `useEveAgent`.
-
-The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic receives `401` from the default `[vercelOidc(), localDev(), placeholderAuth()]` policy. Add the channel file with an `AuthFn` that verifies your application session or token.
-
-For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection) for application-session examples, token verifiers, and the default policy.
-
-## Basic chat (React)
-
-The hook lives in `eve/react`. Render `messages`, use `activeTurn(view)` from `eve/events` to steer follow-ups into an open turn, and send text with `send`:
+## Build a basic chat
 
 ```tsx
 "use client";
 
-import { activeTurn } from "eve/events";
 import { useEveAgent } from "eve/react";
 
 export function Chat() {
   const agent = useEveAgent();
-  const turnOpen = activeTurn(agent.view) !== undefined;
   const isResuming = agent.status === "resuming";
 
   return (
@@ -46,7 +34,7 @@ export function Chat() {
         const form = new FormData(event.currentTarget);
         const message = String(form.get("message") ?? "").trim();
         if (message.length > 0 && !isResuming) {
-          void agent.send(message, turnOpen ? { turnPolicy: "steer" } : undefined);
+          void agent.send(message);
         }
       }}
     >
@@ -67,211 +55,31 @@ export function Chat() {
 }
 ```
 
-## Returned state
+Most chat UIs need only a few values from the hook:
 
-`useEveAgent()` returns the current UI state plus commands:
+| Value              | Use it to                                                       |
+| ------------------ | --------------------------------------------------------------- |
+| `messages`         | Render the conversation                                         |
+| `status`           | Disable input while `"resuming"`; show a spinner while `"busy"` |
+| `error`            | Show the latest failure                                         |
+| `activeTurn(view)` | Check whether a turn is open, so you can offer to cancel it     |
+| `send`, `respond`  | Send a message, or answer a question                            |
+| `cancel`           | Stop the running turn                                           |
+| `newSession`       | Start a new conversation                                        |
 
-| Field              | What it is                                                                    |
-| ------------------ | ----------------------------------------------------------------------------- |
-| `view`             | Opaque, immutable snapshot queried through `eve/events`.                      |
-| `messages`         | Rendered messages, including local optimistic submissions and answers.        |
-| `agents`           | Followed child sessions and their independent observations.                   |
-| `status`           | Outstanding work: `"idle"`, `"busy"`, or `"resuming"`. Errors are separate.   |
-| `error`            | The latest session creation, stream, resume, or turn failure.                 |
-| `events`           | Raw eve stream events for this session.                                       |
-| `session`          | Serializable fixed session cursor (`sessionId`, `streamIndex`).               |
-| `prewarm`          | Create a session or prepare its idle owner without starting a turn.           |
-| `send`, `respond`  | Submit a message or answers; resolve with a `Delivery` receipt when accepted. |
-| `resume`           | Replay through the durable tail; further following obeys `followWhile`.       |
-| `follow`           | Follow a same-session delivery receipt, including one sent by another store.  |
-| `cancel`           | Request durable cancellation of the active turn.                              |
-| `clear`, `compact` | Queue a context change and return its delivery.                               |
-| `reset`            | Retire the server-side session and return its delivery.                       |
-| `newSession`       | Clear local state and the local session cursor.                               |
+See the [`useEveAgent` reference](./use-eve-agent) for everything else.
 
-Most chat UIs only need `messages`, `status`, and `activeTurn(view)`. Use `view` with queries from `eve/events` for lifecycle state, or `events` when you need the wire log for persistence or audit. Snapshots publish after every fact in a committed line has folded. Retained views and their observations stay unchanged after later updates; tables and preview dictionaries are not public fields.
+## Authenticate browser requests
 
-Pass `prewarm: true` to start a workflow when the chat mounts and after each `newSession()` call:
+Because the browser calls the agent on your own origin, it sends your app's cookies with every request. The agent decides whether to accept them in `agent/channels/eve.ts`.
 
-```tsx
-import { useEveAgent } from "eve/react";
+Until you add an auth check there, production browser requests get `401`. Write an `AuthFn` that verifies your app's session; [Authentication](../auth-and-route-protection) shows how. For a public demo, `none()` from `eve/channels/auth` admits everyone; don't use it for private data.
 
-export function Chat() {
-  const agent = useEveAgent({ prewarm: true });
+If your app uses bearer tokens instead of cookies, pass them to the hook. See [Custom hosts and headers](#custom-hosts-and-headers).
 
-  return <button onClick={agent.newSession}>New chat</button>;
-}
-```
+## Send messages
 
-React can turn `prewarm` on after mount, and its initial or later `true` value also prepares a
-restored session. Vue and Svelte read it when their binding is created, so call their returned
-`prewarm()` method when typing starts.
-
-Prewarming defaults to `false`: the first send creates the session. Set it to `true` only after
-your application's auth, headers, and any chat-record binding are ready. Applications that
-prepare those in the submit handler should keep the default until then.
-
-Prewarming starts the workflow and establishes its inbox, then parks before session hooks or
-dynamic definitions run. Meanwhile, it starts the agent's [sandbox](/docs/sandbox) in the
-background. The first message passes through the channel's `onMessage` hook and supplies the
-identity and context for initialization and `turn_0`. That turn does not wait for the sandbox;
-only a tool or hook that uses the sandbox waits for the rest of its start. If the sandbox fails
-to start during prewarming, the first turn that uses it starts it instead. eve deletes the
-sandbox when the session ends, including when an unused prewarmed session times out.
-
-For an existing session, `prewarm()` checks which deployment runs the session against the exact
-deployment accepting that request. On Vercel, an idle session on another deployment can move to
-the accepting deployment in the background before the next `send()`. The session ID, history,
-stream, and expiry stay the same; no model call runs. A session already running on that
-deployment is not woken. Active turns are never interrupted; an active turn can finish before
-preparation, and a queued real message takes priority. A session with pending tasks or input
-requests can skip the hint. A session started by an eve version without preparation support, or
-running on a workflow backend without deployment routing, is not moved.
-
-Call `agent.prewarm()` once when a new typing burst begins, with an application-level cooldown
-if you also retry during long drafts. eve shares concurrent calls; it does not listen to inputs
-or poll deployments. A production alias targets its current deployment; a preview alias targets
-that preview. Requests pinned to an immutable deployment (including deployment-skew routing)
-cannot discover a newer deployment. In local development, `prewarm()` can create a new session,
-but does not move an existing one.
-
-`client.sessions.attach(sessionId).prewarm({ signal })` returns `ready`, `accepted`,
-`unsupported`, or `no_active_session`. `accepted` means the hint was persisted, not that handoff
-has finished. It never replaces an expired session. `send()` retains its existing retry and
-handoff behavior if preparation is unavailable, fails, or has not finished.
-
-The explicit `prewarm()` method resolves after ingress acceptance, as does `client.sessions.create()`.
-It does not wait for an initialization event; concurrent calls share the same request.
-The composer stays `"idle"`, meaning it can accept input, and prewarming does not run
-`prepareSend`. A concurrent `send()` waits for initial creation acceptance when needed, but never
-waits for existing-session preparation.
-If the inbox is still starting, the client retries `409 session_not_ready` with bounded
-exponential backoff for up to 20 seconds. The caller's abort signal cancels the wait. Stream
-events are not a prerequisite for sending.
-
-An existing-session preparation failure rejects the explicit call without setting `error` or
-blocking `send()`. A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can
-fall back to creating a session with its message. After creation succeeds, initialization
-failures arrive on the stream during the first turn. The configured session timeout starts
-at creation, so an unused prewarmed session can expire before its first message. React does not
-retry a failed prewarm on unrelated renders while the option remains `true`; call `prewarm()`,
-change the option from `false` to `true` again, call `newSession()`, or send a message to recover.
-
-The hook keeps consuming one session stream across turns and idle periods. Replies,
-authorization updates, and turns started elsewhere all update the same projection. Each message a
-person sends is its own bubble, placed where its turn took it in: a message that arrives while the
-turn works splits the agent's response, so what the agent did before the message shows above it
-and the rest below. The pieces share `metadata.turnId`. A single event that coalesces multiple
-deliveries remains one bubble. A turn settling does not close the connection. The transport reconnects from
-its cursor after a disconnect or the
-server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
-Unmounting or calling `newSession()` closes the local stream without cancelling the old durable session.
-
-By default, the stream remains open between turns, so events from schedules, channels, or other
-clients arrive as they happen. For a help sidebar that only needs updates during machine work,
-close it when the committed session view becomes idle. Bind both stores to the same existing
-`ClientSession`, kept stable across renders:
-
-```tsx
-import type { ClientSession } from "eve/client";
-import { idle } from "eve/events";
-import { useEveAgent } from "eve/react";
-
-function useSessionPanels(session: ClientSession) {
-  const chat = useEveAgent({ session });
-  const sidebar = useEveAgent({ session, followWhile: (view) => !idle(view) });
-
-  async function send(message: string) {
-    const receipt = await chat.send(message);
-    sidebar.follow(receipt);
-    return receipt;
-  }
-
-  return { chat, sidebar, send };
-}
-```
-
-`followWhile(view)` closes the stream when it returns false at a complete line boundary, after catch-up and any accepted receipt being followed. It can close while a turn is active or waiting on an interaction; the UI then remains at its last observed state, including `status`, until another command or explicit follow reopens the stream. To keep following machine work and open turns, including turns waiting on a person, and close only between turns, pass `followWhile: (view) => !idle(view) || activeTurn(view) !== undefined`. React reads the latest predicate on render; Vue and Svelte read it from their options object.
-
-Both stores must point to the same session. `follow()` tracks an accepted receipt until it settles, even if the stream catches up before admission. Pass only a receipt returned by `send`, `respond`, `clear`, `compact`, or `reset`. Because a receipt can precede its admission, the store keeps waiting for an id the stream never admits: it stays `"busy"` with the stream open until the session ends or you call `newSession()`. `follow()` does not create a session or grant access. A closed stream cannot see new activity by itself; send a command, call `resume()` or `follow()`, or leave default continuous following on when other sources can start work. Limit retries after stream errors, and resolve authorization failures before retrying.
-
-`newSession()` reuses the hook instance and clears the local conversation. `reset()` instead retires the server-side session and returns its delivery. Call `newSession()` to clear the retired conversation and prepare a fresh one. If `prewarm` is true, that call prepares the next owned session; otherwise, the next send creates it. An explicitly
-supplied `session` remains externally owned and is never replaced by prewarming or `newSession()`. Use
-`initialSession` with `resume: true` to restore a saved chat.
-
-`messages` are eve-owned `EveMessage[]`. Assistant text and reasoning parts have a stable `id` from the event that created the part. Appends and completion retain that ID. Use `part.id` to key streamed assistant content, including successive text parts within one step. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
-
-A message's parts are `text`, `reasoning`, `file` (an attachment a person sent; its `url` can be absent), `tool` (a call the turn made), and `interaction` (something the turn asked a person that no call carries: a sign-in, the budget prompt, or a question about no call). Each assistant part carries its turn's `stepIndex`. The parts are eve's own; if you pass messages to an API typed as AI SDK `UIMessage[]`, adapt them first.
-
-A `tool` part renders the shared call state, with partial input while it streams:
-
-| Field                      | What it is                                                                                                                                                      |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `callId`, `name`           | The call, and the tool, agent, or skill it invokes.                                                                                                             |
-| `kind`                     | `tool`, `agent`, `skill`, or `control` (task controls, usually hidden in activity displays).                                                                    |
-| `label`                    | The tool's authored label, its latest output label, or a readable name.                                                                                         |
-| `state`                    | `streaming` while input arrives, then the shared `CallState`: `requested`, `approval`, `running`, `blocked`, `completed`, `failed`, `rejected`, or `cancelled`. |
-| `inputText`                | Partial input, only when `state` is `streaming`.                                                                                                                |
-| `input`, `output`, `error` | Validated input, current or final output, and error details after input streaming.                                                                              |
-| `interaction`              | The latest approval or question about the call. Its status stays `open` while an answer is submitted; settlement confirms the decision.                         |
-
-Read outcomes, reasons, and task identities from `call(view, part.callId)` from `eve/events`
-instead of duplicate fields on the renderable part.
-A call your stream stopped following stays open; decide yourself what an open call shows once the stream ended. A call a model retry replaced doesn't show: the replacement asks again.
-
-A delegated call stays running until `call.settled`; its child's detailed events live on a separate stream. Query `call(view, callId)` for the call outcome, and `agents[sessionId]` for the opened child session.
-
-Detailed child progress lives on the child session's stream, not in the root `messages`. Pass `followAgents: true` to recursively observe recorded children, including children opened inside workflow tools. Following is off by default. React, Vue, and Svelte use the same store-owned traversal.
-
-To select relationships, pass a synchronous predicate. `true` and `() => true` have the same meaning; an excluded child's descendants are not discovered:
-
-```tsx
-const agent = useEveAgent({
-  followAgents: ({ depth }) => depth <= 3,
-});
-```
-
-Root depth is zero. eve admits at most 128 child observations per root generation, follows to depth 8, and allows 8 simultaneous descendant reads independently of the root stream. Each read stops at its captured durable tail or yields its slot after 10 seconds. Caught-up observations are refreshed with delays from 1 to 10 seconds. These bounds do not limit execution or the root transcript. `newSession()` resets admission accounting. The policy is read at store creation and evaluated once per relationship at each known reachable depth; unrelated renders do not replace followers. When authorized readers establish that two paths reach the same session, the store shares its observation and considers both paths' depths.
-
-Each `agents[sessionId]` describes an opening, with an `owner` naming its call or task. A followed `observation.conversation` has its own `agents`, `messages`, and opaque `view`. Calls that continue a task reuse its child conversation; the opening owner does not change. Read the particular call or delivery's settled result for its outcome, not the child's latest message.
-
-To show what one call caused in a child it shares with other calls, use `agentCallActivity(state, callId)` from `eve/client`. It follows the `child.sent` links the parent recorded to each delivery the call sent and the child turns that consumed them:
-
-```ts
-import { agentCallActivity } from "eve/client";
-
-const activity = agentCallActivity(agent, callId);
-if (activity.status === "linked") {
-  for (const { sessionId, deliveries, turns } of activity.sessions) {
-    const pending = deliveries.some(({ status }) => status !== "settled");
-    const turnIds = new Set(turns.map(({ turnId }) => turnId));
-    // Render agent.agents[sessionId]'s messages whose metadata.turnId is in turnIds.
-  }
-}
-```
-
-A delivery's `status` is `"unseen"` until this reader reads the child's admission, then the child's own `"admitted"`, `"consumed"`, or `"settled"`. Several calls can reach one turn, as when a call arrives while the agent works; each turn lists the other calls it answered in `sharedWith`, so render it once for all of them rather than splitting it. `"unlinked"` means the parent recorded no delivery for the call, as for a call that sent nothing or reached a remote agent on an earlier protocol.
-
-| Observation status | Meaning                                                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `"not-followed"`   | Following is disabled, or `reason` identifies a predicate, depth/session limit, or cycle.                                    |
-| `"queued"`         | Admitted and waiting for a read slot.                                                                                        |
-| `"following"`      | Reading a finite captured prefix. Silence does not imply settlement.                                                         |
-| `"caught-up"`      | Reached the tail captured for this read; the child may still be working, and another read can discover more activity.        |
-| `"interrupted"`    | A retryable read failure or detached observation scope.                                                                      |
-| `"unavailable"`    | History cannot currently be read. `reason` distinguishes authorization, expiry, unsupported readers, and transport failures. |
-
-Except for `"not-followed"`, an observation exposes `position`, `caughtUp`, and its committed `conversation`, which can be empty before the first successful read. Its server-established `key` identifies the session within this store's authorized reader scope, not across principals or stores. Equal session IDs reached through different remote reader namespaces are not merged. Cursors use source-line positions and remain independent across sessions.
-
-`caughtUp` describes the tail captured when that read opened, not execution completion or exhaustive subtree coverage. The next read establishes a new horizon. Root call results, `status`, `resume()`, `events`, and callbacks keep their root-session meaning; descendant failures remain on their observations. Parent-relayed interactions remain the source of actionable prompts, so do not render a second set of controls from child observations.
-
-For headless capture, use [`SessionStore.observe()`](../client/streaming#observe-nested-traces-without-a-framework). Archive observed prefixes with their per-session cursors and your own versioned schema, not as atomic or exhaustive execution audits. Preserve prior archives when history expires; later successful reads can enrich them.
-
-If you manage your own session rather than using the hook, pass a `child.opened` event from `events` to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
-
-## Sending and streaming
-
-Pass the message first and optional per-turn settings second. Use `respond()` for HITL answers:
+Send text, or an array of parts to include files:
 
 ```tsx
 await agent.send("Summarize this session.");
@@ -287,37 +95,15 @@ await agent.send([
 ]);
 ```
 
-Assistant text, reasoning, and tool parts update `messages` as they arrive. `status` is `busy`
-while a message, answer, or control command is pending, a followed receipt has not settled, or the
-session has running or queued work, and `idle` otherwise. `resuming` means the hook is catching up
-an attached session; disable message and HITL submission then. `status` describes outstanding
-work, not whether a turn is open: a turn waiting only on a person is open while `status` is
-`idle`, and the stream stays open by default. Use `activeTurn(view)` to decide whether a turn is
-open, can be steered, or can be cancelled. A failure updates `error` without replacing the
-transport status.
+`send()` resolves as soon as eve accepts the message. The reply then streams into `messages`.
 
-`send()` and `respond()` resolve on HTTP acceptance, before the agent needs to reply or pause. They reject if preparation or submission fails; a later execution failure arrives through `view`, `error`, and `onError`. A turn stays open while its work or questions are pending. Read `activeTurn(view)`, `waiting(view, turnId)`, and `activity(view)` from `eve/events` instead of maintaining another turn state. By default, the stream continues after the command's promise resolves. The returned `Delivery` also has
-independent `stream({ signal })` and `result({ signal })` reads. Those can open another HTTP
-stream and remain usable after `newSession()` or unmount; pass a signal when the read should
-end with your component. The store's saved cursor tracks only its own committed events, never
-another reader's progress.
-
-To steer an active turn with a follow-up, send the message with `turnPolicy: "steer"`. Before answer output or local tool execution begins, eve interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output. The hook stays attached through completion:
+A message sent while the agent is still working redirects the current turn, called steering. You don't need to do anything extra. To wait for the turn to finish instead, queue the message:
 
 ```tsx
-await agent.send(message, { turnPolicy: "steer" });
+await agent.send("Then summarize the second file.", { turnPolicy: "queue" });
 ```
 
-You can submit another message while work runs: use `turnPolicy: "queue"` to wait for the current
-turn, or `"steer"` to guide it. Answers are accepted while other work runs. Read interactions with
-`interaction(view, id)` from `eve/events`: their originating turn, step, task, request, and answer
-are in one projection. `activeTurn(view)?.turnId` identifies the current root turn. Followed
-sessions have their own view under `agents[sessionId].observation.conversation`.
-Call `cancel()` to stop the durable turn without replacing it.
-
-`cancel()` targets the currently observed turn and keeps the event stream attached. If no turn is active, it waits for a submission pending when you called `cancel()` to identify its turn. This includes preparation, session creation, and POST acceptance. Cancellation always names the identified turn, so a delayed request cannot stop an unrelated later turn.
-
-The wait does not withdraw a queued message. If it never reaches a running turn, cancellation is a no-op; an idle `cancel()` does not arm a future request. Cancellation is cooperative, so a turn can finish before it takes effect.
+To stop a running turn, call `cancel()`. Closing the page doesn't stop the turn on the server.
 
 ```tsx
 import { activeTurn } from "eve/events";
@@ -327,18 +113,11 @@ if (activeTurn(agent.view) !== undefined) {
 }
 ```
 
-Unmounting the component or closing the page disconnects the local stream but does not cancel server execution. Call `cancel()` before detaching when the user intends to stop the durable turn.
-
-After eve confirms an attachment turn with `delivery.consumed`, each received attachment shows as
-a `file` part on the user message. The part includes `mediaType`, optional
-`filename` and `size`, and a `url` only when the original attachment was browser-resolvable.
+See [Sending](./use-eve-agent#sending) and [Cancelling](./use-eve-agent#cancelling) for exact timing.
 
 ## Human-in-the-loop prompts
 
-Tools gate calls with approval policies, and workflow tools ask questions with `ctx.ask()`.
-See [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Read open prompts from
-`view` and answer through the same session. A call's approval or question also appears as
-`part.interaction`; other prompts are `interaction` message parts.
+Tools can ask a person to approve a call or answer a question. See [Human-in-the-loop](/docs/human-in-the-loop) for the server side. In the UI, read open prompts from `view` and answer with `respond()`:
 
 ```tsx
 import { openInteractions } from "eve/events";
@@ -364,11 +143,14 @@ return pendingRequests.map(({ interactionId, request }) => (
 ));
 ```
 
-For free text, send `{ interactionId, text }`. An interaction stays `open` until `interaction.settled`; a submitted answer alone does not decide it. A refused answer leaves the prompt answerable.
+- For a free-text answer, send `{ interactionId, text }`.
+- A prompt stays `open` until eve settles it, not when you submit an answer. If the answer is refused, the prompt stays answerable.
+- To show how a prompt ended, read its `outcome`. Only `accepted` and `declined` mean a person decided; a prompt can also end because its turn was cancelled. See [Interactions](./use-eve-agent#interactions).
+- A prompt about a tool call also appears on that call's `tool` part as `part.interaction`. Other prompts appear as `interaction` message parts.
 
 ## Sign-ins and other interactions
 
-Connections and tools that need OAuth or another grant open a sign-in: an `interaction.opened` with `request.kind: "sign-in"`. Sign-ins are interactions like approvals and questions; query them with `openInteractions(view, { kind: "sign-in" })`. An approval or question about a call shows on that call's tool part; every other interaction, such as a sign-in or the budget prompt, is an `interaction` message part of its own (`EveInteractionPart`). Its `request` is the interaction as asked, a sign-in's challenge in `request.signIn` (the display name, instructions, device code, and user-facing sign-in URL). The part is `open` until its interaction settles, then `settled` with its `outcome`. Render the part as a normal chat message and keep the session cursor so eve can resume the parked turn once the sign-in completes:
+When a tool or connection needs the user to sign in, for example with OAuth, the turn opens a sign-in prompt. It appears in `messages` as an `interaction` part. Render it like any other message; once the user signs in, the turn continues on its own.
 
 ```tsx
 import { signInEnding, type EveMessagePart } from "eve/react";
@@ -393,11 +175,11 @@ function SignInPrompt({ part }: { part: EveMessagePart }) {
 }
 ```
 
-A sign-in's `interaction.opened` and `interaction.settled` facts are also available on `events` and `onEvent`.
+`request.signIn` holds the provider's display name, instructions, device code, and sign-in URL. To list open sign-ins, use `openInteractions(view, { kind: "sign-in" })`.
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the current turn. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. The context remains available to every model call in the turn, then disappears before the next turn. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it in the second argument to `send()` or `respond()`:
+`clientContext` tells the agent about the user's current page for one turn. It isn't saved to the conversation history:
 
 ```tsx
 await agent.send("What should I do on this screen?", {
@@ -405,7 +187,9 @@ await agent.send("What should I do on this screen?", {
 });
 ```
 
-To attach the same context to every turn without threading it through each call site, use `prepareSend`. It runs right before each send and returns the (possibly augmented) turn. The optimistic message is already visible while asynchronous preparation runs:
+Pass a string, an array of strings, or an object, which eve sends as JSON. The context also rides along with `respond()`.
+
+To add context to every message, use `prepareSend`:
 
 ```tsx
 const agent = useEveAgent({
@@ -416,60 +200,9 @@ const agent = useEveAgent({
 });
 ```
 
-## Lifecycle callbacks
-
-The hook accepts these lifecycle callbacks:
-
-- `onEvent(event)`: fires for each eve stream event as it arrives.
-- `onError(error)`: fires when session creation, streaming, resume, or a live turn fails. Restoring a historical failure updates `error` without replaying this callback. A failed prewarm reports here when no send is waiting to retry creation.
-- `onFinish(snapshot)`: fires when a live turn settles, after its whole committed line is visible. Catch-up never fires it, including for a locally submitted turn that already settled. Use `receipt.result()` to read that delivery's result; a delivery can settle while its turn is still awaiting input.
-- `onSessionChange(session)`: fires when a session is created, its cursor advances, or `newSession()` clears it. Persist the session state to resume across reloads.
-
-```tsx
-const agent = useEveAgent({
-  onEvent: (event) => console.debug(event.type),
-  onError: (error) => toast.error(error.message),
-  onFinish: (snapshot) => console.log(snapshot.status),
-});
-```
-
-The `optimistic` option (default `true`) shows submitted user messages in `messages` before eve confirms them with a `delivery.consumed` fact. A follow-up sent while a turn works shows at the end of the conversation and stays there once the turn takes it in; if the send fails, the failed placeholder stays in place, with `metadata.status` `"failed"`. They show in `messages` only; `events` stays the authoritative eve stream. The hook reconciles each placeholder with the server's delivery ID, including the first message. Its message ID stays unchanged when confirmed, so an unrelated or identical message cannot consume it. While POST acknowledgements are pending, stream-driven snapshot publication waits for their identities; `onEvent` still receives the stream events.
-
-## Derive your own state
-
-Read lifecycle state directly from `view`. It is the shared fold's committed snapshot, not a second conversation-specific turn or task model:
-
-```tsx
-import { activeTurn, activity, waiting } from "eve/events";
-
-const turn = activeTurn(agent.view);
-const currentActivity = activity(agent.view);
-const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
-```
-
-For event-level queries, use `events`, the authoritative, deduplicated list of the session's stream events, which `newSession()` empties:
-
-```tsx
-import { useMemo } from "react";
-import { useEveAgent } from "eve/react";
-
-const agent = useEveAgent();
-const toolCalls = useMemo(
-  () => agent.events.filter((event) => event.type === "call.requested").length,
-  [agent.events],
-);
-```
-
-Use the snapshot's `view` instead of folding `events` again inside a component. Outside the
-store, `foldEvents` and `emptySessionView` from `eve/events` fold received events by whole line:
-assign `view = foldEvents(view, receivedEvents)`. The input view stays unchanged, and the returned
-snapshot holds unfinished lines privately until they complete. Use `callPreview(view, callId)`
-or `contentPreviews(view)` for transient progress; renderable messages still include streamed
-input. To render a saved log, use `conversationOf(events)` from `eve/client`.
-
 ## Resumable sessions
 
-The browser conversation lives durably on the server. Persist both the rendered event log and the `session` cursor to pick it back up after a reload:
+eve stores every conversation on the server. To reopen one after a reload, save two things, `session` and `events`, and pass them back:
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -500,30 +233,81 @@ useEffect(() => {
 }, [agent.events, agent.session]);
 ```
 
-Store the full `session` object (`sessionId`, `streamIndex`). The session cursor
-lets eve continue the exact durable conversation; the event log lets your UI
-render historical messages without replaying the whole stream. A database-backed
-chat app should persist committed events and the matching cursor as they change. Do not save only
-in `onFinish`: a turn paused on an interaction has not finished, but its events must survive a reload.
+- `session` tells eve which conversation to continue and where to pick up. Save the whole object, as is.
+- `events` lets you show the saved messages immediately, before eve catches up.
+- If you only have a session ID, pass `initialSession: { sessionId, streamIndex: 0 }` with `resume: true`; eve replays the conversation from the start.
 
-`initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. Catch-up starts after its complete source coverage, using line positions rather than event counts. Preserve reader metadata unchanged: `meta.next` can record source lines that produced no events, as with [converted v26 history](/docs/concepts/upgrade-to-v27-events). The store's `session.streamIndex` and `position(view)` both track that covered source prefix without changing the facts' original positions. The `initialSession` handle's cursor alone never extends that coverage. A partial line is replayed from its start; already observed events are skipped. Every event carries a stable [`meta.position`](/docs/concepts/sessions-runs-and-streaming#positions), and the store drops any event whose position it has already applied, so an overlapping replay renders once and `onEvent` only fires for events your UI has not seen.
+A few rules keep restored chats correct:
 
-For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `baseUrl`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `followAgents`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`. React reads `prewarm` and `followWhile` on every render.
+- **Save as you go.** Save on every change, not only when a turn finishes. A turn waiting on the user hasn't finished, but its messages must survive a reload.
+- **Disable input while resuming.** While `status` is `"resuming"`, show the saved messages but disable sending.
+- **One saved chat per conversation.** To switch conversations, remount the chat component, for example with `key={chat.id}`.
+- **Create your chat record first.** If the user can reload right after sending, create your app's chat record before `send()`, and save the session ID from `onSessionChange`.
 
-Pass `resume: true` with `initialSession` to rebuild the projection from the durable stream after mount. While `status` is `"resuming"`, render hydrated `messages` but disable message and HITL submission; do not present cancellation or active-turn progress controls. `resume()` resolves when catch-up reaches the durable tail, even if a turn is still running. The binding then reports `"busy"` while the session has running or queued work. The stream reports its initial durable tail so catch-up can finish without closing the connection or waiting for an idle timeout. A settled tail, or a turn waiting only on a person, changes directly to `"idle"`; running or queued work remains `"busy"`. By default, the connection stays open to follow the turn and receive later events. A `followWhile` predicate can close it after catch-up once local obligations clear. A terminal session failure sets `error`.
+See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for exactly how saved events and catch-up fit together.
+
+## Start a new conversation
+
+- `newSession()` clears the chat and starts fresh. The old conversation stays on the server.
+- `end()` ends the conversation on the server. Call `newSession()` afterward to clear it locally.
+
+To make the first reply faster, pass `prewarm: true`. eve then creates the next session before the user sends anything. Turn it on only after your auth headers are ready. See [Prewarming](./use-eve-agent#prewarming).
+
+## Show subagent progress
+
+When the agent delegates to a subagent, `messages` shows the delegated call, not the subagent's own messages. To follow subagents too, pass `followAgents: true`, then render `agents[sessionId].observation.conversation.messages`:
+
+```tsx
+const agent = useEveAgent({ followAgents: true });
+```
+
+See [Child agents](./use-eve-agent#child-agents) for limits, observation states, and showing what a single call caused.
+
+## Lifecycle callbacks
+
+- `onEvent(event)` runs for each stream event.
+- `onError(error)` runs when something fails.
+- `onFinish(snapshot)` runs when a live turn finishes.
+- `onSessionChange(session)` runs when the session cursor changes. Save it here.
 
 ```tsx
 const agent = useEveAgent({
-  initialSession: { sessionId, streamIndex: 0 },
-  resume: true,
+  onEvent: (event) => console.debug(event.type),
+  onError: (error) => toast.error(error.message),
+  onFinish: (snapshot) => console.log(snapshot.status),
 });
 ```
 
-If the user can refresh or navigate immediately after pressing send, create your app-level chat row before calling `send()`, then persist the session ID from `onSessionChange`. This lets the reloaded UI mount with that ID and pass `resume: true` while the durable turn is still running.
+See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for exactly when each one fires.
+
+## Derive your own state
+
+`view` already tracks turns, calls, and prompts. Query it with functions from `eve/events` instead of building your own state:
+
+```tsx
+import { activeTurn, activity, waiting } from "eve/events";
+
+const turn = activeTurn(agent.view);
+const currentActivity = activity(agent.view);
+const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
+```
+
+See [Use eve's answers](./use-eve-agent#use-eves-answers) for which query answers each common question, from a request's result to call timing and usage.
+
+For something `view` doesn't cover, read the raw `events`:
+
+```tsx
+import { useMemo } from "react";
+
+const toolCalls = useMemo(
+  () => agent.events.filter((event) => event.type === "call.requested").length,
+  [agent.events],
+);
+```
 
 ## Custom hosts and headers
 
-Pass `baseUrl` when the eve server isn't same-origin, and pass `auth` or `headers` when the channel needs credentials. Function values are re-resolved before every HTTP request, reconnects included:
+Pass `baseUrl` when the agent is on another origin, and `auth` or `headers` for credentials. Functions run before every request, so tokens stay fresh:
 
 ```tsx
 const agent = useEveAgent({
@@ -534,11 +318,7 @@ const agent = useEveAgent({
 });
 ```
 
-Headers supplied to `send()` apply to that turn request and become the credentials used by the
-continuous session stream on its next reconnect. A later send replaces them with that turn's
-headers.
-
-When a framework integration mounts multiple named agents, pass `agent` instead of `baseUrl`:
+When your app mounts several named agents, select one with `agent` instead:
 
 ```tsx
 const support = useEveAgent({ agent: "support" });
@@ -548,15 +328,15 @@ const support = useEveAgent({ agent: "support" });
 
 | Framework      | Integration                          | Hook                                             |
 | -------------- | ------------------------------------ | ------------------------------------------------ |
-| Next.js        | [`withEve`](./nextjs)                | [`useEveAgent` (React)](#basic-chat-react)       |
+| Next.js        | [Next.js guide](./nextjs)            | [`useEveAgent` (React)](#build-a-basic-chat)     |
 | Nuxt           | [`eve/nuxt` module](./nuxt)          | [`useEveAgent` (Vue)](./use-eve-agent-vue)       |
 | SvelteKit      | [`eveSvelteKit` plugin](./sveltekit) | [`useEveAgent` (Svelte)](./use-eve-agent-svelte) |
-| TanStack Start | [`eveTanStack` plugin](./tanstack)   | [`useEveAgent` (React)](#basic-chat-react)       |
-| Any React      | same-origin or `baseUrl`             | [`useEveAgent` (React)](#basic-chat-react)       |
+| TanStack Start | [`eveTanStack` plugin](./tanstack)   | [`useEveAgent` (React)](#build-a-basic-chat)     |
+| Any React      | same-origin or `baseUrl`             | [`useEveAgent` (React)](#build-a-basic-chat)     |
 
 ## What to read next
 
-- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
-- [Channels](../../channels/overview): the HTTP routes the hook talks to
-- [Client SDK](../client/overview): the lower-level client underneath the frontend hooks
-- [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app
+- [`useEveAgent` reference](./use-eve-agent): every value, option, and behavior
+- [Next.js](./nextjs): set up a chat app end to end
+- [Client SDK](../client/overview): call the agent from scripts and server code
+- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): how sessions and the event stream work

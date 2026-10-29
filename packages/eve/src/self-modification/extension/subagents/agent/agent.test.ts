@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#context/keys.js";
+import { dynamicEvaluate } from "#dynamic/definition.js";
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -64,7 +65,7 @@ describe("self-modification local agent", () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
       await expect(
-        Promise.resolve(agent.evaluate(contextWith(undefined, principal))),
+        Promise.resolve(dynamicEvaluate(agent)(contextWith(undefined, principal))),
       ).resolves.toMatchObject({
         model: "openai/gpt-6-luna-fast",
       });
@@ -79,7 +80,7 @@ describe("self-modification local agent", () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
       await expect(
-        Promise.resolve(agent.evaluate(contextWith(undefined, principal))),
+        Promise.resolve(dynamicEvaluate(agent)(contextWith(undefined, principal))),
       ).resolves.toBeNull();
     });
   });
@@ -127,7 +128,7 @@ describe("self-modification local agent", () => {
           ...options,
           config: { local: { enabled: true } },
         });
-        const resolved = await agent.evaluate(contextWith(parent ?? undefined));
+        const resolved = await dynamicEvaluate(agent)(contextWith(parent ?? undefined));
 
         expect(resolved).toMatchObject({ model });
         expect(resolved).toHaveProperty("reasoning", reasoning);
@@ -139,14 +140,14 @@ describe("self-modification local agent", () => {
     process.env.EVE_DEV = "1";
     const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-    await expect(Promise.resolve(agent.evaluate(context))).resolves.toBeNull();
+    await expect(Promise.resolve(dynamicEvaluate(agent)(context))).resolves.toBeNull();
   });
 
   it("honors local.enabled: false even when eve dev facilities are available", async () => {
     await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: false } } });
 
-      await expect(Promise.resolve(agent.evaluate(context))).resolves.toBeNull();
+      await expect(Promise.resolve(dynamicEvaluate(agent)(context))).resolves.toBeNull();
     });
   });
 });

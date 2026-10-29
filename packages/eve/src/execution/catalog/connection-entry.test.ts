@@ -2,11 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { resolveHeaders } from "#runtime/connections/mcp-client.js";
+import { resolveProvidedArguments } from "#runtime/connections/provided-arguments.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { once } from "#tools/approval/policies.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
+import type {
+  ConnectionCallbackContext,
+  ConnectionClient,
+  ConnectionPrincipal,
+  ConnectionToolMetadata,
+} from "#shared/connection-types.js";
 import type { ToolSchema } from "#tools/schema.js";
 
 import { connectionEntry } from "./connection-entry.js";
@@ -102,6 +110,121 @@ describe("connection approval context", () => {
     const perTool = once();
     const { request } = setup(undefined, perTool);
     expect(await request("delete_issue")).toBe(await perTool({} as ApprovalContext));
+  });
+});
+
+describe("connection tool call", () => {
+  const user = (principalId: string): SessionAuthContext => ({
+    attributes: {},
+    authenticator: "test",
+    issuer: "test",
+    principalId,
+    principalType: "user",
+  });
+
+  const gateway = {
+    getToken: async ({ principal }: { principal: ConnectionPrincipal }) => ({
+      token: `token-for-${principal.type === "user" ? principal.id : "app"}`,
+    }),
+    principalType: "user" as const,
+  };
+
+  const subscribe: ConnectionToolMetadata = {
+    description: "Subscribe to issue events.",
+    inputSchema: { type: "object" },
+    name: "subscribe_issues",
+  };
+
+  /**
+   * Alice's tracker call. Its provided arguments read who approved it and their token; an event
+   * action, which sends no arguments, reports who its headers say approved it.
+   */
+  function call(responder?: SessionAuthContext, toolName = "delete_issue") {
+    const connection = {
+      connectionName: "tracker",
+      description: "Issue tracker.",
+      logicalPath: "connections/tracker.ts",
+      protocol: "mcp",
+      sourceId: "tracker",
+      sourceKind: "module",
+      toolCall: {
+        providedArguments: {
+          approvedBy: ({ approval }) => approval?.responder.principalId ?? null,
+          approverToken: async ({ approval }) =>
+            (await approval?.responder.getToken(gateway))?.token ?? null,
+          requestedBy: ({ session }) => session.auth.current?.principalId ?? null,
+        },
+      },
+      headers: (ctx: ConnectionCallbackContext) => ({
+        "X-Approved-By": ctx.approval?.responder.principalId ?? "",
+      }),
+      url: "https://tracker.example.com/mcp",
+    } as ResolvedConnectionDefinition;
+    const client: ConnectionClient = {
+      close: async () => {},
+      connect: async () => undefined,
+      eventActions: {
+        execute: async () => ({
+          approvedBy: (await resolveHeaders(connection))["X-Approved-By"],
+        }),
+        metadata: async () => [subscribe],
+        ownsName: (name) => name === subscribe.name,
+        recoveryMetadata: () => [subscribe],
+      },
+      executeTool: async (name, args, options) => ({
+        structuredContent: await resolveProvidedArguments({
+          args,
+          callId: options.callId,
+          connection,
+          toolName: name,
+        }),
+      }),
+      getToolMetadata: async () => tools,
+    };
+    const registry: ConnectionRegistry = {
+      dispose: async () => {},
+      getClient: () => client,
+      getConnectionApproval: () => undefined,
+      getConnectionNames: () => ["tracker"],
+      getConnections: () => [connection],
+    };
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: user("alice"), initiator: user("alice") },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    return contextStorage.run(ctx, async () =>
+      connectionEntry(registry, connection, toolName).execute!(
+        {},
+        {
+          messages: [],
+          toolCallId: "call-1",
+          ...(responder !== undefined && { approval: { responder } }),
+        },
+      ),
+    );
+  }
+
+  it("gives an approved call's provided arguments its approver and their token", async () => {
+    await expect(call(user("bob"))).resolves.toEqual({
+      approvedBy: "bob",
+      approverToken: "token-for-bob",
+      requestedBy: "alice",
+    });
+  });
+
+  it("gives a call that needed no approval no approver", async () => {
+    await expect(call()).resolves.toEqual({
+      approvedBy: null,
+      approverToken: null,
+      requestedBy: "alice",
+    });
+  });
+
+  it("gives an approved event action's headers its approver", async () => {
+    await expect(call(user("bob"), subscribe.name)).resolves.toEqual({ approvedBy: "bob" });
+    await expect(call(undefined, subscribe.name)).resolves.toEqual({ approvedBy: "" });
   });
 });
 

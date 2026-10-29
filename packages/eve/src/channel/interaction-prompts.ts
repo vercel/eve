@@ -16,6 +16,7 @@ import {
   interaction,
   decidingAnswer,
   promptQueueHead,
+  responderOf,
   type Interaction,
 } from "#protocol/session-projection/reader.js";
 import type { Answer } from "#shared/input.js";
@@ -129,12 +130,6 @@ export function refusedAnswerOf(
   const responder = responderOf(view, data.responseId);
   if (responder !== undefined) refused.responder = responder;
   return refused;
-}
-
-/** Who gave an answer: the principal of the delivery it arrived in. */
-export function responderOf(view: SessionView, responseId: string): Principal | undefined {
-  const response = view.responses[responseId];
-  return response === undefined ? undefined : view.deliveries[response.deliveryId]?.principal;
 }
 
 /** An option's style a channel can render: a style a newer eve added reads as none. */

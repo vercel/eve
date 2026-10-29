@@ -1,9 +1,9 @@
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 const MARKER = "PROXIED-ASK-APPROVED-6R9K";
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   description: "Ask for deployment approval and return a fixed marker after approval.",
   model: mockModel(({ lastUserMessage, messages, toolResults }) => {
     const result = toolResults.find((entry) => entry.name === "ask_question");
@@ -33,3 +33,5 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 1_000_000,
 });
+
+export default agent;

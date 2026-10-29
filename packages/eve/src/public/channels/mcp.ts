@@ -536,6 +536,7 @@ function createInvocationTools(
         },
         description:
           "Reads complete durable invocation state. Wait at least pollAfterMs between calls. " +
+          "While working, statusMessage, when present, describes the current activity. " +
           "Terminal statuses are completed, failed, and cancelled. input_required includes questions, approvals, and sign-ins. " +
           `Answer questions and approvals with agent_update; follow sign-in instructions and poll for sign-ins.${publicHandleDescription}`,
         inputSchema: z.strictObject({ invocationId: z.string().min(1).max(MAX_ID_CHARS) }),
@@ -687,6 +688,7 @@ const AGENT_INVOCATION_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
     pollAfterMs: z.number().int().nonnegative(),
     result: z.json().optional(),
     status: z.literal("working"),
+    statusMessage: z.string().optional(),
   }),
   AGENT_INVOCATION_BASE_SCHEMA.extend({
     interactions: z.record(z.string(), interactionJsonSchema),

@@ -11,6 +11,7 @@
   "SpanExportPolicy",
   "SpanExporter",
   "SpanProcessor",
+  "SpanProcessorOrName",
   "TraceCaptureContext",
   "TraceCapturePolicy",
   "TracePolicyDecision",

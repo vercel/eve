@@ -1,4 +1,5 @@
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { isDefinedAgent } from "#public/definitions/agent.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
@@ -33,6 +34,9 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   readonly value: unknown;
 }): Promise<DynamicSubagentAgentConfig> {
   const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+  if (!isDefinedAgent(input.value)) {
+    throw new Error(`${message} Wrap a returned agent object in defineAgent({...}) from "eve".`);
+  }
   const definition = normalizeAgentDefinition(input.value, message);
 
   if (!definition.description) {
@@ -93,8 +97,8 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
         },
       });
     }
-    if (definition.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = definition.compaction.thresholdPercent;
+    if (definition.compaction.threshold !== undefined) {
+      compaction.thresholdPercent = definition.compaction.threshold;
     }
     config.compaction = compaction;
   }

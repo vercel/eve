@@ -1,7 +1,7 @@
 import { getPublicPath } from "@vercel/geistdocs/config";
 import type { MetadataRoute } from "next";
 import { cacheLife } from "next/cache";
-import { canonicalRoutes, integrationPath, templatePath } from "@/lib/geistdocs/canonical";
+import { canonicalRoutes, integrationPath } from "@/lib/geistdocs/canonical";
 import { config } from "@/lib/geistdocs/config";
 import { defaultLanguage } from "@/lib/geistdocs/languages";
 import {
@@ -14,7 +14,6 @@ import { createCanonicalSitemap, type SitemapSourceEntry } from "@/lib/geistdocs
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { integrations } from "@/lib/integrations/data";
-import { templateManifest } from "@/lib/templates/manifest";
 
 const getLastModified = (data: unknown): Date | undefined => {
   if (!data || typeof data !== "object" || !("lastModified" in data)) return;
@@ -49,8 +48,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ...docs,
       { pathname: canonicalRoutes.integrations },
       ...integrations.map(({ slug }) => ({ pathname: integrationPath(slug) })),
-      { pathname: canonicalRoutes.templates },
-      ...templateManifest.map(({ slug }) => ({ pathname: templatePath(slug) })),
     ],
   });
 }

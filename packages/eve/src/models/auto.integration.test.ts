@@ -2,6 +2,7 @@ import { Experimental_DecisionMockModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
+import { dynamicEvaluate } from "#dynamic/definition.js";
 import { anthropic } from "#public/models/anthropic/index.js";
 
 import { openMemos } from "#reactions/records.js";
@@ -75,7 +76,7 @@ async function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof
     scope: "model:agent",
     sessionId: "test",
   });
-  return await definition.evaluate({
+  return await dynamicEvaluate(definition)({
     channel: {},
     memo: memos.memo,
     messages: async () => [],

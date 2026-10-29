@@ -1,3 +1,8 @@
+/**
+ * A `SpanProcessor`. Structural for the same reason the exporter is: the
+ * instance comes from whichever `@opentelemetry/*` build the app installed, and
+ * the host only ever hands it spans.
+ */
 export interface SpanProcessor {
   forceFlush(): Promise<void>;
   onEnd(span: unknown): void;
@@ -5,6 +10,7 @@ export interface SpanProcessor {
   shutdown(): Promise<void>;
 }
 
+/** A {@link SpanProcessor}, or `"auto"` for the processor `@vercel/otel` resolves for you. */
 export type SpanProcessorOrName = SpanProcessor | "auto";
 
 export interface IdGenerator {

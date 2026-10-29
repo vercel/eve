@@ -1,5 +1,5 @@
 import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 import { z } from "zod";
 
 /**

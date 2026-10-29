@@ -65,7 +65,12 @@ test("asks for approval before closing a ticket", async () => {
   const policy = typeof close.approval === "function" ? close.approval : close.approval?.request;
   expect(typeof policy).toBe("function");
   const toolInput = { ticketId: "T-7", resolution: "Refund issued." };
-  const decision = await policy({ callId: "call-1", session: {}, toolInput, toolName: "x" });
+  const decision = await policy({
+    callId: "call-1",
+    session: graderSession,
+    toolInput,
+    toolName: "x",
+  });
   expect(requiresApproval(decision)).toBe(true);
 
   // Once approved, the call still closes the ticket in the helpdesk.
@@ -238,7 +243,7 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   );
   const ctx = {
     agent: { name: "support" },
-    session: { id: "session-1", auth: { current: null, initiator: null } },
+    session: graderSession,
     position: { line: facts.length - 1, index: 0 },
     view,
     turn: { id: "turn-1" },
@@ -256,6 +261,26 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
   return output;
 }
 
+/** The person who approves calls in the grader, as eve hands them to an approved call. */
+const graderApprover = {
+  authenticator: "grader",
+  issuer: "grader",
+  principalId: "approver-1",
+  principalType: "user",
+  subject: "approver-1",
+  attributes: {},
+  getToken: async () => {
+    throw new Error("The grader has no provider tokens.");
+  },
+};
+
+/** The session eve hands tools, hooks, and approval policies: one conversation, in its first turn. */
+const graderSession = {
+  id: "session-1",
+  auth: { current: null, initiator: null },
+  turn: { id: "turn-1", sequence: 0 },
+};
+
 /**
  * Runs a tool call the way eve does: with a call context, inside a session whose state the
  * tools can read and write. Pass the same session to calls that belong to one conversation.
@@ -263,13 +288,18 @@ async function runCall(name: string, input: unknown): Promise<unknown> {
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function runTool(tool: any, input: unknown, session = new SessionState()): Promise<unknown> {
   const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
-  const call = {
+  const call: Record<string, unknown> = {
     abortSignal: new AbortController().signal,
     callId: `call-${Math.random().toString(36).slice(2)}`,
     toolName: "graded",
     messages: [],
     channel: { kind: "eve" },
+    // eve passes the session with every call; a tool may read its ID or the current turn.
+    session: graderSession,
   };
+  // eve only runs a tool that asks for approval once a person approves, and tells the call who
+  // did. A tool may check it as a second guard.
+  if (tool.approval !== undefined) call.approval = { responder: graderApprover };
   return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }
 

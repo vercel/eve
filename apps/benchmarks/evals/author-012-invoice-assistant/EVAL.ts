@@ -75,11 +75,17 @@ test("runs and deploys the agent with the Next.js app through withEve", () => {
   expect(source).toMatch(/export\s+default\s+withEve\s*\(/);
 });
 
+/** Principal types eve and its docs use for callers that aren't a signed-in person. */
+const nonPersonTypes = ["anonymous", "app", "local-dev", "runtime", "service"];
+
 test("admits signed-in Tally users as themselves", async () => {
   for (const user of [maya, sam]) {
     const { status, auth } = await authenticate({ cookie: sessionCookie(user) });
     expect(status, user.userId).toBe(202);
-    expect(auth?.principalType, user.userId).toBe("user");
+    // eve leaves `principalType` free-form; "user" is the convention, but `tally_user` still
+    // names a person. Only non-person types fail.
+    expect(auth?.principalType, user.userId).toMatch(/\S/);
+    expect(nonPersonTypes, user.userId).not.toContain(auth?.principalType);
     expect(String(auth?.principalId), user.userId).toContain(user.userId);
   }
 });
@@ -454,7 +460,11 @@ async function toolContext(
     abortSignal: AbortSignal;
     approval?: { responder: unknown };
   } = {
-    session: { id: sessionId, auth: { current, initiator: current }, turn: { id: "turn-1" } },
+    session: {
+      id: sessionId,
+      auth: { current, initiator: current },
+      turn: { id: "turn-1", sequence: 0 },
+    },
     // eve gives every call its own ID; a tool may key idempotent writes on it.
     callId: `call-${(toolCalls += 1)}`,
     abortSignal: new AbortController().signal,
@@ -513,7 +523,7 @@ async function approvalSettles(tool: any, user: User, input: unknown): Promise<b
       principal: requester,
     },
     response: { decision: "approve", principal: requester },
-    session: { id: "session-1", initiator: requester, turn: { id: "turn-1" } },
+    session: { id: "session-1", initiator: requester, turn: { id: "turn-1", sequence: 0 } },
     auth: {
       getToken: async () => {
         throw new Error("The grader has no provider tokens.");

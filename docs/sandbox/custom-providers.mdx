@@ -176,6 +176,8 @@ Validate the shape of your own state in `resume()`. When you change it incompati
 
 `sandbox.delete()` uses the same method with `reason: "deleted"` and the caller's `signal`, so a provider has one deletion path. A subagent that shares its parent's sandbox never calls it, because cleanup belongs to the parent. An `invokeTool` call without a key calls it when the call ends if the tool requested the sandbox.
 
+The sets of `reason` and `ctx.kind` values, like other values eve passes into a provider, can grow in a minor release, so handle unknown values instead of switching exhaustively. See [Stability policy](/docs/reference/typescript-api#stability-policy).
+
 ## Bake files into templates
 
 Call `ctx.populate(connection)` on the build instance before you capture it. `populate()` writes the agent's workspace files to the connection's workspace root and its skill files to `$HOME/.agents/skills` in one `writeFiles()` batch, then runs the authored `prepare` callback with a session over the same connection. eve finds `$HOME` by running a command through `spawn()`. When the sandbox has no usable home directory, skills go to `skills/` under the workspace root.

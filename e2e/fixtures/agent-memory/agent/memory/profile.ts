@@ -16,7 +16,7 @@ export default defineMemory({
       async "turn.started"(ctx) {
         const document = await profiles.read({
           key: ctx.memory.scope.key,
-          abortSignal: ctx.abortSignal,
+          signal: ctx.abortSignal,
         });
         const value = document?.content ?? "OLD_PROFILE_VALUE";
         return { messages: [{ content: `PROFILE_VALUE=${value}`, id: "profile" }] };
@@ -30,13 +30,13 @@ export default defineMemory({
           async execute({ value }, toolContext) {
             const current = await profiles.read({
               key: ctx.memory.scope.key,
-              abortSignal: toolContext.abortSignal,
+              signal: toolContext.abortSignal,
             });
             await profiles.write({
               content: value,
               expectedVersion: current?.version ?? null,
               key: ctx.memory.scope.key,
-              abortSignal: toolContext.abortSignal,
+              signal: toolContext.abortSignal,
             });
             return { saved: true };
           },

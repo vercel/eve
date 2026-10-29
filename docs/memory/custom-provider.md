@@ -148,7 +148,7 @@ context. The `id` also identifies the record in
 
 ### Tools
 
-`tools()` returns a map of `defineTool()` values or `null`. eve qualifies each
+`tools()` returns a `MemoryToolSet`, a map of `defineTool()` values, or `null`. eve qualifies each
 key as `<slot>__<key>`; the qualified name must start with a letter, contain
 only letters, digits, underscores, or dashes, and be at most 64 characters.
 Schemas, `approval`, `outputSchema`, and `toModelOutput` work as they do for

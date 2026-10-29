@@ -34,7 +34,7 @@ export default defineChannel({
       return Response.json(result);
     }),
     POST("/threads/:threadId/new", async (_request, { from, params }) => {
-      const result = await from(params.threadId ?? "").reset({
+      const result = await from(params.threadId ?? "").end({
         reason: "E2E user requested /new",
       });
       return Response.json({ acknowledgement: "Started a new conversation.", ...result });

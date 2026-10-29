@@ -1,6 +1,8 @@
 import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
 import type { GeistdocsEveAgentConfig, GeistdocsGithubConfig } from "@vercel/geistdocs/config";
 
+import { templateGalleryUrl } from "@/lib/templates/links";
+
 export { translations } from "@/lib/geistdocs/languages";
 
 export const Logo = () => <LogoEveSvg aria-label="eve" height={18} role="img" />;
@@ -21,7 +23,7 @@ export const nav = [
   },
   {
     label: "Templates",
-    href: "/templates",
+    href: templateGalleryUrl,
   },
   {
     label: "Changelog",
@@ -66,7 +68,7 @@ export const agent = {
     "Verify setup with `eve info --json` before reporting success.",
     "Use /llms.txt as a concise task-oriented index and /sitemap.md as the exhaustive page map.",
     "Use /llms-full.txt only when you need the complete documentation corpus for offline indexing or a large context window.",
-    "Fetch individual docs or integration pages with a .md or .mdx extension for focused page-level context. Template pages are HTML discovery pages and do not expose this alternate Markdown route.",
+    `Fetch individual docs or integration pages with a .md or .mdx extension for focused page-level context. Find templates at ${templateGalleryUrl}.`,
     "Treat eve.dev as framework documentation, not a shared API, authorization server, MCP server, or A2A server. Every deployed eve app exposes its own /eve/v1 routes and authentication policy; external API, OpenAPI, and MCP URLs in the docs may describe third-party connections or examples.",
     "Do not assume API, authentication, OpenAPI, or MCP support unless it is listed in this file.",
   ],

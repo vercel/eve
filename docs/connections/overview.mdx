@@ -10,6 +10,10 @@ Connections live under `agent/connections/`. A static connection's runtime name 
 
 A connection owns its name and every name that starts with `<name>__`, so `linear__list_issues` always means the `linear` connection's `list_issues` tool. The compiler rejects a tool, subagent, or connection whose name is a static connection's name or starts with its `<name>__` prefix. eve applies the same rule to dynamic connections, tools, and subagents when they resolve, except that a dynamic connection with exactly a static connection's name replaces that static connection; see [Naming and conflicts](/docs/guides/dynamic-capabilities#naming-and-conflicts). Both errors name the two sides of the conflict; rename either one.
 
+Static and dynamic connection definitions must use `defineMcpClientConnection`
+or `defineOpenAPIConnection` from `eve/connections`. Plain object exports are
+rejected because they do not identify a protocol.
+
 ## MCP connections
 
 Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model. Each tool's JSON Schema reaches the model as published, minus any arguments you supply with `toolCall.providedArguments`, and eve checks the model's arguments against it before it calls the server.
@@ -208,6 +212,36 @@ export default defineMcpClientConnection({
 ```
 
 For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, allow-lists, or other safeguards appropriate to the action.
+
+### Send the approver to the server
+
+[Approval is consent only](/docs/human-in-the-loop): it never changes who the turn runs as. An approved connection call keeps the requester's identity, so `ctx.session.auth.current` and the connection's `auth` token stay the requester's, and later calls in the turn are unaffected. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, with access to their credentials. That's a separate identity your code explicitly sends to the server, not a replacement for the requester:
+
+```ts title="agent/connections/gateway.ts"
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://gateway.example.com/mcp",
+  description: "Internal systems through the MCP gateway.",
+  approval: {
+    request: always(),
+    response: ({ response }) =>
+      admins.includes(response.principal.principalId)
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "Only admins can approve gateway calls." },
+  },
+  auth: gatewayAuth,
+  headers: async (ctx) => {
+    const approver = await ctx.approval?.responder.getToken(gatewayApproverAuth);
+    return approver === undefined ? {} : { "X-Approver-Token": approver.token };
+  },
+});
+```
+
+`ctx.approval.responder.getToken(provider)` resolves the approver's token as it does in a [`defineTool` tool](/docs/human-in-the-loop): it never starts a sign-in, and throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"` when the approver has no token. `headers` can't set `Authorization` when the connection also sets `auth`, so send the approver's token in another header, or omit `auth` and set `Authorization` yourself.
+
+`ctx.approval` is absent for calls that needed no approval, and while eve connects to the server and lists its tools. The approver's identity reaches only the requests of the call they approved. Pair it with an `approval.response` policy so only people whose access the call may use can approve it.
 
 ## Interactive OAuth via Vercel Connect
 

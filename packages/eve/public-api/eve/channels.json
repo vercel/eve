@@ -68,11 +68,9 @@
   "WebSocketUpgradeRequest",
   "WebSocketUpgradeResult",
   "WebSocketUpgradeServerBridge",
-  "answerFromText",
   "attachmentError",
   "createWebSocketUpgradeServer",
   "defineChannel",
   "disableRoute",
-  "isChannel",
-  "isDisabledRouteSentinel"
+  "isChannel"
 ]

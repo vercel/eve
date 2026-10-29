@@ -9,7 +9,7 @@ import {
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { PublicAgentDynamicModelResult } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { isFrameworkDefinition } from "#dynamic/definition.js";
+import { dynamicEvaluate, isFrameworkDefinition } from "#dynamic/definition.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { authoredEvaluate, type ValueReaction } from "../reaction.js";
 import { readLive, readReactionsState, slotValueOf } from "../state.js";
@@ -65,7 +65,7 @@ export async function loadModelReaction(
         throw new DynamicModelSelectionError(error);
       }
     },
-    evaluate: authoredEvaluate(definition.evaluate, {
+    evaluate: authoredEvaluate(dynamicEvaluate(definition), {
       framework: isFrameworkDefinition(definition),
     }),
     id: MODEL_REACTION_ID,

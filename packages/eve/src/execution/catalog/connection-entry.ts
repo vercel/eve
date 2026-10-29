@@ -25,6 +25,7 @@ import { isApprovalRecheck, inheritApprovalContext } from "#approval/evaluation.
 import { approvalDecision } from "#approval/status.js";
 import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
   connectionToolModelOutput,
@@ -160,12 +161,19 @@ async function callConnectionTool(
 
   let raw: unknown;
   try {
+    // Only the call itself sees the approver; the listing above stays the requester's.
+    const approved = <T>(fn: () => T) =>
+      withConnectionApproval(connection.connectionName, options.approval?.responder, fn);
     if (isEventAction)
-      return await client.eventActions!.execute(tool.name, input, {
-        abortSignal: options.abortSignal,
-        callId: options.toolCallId,
-      });
-    raw = await executeWithDeadline(connection.connectionName, client, tool.name, input, options);
+      return await approved(() =>
+        client.eventActions!.execute(tool.name, input, {
+          abortSignal: options.abortSignal,
+          callId: options.toolCallId,
+        }),
+      );
+    raw = await approved(() =>
+      executeWithDeadline(connection.connectionName, client, tool.name, input, options),
+    );
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
     throw error;

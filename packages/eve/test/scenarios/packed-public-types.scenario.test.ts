@@ -41,6 +41,7 @@ const integrations: Record<string, readonly string[]> = {
   "eve/channels/linq": ["chat", "@linqapp/sdk"],
   "eve/channels/photon": ["chat"],
   "eve/sandbox/just-bash": ["just-bash"],
+  "eve/experimental/sandbox/just-bash": ["just-bash"],
   "eve/instrumentation/otel": ["@opentelemetry/api"],
 };
 const entries = Object.entries(manifest.exports)
@@ -70,6 +71,31 @@ import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
+import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
+import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
+// @ts-expect-error Hook storage records are not part of eve's Workflow API.
+import { getHookByToken } from "eve/workflow/api";
+// @ts-expect-error Bare Workflow imports are no longer declared by eve.
+import { sleep as bareSleep } from "workflow";
+async function durable() {
+  "use workflow";
+  using hook = createHook<{ approved: boolean }>({ token: "approval" });
+  const answer: { approved: boolean } = await hook;
+  await sleep("1s");
+  return answer.approved;
+}
+async function retryableStep() {
+  "use step";
+  throw new RetryableError("Please try again.", { retryAfter: "5s" });
+}
+async function launch() {
+  const run: WorkflowRun<boolean> = await start(durable);
+  const approved: boolean = await run.returnValue;
+  await resumeHook("approval", { approved: true });
+  // @ts-expect-error Runs started by eve stay on the agent's own deployment.
+  await start(durable, [], { deploymentId: "latest" });
+  const status: "pending" | "running" | "completed" | "failed" | "cancelled" = await getRun(run.runId).status;
+}
 // @ts-expect-error Shared contracts have one home, eve/sessions.
 import type { Delivery as OldDelivery } from "eve/client";
 // @ts-expect-error Routing is on ChannelContext, not a session-shaped handle.
@@ -183,7 +209,7 @@ describe("packed public declarations", () => {
             strict: true,
             skipLibCheck: false,
             noEmit: true,
-            types: ["node"],
+            types: group.name === "core" ? ["node", "eve/workflow-modules"] : ["node"],
             target: "ES2024",
             module: "NodeNext",
             lib: ["ES2024", "DOM", "DOM.Iterable"],
@@ -201,6 +227,29 @@ describe("packed public declarations", () => {
         throw new Error(
           `${group.name} (${group.entries.join(", ")}):\n${(error as { stdout?: string }).stdout ?? String(error)}`,
           { cause: error },
+        );
+      }
+      if (group.name === "core") {
+        await execute(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `
+          import assert from "node:assert/strict";
+          import { createRequire } from "node:module";
+          import { dirname, join } from "node:path";
+          import { pathToFileURL } from "node:url";
+          import { createHook } from "eve/workflow";
+          import { getRun } from "eve/workflow/api";
+          const require = createRequire(import.meta.url);
+          const eve = dirname(require.resolve("eve/package.json"));
+          const internal = (file) => import(pathToFileURL(join(eve, "dist/src/internal/workflow", file)));
+          assert.equal(createHook, (await internal("index.js")).createHook);
+          assert.equal(getRun, (await internal("runtime.js")).getRun);
+        `,
+          ],
+          { cwd: app },
         );
       }
     },

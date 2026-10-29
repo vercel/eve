@@ -48,10 +48,7 @@ export {
   type TelegramUser,
 } from "#public/channels/telegram/inbound.js";
 
-export {
-  type TelegramHitlState,
-  type TelegramInteractionMessage,
-} from "#public/channels/telegram/hitl.js";
+export { type TelegramInteractionMessage } from "#public/channels/telegram/hitl.js";
 
 export { defaultTelegramAuth } from "#public/channels/telegram/defaults.js";
 

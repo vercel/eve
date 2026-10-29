@@ -9,7 +9,7 @@ import type {
   SignInChallenge,
 } from "#protocol/session-events/families/interaction.js";
 import type { Answer } from "#protocol/session-events/families/response.js";
-import type { JsonValue } from "#protocol/session-events/envelope.js";
+import type { JsonValue, Principal } from "#protocol/session-events/envelope.js";
 import {
   answeredInteractionIds,
   callRun,
@@ -168,6 +168,12 @@ export function decidingAnswer(row: InteractionRow): Answer | undefined {
   if (typeof value.optionId === "string") answer.optionId = value.optionId;
   if (typeof value.text === "string") answer.text = value.text;
   return answer.optionId === undefined && answer.text === undefined ? undefined : answer;
+}
+
+/** Who gave an answer: the principal of the delivery it arrived in. */
+export function responderOf(view: SessionView, responseId: string): Principal | undefined {
+  const response = view.responses[responseId];
+  return response === undefined ? undefined : view.deliveries[response.deliveryId]?.principal;
 }
 
 /**

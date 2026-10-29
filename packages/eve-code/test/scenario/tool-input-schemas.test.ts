@@ -25,11 +25,16 @@ test("every extension tool advertises an object-root input schema without root u
   }
 });
 
-type ToolModule = { readonly inputSchema: Schema } | { readonly evaluate: (ctx: never) => unknown };
+// A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
+const DYNAMIC_SENTINEL = Symbol.for("eve.dynamic");
+
+type ToolModule =
+  | { readonly inputSchema: Schema }
+  | { readonly [DYNAMIC_SENTINEL]: (ctx: never) => unknown };
 
 async function resolveTool(definition: ToolModule): Promise<{ inputSchema: Schema }> {
   if ("inputSchema" in definition) return definition;
-  const tool = (await definition.evaluate({} as never)) as { inputSchema: Schema } | null;
+  const tool = (await definition[DYNAMIC_SENTINEL]({} as never)) as { inputSchema: Schema } | null;
   assert.ok(tool, "dynamic tool resolved to null with every capability configured");
   return tool;
 }
