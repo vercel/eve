@@ -75,11 +75,17 @@ test("runs and deploys the agent with the Next.js app through withEve", () => {
   expect(source).toMatch(/export\s+default\s+withEve\s*\(/);
 });
 
+/** Principal types eve and its docs use for callers that aren't a signed-in person. */
+const nonPersonTypes = ["anonymous", "app", "local-dev", "runtime", "service"];
+
 test("admits signed-in Tally users as themselves", async () => {
   for (const user of [maya, sam]) {
     const { status, auth } = await authenticate({ cookie: sessionCookie(user) });
     expect(status, user.userId).toBe(202);
-    expect(auth?.principalType, user.userId).toBe("user");
+    // eve leaves `principalType` free-form; "user" is the convention, but `tally_user` still
+    // names a person. Only non-person types fail.
+    expect(auth?.principalType, user.userId).toMatch(/\S/);
+    expect(nonPersonTypes, user.userId).not.toContain(auth?.principalType);
     expect(String(auth?.principalId), user.userId).toContain(user.userId);
   }
 });
@@ -265,8 +271,11 @@ test("sends the current page with each message without saving it to history", ()
 
 test("restores the conversation after a page reload", () => {
   const source = panelSource();
-  expect(source).toMatch(/\bresume\s*:/);
-  expect(source).toMatch(/\binitialSession\b/);
+  // `resume: true` on the hook, or `resume()` when restoring imperatively.
+  expect(source).toMatch(/\bresume\s*:|\.resume\s*\(/);
+  // Either a saved `initialSession` cursor or an attached `session` handle, which the hook
+  // also accepts for resuming.
+  expect(source).toMatch(/\binitialSession\b|\bsessions\.attach\s*\(/);
 });
 
 function projectPackageJson(): { dependencies?: Record<string, string> } {
@@ -401,6 +410,8 @@ function attachment(mediaType: string, bytes: number) {
   ];
 }
 
+let createdSessions = 0;
+
 async function createSession(
   headers: Record<string, string>,
   message: unknown[],
@@ -418,7 +429,12 @@ async function createSession(
       waitUntil: () => undefined,
       [sessionCreatorKey]: async (options: { auth: unknown }) => {
         auth = options.auth;
-        return { sessionId: "session-1", deliveryId: "delivery-1" };
+        // Each created session is new, as in eve, so per-session state never collides.
+        createdSessions += 1;
+        return {
+          sessionId: `session-${createdSessions}`,
+          deliveryId: `delivery-${createdSessions}`,
+        };
       },
     },
   );
@@ -431,6 +447,8 @@ async function createSession(
  * would give them; a channel that can't resolve one falls back to a principal
  * carrying Tally's session fields, so tools are graded on their own.
  */
+let toolCalls = 0;
+
 async function toolContext(
   user: User,
   { sessionId = "session-1", approvedBy }: { sessionId?: string; approvedBy?: User } = {},
@@ -442,8 +460,13 @@ async function toolContext(
     abortSignal: AbortSignal;
     approval?: { responder: unknown };
   } = {
-    session: { id: sessionId, auth: { current, initiator: current }, turn: { id: "turn-1" } },
-    callId: "call-1",
+    session: {
+      id: sessionId,
+      auth: { current, initiator: current },
+      turn: { id: "turn-1", sequence: 0 },
+    },
+    // eve gives every call its own ID; a tool may key idempotent writes on it.
+    callId: `call-${(toolCalls += 1)}`,
     abortSignal: new AbortController().signal,
   };
   // eve sets this on a call a person approved.
@@ -500,7 +523,7 @@ async function approvalSettles(tool: any, user: User, input: unknown): Promise<b
       principal: requester,
     },
     response: { decision: "approve", principal: requester },
-    session: { id: "session-1", initiator: requester, turn: { id: "turn-1" } },
+    session: { id: "session-1", initiator: requester, turn: { id: "turn-1", sequence: 0 } },
     auth: {
       getToken: async () => {
         throw new Error("The grader has no provider tokens.");
@@ -523,21 +546,29 @@ function decision(status: unknown): "ask" | "deny" | "run" {
 
 async function invoiceInput(tool: unknown, invoiceId: string) {
   const number = `INV-${invoiceId.slice(4)}`;
-  const extras = {
-    reason: "Issued twice by mistake.",
-    note: "Friendly reminder.",
-    tone: "friendly",
-  };
-  const bases = [
+  // A schema may ask for the ID, the number, or both, and for any of these extras. Strict
+  // schemas reject keys they don't declare, so try every subset of the extras too.
+  const identifiers = [
     { invoiceId },
     { invoice_id: invoiceId },
     { id: invoiceId },
     { invoiceNumber: number },
     { number },
+    { invoiceId, invoiceNumber: number },
+    { invoice_id: invoiceId, invoice_number: number },
+    { id: invoiceId, number },
   ];
+  const extras = Object.entries({
+    reason: "Issued twice by mistake.",
+    note: "Friendly reminder.",
+    tone: "friendly",
+  });
+  const extraSets = Array.from({ length: 2 ** extras.length }, (_, mask) =>
+    Object.fromEntries(extras.filter((_, index) => mask & (1 << index))),
+  );
   return firstParsed(
     tool,
-    bases.flatMap((base) => [base, { ...base, ...extras }]),
+    identifiers.flatMap((identifier) => extraSets.map((extra) => ({ ...identifier, ...extra }))),
   );
 }
 

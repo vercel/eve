@@ -5,7 +5,7 @@
 // A fixture qualifies when it has an `evals/` directory under one of the
 // fixture roots. Emits one GitHub Actions output per matrix:
 //
-//   model_matrix          `{ name, dir, model_name, model_id, optional }`
+//   model_matrix          `{ name, package, dir, model_name, model_id, optional }`
 //                         entries for the model suite (e2e-local). Sharded
 //                         fixtures expand each selected model into one entry
 //                         per exact eval partition. Fixtures
@@ -15,7 +15,7 @@
 //                         fixture may add narrowly scoped model legs through
 //                         `additionalModels` and make selected legs non-blocking
 //                         through `optionalModels`.
-//   world_matrix_<world>  `{ name, dir[, world_package] }` entries for that
+//   world_matrix_<world>  `{ name, package, dir[, world_package] }` entries for that
 //                         world's suite workflow, which runs fixtures that
 //                         select that world once with mock models
 //                         (EVE_E2E_MODEL=mock).
@@ -32,7 +32,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
   }
 
   const modelMatrix = normalizedFixtures.flatMap(
-    ({ name, dir, modelMatrix, additionalModels, optionalModels, modelShards }) => {
+    ({ name, packageName, dir, modelMatrix, additionalModels, optionalModels, modelShards }) => {
       const fixtureModels = uniqueModels([
         ...(modelMatrix === "full" ? models : models.slice(0, 1)),
         ...additionalModels,
@@ -48,6 +48,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
       return fixtureModels.flatMap((model) => {
         const entry = {
           name,
+          package: packageName,
           dir,
           model_name: model.name,
           model_id: model.id,
@@ -64,9 +65,10 @@ export function discoverE2eFixtures({ registry, fixtures }) {
   for (const world of worlds) {
     const legs = normalizedFixtures
       .filter(({ selectedWorlds }) => selectedWorlds.includes(world.name))
-      .map(({ name, dir }) =>
-        world.package === undefined ? { name, dir } : { name, dir, world_package: world.package },
-      );
+      .map(({ name, packageName, dir }) => {
+        const fixture = { name, package: packageName, dir };
+        return world.package === undefined ? fixture : { ...fixture, world_package: world.package };
+      });
     if (legs.length === 0) {
       throw new Error(`No e2e fixtures select the registered world "${world.name}".`);
     }
@@ -78,6 +80,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
 function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
   const pkg = packageJson ?? {};
   const packageJsonPath = join(dir, "package.json");
+  const packageName = validateE2ePackageName(pkg.name, packageJsonPath);
   const selectedWorlds = validateNames(
     pkg.e2e?.worlds ?? worlds.map((world) => world.name),
     `${packageJsonPath}: e2e.worlds`,
@@ -97,6 +100,7 @@ function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
       : validateModelShards(pkg.e2e.modelShards, `${packageJsonPath}: e2e.modelShards`, evals);
   return {
     name,
+    packageName,
     dir,
     modelMatrix,
     modelShards,
@@ -144,6 +148,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   );
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, result.lines);
   else process.stdout.write(result.lines);
+}
+
+export function validateE2ePackageName(packageName, packageJsonPath) {
+  if (
+    typeof packageName !== "string" ||
+    packageName.includes("...") ||
+    !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(packageName)
+  ) {
+    throw new Error(`${packageJsonPath}: every e2e fixture needs a valid package name.`);
+  }
+  return packageName;
 }
 
 export function discoverEvalIds(root) {

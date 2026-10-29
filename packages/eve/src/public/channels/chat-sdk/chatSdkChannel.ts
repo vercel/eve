@@ -78,35 +78,37 @@ interface ActiveWebhookContext {
 
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
-/** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
+/** Durable Chat SDK thread state. */
 export interface ChatSdkChannelState
   extends Record<string, unknown>, PromptQueueState, UndeliveredReplyState {
   thread: SerializedThread | null;
-  /** Message id of the in-flight streamed assistant post (edit fallback). */
+  /** @internal Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
-  /** Text streamed for the anchor so far, including deltas no throttled edit has shown yet. */
+  /** @internal Text streamed for the anchor so far, including deltas no throttled edit has shown yet. */
   streamText?: string | null;
-  /** Text the anchor showed after its last successful post or edit. */
+  /** @internal Text the anchor showed after its last successful post or edit. */
   shownText?: string | null;
   /**
    * Whether `adapter.editMessage` works for this session. Set to `false` once
    * an edit throws {@link isNotImplemented}, which disables streaming edits for
    * the rest of the session.
+   * @internal
    */
   editSupported?: boolean;
-  /** Epoch ms of the last streaming edit, used to throttle edits. */
+  /** @internal Epoch ms of the last streaming edit, used to throttle edits. */
   lastEditAtMs?: number | null;
-  /** Buffered first line of a tool-call message, surfaced as typing status. */
+  /** @internal Buffered first line of a tool-call message, surfaced as typing status. */
   pendingToolCallMessage?: string | null;
-  /** Authorization status messages, keyed by connection name. */
+  /** @internal Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
   /**
    * The Chat SDK user behind each principal that sent a message, so a sign-in
    * reaches them privately. `null` once more than one person sent as it.
    */
   usersByPrincipal?: Record<string, string | null>;
-  /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
+  /** @internal Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
+  /** @internal Id of the content part streaming into the anchor. */
   streamPartId?: string | null;
   /** Id of the latest message someone other than the bot sent in the thread. */
   latestMessageId?: string;

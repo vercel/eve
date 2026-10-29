@@ -20,6 +20,7 @@ import {
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import type { SlackInteractionCardParts } from "#public/channels/slack/renderers.js";
 import { type Answer, parseAnswer, type ValidatedAnswer } from "#shared/input.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
@@ -275,11 +276,6 @@ export function renderInteractionBlocks(
   return [prompt];
 }
 
-export interface SlackInteractionPostPart {
-  readonly blocks: unknown[];
-  readonly text: string;
-}
-
 /**
  * Splits approval details from their interactive controls. Slack includes the
  * originating message in `block_actions`, so putting large tool input beside
@@ -288,13 +284,15 @@ export interface SlackInteractionPostPart {
 export function renderInteractionPostParts(
   request: Interaction,
   route?: SlackHitlRoute,
-): {
-  readonly controls: SlackInteractionPostPart;
-  readonly details?: SlackInteractionPostPart;
-} {
+): SlackInteractionCardParts {
   const blocks = renderInteractionBlocks(request, route);
-  const firstBlock = blocks[0];
-  if (!isApprovalRequest(request) || !isBlockType(firstBlock, "card") || blocks.length === 1) {
+  const [firstBlock, ...details] = blocks;
+  if (
+    !isApprovalRequest(request) ||
+    firstBlock === undefined ||
+    !isBlockType(firstBlock, "card") ||
+    details.length === 0
+  ) {
     return {
       controls: { blocks, text: formatInteractionFallbackText(request) },
     };
@@ -302,10 +300,7 @@ export function renderInteractionPostParts(
 
   return {
     controls: { blocks: [firstBlock], text: request.request.prompt },
-    details: {
-      blocks: blocks.slice(1),
-      text: formatInteractionFallbackText(request),
-    },
+    details: { blocks: details, text: formatInteractionFallbackText(request) },
   };
 }
 

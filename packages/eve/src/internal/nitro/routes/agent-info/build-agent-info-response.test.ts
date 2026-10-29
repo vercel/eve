@@ -24,7 +24,7 @@ describe("buildAgentInfoResponse", () => {
     expectTypeOf<HealthResult>().toEqualTypeOf<z.output<typeof HealthResultSchema>>();
   });
 
-  it("projects v4 exclusively from the effective compiled graph", async () => {
+  it("projects agent info exclusively from the effective compiled graph", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       name: "info-agent",

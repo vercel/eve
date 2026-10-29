@@ -19,7 +19,12 @@ import type { InteractionRequest } from "#protocol/session-events/families/inter
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
-type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
+// `any` passes through so `ToolDefinition<any, any>` stays the type every defined tool fits.
+type ApprovalContextInput<TInput> = 0 extends 1 & TInput
+  ? TInput
+  : unknown extends TInput
+    ? Record<string, unknown>
+    : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
@@ -453,18 +458,20 @@ export function stampToolDefinition<
 }
 
 /**
- * Marker discriminator written into every {@link DisabledToolSentinel}.
+ * Cross-instance brand on a {@link DisabledToolSentinel}. `Symbol.for` lets the compiler's module
+ * copy and the author's import share the key; keeping it unexported makes the sentinel opaque, so
+ * only {@link disableTool} produces one.
  */
-const DISABLED_TOOL_SENTINEL_KIND = "eve:disabled-tool";
+const DISABLED_TOOL: unique symbol = Symbol.for("eve.disabled-tool");
 
 /**
- * Marker value returned from {@link disableTool}. Export this as the default
+ * Opaque value returned from {@link disableTool}. Export this as the default
  * export of a file in `agent/tools/` to remove the model tool whose name
  * matches the file's slug, including framework defaults and derived subagent
  * tools.
  */
 export interface DisabledToolSentinel {
-  readonly kind: typeof DISABLED_TOOL_SENTINEL_KIND;
+  readonly [DISABLED_TOOL]: true;
 }
 
 /**
@@ -472,9 +479,7 @@ export interface DisabledToolSentinel {
  * containing file's slug.
  */
 export function disableTool(): DisabledToolSentinel {
-  return {
-    kind: DISABLED_TOOL_SENTINEL_KIND,
-  };
+  return { [DISABLED_TOOL]: true };
 }
 
 /**
@@ -482,9 +487,5 @@ export function disableTool(): DisabledToolSentinel {
  * produced by {@link disableTool}.
  */
 export function isDisabledToolSentinel(value: unknown): value is DisabledToolSentinel {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === DISABLED_TOOL_SENTINEL_KIND
-  );
+  return typeof value === "object" && value !== null && Reflect.get(value, DISABLED_TOOL) === true;
 }

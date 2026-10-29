@@ -539,7 +539,7 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("fails the driver build when a workflow body calls workflow/api", async () => {
+  it("fails the driver build when a workflow body calls eve/workflow/api", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-api-in-body-"));
     const outDir = join(tempRoot, "workflow-build");
     const flowFilePath = join(tempRoot, "flow.ts");
@@ -560,7 +560,7 @@ describe("WorkflowBundleBuilder", () => {
         writeFile(
           flowFilePath,
           [
-            'import { start } from "workflow/api";',
+            'import { start } from "eve/workflow/api";',
             "export async function child() {",
             '  "use workflow";',
             "  return 1;",
@@ -587,7 +587,7 @@ describe("WorkflowBundleBuilder", () => {
       );
 
       await expect(builder.build()).rejects.toThrow(
-        /cannot import "workflow\/api".*not available inside a workflow body.*"use step"/s,
+        /cannot import "eve\/workflow\/api".*not available inside a workflow body.*"use step"/s,
       );
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
@@ -599,9 +599,6 @@ describe("WorkflowBundleBuilder", () => {
     const outDir = join(tempRoot, "workflow-build");
     const flowFilePath = join(tempRoot, "flow.ts");
     const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
-    const workflowCoreShimPath = resolvePackageSourceFilePath(
-      "src/internal/workflow-bundle/workflow-core-shim.ts",
-    ).replaceAll("\\", "/");
 
     try {
       await Promise.all([
@@ -618,7 +615,7 @@ describe("WorkflowBundleBuilder", () => {
         writeFile(
           flowFilePath,
           [
-            `import { createHook } from ${JSON.stringify(workflowCoreShimPath)};`,
+            'import { createHook } from "eve/workflow";',
             "export async function claimHook() {",
             '  "use workflow";',
             '  const hook = createHook({ token: "shared-token" });',
@@ -825,7 +822,7 @@ describe("WorkflowBundleBuilder", () => {
           toolPath,
           [
             'import { defineWorkflowTool } from "eve/tools";',
-            'import { sleep } from "workflow";',
+            'import { sleep } from "eve/workflow";',
             'import { describePlan, hashPlan } from "../lib/steps";',
             "",
             "export default defineWorkflowTool({",

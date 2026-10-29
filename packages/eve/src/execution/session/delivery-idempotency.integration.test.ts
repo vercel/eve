@@ -88,7 +88,7 @@ describe("delivery idempotency", () => {
         await fixed.send("Alice thanks Bob.", { auth: null, turnPolicy: "queue" });
         await stream.nextTurn();
         await waitForParkedTurnStep(session.sessionId, 3);
-        await fixed.reset();
+        await fixed.end();
         completed = true;
         expect(messages).toHaveLength(3);
       } finally {
@@ -161,7 +161,7 @@ describe("delivery idempotency", () => {
         );
         // One delivery, read once: both receipts are it, and neither is a duplicate's.
         expect(outcomes).toEqual(["handled", "handled"]);
-        await fixed.reset();
+        await fixed.end();
         completed = true;
         expect(turns).toBe(2);
       } finally {

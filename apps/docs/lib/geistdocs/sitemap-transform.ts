@@ -1,12 +1,5 @@
-interface TemplateDiscoveryEntry {
-  description: string;
-  slug: string;
-  title: string;
-}
-
 interface TransformSitemapOptions {
   resolveTitle: (title: string, url: string) => string;
-  templates: TemplateDiscoveryEntry[];
 }
 
 const SITEMAP_ENTRY_PATTERN = /^(\s*)- \[([^\]]+)\]\(([^)]+)\) \| (.+)$/gm;
@@ -36,7 +29,7 @@ const addCanonical = (metadata: string, url: string): string =>
 
 export const transformSitemapMarkdown = (
   markdown: string,
-  { resolveTitle, templates }: TransformSitemapOptions,
+  { resolveTitle }: TransformSitemapOptions,
 ): string => {
   const transformed = markdown.replace(
     SITEMAP_ENTRY_PATTERN,
@@ -47,10 +40,5 @@ export const transformSitemapMarkdown = (
     },
   );
 
-  const templateLines = templates.map(
-    (template) =>
-      `- [${template.title}](/templates/${template.slug}) | Type: Example | Summary: ${template.description} | Canonical: /templates/${template.slug}`,
-  );
-
-  return `${transformed.trimEnd()}\n\n## Templates\n\n${templateLines.join("\n")}\n`;
+  return `${transformed.trimEnd()}\n`;
 };

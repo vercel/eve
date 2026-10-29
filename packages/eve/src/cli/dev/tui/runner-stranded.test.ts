@@ -82,7 +82,7 @@ describe("EveTUIRunner with a stranded session", () => {
       { kind: "dismiss" },
     ]);
     expect(server.requestsTo("POST", "/session_1/clear")).toHaveLength(1);
-    expect(server.requestsTo("POST", "/session_1/reset")).toHaveLength(1);
+    expect(server.requestsTo("POST", "/session_1/end")).toHaveLength(1);
     expect(server.sessionId).toBe("session_2");
   });
 });

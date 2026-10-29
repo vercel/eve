@@ -230,7 +230,7 @@ export class SessionStore {
   /**
    * Follow an accepted delivery in this session until it settles or the session ends.
    * The receipt may come from another store. Repeating it is safe and retries a closed stream.
-   * Pass only a receipt returned by `send`, `respond`, `clear`, `compact`, or `reset`: a receipt
+   * Pass only a receipt returned by `send`, `respond`, `clear`, `compact`, or `end`: a receipt
    * may arrive before its delivery is admitted, so an id the stream never admits keeps the store
    * busy and its stream open until the session ends or `newSession()`.
    * Catch-up updates recorded failures without replaying live completion callbacks.
@@ -324,8 +324,8 @@ export class SessionStore {
   clear(): Promise<Delivery> {
     return this.#control((session) => session.clear());
   }
-  reset(): Promise<Delivery> {
-    return this.#control((session) => session.reset());
+  end(): Promise<Delivery> {
+    return this.#control((session) => session.end());
   }
 
   async #control(dispatch: (session: ClientSession) => Promise<Delivery>): Promise<Delivery> {

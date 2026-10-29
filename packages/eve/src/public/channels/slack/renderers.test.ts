@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelEventOf } from "#public/definitions/channel.js";
-import { composeSlackRenderers, defineSlackRenderer } from "#public/channels/slack/renderers.js";
+import {
+  composeInteractionCards,
+  composeSlackRenderers,
+  defineSlackRenderer,
+  type SlackInteractionCard,
+} from "#public/channels/slack/renderers.js";
 
 /** The parts of a handler's context these renderers read. */
 function context() {
@@ -99,5 +104,31 @@ describe("composeSlackRenderers", () => {
       "postEphemeral",
       "state",
     ]);
+  });
+
+  it("runs interactionCard hooks first-outermost and hands eve's default the changed card", () => {
+    const seen: string[] = [];
+    const chain = composeInteractionCards([
+      defineSlackRenderer({
+        interactionCard(card, next) {
+          seen.push("outer");
+          return next({ ...card, destination: "direct-message" });
+        },
+      }),
+      defineSlackRenderer({}),
+      defineSlackRenderer({
+        interactionCard(card, next) {
+          seen.push(`inner:${card.destination}`);
+          return next(card);
+        },
+      }),
+    ]);
+
+    const parts = chain({ destination: "thread" } as SlackInteractionCard, (card) => ({
+      controls: { blocks: [], text: card.destination },
+    }));
+
+    expect(seen).toEqual(["outer", "inner:direct-message"]);
+    expect(parts.controls.text).toBe("direct-message");
   });
 });

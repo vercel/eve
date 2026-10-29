@@ -242,6 +242,28 @@ function githubChannelFile(): string {
   return file;
 }
 
+/**
+ * The GitHub channel's instrumentation kind, stamped on its definition the way eve's runtime
+ * does when it loads the channel, so a hook that checks `isChannel(ctx.channel, github)`
+ * recognizes the turn's channel. Without one GitHub channel, the hooks are still graded on
+ * their own.
+ */
+async function githubChannelKind(): Promise<string> {
+  let file: string;
+  try {
+    file = githubChannelFile();
+  } catch {
+    return "channel:github";
+  }
+  const kind = `channel:${file.slice(`${agentRoot}/channels/`.length).replace(/\.ts$/, "")}`;
+  Object.defineProperty(await load(file), Symbol.for("eve.channel.instrumentationKind"), {
+    configurable: true,
+    enumerable: false,
+    value: kind,
+  });
+  return kind;
+}
+
 interface Delivery {
   readonly status: number;
   readonly sends: ReadonlyArray<{ continuationToken: unknown; message: unknown }>;
@@ -416,7 +438,9 @@ function recordingSandbox() {
     commands.push(command);
     // Answer version checks once pnpm 9 is installed, so a `prepare` that verifies its install passes.
     const installed = pnpm9Install.test(commands.join("\n"));
-    const stdout = installed && /pnpm\s+(?:--version|-v)\b/.test(command) ? "9.15.4\n" : "";
+    // Some installs expose pnpm 9 under an alias such as `pnpm9`.
+    const stdout =
+      installed && /\bpnpm[\w.-]*\s+(?:--version|-v)\b/.test(command) ? "9.15.4\n" : "";
     return { exitCode: 0, stdout, stderr: "" };
   };
   const sandbox = {
@@ -455,7 +479,7 @@ async function settleTurn() {
   const event = { type: "turn.settled", data: { turnId: "turn-1", outcome: "completed" } };
   const ctx = {
     agent: { name: "mender" },
-    channel: { kind: "channel:github" },
+    channel: { kind: await githubChannelKind() },
     session: { id: "session-1", auth: { current: null, initiator: null } },
     position: { line: 7, index: 0 },
     view: await settledTurnView(),

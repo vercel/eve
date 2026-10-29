@@ -405,7 +405,10 @@ export const next = () => ++count;
       await mkdir(dirname(filePath), { recursive: true });
       await writeFile(filePath, content);
     }
-    await writeFile(join(subagentRoot, "agent.ts"), 'export default { description: "Research." };');
+    await writeFile(
+      join(subagentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research.", model: "openai/gpt-5.4" });',
+    );
     const config = await tryReadExtensionBuildConfig(root);
     const outDir = await buildExtensionPackage(root, config!);
     const workspace = join(outDir, "extension", "subagents", "researcher", "sandbox", "workspace");

@@ -131,7 +131,10 @@ async function createScenarioAppRoot(
       2,
     ),
   );
-  await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+  await writeFile(
+    join(agentRoot, "agent.ts"),
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+  );
   await writeFile(join(agentRoot, "instructions.md"), "Root system prompt.\n");
   if (input.withSkills) {
     await writeFile(
@@ -146,10 +149,11 @@ async function createScenarioAppRoot(
   await writeFile(
     join(subagentRoot, "agent.ts"),
     [
-      "export default {",
+      'import { defineAgent } from "eve";',
+      "export default defineAgent({",
       '  model: "openai/gpt-5.4",',
       '  description: "Research one topic.",',
-      "};",
+      "});",
       "",
     ].join("\n"),
   );

@@ -1,7 +1,7 @@
 ---
 issue: "https://github.com/vercel/eve/pull/5449"
 status: implemented
-last_updated: "2026-10-27"
+last_updated: "2026-10-28"
 ---
 
 # Remote callback transport credentials
@@ -16,7 +16,7 @@ On a Vercel remote deployment:
 EVE_CALLBACK_TRUSTED_ORIGINS=https://parent.example.com,https://second-parent.example.com
 ```
 
-The remote sends its own ambient Vercel OIDC token in the trusted-OIDC header only to its own deployment origins or these explicitly configured HTTPS origins. Match origins exactly, including ports. Reject entries with credentials, paths, queries, or fragments. A callback request cannot extend this server-owned allowlist.
+The remote sends its own ambient Vercel OIDC token in the trusted-OIDC header only to its own deployment origins or these explicitly configured HTTPS origins. Match origins exactly, including ports. A leading `*.` label (for example `https://*.preview.example.com`) matches exactly one subdomain label at the same port, needs at least two labels after it, cannot end in a trailing dot, and cannot cover `vercel.app`. That denylist is best-effort; other shared domains are not detected. Reject entries with credentials, paths, queries, or fragments. A callback request cannot extend this server-owned allowlist.
 
 Adding an origin is a trust grant. The ambient OIDC token is a bearer credential for the remote project's identity, not a recipient-scoped callback token. A listed parent can replay it against any other service, Trusted Sources rule, or federated role accepting that identity until expiry. Only explicitly trusted parents belong in this list.
 

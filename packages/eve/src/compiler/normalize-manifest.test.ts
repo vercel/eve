@@ -38,7 +38,7 @@ import { compiledAgentManifestSchema } from "#compiler/manifest.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
-import { defineDynamic } from "#dynamic/definition.js";
+import { defineDynamic, dynamicEvaluate } from "#dynamic/definition.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { webSearch, type WebSearchToolInput } from "#tools/provided/web-search.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
@@ -144,6 +144,32 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistry,
     ]);
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
+  });
+
+  it("rejects an agent.ts plain object that did not come from defineAgent()", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: { model: "openai/gpt-5.4" } }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow('Export defineAgent({...}) from "agent.ts".');
+  });
+
+  it("does not treat a hand-written disabled-tool shape as disableTool()", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/bash.ts",
+        loadNamespace: async () => ({ default: { kind: "eve:disabled-tool" } }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow();
   });
 
   it("omits the built-in agent tool when the root sets tool false", async () => {
@@ -444,7 +470,7 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistry,
     ]);
     const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
-    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).evaluate(
+    const tools = await dynamicEvaluate(namespace.default as ReturnType<typeof defineDynamic>)(
       {} as never,
     );
     expect(Object.keys(tools as object).sort()).toEqual(
@@ -901,6 +927,25 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow("Provider tools can't be deferred");
+  });
+
+  it("rejects a static connection without a protocol helper", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "connections/issues.ts",
+        loadNamespace: async () => ({
+          default: {
+            description: "Issues.",
+            url: "https://issues.example/mcp",
+          },
+        }),
+      },
+    ]);
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Connection "connections/issues.ts" exports a plain object. Wrap it in defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "eve/connections"; plain objects no longer default to MCP.',
+    );
   });
 
   describe("connection name ownership", () => {

@@ -1,4 +1,5 @@
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { buildConnectionCallbackContext } from "#runtime/connections/approval-scope.js";
+import type { ProvidedArgumentContext } from "#public/definitions/connections/tool-call.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
@@ -21,15 +22,10 @@ export async function resolveProvidedArguments(input: {
     return input.args;
   }
 
-  let context:
-    | (ReturnType<typeof buildCallbackContext> & {
-        readonly callId: string;
-        readonly toolName: string;
-      })
-    | undefined;
+  let context: ProvidedArgumentContext | undefined;
   const getContext = () =>
     (context ??= {
-      ...buildCallbackContext(),
+      ...buildConnectionCallbackContext(),
       callId: input.callId,
       toolName: input.toolName,
     });

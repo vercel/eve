@@ -54,7 +54,7 @@ export type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
-  ResetSessionResult,
+  EndSessionResult,
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
@@ -150,17 +150,19 @@ export interface RouteContext {
 }
 
 /**
- * Marker discriminator written into every {@link DisabledRouteSentinel}.
+ * Cross-instance brand on a {@link DisabledRouteSentinel}. `Symbol.for` lets the compiler's module
+ * copy and the author's import share the key; keeping it unexported makes the sentinel opaque, so
+ * only {@link disableRoute} produces one.
  */
-const DISABLED_ROUTE_SENTINEL_KIND = "eve:disabled-channel";
+const DISABLED_ROUTE: unique symbol = Symbol.for("eve.disabled-route");
 
 /**
- * Marker value returned from {@link disableRoute}. Export this as the
+ * Opaque value returned from {@link disableRoute}. Export this as the
  * default export of a file in `agent/channels/` to remove the framework
  * default route whose logical name matches the file's slug path.
  */
 export interface DisabledRouteSentinel {
-  readonly kind: typeof DISABLED_ROUTE_SENTINEL_KIND;
+  readonly [DISABLED_ROUTE]: true;
 }
 
 /**
@@ -170,9 +172,7 @@ export interface DisabledRouteSentinel {
  * Export it as the default export of a file in `agent/channels/`.
  */
 export function disableRoute(): DisabledRouteSentinel {
-  return {
-    kind: DISABLED_ROUTE_SENTINEL_KIND,
-  };
+  return { [DISABLED_ROUTE]: true };
 }
 
 /**
@@ -180,11 +180,7 @@ export function disableRoute(): DisabledRouteSentinel {
  * produced by {@link disableRoute}.
  */
 export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteSentinel {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === DISABLED_ROUTE_SENTINEL_KIND
-  );
+  return typeof value === "object" && value !== null && Reflect.get(value, DISABLED_ROUTE) === true;
 }
 
 /** The session event a handler keyed `T` observes. */

@@ -2,7 +2,11 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
+import {
+  callAdapterEventHandler,
+  defaultDeliverResult,
+  type ChannelAdapter,
+} from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -988,6 +992,153 @@ describe("githubChannel", () => {
     expect(ctx.state.headSha).toBe(headSha);
     expect(sandbox.commandLog).toContain(
       `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${headSha}'`,
+    );
+  });
+
+  // https://github.com/vercel/eve/issues/1554
+  it("turn.started checks out the head a later delivery brings", async () => {
+    const oldHead = "a".repeat(40);
+    const newHead = "b".repeat(40);
+    let checkedOut = oldHead;
+    const sandbox = mockSandbox({
+      run(options) {
+        if (options.command.includes("git rev-parse HEAD")) {
+          return { exitCode: 0, stderr: "", stdout: `${checkedOut}\n` };
+        }
+        if (options.command.includes(`git checkout --detach '${newHead}'`)) checkedOut = newHead;
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+    const state = {
+      baseRef: "main",
+      baseSha: "c".repeat(40),
+      checkoutPath: "/workspace",
+      conversationKind: "pull_request" as const,
+      defaultBranch: "main",
+      headRef: "feature",
+      installationId: 55,
+      issueNumber: 7,
+      owner: "vercel",
+      pullRequestNumber: 7,
+      repo: "eve",
+      repositoryId: 123,
+    };
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        }),
+      ),
+      { ...state, headSha: oldHead },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    // A `synchronize` delivery to the existing PR session carries the pushed head.
+    const payload = {
+      message: "synchronize",
+      state: { ...state, checkoutPath: null, headSha: newHead },
+    };
+    await (adapter.deliver ?? defaultDeliverResult)(payload, ctx);
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 1, turnId: "t2" }),
+      ctx,
+      sandbox,
+    );
+
+    expect(ctx.state.headSha).toBe(newHead);
+    expect(sandbox.commandLog).toContain(
+      `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${newHead}'`,
+    );
+  });
+
+  // https://github.com/vercel/eve/issues/1554
+  it("a comment delivered after a push checks out the new head and reacts to that comment", async () => {
+    const oldHead = "a".repeat(40);
+    const newHead = "b".repeat(40);
+    let checkedOut = oldHead;
+    const sandbox = mockSandbox({
+      run(options) {
+        if (options.command.includes("git rev-parse HEAD")) {
+          return { exitCode: 0, stderr: "", stdout: `${checkedOut}\n` };
+        }
+        if (options.command.includes(`git checkout --detach '${newHead}'`)) checkedOut = newHead;
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+    const fetchMock = vi.fn((input: Request | URL | string): Promise<Response> => {
+      const body = String(input).endsWith("/pulls/7")
+        ? {
+            base: { ref: "main", repo: { default_branch: "main" }, sha: "c".repeat(40) },
+            head: { ref: "feature", repo: { full_name: "octocat/eve" }, sha: newHead },
+            number: 7,
+          }
+        : { id: 1 };
+      return Promise.resolve(new Response(JSON.stringify(body)));
+    });
+    const target = {
+      conversationKind: "pull_request" as const,
+      installationId: 55,
+      issueNumber: 7,
+      owner: "vercel",
+      pullRequestNumber: 7,
+      repo: "eve",
+      repositoryId: 123,
+    };
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        ...target,
+        baseRef: "main",
+        baseSha: "c".repeat(40),
+        checkoutPath: "/workspace",
+        defaultBranch: "main",
+        headRef: "feature",
+        headSha: oldHead,
+        triggeringCommentId: 10,
+        triggeringUserLogin: "octocat",
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    // An `issue_comment` delivery names no head: the PR was pushed to since the last checkout.
+    await (adapter.deliver ?? defaultDeliverResult)(
+      {
+        message: "@bot review",
+        state: {
+          ...target,
+          baseRef: null,
+          baseSha: null,
+          checkoutPath: null,
+          defaultBranch: null,
+          headRef: null,
+          headSha: null,
+          reviewCommentId: null,
+          triggeringCommentId: 11,
+          triggeringUserLogin: "hubot",
+        },
+      },
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 1, turnId: "t2" }),
+      ctx,
+      sandbox,
+    );
+
+    expect(ctx.state.headSha).toBe(newHead);
+    expect(sandbox.commandLog).toContain(
+      `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${newHead}'`,
+    );
+    expect(ctx.state.triggeringUserLogin).toBe("hubot");
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
+      "https://github.test/repos/vercel/eve/issues/comments/11/reactions",
     );
   });
 });

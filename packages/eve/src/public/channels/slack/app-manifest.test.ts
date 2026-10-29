@@ -59,4 +59,17 @@ describe("Slack app manifests", () => {
       },
     });
   });
+
+  it("adds users:read for names and users:read.email only for emails", () => {
+    expect(defineSlackAppManifest({ users: true }).build("support")).toMatchObject({
+      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write", "users:read"] } },
+    });
+    expect(
+      defineSlackAppManifest({ users: true, userEmails: true }).build("support"),
+    ).toMatchObject({
+      oauth_config: {
+        scopes: { bot: ["app_mentions:read", "chat:write", "users:read", "users:read.email"] },
+      },
+    });
+  });
 });

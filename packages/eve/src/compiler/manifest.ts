@@ -611,7 +611,7 @@ const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(fal
 const compiledAgentLimitsDefinitionSchema = z
   .object({
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
-    sessionUsage: z.literal(true).optional(),
+    sessionUsage: z.boolean().optional(),
   })
   .strict();
 

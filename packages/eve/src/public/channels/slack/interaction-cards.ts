@@ -136,21 +136,6 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** Settles a pressed HITL card as answered by the presser with the choice they pressed. */
-export async function updateAnsweredHitlCard(
-  interaction: ParsedBlockActionsPayload,
-  deps: InteractionHandlerDeps,
-): Promise<void> {
-  const hitlAction = interaction.actions.find((action) => isHitlAction(action.actionId));
-  const label = hitlAction?.label ?? hitlAction?.selectedOptionValue ?? hitlAction?.value;
-  if (!hitlAction || !label) return;
-  await settleHitlCard(interaction, deps, {
-    label,
-    text: `Answered: ${label}`,
-    userId: hitlAction.user.id,
-  });
-}
-
 /** Replaces a pressed HITL card's controls with `card`. */
 export async function settleHitlCard(
   interaction: ParsedBlockActionsPayload,

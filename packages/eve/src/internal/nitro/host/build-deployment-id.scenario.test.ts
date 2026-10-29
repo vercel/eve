@@ -22,7 +22,7 @@ describe("production deployment identity", () => {
       dependencies: { "@acme/test-world": "file:./world" },
       files: {
         "agent/agent.ts":
-          'export default { model: "openai/gpt-5.4", experimental: { workflow: { world: "@acme/test-world" } } };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4", experimental: { workflow: { world: "@acme/test-world" } } });',
         "agent/instructions.md": "Help Alice organize her notes.\n",
         "agent/skills/notes.md": "---\ndescription: Organize notes.\n---\nGroup notes by topic.\n",
         "world/package.json": JSON.stringify({

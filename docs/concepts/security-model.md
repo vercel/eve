@@ -18,7 +18,7 @@ The app runtime is the trusted side. Your tool implementations, model calls, con
 
 The sandbox is the isolated side. The model runs shell commands and accesses files there through the default `bash`, `read_file`, and `write_file` tools and any opt-in sandbox tools such as `glob` and `grep`. It gets its own `/workspace` filesystem, but no `process.env`, no secrets, and no path back into the app runtime. (On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.) Only shell commands execute in the sandbox. Even the built-in `bash`/`read_file`/`write_file` tools live in the app runtime and _proxy_ into the sandbox. The model sees tool definitions and results, never your secrets.
 
-The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem that runs inside the app runtime process, not a separate container or VM. It provides no network isolation, and any `customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
+The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem that runs inside the app runtime process, not a separate container or VM. It provides no network isolation, and any `experimental.customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
 
 A concrete trace makes the boundary clear. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`: the key never leaves the app runtime, and nothing about the call touches the sandbox. The built-in `write_file` is the mirror image, running in the app runtime and proxying the write into the sandbox `/workspace`. Either way the model drives the work through tool calls and their results, never by holding a credential or reaching the runtime directly.
 
@@ -41,7 +41,7 @@ flowchart LR
 eve sends data where your agent configuration and runtime choices send it:
 
 - Inbound channel data flows through the channel provider you configure, then into the eve app runtime.
-- Model inputs and outputs flow to the model or routing path selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider-authored `LanguageModel`.
+- Model inputs and outputs flow to the model or routing path selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider model instance (`EveLanguageModel`).
 - Tool and connection calls flow to the external services, MCP servers, OpenAPI endpoints, and channels you configure.
 - Sandbox commands can reach network destinations allowed by the sandbox network policy.
 - Telemetry flows to destinations configured under `agent/instrumentation/`.
@@ -74,6 +74,10 @@ A [channel](../channels/overview) is your agent's front door, so authenticating 
   cross-user impersonation.
 
 A custom channel that accepts dashboard-style webhooks should follow the same shape: authenticate the raw body with an HMAC, compare signatures in constant time, and trust any body-supplied principal only after the signature verifies.
+
+## A turn runs as one principal
+
+A turn's principal (its authenticator, issuer, principal type and id) never changes while the turn runs; only its claims may update. Only that principal's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn, so their text never drives the turn's credentials and the turn never continues under their identity. Another person can still settle a pending request with a button or structured answer; they are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
 ## Authored markdown is data
 

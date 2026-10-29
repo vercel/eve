@@ -9,6 +9,27 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 Reporters attach in two places. Declare them in `evals.config.ts` to observe **every** eval in the run, the usual choice for a shared destination like one Braintrust experiment, so you don't repeat the reporter in each file. Or list them on an individual eval's `reporters` to scope a destination to that eval (or to a group of evals that share one instance).
 
+## Console
+
+The CLI adds `consoleReporter()` from `eve/evals/reporters` unless you pass
+`--json`. There is no public runner API, so reporters compose only through
+`evals.config.ts` and per-eval `reporters`. A custom console reporter mostly
+makes sense with `--json`, for example logging to stderr so stdout stays valid
+JSON:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { consoleReporter } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  reporters: [consoleReporter({ color: false, log: (line) => console.error(line) })],
+});
+```
+
+Both options are optional; the default logger is `console.log` and color
+follows whether stdout is a terminal. Without `--json`, another console reporter
+duplicates the CLI's output.
+
 ## Braintrust
 
 `braintrustReporter(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:

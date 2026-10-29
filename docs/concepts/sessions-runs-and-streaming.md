@@ -32,8 +32,11 @@ A session completes after 30 idle days by default; configure
 timeout. The idle window restarts each time a turn settles, and a session never
 expires while a turn is open. At expiration, eve emits `session.ended` with `outcome: "completed"` and
 releases the session's continuation addresses so the next qualifying channel
-message starts fresh. Stored session data is not deleted. See
-[Agent config](../agent-config#runtime-limits).
+message starts fresh. Stored data follows the session's
+[run-data retention policy](../agent-config#run-data-retention). Under the default
+policy outside development, eve requests deletion when private and unknown-audience
+sessions end. The Workflow World must support deletion to enforce it. See
+[Agent config](../agent-config#runtime-limits) for timeout settings.
 
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
@@ -103,6 +106,8 @@ Facts are grouped into families. Lifecycle facts introduce, update, or settle an
 | `context`     | `context.started`, `context.settled`                                 | A context change: `kind` `"compaction"` or `"clear"`.                                                                                                                                                                                                                                                                  |
 | `usage`       | `usage.recorded`                                                     | Model spend, owned by the run, call, or context change that spent it.                                                                                                                                                                                                                                                  |
 
+The conversation is a chain of turns. Each `turn.started` names the turn it `follows`, the one whose conversation it continues, or `null` for a first turn. A completed `context.settled` can change the conversation with `selects`: `null` empties it, as a clear does, and `{ turnId }` makes that earlier turn its newest, leaving out the turns after it. The next turn then follows the selected one. Either can name any earlier turn, so read the conversation with `conversation(view)` instead of assuming it holds every turn in order.
+
 Progress records are `content.delta` (a text or reasoning delta for a `partId`), `call.input` (a raw tool-input delta for a `callId`), and `call.progress` (a preliminary output snapshot for a `callId`).
 
 Call labels use `capability.label` before execution, `call.progress.data.label` for a progress
@@ -115,6 +120,13 @@ The full catalog, its outcome sets, and TypeScript types are exported from `eve/
 import { FACT_CATALOG, foldEvents, activeTurn, reply } from "eve/events";
 ```
 
+The family-specific arrays `SESSION_OUTCOMES`, `DELIVERY_OUTCOMES`, `TURN_OUTCOMES`,
+`MODEL_OUTCOMES`, `CALL_OUTCOMES`, `TASK_OUTCOMES`, `INTERACTION_OUTCOMES`,
+`RESPONSE_OUTCOMES`, and `CONTEXT_OUTCOMES` list the outcomes known to this release.
+`TERMINAL_OUTCOMES` maps terminal fact types to those arrays. `isTerminal(fact)`
+narrows a fact to one that ends its entity; it does not test whether the whole
+session has ended. These helpers come from `eve/events`.
+
 #### What a later release can add
 
 Within stream version 27, a later minor release can add:
@@ -122,7 +134,7 @@ Within stream version 27, a later minor release can add:
 - fact types that only add information: a new family, or an update to a row such as `model.retried`, never the only way an entity opens or ends;
 - progress record types;
 - optional fields;
-- outcomes, interaction kinds, displays, and option styles.
+- outcomes, interaction kinds, context-change kinds, displays, and option styles.
 
 It never removes or renames a fact or field, changes what a fact means or which role it plays in its entity's lifecycle, or adds a required field. Anything else is a new stream version, which readers refuse.
 
@@ -152,7 +164,7 @@ Spend is recorded on `usage.recorded`, once per model run (`owner: { runId }`) a
 
 ### Deliveries and responses
 
-Everything that reaches a session arrives as a delivery: a message, an answer, a control such as `cancel` or `reset`, or a sign-in callback. `delivery.admitted` records it, with the sender's `principal` and its `source`. A message that a turn takes in is `delivery.consumed`, with the `parts` it received: text, plus file metadata without raw bytes or internal sandbox paths. A delivery that brought [prior history](../channels/eve#start-from-prior-history) also carries it there, in `history`. Every delivery ends with exactly one `delivery.settled`, except after a degraded termination (see below):
+Everything that reaches a session arrives as a delivery: a message, an answer, a control such as `cancel` or `end`, or a sign-in callback. `delivery.admitted` records it, with the sender's `principal` and its `source`. A message that a turn takes in is `delivery.consumed`, with the `parts` it received: text, plus file metadata without raw bytes or internal sandbox paths. A delivery that brought [prior history](../channels/eve#start-from-prior-history) also carries it there, in `history`. Every delivery ends with exactly one `delivery.settled`, except after a degraded termination (see below):
 
 | Outcome          | Meaning                                                                                             |
 | ---------------- | --------------------------------------------------------------------------------------------------- |
@@ -165,8 +177,9 @@ Everything that reaches a session arrives as a delivery: a message, an answer, a
 
 `POST /eve/v1/session/:sessionId` returns the message's `deliveryId`, so a client resuming from an old cursor knows which `delivery.settled` ends its response. Steering and coalesced messages each keep their own delivery. The id is assigned before dispatch,
 not derived from stream position. An answer-only delivery stops on its own `delivery.settled`.
-A stranded reset records its control's admission and settlement before ending the session, with
-`session.ended.data.cause.deliveryId` naming the reset.
+Ending a stranded session records the control's admission and settlement, with
+`session.ended.data.cause.deliveryId` naming that delivery. Its stream control value
+remains `"reset"` for compatibility with recorded history.
 An answer and message sent together by someone other than the turn's caller become separate deliveries: the answer reaches the waiting turn, and the message retains the receipt and waits. Follow the answer through its interaction.
 
 To follow an accepted receipt in a client view, use `delivery(view, receipt.deliveryId)` from
@@ -231,6 +244,8 @@ const totals = usage(agent.view);
 const observed = call(agent.view, callId);
 if (observed?.state === "failed") console.error(observed.error.message);
 ```
+
+`callOutputSource(view, callId)` returns the observation of the call that produced a call's output. `call(view, callId)?.output` already follows `outputOf`, so use `callOutputSource` when you need the producing call itself, such as its `callId` or label.
 
 Calls include their resolved `turnId`, `runId`, and `taskId` when known, so applications do not
 join calls to runs to find their turn. `turns`, `deliveries`, `tasks`, `runs`, `parts`, and
@@ -362,14 +377,14 @@ Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
-## Compact, clear, and reset
+## Compact, clear, and end
 
 All session controls are ID-addressed and accept no continuation token:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/compact
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/clear
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
   -H 'content-type: application/json' \
   -d '{"reason":"Start over"}'
 ```
@@ -380,9 +395,9 @@ Clear removes model-message history in place, including static and dynamic user-
 
 A cancel stops turns, not a compaction or clear: one that arrives while either runs settles `ignored`, and the change finishes. A cancel, clear, or compact sent to a prewarmed session before its first message has nothing to act on, and settles `ignored` once the session starts.
 
-Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. All controls return delivery receipts when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
+End terminally retires the exact session ID. An ended ID never becomes a new session; create another session explicitly for a fresh conversation. All controls return delivery receipts when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
 
-A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. Reset still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear and compact cannot repair a stranded owner; use reset instead.
+A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. End still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear and compact cannot repair a stranded owner; use end instead.
 
 ## Reconnect and rewind
 
@@ -431,15 +446,19 @@ for await (const event of events) {
 }
 ```
 
-`stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a durable line position, with negative values counting back from the tail), `follow`, and `signal`. Client readers also accept `streamReconnectPolicy`. Key stored events on [`meta.position`](#positions), which stays stable across reads. With `follow: false`, the read ends at the durable tail observed when it opens; otherwise it keeps following new events until the stream closes or the signal aborts.
+`stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a durable line position, with negative values counting back from the tail), `follow`, and `signal`. Client readers also accept `reconnect: false` or a `ReconnectOptions` object from `eve/client`. Key stored events on [`meta.position`](#positions), which stays stable across reads. With `follow: false`, the read ends at the durable tail observed when it opens; otherwise it keeps following new events until the stream closes or the signal aborts.
 
 A read reflects events that are already durable. A hook runs after its line is written, so a bounded read there includes the event that triggered it. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It is available only in code that runs inside the eve server.
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns agent-info version 6, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
+`GET /eve/v1/info` returns agent-info version 5, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
 
-The info route belongs to the selected `channels/eve.ts` source and uses its resolved auth policy. Without an authored replacement, eve selects the default channel source with Vercel OIDC, local development access, and the production placeholder. Replacing or disabling that source replaces or removes the info route too; no native fallback serves it.
+Because the payload includes authored text and server paths, the route serves only operator principals: `service` and `runtime` principals and, when the channel's auth includes `localDev()`, any caller it admits on a development server. Any other principal the channel admits, such as a `user` or `anonymous` principal, gets `403` with `{ "code": "info_forbidden", "ok": false }` and an `error` message. To give another credential access, return `principalType: "service"` or `allowAgentInfo: true` from its authenticator; see [Agent info access](../guides/auth-and-route-protection#agent-info-access).
+
+The version changes only for breaking reshapes. New fields and new enum values are added within a version, so readers should ignore unknown fields and tolerate unknown enum values. `kind` discriminants, such as an owner's, a model endpoint's, or a module's backing `kind`, are closed: a new variant comes with a version bump.
+
+The info route belongs to the selected `channels/eve.ts` source and uses its resolved auth policy before the operator check. Without an authored replacement, eve selects the default channel source with Vercel OIDC, local development access, and the production placeholder. Replacing or disabling that source replaces or removes the info route too; no native fallback serves it.
 
 ```bash
 curl http://127.0.0.1:2000/eve/v1/info

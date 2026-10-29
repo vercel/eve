@@ -57,7 +57,7 @@ test("the project typechecks and builds", { timeout: 600_000 }, () => {
   }
 });
 
-test("gives the agent both tools and the extension's instructions", () => {
+test("gives the agent both tools and has it look customers up before notes", async () => {
   const info = eveInfo();
   expect(info.status).toBe("ready");
   expect(info.tools).toEqual(
@@ -65,7 +65,9 @@ test("gives the agent both tools and the extension's instructions", () => {
   );
   expect(info.tools).not.toContain("lookup_customer");
   expect(info.tools).not.toContain("add_note");
-  // The extension contributes its own fragment beside the agent's instructions.
+  // Either add_note looks the customer up itself, so a note can't land on the wrong record,
+  // or the extension contributes its own instructions fragment telling agents to.
+  if (await addNoteLooksUpFirst()) return;
   expect(info.instructions).toMatch(new RegExp(`instructions/${mount().namespace}(?:__|\\.)`));
   expect(extensionInstructions()).toMatch(/look\w*\s+(?:\w+\s+){0,3}up|lookup|look-up/i);
   expect(extensionInstructions()).toMatch(/note/i);
@@ -117,8 +119,10 @@ test("add_note always asks for approval", async () => {
   expect(typeof policy).toBe("function");
   for (const note of ["short", "x".repeat(500)]) {
     const toolInput = { customerId: customer.id, email: customer.email, note };
-    const request = { callId: "call-1", session: {}, toolInput, toolName: "x" };
-    const decision = await sessionStorage().run({ context: session }, () => policy(request));
+    const request = { callId: "call-1", session: graderSession, toolInput, toolName: "x" };
+    const decision = await (
+      await sessionStorage()
+    ).run({ context: session }, () => policy(request));
     expect(requiresApproval(decision)).toBe(true);
   }
   const manifest = readJson(eveInfo().artifacts.compiledManifest);
@@ -151,6 +155,35 @@ async function lookUpThenAddNote(): Promise<void> {
   await runTool(await loadTool("lookup_customer"), { email: customer.email }, session);
   const input = { customerId: customer.id, email: customer.email, note: "Prefers email." };
   await runTool(await loadTool("add_note"), input, session);
+}
+
+/**
+ * Whether add_note, given only an email, looks the customer up by it before it writes the note.
+ * Binds the configuration through the extension's handle rather than the agent's mount: the
+ * mount binds once, and later tests rely on it binding after the handle tests.
+ */
+async function addNoteLooksUpFirst(): Promise<boolean> {
+  const fetch = stubFetch();
+  try {
+    (await loadExtension())({ apiKey: "test-crm-key" });
+    await runTool(await loadTool("add_note"), { email: customer.email, note: "Prefers email." });
+  } catch {
+    return false;
+  }
+  const calls = await requests(fetch);
+  const lookup = calls.findIndex((call) => {
+    const url = new URL(call.url);
+    return (
+      call.method === "GET" &&
+      url.pathname === "/v1/customers" &&
+      url.searchParams.get("email") === customer.email
+    );
+  });
+  const post = calls.findIndex(
+    (call) =>
+      call.method === "POST" && new URL(call.url).pathname === `/v1/customers/${customer.id}/notes`,
+  );
+  return lookup !== -1 && post > lookup;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded files are untyped.
@@ -263,6 +296,26 @@ function stubFetch() {
   return fetch;
 }
 
+/** The person who approves calls in the grader, as eve hands them to an approved call. */
+const graderApprover = {
+  authenticator: "grader",
+  issuer: "grader",
+  principalId: "approver-1",
+  principalType: "user",
+  subject: "approver-1",
+  attributes: {},
+  getToken: async () => {
+    throw new Error("The grader has no provider tokens.");
+  },
+};
+
+/** The session eve hands tools and approval policies: one conversation, in its first turn. */
+const graderSession = {
+  id: "session-1",
+  auth: { current: null, initiator: null },
+  turn: { id: "turn-1", sequence: 0 },
+};
+
 /**
  * Runs a tool call the way eve does: with a call context, inside a session whose state the
  * tools can read and write. Pass the same session to calls that belong to one conversation.
@@ -270,25 +323,36 @@ function stubFetch() {
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function runTool(tool: any, input: unknown, session = new SessionState()): Promise<unknown> {
   const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
-  const call = {
+  const call: Record<string, unknown> = {
     abortSignal: new AbortController().signal,
     callId: `call-${Math.random().toString(36).slice(2)}`,
     toolName: "graded",
     messages: [],
     channel: { kind: "eve" },
+    // eve passes the session with every call; a tool may read its ID or the current turn.
+    session: graderSession,
   };
-  return sessionStorage().run({ context: session }, () => tool.execute(parsed, call));
+  // eve only runs a tool that asks for approval once a person approves, and tells the call who
+  // did. A tool may check it as a second guard.
+  if (tool.approval !== undefined) call.approval = { responder: graderApprover };
+  return (await sessionStorage()).run({ context: session }, () => tool.execute(parsed, call));
 }
 
-/** The process-wide storage eve creates on load for its session context, shared by every eve copy. */
-function sessionStorage(): AsyncLocalStorage<{ context: SessionState }> {
+/**
+ * The process-wide storage eve keeps its session context in, shared by every eve copy. eve
+ * creates it when its context module loads, and `eve/tools` and `eve/extension` don't load
+ * that module, so a solution that never imports `eve/context` would leave it missing. Load
+ * it from the project's eve first.
+ */
+async function sessionStorage(): Promise<AsyncLocalStorage<{ context: SessionState }>> {
+  await importProjectEve("./context");
   const key = Symbol.for("eve.context-storage");
   const global = globalThis as Record<
     symbol,
     AsyncLocalStorage<{ context: SessionState }> | undefined
   >;
   const storage = global[key];
-  if (!storage) throw new Error("eve context storage is missing; load a graded module first.");
+  if (!storage) throw new Error("eve context storage is missing after loading eve/context.");
   return storage;
 }
 
@@ -340,4 +404,12 @@ function requiresApproval(decision: unknown): boolean {
     "type" in decision &&
     decision.type === "user-approval"
   );
+}
+
+/** Imports an `eve` entry point as the authored modules resolve it, sharing their module instance. */
+// oxlint-disable-next-line typescript/no-explicit-any -- eve's types aren't installed at the root.
+async function importProjectEve(subpath: string): Promise<any> {
+  const eveRoot = "node_modules/eve";
+  const target = readJson(`${eveRoot}/package.json`).exports[subpath];
+  return import(pathToFileURL(resolve(eveRoot, target.import ?? target.default)).href);
 }

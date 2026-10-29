@@ -2,7 +2,7 @@ import { posix } from "node:path";
 import { getToken } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
-import type { ToolContext } from "eve/tools";
+import type { ToolAuthProvider, ToolContext } from "eve/tools";
 
 import {
   attributeCommand,
@@ -11,21 +11,18 @@ import {
   type GitHubCoAuthor,
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
+import { connectUserAuthorization } from "./connect-user-auth.ts";
+import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
 
-export interface GitHubPermission {
-  readonly access: "write";
-  readonly provider: "github";
-  readonly repositories: readonly string[];
-}
-
 export interface GitHubShellInput {
   readonly command: string;
   readonly description: string;
-  readonly permissions: readonly GitHubPermission[];
+  /** The `owner/name` repository the command acts on, an `owner` for discovery, or omitted. */
+  readonly repository?: string;
   readonly workingDirectory?: string;
 }
 
@@ -41,7 +38,7 @@ export type GitHubAttribution = (
   ctx: ToolContext,
 ) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
 
-export interface GitHubConfig {
+interface GitHubConfigBase {
   /**
    * Resolves who the current turn publishes for. When it returns a person,
    * `gh-signed-commit` messages and `gh pr create` bodies end with their
@@ -50,27 +47,53 @@ export interface GitHubConfig {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
-  readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
   readonly connector: string;
-  readonly org: string;
 }
 
-/** What an `authorize` callback sees before a `gh` command runs. */
-export interface GitHubAuthorizeRequest {
+/** Mints GitHub App installation tokens scoped to the declared repository or owner. */
+export interface GitHubAppConfig extends GitHubConfigBase {
+  /** The only access control: commands run only when it returns `true`. */
+  readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
+  readonly principalType: "app";
+}
+
+/** Resolves the caller's own token through `ctx.getToken`, signing them in when needed. */
+export interface GitHubUserConfig extends GitHubConfigBase {
+  /** The only access control: commands run only when it returns `true`. */
+  readonly authorize: GitHubAuthorize<GitHubUserAuthorizeRequest>;
+  readonly principalType: "user";
+}
+
+export type GitHubConfig = GitHubAppConfig | GitHubUserConfig;
+
+/** What an `authorize` callback sees before a `gh` command runs with the caller's own token. */
+export interface GitHubUserAuthorizeRequest {
+  /** The parsed command, such as `["gh", "pr", "view", "7", "--repo", "acme/widgets"]`. */
+  readonly argv: readonly string[];
   /** The session's current caller, or `null` when the session has none. */
   readonly auth: SessionAuthContext | null;
-  /** The `owner/name` repository the command declared. */
-  readonly repository: string;
-  /** The repository-scoped GitHub App token minted for this command, for API lookups. */
+  /** The `owner/name` repository the command declared, or `null`. */
+  readonly repository: string | null;
+  /** The token Connect minted for this command, for API lookups. It reaches the command only after `authorize` returns `true`. */
   readonly token: string;
 }
 
-/** Decides whether the session's caller may run a `gh` command against one repository. */
-export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
+/** What an `authorize` callback sees before a `gh` command runs with an installation token. */
+export interface GitHubAppAuthorizeRequest extends GitHubUserAuthorizeRequest {
+  /** The owner whose installation minted the token. */
+  readonly owner: string;
+}
+
+export type GitHubAuthorizeRequest = GitHubAppAuthorizeRequest | GitHubUserAuthorizeRequest;
+
+/** Decides whether the session's caller may run one `gh` command; the agent's only access control. */
+export type GitHubAuthorize<Request extends GitHubAuthorizeRequest = GitHubAuthorizeRequest> = (
+  request: Request,
+) => boolean | Promise<boolean>;
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -92,11 +115,14 @@ interface GitHubShellDependencies {
       authorizationDetails: {
         type: "github_app_installation";
         org: string;
-        repositories: string[];
+        repositories?: string[];
       }[];
       subject: { type: "app" };
     },
   ) => Promise<string>;
+  /** Resolves and re-authorizes user-scoped providers; the tool's `ctx.getToken` and `ctx.requireAuth`. */
+  readonly getToken?: ToolContext["getToken"];
+  readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
   /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
   readonly sessionId: string;
@@ -104,7 +130,9 @@ interface GitHubShellDependencies {
 
 const MAX_OUTPUT_BYTES = 100_000;
 const leaseQueues = new Map<string, Promise<void>>();
-const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
+const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
+/** How `gh` and `git` report a rejected token. */
+const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
 
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
@@ -125,35 +153,56 @@ export async function executeGitHubShell(
   dependencies: GitHubShellDependencies,
 ): Promise<GitHubShellOutput> {
   if (!config) throw new Error("GitHub command access is not configured for this agent.");
-  const argv = validateGitHubShellInput(input);
+  const {
+    argv,
+    target: { owner, repository, name },
+  } = validateGitHubShellInput(input);
+  if (config.principalType === "user" ? owner && !repository : !owner) {
+    throw new Error(
+      config.principalType === "user"
+        ? "Set repository to owner/name or omit it; user tokens are not scoped to an owner."
+        : "App tokens need repository set to an owner or owner/name.",
+    );
+  }
   const sandbox = await dependencies.getSandbox();
   let workingDirectory = resolveWorkingDirectory(sandbox, input.workingDirectory);
-  if (argv[0] === "git" || argv[0] === "gh-signed-commit") {
+  if (argv[0] === "gh-signed-commit") {
     workingDirectory = await validateRepositoryRoot(sandbox, workingDirectory);
   }
-  const declaredRepositories = input.permissions[0]!.repositories;
-  const remoteRepository = await assertCommandTargets(
-    argv,
-    declaredRepositories,
-    workingDirectory,
-    sandbox,
-  );
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
-  const repositories = repositoryNames(declaredRepositories, config.org);
-  const tokenParams: Parameters<NonNullable<GitHubShellDependencies["getConnectToken"]>>[1] = {
-    authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
-    subject: { type: "app" },
-  };
-  const token = await (dependencies.getConnectToken ?? getToken)(config.connector, tokenParams);
+  const auth = dependencies.auth ?? null;
+  let userAuth: ToolAuthProvider | undefined;
+  let token: string;
+  if (config.principalType === "user") {
+    if (!dependencies.getToken || !dependencies.requireAuth)
+      throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
+    // Connect matches a user grant only to the exact authorization details it
+    // was consented with, and repository details do not narrow user tokens.
+    // One unscoped grant therefore covers every repository after one sign-in.
+    userAuth = connectUserAuthorization(config.connector);
+    ({ token } = await dependencies.getToken(userAuth));
+  } else {
+    // Scope the installation token to the repository, or to the owner's
+    // installation for owner-level commands such as `gh repo list <owner>`.
+    const installation: { type: "github_app_installation"; org: string; repositories?: string[] } =
+      { type: "github_app_installation", org: owner! };
+    if (name) installation.repositories = [name];
+    token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
+      authorizationDetails: [installation],
+      subject: { type: "app" },
+    });
+  }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
-  const repository = declaredRepositories[0]!;
-  if (
-    config.authorize &&
-    !(await config.authorize({ auth: dependencies.auth ?? null, repository, token }))
-  ) {
-    throw new Error(`The current caller is not authorized to access ${repository}.`);
+  const allowed =
+    config.principalType === "user"
+      ? await config.authorize({ argv, auth, repository, token })
+      : await config.authorize({ argv, auth, owner: owner!, repository, token });
+  if (!allowed) {
+    throw new Error(
+      `The current caller is not authorized to run this command${repository ? ` on ${repository}` : owner ? ` for ${owner}` : ""}.`,
+    );
   }
   const coAuthor =
     config.attribution && dependencies.context && isAttributable(argv)
@@ -164,18 +213,8 @@ export async function executeGitHubShell(
     : argv;
 
   const executable = executablePath(commandArgv[0]!);
-  const executionArguments = remoteRepository
-    ? [
-        "-c",
-        "protocol.allow=never",
-        "-c",
-        "protocol.https.allow=always",
-        commandArgv[1]!,
-        `https://github.com/${remoteRepository}.git`,
-        ...commandArgv.slice(3),
-      ]
-    : commandArgv.slice(1);
-  const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${executionArguments
+  const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
+    .slice(1)
     .map(shellQuote)
     .join(" ")}`;
   const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
@@ -194,11 +233,23 @@ export async function executeGitHubShell(
           GH_PROMPT_DISABLED: "1",
         };
         if (argv[0] !== "git") env.GH_TOKEN = placeholder;
-        env.GIT_CONFIG_COUNT = "2";
-        env.GIT_CONFIG_KEY_0 = "http.https://github.com/.extraheader";
-        env.GIT_CONFIG_VALUE_0 = `Authorization: ${placeholderAuthorization}`;
-        env.GIT_CONFIG_KEY_1 = "core.hooksPath";
-        env.GIT_CONFIG_VALUE_1 = "/dev/null";
+        // Defaults for every git process, including the ones gh starts. SSH
+        // GitHub remotes are rewritten to HTTPS so they carry the credential
+        // header. The command's own `-c` options still override these; the
+        // lease, not this config, bounds what the command can reach.
+        const gitConfig: [string, string][] = [
+          ["http.https://github.com/.extraheader", `Authorization: ${placeholderAuthorization}`],
+          ["url.https://github.com/.insteadOf", "git@github.com:"],
+          ["url.https://github.com/.insteadOf", "ssh://git@github.com/"],
+          ["core.hooksPath", "/dev/null"],
+          ["protocol.allow", "never"],
+          ["protocol.https.allow", "always"],
+        ];
+        env.GIT_CONFIG_COUNT = String(gitConfig.length);
+        gitConfig.forEach(([key, value], index) => {
+          env[`GIT_CONFIG_KEY_${index}`] = key;
+          env[`GIT_CONFIG_VALUE_${index}`] = value;
+        });
         env.GIT_TERMINAL_PROMPT = "0";
         env.PATH = "/usr/local/bin:/usr/bin:/bin";
         return sandbox.run({ command, env });
@@ -208,6 +259,10 @@ export async function executeGitHubShell(
   } finally {
     await sandbox.removePath({ path: githubConfig, recursive: true, force: true });
     await sandbox.removePath({ path: bodyFile, force: true });
+  }
+  if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
+    // GitHub rejected the caller's token: evict it and sign the caller in again.
+    dependencies.requireAuth!(userAuth);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);
@@ -335,125 +390,32 @@ export function parseCommand(command: string): string[] {
   return argv;
 }
 
-function validateGitHubShellInput(input: GitHubShellInput): string[] {
+function validateGitHubShellInput(input: GitHubShellInput): {
+  argv: string[];
+  target: ReturnType<typeof declaredTarget>;
+} {
   const argv = parseCommand(input.command);
-  const permission = input.permissions[0];
-  if (input.permissions.length !== 1 || permission?.provider !== "github") {
-    throw new Error("Exactly one GitHub permission is required.");
-  }
-  if (permission.access !== "write") {
-    throw new Error("GitHub App commands require explicit write-capable access.");
-  }
   if (!input.description.trim()) throw new Error("description must describe the intended result.");
-  const [executable, subcommand] = argv;
-  if (executable === "gh") {
-    if (!subcommand) throw new Error("A gh subcommand is required.");
-  } else if (executable === "git") {
-    if (!subcommand || !ALLOWED_GIT_REMOTE_COMMANDS.has(subcommand)) {
-      throw new Error(
-        "Authenticated git supports only fetch, ls-remote, pull, and push; clone with gh repo clone.",
-      );
-    }
-  } else if (executable !== "gh-signed-commit") {
-    throw new Error(
-      "GitHub commands must use gh, an authenticated git remote command, or gh-signed-commit.",
-    );
+  // The credential lease is wired only into these executables: gh reads the
+  // placeholder GH_TOKEN and git sends the placeholder header.
+  if (!EXECUTABLES.has(argv[0]!)) {
+    throw new Error("GitHub commands must use gh, git, or gh-signed-commit.");
   }
-  return argv;
+  if (argv.length < 2) throw new Error(`A ${argv[0]} subcommand or argument is required.`);
+  return { argv, target: declaredTarget(input.repository) };
 }
 
-async function assertCommandTargets(
-  argv: readonly string[],
-  declaredRepositories: readonly string[],
-  workingDirectory: string,
-  sandbox: Pick<SandboxSession, "run">,
-): Promise<string | undefined> {
-  const declared = new Set(declaredRepositories.map((repository) => repository.toLowerCase()));
-  let remoteRepository: string | undefined;
-  let targets: string[];
-  if (argv[0] === "git") {
-    if (argv[2] !== "origin") {
-      throw new Error("Authenticated git commands must use the validated origin remote.");
-    }
-    const push = argv[1] === "push";
-    const remote = await sandbox.run({
-      command: `cd ${shellQuote(workingDirectory)} && git remote get-url ${push ? "--push " : ""}origin`,
-      env: { GIT_TERMINAL_PROMPT: "0", PATH: "/usr/bin:/bin" },
-    });
-    if (remote.exitCode !== 0) throw new Error("Could not resolve the origin GitHub repository.");
-    remoteRepository = repositoryFromRemote(remote.stdout.trim());
-    targets = [remoteRepository];
-  } else if (argv[0] === "gh-signed-commit") {
-    targets = repoFlagTargets(argv.slice(1));
-    if (targets.length === 0) {
-      throw new Error("gh-signed-commit requires an explicit --repo owner/repository target.");
-    }
-  } else {
-    targets = repoFlagTargets(argv.slice(1));
-    if (
-      argv[1] === "repo" &&
-      (argv[2] === "clone" || argv[2] === "view" || argv[2] === "fork") &&
-      argv[3] &&
-      !argv[3].startsWith("-")
-    ) {
-      targets.push(canonicalRepository(argv[3]));
-    }
-  }
-  for (const target of targets) {
-    if (!declared.has(target.toLowerCase())) {
-      throw new Error(
-        `Command target ${JSON.stringify(target)} is not in the declared repositories.`,
-      );
-    }
-  }
-  return remoteRepository;
-}
-
-function repoFlagTargets(argv: readonly string[]): string[] {
-  const targets: string[] = [];
-  for (let index = 0; index < argv.length; index += 1) {
-    const value = argv[index];
-    if (value === "--repo" || value === "-R") {
-      const target = argv[index + 1];
-      if (!target) throw new Error(`${value} requires an owner/repository value.`);
-      targets.push(canonicalRepository(target));
-      index += 1;
-    } else if (value?.startsWith("--repo=")) {
-      targets.push(canonicalRepository(value.slice("--repo=".length)));
-    }
-  }
-  return targets;
-}
-
-function repositoryFromRemote(remote: string): string {
-  const https = /^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/iu.exec(remote);
-  if (https?.[1]) return canonicalRepository(https[1]);
-  const ssh = /^git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/iu.exec(remote);
-  if (ssh?.[1]) return canonicalRepository(ssh[1]);
-  throw new Error("The origin remote is not a canonical GitHub repository URL.");
-}
-
-function canonicalRepository(value: string): string {
-  const normalized = value.replace(/\.git$/iu, "");
-  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/u.test(normalized)) {
-    throw new Error(`Invalid GitHub repository ${JSON.stringify(value)}.`);
-  }
-  return normalized;
-}
-
-function repositoryNames(repositories: readonly string[], configuredOrg: string): string[] {
-  if (repositories.length !== 1) throw new Error("Exactly one GitHub repository is required.");
-  const names = new Set<string>();
-  for (const repository of repositories) {
-    const match = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/u.exec(repository);
-    if (!match) throw new Error(`Invalid GitHub repository ${JSON.stringify(repository)}.`);
-    if (match[1]?.toLowerCase() !== configuredOrg.toLowerCase()) {
-      throw new Error(`Repository ${JSON.stringify(repository)} is outside ${configuredOrg}.`);
-    }
-    names.add(match[2]!);
-  }
-  if (names.size !== 1) throw new Error("Exactly one GitHub repository is required.");
-  return [...names];
+function declaredTarget(value: string | undefined): {
+  owner: string | null;
+  repository: string | null;
+  name: string | null;
+} {
+  const declared = value?.trim();
+  if (!declared) return { owner: null, repository: null, name: null };
+  const match = GITHUB_TARGET.exec(declared.replace(/\.git$/iu, ""));
+  if (!match) throw new Error(`Invalid GitHub repository or owner ${JSON.stringify(value)}.`);
+  const [, owner, name] = match;
+  return { owner: owner!, repository: name ? `${owner}/${name}` : null, name: name ?? null };
 }
 
 function executablePath(executable: string): string {

@@ -19,7 +19,7 @@ export default defineMemory({
       async "turn.started"(ctx) {
         const document = await captures.read({
           key: ctx.memory.scope.key,
-          abortSignal: ctx.abortSignal,
+          signal: ctx.abortSignal,
         });
         if (document === null) return null;
         return { messages: [{ content: document.content, id: "capture-state" }] };
@@ -29,7 +29,7 @@ export default defineMemory({
       async "turn.completed"(ctx) {
         const current = await captures.read({
           key: ctx.memory.scope.key,
-          abortSignal: ctx.abortSignal,
+          signal: ctx.abortSignal,
         });
         const previous: CaptureState =
           current === null
@@ -46,7 +46,7 @@ export default defineMemory({
           content: JSON.stringify(next),
           expectedVersion: current?.version ?? null,
           key: ctx.memory.scope.key,
-          abortSignal: ctx.abortSignal,
+          signal: ctx.abortSignal,
         });
       },
     },

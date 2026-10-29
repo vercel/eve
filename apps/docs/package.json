@@ -5,8 +5,8 @@
   "description": "eve documentation site.",
   "type": "module",
   "scripts": {
-    "build": "pnpm run registry:check && pnpm run templates:sync && next build",
-    "dev": "pnpm run templates:sync && next dev --turbo",
+    "build": "pnpm run registry:check && next build",
+    "dev": "next dev --turbo",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
     "translate": "npx @vercel/geistdocs translate",
@@ -18,7 +18,6 @@
     "registry:validate:tools": "tsx scripts/validate-tool-registry.ts",
     "registry:validate:channels": "tsx scripts/validate-channel-registry.ts",
     "registry:validate:instrumentation": "tsx scripts/validate-instrumentation-registry.ts",
-    "templates:sync": "tsx scripts/sync-templates.ts",
     "registry:validate:memory": "tsx scripts/validate-memory-registry.ts"
   },
   "dependencies": {

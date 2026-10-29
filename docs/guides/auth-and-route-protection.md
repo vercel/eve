@@ -16,7 +16,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 - `POST /eve/v1/session`
 - `POST /eve/v1/session/:sessionId`
-- `POST /eve/v1/session/:sessionId/{cancel,compact,clear,reset}`
+- `POST /eve/v1/session/:sessionId/{cancel,compact,clear,end}`
 - `GET /eve/v1/session/:sessionId/stream`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
@@ -117,7 +117,7 @@ Verifies a bearer JWT against the [Vercel OIDC issuer](https://vercel.com/docs/o
 
 Auth fails closed: routes reject unauthenticated traffic by default, and the OIDC user branch verifies `external_sub` against `VERCEL_PROJECT_ID` and the deployment environment, returning `false` when either is unset. An external-subject token cannot authenticate on a deployment that hasn't pinned its project.
 
-Subject entries can also be objects: `{ subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }), allowToolStubs: true }`. This explicitly permits that verified service/runtime caller to create [stubbed eval sessions](../evals/tool-stubs). Plain subject strings and implicit current-project acceptance grant ordinary access only. Custom authenticators can return the same permission in their authentication result; it is not part of persisted or forwarded session identity.
+To also permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve`. It takes the same options, and its subject entries can grant [tool replacement permission](#tool-replacement-permission).
 
 #### `subjects` patterns and `vercelSubject(...)`
 
@@ -298,6 +298,7 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 - `auth.current`: the caller on the active inbound turn.
 - `auth.initiator`: the caller that started the durable session.
 - A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
+- Within a turn the principal is fixed; only its claims may update. A message from the turn's own principal, including a typed answer to a pending `ctx.ask()` or `ask_question`, joins the turn and updates `auth.current` with its claims. A message from anyone else waits for the turn to end and runs as its own turn. Someone else can still answer a pending request with a button or structured response; that settles the request with them as its responder, and the turn keeps its `auth.current`.
 - `auth.current` is whatever the channel passed as `auth` when it dispatched the message. Route auth either accepts the request or returns `401`, but a route handler or channel hook can still dispatch with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`. On a continuation, `auth.current` is `null` while `auth.initiator` stays pinned to the session's original caller. Internal runtime paths, such as subagents, can also have no caller auth.
 
 Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.
@@ -306,9 +307,9 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 ## Tool replacement permission
 
-Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` in the verified route authentication result. The target's server configuration grants permission; request JSON cannot. With `vercelOidc`, put the grant on a `subjects` entry as shown above. Any matching entry with the grant permits replacement; other entries do not revoke it. Implicit current-project acceptance and user principals do not inherit project grants.
+Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` in the verified route authentication result. The target's server configuration grants permission; request JSON cannot. With `eveVercelOidc`, put the grant on a `subjects` entry, as in the [tool stubs example](../evals/tool-stubs#permit-tool-replacement). Any matching entry with the grant permits replacement; other entries do not revoke it. Implicit current-project acceptance and user principals do not inherit project grants.
 
-Custom authenticators return the same grant after verifying their caller. For example, this alternative channel permits stubs only in local development:
+Custom authenticators return the same grant after verifying their caller; type standalone callbacks as `EveAuthFn` from `eve/channels/eve`. For example, this alternative channel permits stubs only in local development:
 
 ```ts
 import { localDev } from "eve/channels/auth";
@@ -326,6 +327,19 @@ export default eveChannel({
 The channel checks the grant before forwarded-principal handling or `onMessage` projection. It removes the grant before using the identity for forwarding, audience classification, or session persistence. This is an authentication-result permission, not a session attribute.
 
 Later messages, approvals, controls, and result reads use normal channel authentication. There is no additional creator-only rule or replacement-permission recheck. Anyone your channel admits to an existing session can use its configured stubs; apply the same application-specific session-access policy you need for ordinary sessions.
+
+## Agent info access
+
+`GET /eve/v1/info` returns authored instructions and server paths, so it serves only operators by default: `service` and `runtime` principals, plus callers `localDev()` admits when the channel's `auth` includes it. Other callers get `403` with code `info_forbidden`. An eve-channel authenticator can decide for its caller instead: `allowAgentInfo: true` grants access, and `false` denies it even to an operator. Like `allowToolStubs`, the flag applies only to the current request and is never persisted or forwarded.
+
+```ts
+import type { EveAuthFn } from "eve/channels/eve";
+
+const authenticateStaff: EveAuthFn = async (request) => {
+  const staff = await verifyStaffSession(request);
+  return staff ? { ...staff, allowAgentInfo: true } : null;
+};
+```
 
 ## Tool and connection auth
 

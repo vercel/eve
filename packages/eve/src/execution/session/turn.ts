@@ -12,6 +12,7 @@ import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import { renderTaskWaitResult } from "#execution/tasks/render.js";
 import {
   answerTaskCancel,
@@ -114,12 +115,16 @@ export class SessionExecution {
       readonly control?: TurnControl;
     } = {},
   ): Promise<TurnOutcome> {
+    const { cursor } = this.input;
+    // A resumed turn keeps its principal; another person's answer that
+    // resumes it does not make them its owner.
+    const starts = isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
     const turn = new ActiveTurn(
       this.input,
       {
         caller: options.caller,
         control: delivery?.control !== undefined,
-        principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+        principal: resolveTurnPrincipal(starts ? delivery : undefined, cursor.serializedContext),
       },
       options.control,
     );
