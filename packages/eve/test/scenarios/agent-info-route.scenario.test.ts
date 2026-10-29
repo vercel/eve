@@ -177,7 +177,8 @@ describe("eve agent info route", () => {
     // The caller picks its principal type so one channel exercises each class.
     await writeFile(
       join(agentRoot, "channels", "eve.mjs"),
-      `import { eveChannel } from "eve/channels/eve";
+      `import { localDev } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
 
 function issue389Auth(request) {
   if (request.headers.get("x-eve-info-token") !== "issue-389") {
@@ -191,7 +192,7 @@ function issue389Auth(request) {
   };
 }
 
-export default eveChannel({ auth: issue389Auth });
+export default eveChannel({ auth: [issue389Auth, localDev()] });
 `,
     );
 
@@ -219,8 +220,8 @@ export default eveChannel({ auth: issue389Auth });
       expect(payload.instructions.static[0]?.content).toContain("precise assistant");
     }
 
-    // On a development server, a caller localDev() would admit is the
-    // developer even when an earlier strategy resolved them as a user.
+    // On a development server, a caller the configured localDev() would admit
+    // is the developer even when an earlier strategy resolved them as a user.
     vi.stubEnv("EVE_DEV", "1");
     const localUser = await requestAgentInfo(
       appRoot,

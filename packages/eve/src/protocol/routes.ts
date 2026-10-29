@@ -15,13 +15,18 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 /**
  * Stable framework-owned route exposing the JSON inspection payload for
  * the current agent. The eve channel registers and authenticates this route
- * with the same `auth` input as its session routes, then serves only operator
- * principals (`service`, `runtime`, or `local-dev`).
+ * with the same `auth` input as its session routes, then serves operator
+ * principals (`service`, `runtime`, or `local-dev`) unless the auth result
+ * sets `allowAgentInfo`.
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 
-/** Error code the info route returns with `403` to a non-operator principal. */
+/** Error code the info route returns with `403` to a caller it does not serve. */
 export const AGENT_INFO_FORBIDDEN_CODE = "info_forbidden";
+
+/** Why the info route refused a caller and how to grant access; shared by server and clients. */
+export const AGENT_INFO_FORBIDDEN_MESSAGE =
+  'Agent info is served only to operator credentials (principalType "service", "runtime", or "local-dev"). Authenticate as a service principal, for example with Vercel OIDC, or return allowAgentInfo: true from the eve channel\'s auth for this caller.';
 
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;

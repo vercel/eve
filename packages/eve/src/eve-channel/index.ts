@@ -23,6 +23,7 @@ import {
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   AGENT_INFO_FORBIDDEN_CODE,
+  AGENT_INFO_FORBIDDEN_MESSAGE,
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
@@ -53,6 +54,7 @@ import {
 } from "#shared/forwarded-trace-policy.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { localDev, routeAuth } from "#public/channels/auth.js";
+import { isLocalDevAuth } from "#channel/auth/definitions.js";
 import { defaultEveAudience } from "#eve-channel/audience.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
@@ -88,7 +90,12 @@ import {
   deliveryResponse,
   resolveTurnClientContext,
 } from "#eve-channel/support.js";
-import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
+import type {
+  EveAuthResult,
+  EveChannel,
+  EveChannelConfig,
+  EveEventContext,
+} from "#eve-channel/types.js";
 
 export * from "#eve-channel/types.js";
 export { eveVercelOidc, type EveVercelOidcOptions } from "#eve-channel/auth.js";
@@ -104,14 +111,22 @@ const AGENT_INFO_PRINCIPAL_TYPES: ReadonlySet<string> = new Set([
 const localDevelopmentCaller = localDev();
 
 /**
- * Agent info carries authored text and server paths, so only operators read it.
- * A caller `localDev()` would admit is the developer at their own server even
- * when an earlier strategy resolved them first, such as the TUI's development
- * Vercel OIDC token resolving to a `user`.
+ * Agent info carries authored text and server paths, so only operators read it
+ * unless the request's auth result decides with `allowAgentInfo`. When the
+ * channel's auth includes `localDev()`, a caller it would admit is the
+ * developer at their own server even when an earlier strategy resolved them
+ * first, such as the TUI's development Vercel OIDC token resolving to a `user`
+ * on a linked project.
  */
-async function isAgentInfoOperator(request: Request, principalType: string): Promise<boolean> {
-  if (AGENT_INFO_PRINCIPAL_TYPES.has(principalType)) return true;
-  return Boolean(await localDevelopmentCaller(request));
+async function canReadAgentInfo(
+  request: Request,
+  caller: EveAuthResult,
+  localDevConfigured: boolean,
+): Promise<boolean> {
+  if (caller.allowAgentInfo === true) return true;
+  if (caller.allowAgentInfo === false) return false;
+  if (AGENT_INFO_PRINCIPAL_TYPES.has(caller.principalType)) return true;
+  return localDevConfigured && Boolean(await localDevelopmentCaller(request));
 }
 
 /**
@@ -141,6 +156,9 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
 
 export function eveChannel(input: EveChannelConfig): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
+  const localDevConfigured = (Array.isArray(input.auth) ? input.auth : [input.auth]).some(
+    isLocalDevAuth,
+  );
 
   return defineChannel<undefined, EveEventContext>({
     cors: input.cors,
@@ -156,14 +174,9 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
-        if (!(await isAgentInfoOperator(req, authResult.principalType))) {
+        if (!(await canReadAgentInfo(req, authResult, localDevConfigured))) {
           return Response.json(
-            {
-              code: AGENT_INFO_FORBIDDEN_CODE,
-              error:
-                'Agent info is served only to operator principals. Authenticate as a service principal (principalType "service"), or call a local development server.',
-              ok: false,
-            },
+            { code: AGENT_INFO_FORBIDDEN_CODE, error: AGENT_INFO_FORBIDDEN_MESSAGE, ok: false },
             { status: 403 },
           );
         }

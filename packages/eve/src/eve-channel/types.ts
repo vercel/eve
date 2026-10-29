@@ -25,6 +25,12 @@ export interface EveAuthResult extends AuthResult {
    * Omitted or false denies both operations. Never persisted or forwarded as session identity.
    */
   readonly allowToolStubs?: boolean;
+  /**
+   * Decides whether this request may read `GET /eve/v1/info`. `true` allows it, `false` denies
+   * it even for operator principals, and omitted serves only operators (`service`, `runtime`,
+   * and callers a configured `localDev()` admits). Never persisted or forwarded.
+   */
+  readonly allowAgentInfo?: boolean;
 }
 
 /** An eve-channel authenticator; ordinary identity-only authenticators also satisfy this type. */
@@ -112,7 +118,8 @@ export interface EveChannelConfig {
    * The first entry returning an {@link EveAuthResult} wins; `null` / `undefined` skips to
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
    * Ordinary authenticators grant no tool-replacement permission; return `allowToolStubs: true`
-   * from an eve-channel callback to grant it for that request.
+   * from an eve-channel callback to grant it for that request. Return `allowAgentInfo` to
+   * override who reads `GET /eve/v1/info`.
    */
   readonly auth: EveAuthFn | readonly EveAuthFn[];
   /**

@@ -820,6 +820,9 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
   return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
 }
 
+/** Marks functions {@link localDev} returns so channels can tell the author configured it. */
+const LOCAL_DEV_AUTH_SYMBOL = Symbol.for("eve.channels.auth.localDev");
+
 /**
  * Returns an {@link AuthFn} that authenticates a synthetic `local-dev`
  * principal while the process is a local development server, and returns
@@ -849,10 +852,19 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * behind an authenticator that runs before `localDev()`.
  */
 export function localDev(): AuthFn<Request> {
-  return (request) =>
+  const authenticate: AuthFn<Request> = (request) =>
     isLocalDevelopmentServer() && !isCrossSiteBrowserRequest(request) && !isFromRemotePeer(request)
       ? LOCAL_DEV_SESSION_AUTH_CONTEXT
       : null;
+  Object.defineProperty(authenticate, LOCAL_DEV_AUTH_SYMBOL, { value: true });
+  return authenticate;
+}
+
+/** @internal Whether `fn` is a function {@link localDev} returned. */
+export function isLocalDevAuth(fn: AuthFn<never>): boolean {
+  return (
+    (fn as Partial<Record<typeof LOCAL_DEV_AUTH_SYMBOL, true>>)[LOCAL_DEV_AUTH_SYMBOL] === true
+  );
 }
 
 function isCrossSiteBrowserRequest(request: Request): boolean {

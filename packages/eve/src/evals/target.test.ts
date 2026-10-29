@@ -142,7 +142,7 @@ describe("resolveEvalTargetHandle", () => {
         url: "https://agent.example.com",
       }),
     ).rejects.toThrow(
-      /Eval target https:\/\/agent\.example\.com refused GET \/eve\/v1\/info.*principalType "service"/,
+      /Eval target https:\/\/agent\.example\.com refused GET \/eve\/v1\/info.*principalType "service".*allowAgentInfo: true/,
     );
   });
 });

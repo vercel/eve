@@ -4,6 +4,7 @@ import { sessionAuthFromResult } from "#channel/auth/result.js";
 describe("sessionAuthFromResult", () => {
   it("keeps identity fields and drops channel permission extensions", () => {
     const identity = sessionAuthFromResult({
+      allowAgentInfo: true,
       allowToolStubs: true,
       attributes: { team: "acme" },
       authenticator: "oidc",
