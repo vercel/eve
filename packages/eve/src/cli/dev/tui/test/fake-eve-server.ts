@@ -127,6 +127,38 @@ export class FakeEveServer {
         },
         { type: "delivery.settled", data: { deliveryId, outcome: "applied" } },
       ];
+      if (action === "rewind" && typeof body?.turnId === "string") {
+        facts.splice(
+          1,
+          0,
+          { type: "context.started", data: { changeId: `${deliveryId}.change`, kind: "rewind" } },
+          {
+            type: "context.settled",
+            data: {
+              changeId: `${deliveryId}.change`,
+              kind: "rewind",
+              outcome: "completed",
+              selects: { turnId: body.turnId },
+            },
+          },
+        );
+      }
+      if (action === "clear") {
+        facts.splice(
+          1,
+          0,
+          { type: "context.started", data: { changeId: `${deliveryId}.change`, kind: "clear" } },
+          {
+            type: "context.settled",
+            data: {
+              changeId: `${deliveryId}.change`,
+              kind: "clear",
+              outcome: "completed",
+              selects: null,
+            },
+          },
+        );
+      }
       if (action === "end" || action === "reset")
         facts.push({ type: "session.ended", data: { outcome: "completed" } });
       this.emit(facts, deliveryId, sessionId);

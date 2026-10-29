@@ -24,6 +24,7 @@ Before your first message, the empty composer may suggest asking your local agen
 | `/model`    | Choose the model, speed, and reasoning. Pass a model ID to set it directly: `/model provider/model-id`.                                                      |
 | `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
 | `/clear`    | Clear the session's model-message history and keep the session.                                                                                              |
+| `/rewind`   | Choose a message to edit and remove that turn and later turns from the current conversation.                                                                 |
 | `/compact`  | Compact the current session's context.                                                                                                                       |
 | `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
@@ -34,6 +35,8 @@ Before your first message, the empty composer may suggest asking your local agen
 | `/info`     | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                              |
 | `/help`     | List available commands.                                                                                                                                     |
 | `/exit`     | Quit the UI.                                                                                                                                                 |
+
+Run `/rewind` to choose an earlier user message, or `/rewind 1` to edit the latest one. The selected message's entire turn and later turns leave the conversation, even if it was a steering message. Its text returns to the composer; reattach any files before sending. The TUI repaints the current conversation and clears discarded messages from terminal scrollback where supported. Rewind cancels working tasks and does not undo files, durable state, or external side effects. A point may be unavailable after compaction or clear.
 
 When a message or stream reconnection reaches a [stranded session](./deployment/self-hosting#recover-a-stranded-session), the TUI says why and which eve version built it, when known. New messages and approvals are not delivered. Run `/new` to end the stranded session; your next message starts a fresh one. `/clear` is refused, because it would keep the stranded session. A session from a previous `eve dev` invocation that the same eve version built is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery). A message accepted before the upgrade is not redelivered.
 

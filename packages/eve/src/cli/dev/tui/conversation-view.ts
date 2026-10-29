@@ -1,4 +1,5 @@
 import { snapshotState } from "#protocol/session-projection/session-view.js";
+import { conversation as conversationTurns } from "#protocol/session-projection/selectors.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { SessionStoreSnapshot } from "#client/session-store.js";
@@ -43,8 +44,13 @@ export interface ToolLabels {
 
 export function tuiSessionData(conversation: ConversationState): TuiSessionData {
   const { previews, tables: view } = snapshotState(conversation.view);
-  const turnRuns = Object.values(view.runs).filter((run) => "turnId" in run.owner);
-  const latestTurnId = view.session.latestTurnId;
+  const turns = conversationTurns(view);
+  const turnIds = new Set(turns.map((turn) => turn.turnId));
+  const turnRuns = Object.values(view.runs).filter((run) => {
+    const turnId = runTurnId(run);
+    return turnId !== undefined && turnIds.has(turnId);
+  });
+  const latestTurnId = turns.at(-1)?.turnId;
   const modelId = turnRuns
     .findLast((run) => run.modelId !== undefined && runTurnId(run) === latestTurnId)
     ?.modelId?.slice(0, 256);
@@ -75,7 +81,7 @@ function runTurnId(run: SessionView["runs"][string]): string | undefined {
  * the turn's, and otherwise belongs to no turn.
  */
 function failuresOf(view: SessionView): readonly TuiFailure[] {
-  const failures = Object.values(view.turns).flatMap((turn): TuiFailure[] => {
+  const failures = conversationTurns(view).flatMap((turn): TuiFailure[] => {
     const error = turnFailure(turn);
     return error === undefined ? [] : [{ error, turnId: turn.turnId }];
   });
@@ -90,7 +96,10 @@ function failuresOf(view: SessionView): readonly TuiFailure[] {
       ...failures,
       { error: failure, ...(causeTurnId !== undefined && { turnId: causeTurnId }) },
     ];
-  return failureKey(own) === failureKey(failure) ? failures : [...failures, { error: failure }];
+  return failureKey(own) === failureKey(failure) &&
+    failures.some((entry) => entry.turnId === turnId)
+    ? failures
+    : [...failures, { error: failure }];
 }
 
 function turnFailure(turn: SessionView["turns"][string] | undefined): ErrorInfo | undefined {
