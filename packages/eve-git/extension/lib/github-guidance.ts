@@ -10,19 +10,21 @@ const TOKEN_SCOPE = {
   repository: {
     token:
       "Connect mints a GitHub App installation token for the declared repository, or for the owner's installation when you declare only an owner.",
-    unscoped: "",
+    repository:
+      "Set `repository` to the `owner/name` the command acts on, or to an owner for discovery.",
   },
   caller: {
     token:
       "Connect resolves the caller's own GitHub token for each command. It carries the caller's GitHub permissions, so access is limited to what the caller can reach on GitHub.",
-    unscoped: " Omit `repository` for commands tied to no owner, such as `gh api user/repos`.",
+    repository:
+      "Set `repository` to the `owner/name` the command acts on, or omit it for commands that act on no single repository, such as `gh repo list <owner>`, `gh search repos`, or `gh api user/repos`.",
   },
 } as const;
 
 /** Holds only when the Connect-brokered `gh` tool can authenticate, which requires `github` config. */
 const connectInstructions = (scope: (typeof TOKEN_SCOPE)[keyof typeof TOKEN_SCOPE]) => `# GitHub
 
-GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation: \`gh\`, \`git\`, and \`gh-signed-commit\` commands. The full \`gh\` and \`git\` CLI surface is available. Set \`repository\` to the \`owner/name\` the command acts on, or to an owner for discovery.${scope.unscoped} The agent's access policy decides whether each command runs. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. ${scope.token} The sandbox process receives only a placeholder \`GH_TOKEN\`, and the firewall exchanges it on matching GitHub requests. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
+GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation: \`gh\`, \`git\`, and \`gh-signed-commit\` commands. The full \`gh\` and \`git\` CLI surface is available. ${scope.repository} The agent's access policy decides whether each command runs. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. ${scope.token} The sandbox process receives only a placeholder \`GH_TOKEN\`, and the firewall exchanges it on matching GitHub requests. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
 
 Pass commands as simple argv with ordinary quoting. Do not use environment assignments, pipes, redirects, substitutions, or other shell syntax.
 

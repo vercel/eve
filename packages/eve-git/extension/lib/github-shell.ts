@@ -37,7 +37,7 @@ export type GitHubAttribution = (
   ctx: ToolContext,
 ) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
 
-export interface GitHubConfig {
+interface GitHubConfigBase {
   /**
    * Resolves who the current turn publishes for. When it returns a person,
    * `gh-signed-commit` messages and `gh pr create` bodies end with their
@@ -46,36 +46,53 @@ export interface GitHubConfig {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
-  /** The only repository access control: commands run only when it returns `true`. */
-  readonly authorize: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
   readonly connector: string;
-  /**
-   * `"app"` (default) mints GitHub App installation tokens. `"user"` resolves
-   * the caller's own token through `ctx.getToken`, signing them in when needed.
-   */
-  readonly principalType?: "app" | "user";
 }
 
-/** What an `authorize` callback sees before a `gh` command runs. */
-export interface GitHubAuthorizeRequest {
+/** Mints GitHub App installation tokens scoped to the declared repository or owner. */
+export interface GitHubAppConfig extends GitHubConfigBase {
+  /** The only access control: commands run only when it returns `true`. */
+  readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
+  readonly principalType: "app";
+}
+
+/** Resolves the caller's own token through `ctx.getToken`, signing them in when needed. */
+export interface GitHubUserConfig extends GitHubConfigBase {
+  /** The only access control: commands run only when it returns `true`. */
+  readonly authorize: GitHubAuthorize<GitHubUserAuthorizeRequest>;
+  readonly principalType: "user";
+}
+
+export type GitHubConfig = GitHubAppConfig | GitHubUserConfig;
+
+/** What an `authorize` callback sees before a `gh` command runs with the caller's own token. */
+export interface GitHubUserAuthorizeRequest {
   /** The parsed command, such as `["gh", "pr", "view", "7", "--repo", "acme/widgets"]`. */
   readonly argv: readonly string[];
   /** The session's current caller, or `null` when the session has none. */
   readonly auth: SessionAuthContext | null;
-  /** The owner the command declared, or `null` when it declared none. */
-  readonly owner: string | null;
-  /** The `owner/name` repository the command declared, or `null` for owner-level or unscoped commands. */
+  /** The `owner/name` repository the command declared, or `null`. */
   readonly repository: string | null;
   /** The token Connect minted for this command, for API lookups. It reaches the command only after `authorize` returns `true`. */
   readonly token: string;
 }
 
+/** What an `authorize` callback sees before a `gh` command runs with an installation token. */
+export interface GitHubAppAuthorizeRequest extends GitHubUserAuthorizeRequest {
+  /** The owner whose installation minted the token. */
+  readonly owner: string;
+}
+
+export type GitHubAuthorizeRequest = GitHubAppAuthorizeRequest | GitHubUserAuthorizeRequest;
+
 /** Decides whether the session's caller may run one `gh` command; the agent's only access control. */
-export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
+export type GitHubAuthorize<Request extends GitHubAuthorizeRequest = GitHubAuthorizeRequest> = (
+  request: Request,
+) => boolean | Promise<boolean>;
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -138,8 +155,12 @@ export async function executeGitHubShell(
   if (!config) throw new Error("GitHub command access is not configured for this agent.");
   const argv = validateGitHubShellInput(input);
   const { owner, repository, name } = declaredTarget(input.repository);
-  if (config.principalType !== "user" && !owner) {
-    throw new Error("App tokens need repository set to an owner or owner/name.");
+  if (config.principalType === "user" ? owner && !repository : !owner) {
+    throw new Error(
+      config.principalType === "user"
+        ? "Set repository to owner/name or omit it; user tokens are not scoped to an owner."
+        : "App tokens need repository set to an owner or owner/name.",
+    );
   }
   const sandbox = await dependencies.getSandbox();
   let workingDirectory = resolveWorkingDirectory(sandbox, input.workingDirectory);
@@ -172,7 +193,11 @@ export async function executeGitHubShell(
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
-  if (!(await config.authorize({ argv, auth, owner, repository, token }))) {
+  const allowed =
+    config.principalType === "user"
+      ? await config.authorize({ argv, auth, repository, token })
+      : await config.authorize({ argv, auth, owner: owner!, repository, token });
+  if (!allowed) {
     throw new Error(
       `The current caller is not authorized to run this command${repository ? ` on ${repository}` : owner ? ` for ${owner}` : ""}.`,
     );

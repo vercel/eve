@@ -12,6 +12,7 @@ import {
   executeGitHubShell,
   githubShellApproval,
   parseCommand,
+  type GitHubAppAuthorizeRequest,
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
@@ -20,6 +21,7 @@ type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>
 
 const CONFIG = {
   connector: "github/citron-compass",
+  principalType: "app" as const,
   authorize: () => true,
   async broker(
     sandbox: SandboxSession,
@@ -138,7 +140,7 @@ test("asks authorize with the argv, caller, owner, repository, and token before 
       READ,
       {
         ...CONFIG,
-        authorize: (request) => {
+        authorize: (request: GitHubAppAuthorizeRequest) => {
           requests.push(request);
           return false;
         },
@@ -173,7 +175,7 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
     requireAuthCalls.push(args);
     throw new Error("authorization required");
   };
-  const config = { ...CONFIG, principalType: "user" as const };
+  const config = { ...CONFIG, principalType: "user" as const, authorize: () => true };
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   let stderr = "";
   const dependencies = {
@@ -443,6 +445,22 @@ test("accepts workspace-relative working directories and rejects escapes", async
   );
 });
 
+test("rejects owner-only repositories for user tokens before sandbox access", async () => {
+  await assert.rejects(
+    executeGitHubShell(
+      { command: "gh repo list vercel", description: "List repos", repository: "vercel" },
+      { ...CONFIG, principalType: "user", authorize: () => true },
+      {
+        sessionId: "session-1",
+        async getSandbox() {
+          assert.fail("must not access the sandbox");
+        },
+      },
+    ),
+    /Set repository to owner\/name or omit it/u,
+  );
+});
+
 test("leaves explicit command targets to authorize through argv", async () => {
   const requests: { argv: readonly string[]; repository: string | null }[] = [];
   await assert.rejects(
@@ -450,7 +468,7 @@ test("leaves explicit command targets to authorize through argv", async () => {
       { ...READ, command: "gh pr view 2583 --repo vercel/eve" },
       {
         ...CONFIG,
-        authorize: ({ argv, repository }) => {
+        authorize: ({ argv, repository }: GitHubAppAuthorizeRequest) => {
           requests.push({ argv, repository });
           return !argv.includes("--repo") || argv[argv.indexOf("--repo") + 1] === repository;
         },
@@ -477,7 +495,7 @@ test("leaves explicit command targets to authorize through argv", async () => {
 
 test("mints an owner-wide installation token for owner-level discovery", async () => {
   const tokenCalls: ConnectTokenParams[] = [];
-  const requests: { owner: string | null; repository: string | null }[] = [];
+  const requests: { owner: string; repository: string | null }[] = [];
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   await executeGitHubShell(
     {
@@ -487,7 +505,7 @@ test("mints an owner-wide installation token for owner-level discovery", async (
     },
     {
       ...CONFIG,
-      authorize: ({ owner, repository }) => {
+      authorize: ({ owner, repository }: GitHubAppAuthorizeRequest) => {
         requests.push({ owner, repository });
         return owner === "vercel";
       },
@@ -526,7 +544,7 @@ test("scopes app tokens to the declared owner's installation and leaves owners t
       },
       {
         ...CONFIG,
-        authorize: ({ repository }) => {
+        authorize: ({ repository }: GitHubAppAuthorizeRequest) => {
           repositories.push(repository!);
           return repository!.toLowerCase().startsWith("vercel/");
         },

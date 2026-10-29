@@ -46,7 +46,12 @@ test("without github config, GitHub goes through the shell's gh and git", async 
 
 test("with github config, GitHub goes through the brokered gh tool and signed commits", async () => {
   extension({
-    github: { connector: "github/acme-bot", authorize: () => true, broker: async () => {} },
+    github: {
+      connector: "github/acme-bot",
+      authorize: () => true,
+      broker: async () => {},
+      principalType: "app",
+    },
   });
   const { content, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
@@ -64,8 +69,19 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
 
 test("github config without authorize is rejected, so brokered access never defaults to allow", () => {
   assert.throws(
-    () => extension({ github: { connector: "github/acme-bot", broker: async () => {} } } as never),
+    () =>
+      extension({
+        github: { connector: "github/acme-bot", broker: async () => {}, principalType: "app" },
+      } as never),
     /github\.authorize/u,
+  );
+  // principalType selects what authorize receives, so it is required.
+  assert.throws(
+    () =>
+      extension({
+        github: { connector: "github/acme-bot", broker: async () => {}, authorize: () => true },
+      } as never),
+    /github\.principalType/u,
   );
 });
 
