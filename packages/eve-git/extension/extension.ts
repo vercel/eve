@@ -3,15 +3,15 @@ import { z } from "zod";
 
 import type {
   GitHubAttribution,
+  GitHubAuth,
   GitHubAuthorize,
   GitHubConfig,
-  GitHubTokenParams,
 } from "./lib/github-shell.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
 export type { GitHubCoAuthor } from "./lib/github-shell.ts";
 export type { GitHubAuthorize, GitHubAuthorizeRequest } from "./lib/github-shell.ts";
-export type { GitHubTokenParams, GitHubTokenParamsRequest } from "./lib/github-shell.ts";
+export type { GitHubAuth, GitHubAuthRequest } from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
 export type { GitHubAttribution } from "./lib/github-shell.ts";
 
@@ -41,12 +41,13 @@ export default defineExtension({
          */
         authorize: fn<GitHubAuthorize>().optional(),
         /**
-         * Called before each `gh` command with the session's caller, the
-         * declared repository, and eve's default Connect token params.
-         * Return the params to mint with instead, for example a user subject
-         * so commands run with the caller's own GitHub permissions.
+         * Returns a user-scoped provider, such as `connect({ connector,
+         * tokenParams })`, for each `gh` command. The token then comes from
+         * `ctx.getToken`, which signs the caller in when needed, and a
+         * rejected token signs them in again. Without it, commands use the
+         * GitHub App installation token.
          */
-        tokenParams: fn<GitHubTokenParams>().optional(),
+        auth: fn<GitHubAuth>().optional(),
       })
       .optional(),
   }),

@@ -1,8 +1,12 @@
 import { posix } from "node:path";
-import { getToken, type ConnectTokenParams } from "@vercel/connect";
+import {
+  getToken,
+  type ConnectAuthorizationDetail,
+  type ConnectTokenParams,
+} from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
-import type { ToolContext } from "eve/tools";
+import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "eve/tools";
 
 import {
   attributeCommand,
@@ -50,6 +54,7 @@ export interface GitHubConfig {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
+  readonly auth?: GitHubAuth;
   readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
@@ -57,7 +62,6 @@ export interface GitHubConfig {
   ) => Promise<void>;
   readonly connector: string;
   readonly org: string;
-  readonly tokenParams?: GitHubTokenParams;
 }
 
 /** What an `authorize` callback sees before a `gh` command runs. */
@@ -73,23 +77,21 @@ export interface GitHubAuthorizeRequest {
 /** Decides whether the session's caller may run a `gh` command against one repository. */
 export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
 
-/** What a `tokenParams` callback sees before Connect mints a `gh` command's token. */
-export interface GitHubTokenParamsRequest {
-  /** The session's current caller, or `null` when the session has none. */
-  readonly auth: SessionAuthContext | null;
-  /**
-   * The params eve sends without a callback: an app subject and a
-   * `github_app_installation` detail scoped to the declared repository.
-   */
-  readonly defaults: ConnectTokenParams;
+/** What an `auth` callback sees before a `gh` command resolves its token. */
+export interface GitHubAuthRequest {
+  /** The configured `github.connector`. */
+  readonly connector: string;
   /** The `owner/name` repository the command declared. */
   readonly repository: string;
+  /** Token params scoping the token to `repository`; pass them to `connect({ tokenParams })`. */
+  readonly tokenParams: { readonly authorizationDetails: ConnectAuthorizationDetail[] };
 }
 
-/** Returns the Connect token params used to mint one `gh` command's token. */
-export type GitHubTokenParams = (
-  request: GitHubTokenParamsRequest,
-) => ConnectTokenParams | Promise<ConnectTokenParams>;
+/**
+ * Returns the provider a `gh` command resolves through `ctx.getToken`, such as
+ * `connect({ connector, tokenParams })` from `@vercel/connect/eve`.
+ */
+export type GitHubAuth = (request: GitHubAuthRequest) => ToolAuthProvider;
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -114,6 +116,8 @@ interface GitHubShellDependencies {
 const MAX_OUTPUT_BYTES = 100_000;
 const leaseQueues = new Map<string, Promise<void>>();
 const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
+/** How `gh` and `git` report a rejected token. */
+const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for/u;
 
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
@@ -152,14 +156,28 @@ export async function executeGitHubShell(
   const repositories = repositoryNames(declaredRepositories, config.org);
   const repository = declaredRepositories[0]!;
   const auth = dependencies.auth ?? null;
-  const defaults: ConnectTokenParams = {
+  const tokenParams = {
     authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
-    subject: { type: "app" },
   };
-  const tokenParams = config.tokenParams
-    ? await config.tokenParams({ auth, defaults, repository })
-    : defaults;
-  const token = await (dependencies.getConnectToken ?? getToken)(config.connector, tokenParams);
+  let userAuth: { provider: ToolAuthProvider; options: ToolAuthOptions } | undefined;
+  let token: string;
+  if (config.auth) {
+    if (!dependencies.context)
+      throw new Error("User-scoped GitHub access requires a tool context.");
+    userAuth = {
+      provider: config.auth({ connector: config.connector, repository, tokenParams }),
+      // One auth key per repository keeps eve's per-step token cache from
+      // reusing another repository's token. Connect holds a single grant per
+      // user, so only the first repository prompts a sign-in.
+      options: { authKey: `github:${repository.toLowerCase().replace("/", ":")}` },
+    };
+    ({ token } = await dependencies.context.getToken(userAuth.provider, userAuth.options));
+  } else {
+    token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
+      ...tokenParams,
+      subject: { type: "app" },
+    });
+  }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
   if (config.authorize && !(await config.authorize({ auth, repository, token }))) {
@@ -218,6 +236,10 @@ export async function executeGitHubShell(
   } finally {
     await sandbox.removePath({ path: githubConfig, recursive: true, force: true });
     await sandbox.removePath({ path: bodyFile, force: true });
+  }
+  if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
+    // GitHub rejected the caller's token: evict it and sign the caller in again.
+    dependencies.context!.requireAuth(userAuth.provider, userAuth.options);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);

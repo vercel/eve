@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-`git({ github: { tokenParams } })` lets agents choose the Connect token params for each `gh` command. The callback receives the caller, the declared repository, and eve's default app-subject params, and can return a user subject so commands run with the caller's own GitHub permissions.
+`git({ github: { auth } })` runs `gh` commands with the caller's own GitHub permissions. It returns a user-scoped provider, such as `connect({ connector, tokenParams })`, that the tool resolves through `ctx.getToken`, so eve signs the caller in when needed and again when GitHub rejects the token. Without it, commands keep using the GitHub App installation token.

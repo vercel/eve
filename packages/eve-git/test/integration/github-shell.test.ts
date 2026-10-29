@@ -157,69 +157,62 @@ test("asks authorize with the caller, repository, and token before running", asy
   assert.equal(runs.length, 1);
 });
 
-test("mints with the params tokenParams returns for the caller and repository", async () => {
-  const auth = {
-    attributes: {},
-    authenticator: "slack",
-    issuer: "https://slack.com",
-    principalId: "slack:U123",
-    principalType: "user",
-    subject: "U123",
+test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401", async () => {
+  const provider = { principalType: "user" };
+  const authRequests: unknown[] = [];
+  const getTokenCalls: unknown[][] = [];
+  const requireAuthCalls: unknown[][] = [];
+  const context = {
+    async getToken(...args: unknown[]) {
+      getTokenCalls.push(args);
+      return { token: "user-token" };
+    },
+    requireAuth(...args: unknown[]): never {
+      requireAuthCalls.push(args);
+      throw new Error("authorization required");
+    },
+  } as unknown as ToolContext;
+  const config = {
+    ...CONFIG,
+    auth: (request: unknown) => {
+      authRequests.push(request);
+      return provider as never;
+    },
   };
-  const requests: unknown[] = [];
-  const tokenCalls: Array<{ connector: string; params: ConnectTokenParams }> = [];
-  const authorized: unknown[] = [];
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
-
-  await executeGitHubShell(
-    READ,
-    {
-      ...CONFIG,
-      tokenParams: async (request) => {
-        requests.push(request);
-        return {
-          ...request.defaults,
-          subject: { type: "user", id: request.auth!.subject!, issuer: request.auth!.issuer },
-        };
-      },
-      authorize: (request) => {
-        authorized.push(request);
-        return true;
-      },
+  let stderr = "";
+  const dependencies = {
+    context,
+    sessionId: "session-user-auth",
+    async getConnectToken(): Promise<string> {
+      throw new Error("user-scoped access must not mint app tokens");
     },
-    {
-      auth,
-      sessionId: "session-token-params",
-      async getConnectToken(connector, params) {
-        tokenCalls.push({ connector, params });
-        return "user-token";
-      },
-      async getSandbox() {
-        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
-      },
+    async getSandbox() {
+      return fakeSandbox(runs, () => ({ exitCode: stderr ? 1 : 0, stdout: "", stderr }));
     },
-  );
-
-  const defaults = {
-    authorizationDetails: [
-      { type: "github_app_installation", org: "vercel", repositories: ["internal-agents"] },
-    ],
-    subject: { type: "app" },
   };
-  assert.deepEqual(requests, [{ auth, defaults, repository: "vercel/internal-agents" }]);
-  assert.deepEqual(tokenCalls, [
+
+  await executeGitHubShell(READ, config, dependencies);
+
+  const authKey = { authKey: "github:vercel:internal-agents" };
+  assert.deepEqual(authRequests, [
     {
       connector: "github/citron-compass",
-      params: {
-        ...defaults,
-        subject: { type: "user", id: "U123", issuer: "https://slack.com" },
+      repository: "vercel/internal-agents",
+      tokenParams: {
+        authorizationDetails: [
+          { type: "github_app_installation", org: "vercel", repositories: ["internal-agents"] },
+        ],
       },
     },
   ]);
-  assert.deepEqual(authorized, [
-    { auth, repository: "vercel/internal-agents", token: "user-token" },
-  ]);
-  assert.equal(runs.length, 1);
+  assert.deepEqual(getTokenCalls, [[provider, authKey]]);
+  assert.equal(requireAuthCalls.length, 0);
+
+  stderr = "HTTP 401: Bad credentials (https://api.github.com/graphql)";
+  await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
+  assert.deepEqual(requireAuthCalls, [[provider, authKey]]);
+  assert.equal(runs.length, 2);
 });
 
 test("approves the full syntactically valid gh surface", () => {
