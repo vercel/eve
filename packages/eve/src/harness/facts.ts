@@ -194,7 +194,7 @@ export type ControlSettlement =
       readonly control: ControlDelivery;
       /** The command's kind, as it arrived: this owner may not know it. */
       readonly source: string;
-      readonly outcome: "refused";
+      readonly outcome: "failed";
       readonly reason: string;
     };
 
@@ -206,7 +206,7 @@ export function controlSettled(settlement: ControlSettlement): SessionEvent[] {
     fact("delivery.settled", {
       deliveryId: control.deliveryId,
       outcome,
-      ...(settlement.outcome === "refused" && { reason: settlement.reason }),
+      ...(settlement.outcome === "failed" && { reason: settlement.reason }),
     }),
   ];
 }

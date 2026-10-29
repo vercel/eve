@@ -1806,7 +1806,7 @@ describe("deliveries a child session reads", () => {
 
 describe("controls between turns", () => {
   it.each(["idle", "during a turn"] as const)(
-    "refuses a command this owner does not know when %s, so its delivery settles",
+    "fails a command this owner does not know when %s, so its delivery settles",
     async (when) => {
       const release = gate();
       const { events } = await withSession(
@@ -1829,8 +1829,8 @@ describe("controls between turns", () => {
           await session.control("from-the-future" as "clear", { turnId: "turn_0" });
           release.open();
           await session.until(
-            "refused",
-            (event) => event.type === "delivery.settled" && event.data.outcome === "refused",
+            "unsupported",
+            (event) => event.type === "delivery.settled" && event.data.deliveryId === "control_0",
           );
           await session.send("Still there?");
           await session.until(
@@ -1840,12 +1840,12 @@ describe("controls between turns", () => {
         },
       );
 
-      const refused = ofType(events, "delivery.settled").find(
-        (event) => event.data.outcome === "refused",
+      const settled = ofType(events, "delivery.settled").find(
+        (event) => event.data.deliveryId === "control_0",
       );
-      expect(refused?.data).toEqual({
+      expect(settled?.data).toEqual({
         deliveryId: "control_0",
-        outcome: "refused",
+        outcome: "failed",
         reason: 'This session does not support the "from-the-future" command.',
       });
       expect(ofType(events, "delivery.admitted")).toContainEqual(

@@ -316,7 +316,7 @@ export class ActiveTurn {
           );
         }
         return false;
-      case "refused": {
+      case "unsupported": {
         const { settlement } = admitted;
         await this.input.cursor.advance((state) =>
           settleControlDeliveryStep({ ...state, settlement }),

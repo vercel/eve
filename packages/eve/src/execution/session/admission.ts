@@ -27,8 +27,8 @@ type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel"; readonly origin?: ControlOrigin }
   | { readonly kind: "consumed" }
-  /** A control this owner cannot run: settle it refused, so its sender doesn't wait forever. */
-  | { readonly kind: "refused"; readonly settlement: ControlSettlement }
+  /** A control this owner cannot run: settle it failed, so its sender doesn't wait forever. */
+  | { readonly kind: "unsupported"; readonly settlement: ControlSettlement }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -63,8 +63,8 @@ export async function admitSessionInboxPayload(
   } catch (error) {
     if (!(error instanceof SessionInboxPayloadError)) throw error;
     await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-    const settlement = refusalOf(value, error.message);
-    return settlement === undefined ? { kind: "consumed" } : { kind: "refused", settlement };
+    const settlement = unsupportedControl(value, error.message);
+    return settlement === undefined ? { kind: "consumed" } : { kind: "unsupported", settlement };
   }
 
   switch (command.kind) {
@@ -110,11 +110,14 @@ export function controlOrigin(command: SessionControlIdentity): ControlOrigin {
 }
 
 /**
- * The refusal of an undecodable payload that names its delivery: a control from a newer eve, or
+ * The failed settlement of an undecodable payload that names its delivery: a control from a newer eve, or
  * a malformed one. Its sender awaits that delivery's settlement. Without a delivery id, nobody
  * waits on it, and the payload is only dropped.
  */
-function refusalOf(value: SessionInboxPayload, reason: string): ControlSettlement | undefined {
+function unsupportedControl(
+  value: SessionInboxPayload,
+  reason: string,
+): ControlSettlement | undefined {
   const { auth, deliveryId, kind } = value as Record<string, unknown>;
   if (typeof deliveryId !== "string" || deliveryId.length === 0) return undefined;
   const origin =
@@ -123,7 +126,7 @@ function refusalOf(value: SessionInboxPayload, reason: string): ControlSettlemen
       : { deliveryId };
   return {
     control: controlDeliveryOf(origin),
-    outcome: "refused",
+    outcome: "failed",
     reason,
     source: typeof kind === "string" && kind.length > 0 ? kind : "unknown",
   };

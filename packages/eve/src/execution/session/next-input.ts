@@ -74,7 +74,7 @@ export async function nextTurnDelivery(input: {
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
-    if (admitted.kind === "refused") {
+    if (admitted.kind === "unsupported") {
       await input.ignore(admitted.settlement);
       continue;
     }
