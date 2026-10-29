@@ -396,9 +396,9 @@ export default eveChannel({
 
 ### Slash commands
 
-`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. When `commands` is omitted, the channel offers `sessionCommands`: `/new` (alias `/reset`), `/clear`, `/compact`, and `/cancel`. These are the conversation controls the terminal UI shows.
+`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. The channel always offers `sessionCommands` unless you remove them: `/new` (alias `/reset`), `/clear`, `/compact`, and `/cancel`. These are the conversation controls the terminal UI shows.
 
-Declare your own commands with `defineCommand` from `eve/channels`. Passing `commands` replaces the defaults, so spread `sessionCommands` in to keep them. This one hands the conversation to a person on the support team:
+Declare your own commands with `defineCommand` from `eve/channels`; a `commands` record adds them to the defaults. This one hands the conversation to a person on the support team:
 
 ```ts title="agent/lib/commands.ts"
 import { defineCommand } from "eve/channels";
@@ -423,7 +423,6 @@ export const escalate = defineCommand({
 ```
 
 ```ts title="agent/channels/eve.ts"
-import { sessionCommands } from "eve/channels";
 import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
@@ -431,7 +430,7 @@ import { escalate } from "../lib/commands";
 
 export default eveChannel({
   auth: [vercelOidc(), localDev()],
-  commands: { ...sessionCommands, escalate },
+  commands: { escalate },
 });
 ```
 
@@ -444,6 +443,12 @@ The key is the command name, typed as `/escalate the refund failed twice`; `alia
 - `session`: the client's current session, when it has one. `session.clear()`, `compact()`, `cancel()`, and `end()` apply as the caller and resolve once eve accepts them.
 
 `session: "required"` marks a command that only makes sense in a conversation, like `/escalate`. `run` then always receives `session`, clients don't run the command before the first message, and the session-free route answers `409`. Omit it for a command that works anywhere; `session` is then present only when the client has one. The `sessionCommands` are built the same way: `/clear`, for example, calls `session.clear()`.
+
+A same-named entry in the record replaces a default. To drop or rename defaults, pass `commands` as a function. It receives `sessionCommands` and returns the full set:
+
+```ts
+commands: ({ clear, compact }) => ({ clear, compact, escalate }), // no /new or /cancel
+```
 
 `run` returns an optional result:
 

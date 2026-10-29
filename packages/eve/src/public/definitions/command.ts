@@ -94,9 +94,9 @@ export function defineCommand(definition: CommandDefinition): CommandDefinition 
 }
 
 /**
- * The conversation controls every client offers: `new` (alias `reset`), `clear`, `compact`, and
- * `cancel`. `eveChannel()` offers them when `commands` is omitted; spread them in to keep them
- * alongside your own: `commands: { ...sessionCommands, standup }`.
+ * The eve channel's default commands: `new` (alias `reset`), `clear`, `compact`, and `cancel`.
+ * `eveChannel({ commands })` adds its own to them; pass `commands` as a function to change or drop
+ * them.
  */
 export const sessionCommands = {
   new: defineCommand({
