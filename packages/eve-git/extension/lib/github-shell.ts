@@ -2,7 +2,7 @@ import { posix } from "node:path";
 import { getToken } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
-import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "eve/tools";
+import type { ToolAuthProvider, ToolContext } from "eve/tools";
 
 import {
   attributeCommand,
@@ -51,13 +51,13 @@ export interface GitHubConfig {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
-  readonly authorize?: GitHubAuthorize;
+  /** The only repository access control: commands run only when it returns `true`. */
+  readonly authorize: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
   readonly connector: string;
-  readonly org: string;
   /**
    * `"app"` (default) mints GitHub App installation tokens. `"user"` resolves
    * the caller's own token through `ctx.getToken`, signing them in when needed.
@@ -69,21 +69,14 @@ export interface GitHubConfig {
 export interface GitHubAuthorizeRequest {
   /** The session's current caller, or `null` when the session has none. */
   readonly auth: SessionAuthContext | null;
-  /** The `owner/name` repository the command declared. */
+  /** The `owner/name` repository the command declared, which every explicit command target matches. */
   readonly repository: string;
-  /** The token Connect minted for this command, for API lookups. */
+  /** The token Connect minted for this command, for API lookups. It reaches the command only after `authorize` returns `true`. */
   readonly token: string;
 }
 
 /** Decides whether the session's caller may run a `gh` command against one repository. */
 export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
-
-/** The Connect `github_app_installation` authorization detail for one repository. */
-export interface GitHubInstallationDetail {
-  type: "github_app_installation";
-  org: string;
-  repositories: string[];
-}
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -101,7 +94,14 @@ interface GitHubShellDependencies {
   readonly auth?: SessionAuthContext | null;
   readonly getConnectToken?: (
     connector: string,
-    params: { authorizationDetails: GitHubInstallationDetail[]; subject: { type: "app" } },
+    params: {
+      authorizationDetails: {
+        type: "github_app_installation";
+        org: string;
+        repositories: string[];
+      }[];
+      subject: { type: "app" };
+    },
   ) => Promise<string>;
   /** Resolves and re-authorizes user-scoped providers; the tool's `ctx.getToken` and `ctx.requireAuth`. */
   readonly getToken?: ToolContext["getToken"];
@@ -151,34 +151,27 @@ export async function executeGitHubShell(
   );
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
-  const repositories = repositoryNames(declaredRepositories, config.org);
-  const repository = declaredRepositories[0]!;
+  const { repository, owner, name } = declaredRepository(declaredRepositories);
   const auth = dependencies.auth ?? null;
-  const authorizationDetails: GitHubInstallationDetail[] = [
-    { type: "github_app_installation", org: config.org, repositories },
-  ];
-  let userAuth: { provider: ToolAuthProvider; options: ToolAuthOptions } | undefined;
+  let userAuth: ToolAuthProvider | undefined;
   let token: string;
   if (config.principalType === "user") {
     if (!dependencies.getToken || !dependencies.requireAuth)
       throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
-    userAuth = {
-      provider: connectUserAuthorization(config.connector, authorizationDetails),
-      // One auth key per repository keeps eve's per-step token cache from
-      // reusing another repository's token. Connect holds a single grant per
-      // user, so only the first repository prompts a sign-in.
-      options: { authKey: `github:${repository.toLowerCase().replace("/", ":")}` },
-    };
-    ({ token } = await dependencies.getToken(userAuth.provider, userAuth.options));
+    // Connect matches a user grant only to the exact authorization details it
+    // was consented with, and repository details do not narrow user tokens.
+    // One unscoped grant therefore covers every repository after one sign-in.
+    userAuth = connectUserAuthorization(config.connector);
+    ({ token } = await dependencies.getToken(userAuth));
   } else {
     token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
-      authorizationDetails,
+      authorizationDetails: [{ type: "github_app_installation", org: owner, repositories: [name] }],
       subject: { type: "app" },
     });
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
-  if (config.authorize && !(await config.authorize({ auth, repository, token }))) {
+  if (!(await config.authorize({ auth, repository, token }))) {
     throw new Error(`The current caller is not authorized to access ${repository}.`);
   }
   const coAuthor =
@@ -237,7 +230,7 @@ export async function executeGitHubShell(
   }
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
     // GitHub rejected the caller's token: evict it and sign the caller in again.
-    dependencies.requireAuth!(userAuth.provider, userAuth.options);
+    dependencies.requireAuth!(userAuth);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);
@@ -471,19 +464,16 @@ function canonicalRepository(value: string): string {
   return normalized;
 }
 
-function repositoryNames(repositories: readonly string[], configuredOrg: string): string[] {
+function declaredRepository(repositories: readonly string[]): {
+  repository: string;
+  owner: string;
+  name: string;
+} {
   if (repositories.length !== 1) throw new Error("Exactly one GitHub repository is required.");
-  const names = new Set<string>();
-  for (const repository of repositories) {
-    const match = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/u.exec(repository);
-    if (!match) throw new Error(`Invalid GitHub repository ${JSON.stringify(repository)}.`);
-    if (match[1]?.toLowerCase() !== configuredOrg.toLowerCase()) {
-      throw new Error(`Repository ${JSON.stringify(repository)} is outside ${configuredOrg}.`);
-    }
-    names.add(match[2]!);
-  }
-  if (names.size !== 1) throw new Error("Exactly one GitHub repository is required.");
-  return [...names];
+  const repository = repositories[0]!;
+  const match = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/u.exec(repository);
+  if (!match) throw new Error(`Invalid GitHub repository ${JSON.stringify(repository)}.`);
+  return { repository, owner: match[1]!, name: match[2]! };
 }
 
 function executablePath(executable: string): string {

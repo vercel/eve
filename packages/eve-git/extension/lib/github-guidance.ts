@@ -23,7 +23,7 @@ const TOKEN_SCOPE = {
 /** Holds only when the Connect-brokered `gh` tool can authenticate, which requires `github` config. */
 const connectInstructions = (scope: (typeof TOKEN_SCOPE)[keyof typeof TOKEN_SCOPE]) => `# GitHub
 
-GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation. The full \`gh\` CLI surface is available. Declare exactly one repository in the configured organization with write-capable access. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. ${scope.token} Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
+GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation. The full \`gh\` CLI surface is available. Declare exactly one \`owner/name\` repository with write-capable access; the agent's access policy decides which repositories commands may use. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. ${scope.token} Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
 
 Pass commands as simple argv with ordinary quoting. Do not use environment assignments, pipes, redirects, substitutions, or other shell syntax. ${scope.context} An explicit \`-R\`, \`--repo\`, \`--repo=\`, or repository argument to \`gh repo clone\`, \`view\`, or \`fork\` must match the declaration.
 

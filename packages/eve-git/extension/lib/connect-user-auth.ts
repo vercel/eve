@@ -13,8 +13,6 @@ import {
   type InteractiveAuthorizationDefinition,
 } from "eve/connections";
 
-import type { GitHubInstallationDetail } from "./github-shell.ts";
-
 /** The Connect calls the sign-in uses; injectable for tests. */
 export interface ConnectUserClient {
   readonly getTokenResponse: typeof getTokenResponse;
@@ -29,12 +27,11 @@ type Phase = "getToken" | "startAuthorization" | "completeAuthorization";
 /**
  * Connect-backed sign-in for user-scoped `gh` tokens. It mirrors
  * `connect({ connector, principalType: "user" })` from `@vercel/connect/eve`,
- * which eve cannot bundle because it imports `eve` itself. eve owns the token
- * params, so every token request carries the declared repository's detail.
+ * which eve cannot bundle because it imports `eve` itself. Requests carry no
+ * authorization details, so one grant serves every repository.
  */
 export function connectUserAuthorization(
   connector: string,
-  authorizationDetails: GitHubInstallationDetail[],
   client: ConnectUserClient = CONNECT,
 ): InteractiveAuthorizationDefinition {
   const params = (principal: ConnectionPrincipal) => {
@@ -45,10 +42,7 @@ export function connectUserAuthorization(
         retryable: false,
       });
     }
-    return {
-      authorizationDetails,
-      subject: { type: "user" as const, id: principal.id, issuer: principal.issuer },
-    };
+    return { subject: { type: "user" as const, id: principal.id, issuer: principal.issuer } };
   };
   const token = async (principal: ConnectionPrincipal, phase: Phase) => {
     try {

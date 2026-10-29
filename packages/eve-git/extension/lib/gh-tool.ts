@@ -18,7 +18,7 @@ const GH_TOOL_SCOPE = {
 
 /** Describes the `gh` tool for app-installation (`repository`) or user-scoped (`caller`) tokens. */
 export function ghToolDescription(scope: keyof typeof GH_TOOL_SCOPE): string {
-  return `Run one authenticated GitHub command in the sandbox. The full gh CLI surface is available. Commands run without an approval prompt; description records the GitHub-side result the command intends to produce. Declare exactly one repository in the configured GitHub organization: ${GH_TOOL_SCOPE[scope]} Use simple argv quoting only, never environment assignments, pipes, redirects, substitutions, or other shell syntax. gh alias and extension commands may execute local code, but remain sandboxed. Use git here only for authenticated fetch, pull, push, or ls-remote against a strictly validated origin, and use gh-signed-commit only with --repo. Use ordinary bash for local git status, diff, add, commit, and rebase.`;
+  return `Run one authenticated GitHub command in the sandbox. The full gh CLI surface is available. Commands run without an approval prompt; description records the GitHub-side result the command intends to produce. Declare exactly one owner/name repository; the agent's access policy decides which repositories commands may use. ${GH_TOOL_SCOPE[scope]} Use simple argv quoting only, never environment assignments, pipes, redirects, substitutions, or other shell syntax. gh alias and extension commands may execute local code, but remain sandboxed. Use git here only for authenticated fetch, pull, push, or ls-remote against a strictly validated origin, and use gh-signed-commit only with --repo. Use ordinary bash for local git status, diff, add, commit, and rebase.`;
 }
 
 export const GH_TOOL_DESCRIPTION = ghToolDescription("repository");

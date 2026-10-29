@@ -11,13 +11,11 @@ import {
   type ConnectUserClient,
 } from "../../extension/lib/connect-user-auth.ts";
 
-const DETAILS = [
-  { type: "github_app_installation" as const, org: "vercel", repositories: ["eve"] },
-];
 const USER = { type: "user" as const, id: "U123", issuer: "https://slack.com" };
 const CONNECTION = { url: "" };
+// Connect matches a user grant to the exact details it was consented with, so
+// repository details would require a separate sign-in for every repository.
 const PARAMS: ConnectTokenParams = {
-  authorizationDetails: DETAILS,
   subject: { type: "user", id: "U123", issuer: "https://slack.com" },
 };
 
@@ -56,9 +54,9 @@ function client(overrides: Partial<ConnectUserClient> = {}) {
   return { calls, value };
 }
 
-test("requests the caller's token scoped to the declared repository", async () => {
+test("requests the caller's token and sign-in without repository details", async () => {
   const { calls, value } = client();
-  const auth = connectUserAuthorization("github/acme-bot", DETAILS, value);
+  const auth = connectUserAuthorization("github/acme-bot", value);
   assert.equal(auth.principalType, "user");
   assert.deepEqual(auth.vercelConnect, { connector: "github/acme-bot" });
 
@@ -93,7 +91,6 @@ test("requests the caller's token scoped to the declared repository", async () =
 test("maps Connect errors to eve authorization errors", async () => {
   const missingGrant = connectUserAuthorization(
     "github/acme-bot",
-    DETAILS,
     client({
       async getTokenResponse() {
         throw new UserAuthorizationRequiredError("sign in");
@@ -115,7 +112,6 @@ test("maps Connect errors to eve authorization errors", async () => {
 
   const notInstalled = connectUserAuthorization(
     "github/acme-bot",
-    DETAILS,
     client({
       async getTokenResponse() {
         throw new ConnectorInstallationRequiredError("install");

@@ -20,7 +20,7 @@ type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>
 
 const CONFIG = {
   connector: "github/citron-compass",
-  org: "vercel",
+  authorize: () => true,
   async broker(
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
@@ -157,7 +157,7 @@ test("asks authorize with the caller, repository, and token before running", asy
   assert.equal(runs.length, 1);
 });
 
-test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401", async () => {
+test("resolves one user grant for every repository through ctx.getToken and re-authorizes on 401", async () => {
   const getTokenCalls: Parameters<ToolContext["getToken"]>[] = [];
   const requireAuthCalls: Parameters<ToolContext["requireAuth"]>[] = [];
   const getToken: ToolContext["getToken"] = async (...args) => {
@@ -184,26 +184,37 @@ test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401"
   };
 
   await executeGitHubShell(READ, config, dependencies);
+  await executeGitHubShell(
+    {
+      ...READ,
+      command: "gh pr view 7 --repo acme/widgets",
+      permissions: [{ provider: "github", repositories: ["acme/widgets"], access: "write" }],
+    },
+    config,
+    dependencies,
+  );
 
-  const authKey = { authKey: "github:vercel:internal-agents" };
-  assert.equal(getTokenCalls.length, 1);
-  const [provider, options] = getTokenCalls[0]!;
-  assert.deepEqual(options, authKey);
-  assert.equal(provider.principalType, "user");
-  assert.deepEqual(provider.vercelConnect, { connector: "github/citron-compass" });
+  // No authKey: eve files both repositories' sign-in under the connector, so
+  // one grant serves them, and no call carries repository-specific options.
+  assert.equal(getTokenCalls.length, 2);
+  for (const [provider, options] of getTokenCalls) {
+    assert.equal(options, undefined);
+    assert.equal(provider.principalType, "user");
+    assert.deepEqual(provider.vercelConnect, { connector: "github/citron-compass" });
+  }
   assert.equal(requireAuthCalls.length, 0);
 
   stderr = "HTTP 401: Bad credentials (https://api.github.com/graphql)";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
   assert.equal(requireAuthCalls.length, 1);
   assert.equal(requireAuthCalls[0]![0]!.principalType, "user");
-  assert.deepEqual(requireAuthCalls[0]![1], authKey);
+  assert.equal(requireAuthCalls[0]![1], undefined);
 
   // gh-signed-commit reports a rejected token through its own API errors.
   stderr = "GitHub ref lookup failed: 401";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
   assert.equal(requireAuthCalls.length, 2);
-  assert.equal(runs.length, 3);
+  assert.equal(runs.length, 4);
 });
 
 test("approves the full syntactically valid gh surface", () => {
@@ -421,32 +432,47 @@ test("rejects explicit command targets outside the declared repository before mi
   }
 });
 
-test("rejects repositories outside the configured organization before minting", async () => {
-  let tokenRequested = false;
+test("scopes app tokens to the declared owner's installation and leaves owners to authorize", async () => {
+  const tokenCalls: ConnectTokenParams[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const repositories: string[] = [];
   await assert.rejects(
     executeGitHubShell(
       {
         ...READ,
-        command: "gh pr view 2583 --repo other/internal-agents",
-        permissions: [
-          { provider: "github", repositories: ["other/internal-agents"], access: "write" },
-        ],
+        command: "gh pr view 7 --repo acme/widgets",
+        permissions: [{ provider: "github", repositories: ["acme/widgets"], access: "write" }],
       },
-      CONFIG,
+      {
+        ...CONFIG,
+        authorize: ({ repository }) => {
+          repositories.push(repository);
+          return repository.toLowerCase().startsWith("vercel/");
+        },
+      },
       {
         sessionId: "session-1",
-        async getConnectToken() {
-          tokenRequested = true;
+        async getConnectToken(_connector, params) {
+          tokenCalls.push(params);
           return "token";
         },
         async getSandbox() {
-          return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
+          return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
         },
       },
     ),
-    /outside vercel/u,
+    /not authorized to access acme\/widgets/u,
   );
-  assert.equal(tokenRequested, false);
+  assert.deepEqual(tokenCalls, [
+    {
+      authorizationDetails: [
+        { type: "github_app_installation", org: "acme", repositories: ["widgets"] },
+      ],
+      subject: { type: "app" },
+    },
+  ]);
+  assert.deepEqual(repositories, ["acme/widgets"]);
+  assert.equal(runs.length, 0);
 });
 
 test("attributes pull requests to the person the tool context resolves", async () => {
