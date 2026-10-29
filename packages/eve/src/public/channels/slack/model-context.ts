@@ -19,25 +19,33 @@ interface SlackModelMessageInput {
 }
 
 /**
- * Renders one Slack message with its sender identity attached to the same
- * model-visible message. Slack user ids are stable and require no profile
- * lookup, so they remain the canonical speaker identity.
+ * Renders one Slack message with its metadata grouped into `<sender>`,
+ * `<bot>`, and `<thread>` blocks of the same model-visible message. Slack user
+ * ids are stable and require no profile lookup, so they remain the canonical
+ * speaker identity; looked-up profile fields only add to them.
  */
 function formatSlackModelMessage(input: SlackModelMessageInput): string {
   const info = input.senderInfo;
+  const botLines = [
+    ...(input.botUserId ? [`id: ${input.botUserId}`] : []),
+    ...(input.isMentioned !== undefined ? [`mentioned: ${input.isMentioned}`] : []),
+  ];
   return [
     "<slack_message>",
-    `sender_type: ${input.senderType}`,
-    ...(input.senderId ? [`sender_id: ${input.senderId}`] : []),
-    ...(info?.displayName ? [`sender_display_name: ${oneLine(info.displayName)}`] : []),
-    ...(info?.realName ? [`sender_real_name: ${oneLine(info.realName)}`] : []),
-    ...(info?.email ? [`sender_email: ${oneLine(info.email)}`] : []),
-    ...(input.botUserId ? [`bot_user_id: ${input.botUserId}`] : []),
-    ...(input.isMentioned !== undefined ? [`is_mentioned: ${input.isMentioned}`] : []),
+    "<sender>",
+    `type: ${input.senderType}`,
+    ...(input.senderId ? [`id: ${input.senderId}`] : []),
+    ...(info?.displayName ? [`display_name: ${oneLine(info.displayName)}`] : []),
+    ...(info?.realName ? [`real_name: ${oneLine(info.realName)}`] : []),
+    ...(info?.email ? [`email: ${oneLine(info.email)}`] : []),
+    "</sender>",
+    ...(botLines.length > 0 ? ["<bot>", ...botLines, "</bot>"] : []),
+    "<thread>",
+    ...(input.teamId ? [`team_id: ${input.teamId}`] : []),
     ...(input.channelId ? [`channel_id: ${input.channelId}`] : []),
     `thread_ts: ${input.threadTs}`,
     `message_ts: ${input.ts}`,
-    ...(input.teamId ? [`team_id: ${input.teamId}`] : []),
+    "</thread>",
     "<content>",
     input.content,
     "</content>",

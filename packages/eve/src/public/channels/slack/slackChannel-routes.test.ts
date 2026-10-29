@@ -239,9 +239,7 @@ describe("slackChannel messageContext.users", () => {
     expect(onAppMention.mock.calls[0]?.[1].author?.email).toBeUndefined();
     const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
     const turn = JSON.stringify("message" in input ? input.message : "");
-    expect(turn).toContain(
-      "sender_id: U01\\nsender_display_name: alice\\nsender_real_name: Alice Doe\\n",
-    );
+    expect(turn).toContain("id: U01\\ndisplay_name: alice\\nreal_name: Alice Doe\\n</sender>");
     expect(turn).not.toContain("alice@example.com");
     expect(input.auth?.attributes).toMatchObject({ full_name: "Alice Doe" });
   });
@@ -263,7 +261,7 @@ describe("slackChannel messageContext.users", () => {
     expect(resolve).toHaveBeenCalledWith({ userId: "U01", teamId: "T01" }, expect.any(Function));
     const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
     expect(JSON.stringify("message" in input ? input.message : "")).toContain(
-      "sender_id: U01\\nsender_real_name: cached-U01\\nsender_email: alice@example.com\\n",
+      "id: U01\\nreal_name: cached-U01\\nemail: alice@example.com\\n</sender>",
     );
     expect(fetchMock.mock.calls.map(([request]) => String(request))).not.toContainEqual(
       expect.stringContaining("users.info"),
@@ -352,7 +350,7 @@ describe("slackChannel thread history", () => {
       { id: "1700000000.000002", role: "assistant" },
       { id: "1700000000.000003", role: "user" },
     ]);
-    expect(history?.[0]?.text).toContain("sender_id: U_ROOT");
+    expect(history?.[0]?.text).toContain("id: U_ROOT");
     expect(history?.[1]?.text).toBe("Deploys are green.");
   });
 

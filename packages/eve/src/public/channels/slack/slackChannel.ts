@@ -789,9 +789,10 @@ export interface SlackChannelConfig {
    */
   readonly messageContext?: {
     /**
-     * Looks up each human sender with `users.info` and adds their
-     * `sender_display_name` and `sender_real_name`, plus `sender_email` with
-     * `email: true`, including `threadContext` replies. The triggering author
+     * Looks up each human sender with `users.info` and adds `display_name`
+     * and `real_name` to their `<sender>` block, plus `email` with
+     * `email: true` (`name: false` leaves names out), including
+     * `threadContext` replies. The triggering author
      * is also written to `message.author` (`fullName`, `displayName`,
      * `email`) and to the default Slack auth attributes: before
      * `onAppMention` and `onDirectMessage` run, and for other channel

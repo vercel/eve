@@ -6,11 +6,11 @@ const log = createLogger("slack.user-info");
 
 /** Slack profile fields `messageContext.users` adds to a message's sender. */
 export interface SlackUserInfo {
-  /** Rendered as `sender_display_name`. */
+  /** Rendered as the sender's `display_name`. Kept unless `messageContext.users.name` is `false`. */
   readonly displayName?: string;
-  /** Rendered as `sender_real_name`, and set as `message.author.fullName`. */
+  /** Rendered as the sender's `real_name`, and set as `message.author.fullName`. Kept unless `name` is `false`. */
   readonly realName?: string;
-  /** Rendered as `sender_email`. Kept only with `messageContext.users.email`. */
+  /** Rendered as the sender's `email`. Kept only with `messageContext.users.email`. */
   readonly email?: string;
 }
 
@@ -18,6 +18,11 @@ export interface SlackUserInfo {
 export type SlackUsersOption =
   | boolean
   | {
+      /**
+       * Adds each sender's display and real names. Defaults to `true`; set
+       * `false` with `email: true` to add emails only.
+       */
+      readonly name?: boolean;
       /** Adds each sender's email. Needs the `users:read.email` scope. */
       readonly email?: boolean;
       /**
@@ -62,8 +67,8 @@ interface CachedProfile {
 }
 
 /**
- * Builds the resolver for `messageContext.users`, or `undefined` when it is
- * off. Without an authored `resolve`, `users.info` results are cached in
+ * Builds the resolver for `messageContext.users`, or `undefined` when it adds
+ * no fields. Without an authored `resolve`, `users.info` results are cached in
  * memory per workspace and user for an hour, and failures for a minute. Each
  * Slack channel builds its own, so a profile fetched with one app's scopes
  * never reaches another app in the same process.
@@ -73,7 +78,9 @@ export function createSlackUserResolver(
   now: () => number = Date.now,
 ): SlackUserResolver | undefined {
   if (option === undefined || option === false) return undefined;
+  const includeName = option === true || option.name !== false;
   const includeEmail = option !== true && option.email === true;
+  if (!includeName && !includeEmail) return undefined;
   const authored = option === true ? undefined : option.resolve;
   const cache = new Map<string, CachedProfile>();
 
@@ -119,9 +126,13 @@ export function createSlackUserResolver(
           }, LOOKUP_TIMEOUT_MS);
         }),
       ]);
-      if (profile === undefined || includeEmail) return profile;
-      const { email: _email, ...withoutEmail } = profile;
-      return withoutEmail;
+      if (profile === undefined) return undefined;
+      const { displayName, realName, email } = profile;
+      return {
+        ...(includeName && displayName && { displayName }),
+        ...(includeName && realName && { realName }),
+        ...(includeEmail && email && { email }),
+      };
     } catch (error) {
       logError(log, "Slack user lookup threw; omitting it", error, { userId: input.userId });
       return undefined;

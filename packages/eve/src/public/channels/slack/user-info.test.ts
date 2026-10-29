@@ -28,6 +28,7 @@ describe("createSlackUserResolver", () => {
   it("is off unless messageContext.users is set", () => {
     expect(createSlackUserResolver(undefined)).toBeUndefined();
     expect(createSlackUserResolver(false)).toBeUndefined();
+    expect(createSlackUserResolver({ name: false })).toBeUndefined();
   });
 
   it("returns names only unless email is requested", async () => {
@@ -39,6 +40,13 @@ describe("createSlackUserResolver", () => {
     await expect(
       createSlackUserResolver({ email: true })!({ userId: "U1", teamId: "T1", request }),
     ).resolves.toEqual({ displayName: "alice", realName: "Alice Doe", email: "a@example.com" });
+    await expect(
+      createSlackUserResolver({ name: false, email: true })!({
+        userId: "U1",
+        teamId: "T1",
+        request,
+      }),
+    ).resolves.toEqual({ email: "a@example.com" });
   });
 
   it("keeps profiles per workspace and user for an hour", async () => {
