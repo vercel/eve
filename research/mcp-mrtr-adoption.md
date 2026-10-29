@@ -66,9 +66,22 @@ Reject unsupported schemas or constraints explicitly; never omit them silently.
 This lets Slack and web chat reuse their question UI without requiring a general
 JSON Schema form renderer in the first release.
 
+The adapter converts question answers to JSON values. Boolean and enum option
+IDs map to their exact schema values; display labels are never parsed. Strings
+retain their text. Numeric text must parse as a finite JSON number; integer
+fields also require a safe integer. Optional fields offer an explicit skip
+action, which omits the property rather than sending an empty string or `null`.
+Invalid parsing or schema validation re-asks the affected field without sending
+an MCP continuation. Editing opens a new question because each existing ask
+resolves once; superseded question IDs cannot answer the new question.
+
+Final review offers Submit, Edit, Decline, and Cancel. Edit reopens selected
+fields in the same batch; only Submit sends `accept`. Decline and Cancel use the
+corresponding outcomes below.
+
 | Input or outcome                        | Proposed behavior                                                                   |
 | --------------------------------------- | ----------------------------------------------------------------------------------- |
-| Complete, valid form                    | Send `accept` with typed content.                                                   |
+| User submits a complete, valid form     | Send `accept` with typed content.                                                   |
 | User declines the remote request        | Send `decline`; do not create reusable approval memory.                             |
 | User cancels only the form              | Send `cancel` if the call is still active.                                          |
 | Turn is cancelled or steered            | Withdraw its questions and stop continuation; do not issue another network request. |
@@ -95,7 +108,7 @@ sequenceDiagram
   E->>S: tools/call
   S-->>E: input_required + opaque state
   E->>E: Checkpoint continuation and questions
-  E-->>U: Questions; turn.waiting on input
+  E-->>U: Questions; turn.paused on input
   U->>E: Authenticated answers
   E->>S: Same operation + answers + unchanged state
   S-->>E: Final result or another input round
@@ -107,9 +120,9 @@ handler receives the form request. An in-memory promise waiting for a user
 does not survive a worker restart. Re-running the original call on recovery
 can also repeat work before the question.
 
-Before enabling the feature, agree on an SDK surface that can return a bounded,
+Before enabling the feature, add an SDK surface that can return a bounded,
 serializable pending round and resume it with answers on a new client. Keep it
-behind an eve-owned adapter. This may require a follow-up to #24208; its current
+behind an eve-owned adapter. This requires a follow-up to #24208; its current
 callback API must not be described as sufficient. If that surface is unavailable,
 keep the feature disabled. Do not revive #4117's fetch interception and payload
 rewriting as a second protocol implementation.
@@ -121,6 +134,11 @@ JSON-RPC IDs, the original operation, the latest answers, and the exact opaque
 state. Omit state when the latest round omitted it. Bind to the saved connection
 instance and reauthorize access before sending. A changed endpoint, account, or
 application-provided argument must stop continuation rather than retarget it.
+The current instance ID does not include provided arguments. Save a keyed
+fingerprint of their canonicalized resolved JSON values in the protected
+continuation. Re-resolve them with the original requester and call context
+before each round and compare fingerprints. A mismatch fails the call before
+any continuation request; the fingerprint avoids persisting credential values.
 
 Keep `requestState` and any sensitive continuation data in protected internal
 durable storage. Do not put them in model messages, channel events, public
@@ -129,13 +147,22 @@ not access tokens. Resolve credentials again for each round. Review the actual
 checkpoint/projection path before choosing storage; generic session state is
 not automatically private. Retire pending state when the call settles.
 
-Proposed initial limits are three human input batches, three state-only retries,
-16 requests per batch, 64 KiB of opaque state, and 8 KiB per displayed message.
-Bound schemas, answers, and the total continuation size as well. Preserve a
-persisted whole-call deadline across restarts, with a proposed ten-minute
-default; align active network timeouts with the SDK without treating the human
-wait as an open HTTP request. Show expiry clearly. An expired or rejected server
-state fails the call; never silently restart the original operation.
+Persist two per-call counters across restarts: at most three input-required
+responses containing requests, and three continuation retries for responses
+without requests. Local edits and validation retries stay in the same input
+batch. Each batch allows 16 requests and 16 fields per form. Proposed byte limits,
+measured as UTF-8 serialized JSON, are 64 KiB of opaque state per round, 32 KiB
+of schemas and 16 KiB of answers per batch, and 256 KiB for the complete pending
+continuation per call. Each displayed message allows 8 KiB of UTF-8 text.
+Exceeding any limit fails the call with an actionable limit-exceeded result,
+withdraws its questions, and sends no further continuation request.
+
+Match eve's existing human-input holds: no default human-wait timeout. Each active
+network round remains subject to the SDK timeout, but the human wait must not
+keep that request or timeout running. A server may expire its opaque state while
+eve waits. If the server rejects or expires it on resume, fail visibly and retire
+the pending state; never silently restart the original operation. The local hold
+ends when the input batch settles, or the turn is steered or cancelled.
 
 MCP does not promise exactly-once side effects. A lost response after submission
 can leave the outcome unknown. Resume from a committed round when possible;
@@ -146,8 +173,8 @@ work the remote server already accepted.
 ## Delivery slices
 
 1. **Prove the SDK boundary.** Pin a release containing #24208 through eve's
-   existing compiled dependency path. Add a restartable round API upstream if
-   needed. Use a deterministic MCP fixture to prove checkpoint, process exit,
+   existing compiled dependency path. A restartable round API upstream is a hard
+   prerequisite. Use a deterministic MCP fixture to prove checkpoint, process exit,
    and continuation before connecting any user UI.
 2. **Adapt #4237's client work.** Use the current HITL machinery and the proposed
    opt-in. Preserve per-call ownership and local approval. Add the supported form
@@ -179,5 +206,5 @@ or dashboard behavior for this adoption.
 | E2E                       | A deterministic fixture completes an interactive form through the channel contract; a Connect event starts a session whose later tool call asks and resumes. Duplicate event delivery does not duplicate the question. |
 
 Before implementation, settle the upstream resumable-round API and the protected
-storage location with the owners of #24208 and #4237. Confirm the proposed schema
-subset, limits, deadline, and opt-in during review. This PR changes only the plan.
+storage location alongside #24208 and #4237. Confirm the proposed schema subset,
+limits, and opt-in during review. This PR changes only the plan.
