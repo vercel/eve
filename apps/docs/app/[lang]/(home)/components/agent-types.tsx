@@ -633,9 +633,10 @@ function WebAppClient({ stage = 0 }: { stage?: number }) {
           {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. */}
           <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[15rem]:block" />
         </div>
-        {/* Pinned to the window's bottom, the chat grows up over the dashboard as messages
-            join, never past the window; past that, the oldest scroll up out of view. */}
-        <div className="absolute inset-x-3 bottom-3 flex max-h-[calc(100%-1.5rem)] flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
+        {/* Pinned to the window's bottom, the chat grows up as messages join, stopping 8px
+            short of the KPI row, which ends 106px down (12 + 106 + 8 = 126px off the height);
+            past that, the oldest scroll up out of view. */}
+        <div className="absolute inset-x-3 bottom-3 flex max-h-[calc(100%-7.875rem)] flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
           <span className="shrink-0 text-label-12 text-gray-900">Acme support</span>
           <div
             className="flex min-h-0 flex-col justify-end overflow-hidden"
