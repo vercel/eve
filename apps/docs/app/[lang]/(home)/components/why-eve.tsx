@@ -207,7 +207,8 @@ for (let attempt = 0; PARTICLES.length < particleCount && attempt < 2000; attemp
     x: Math.round(x * 100) / 100,
     y: Math.round(y * 100) / 100,
     size: Math.round(size * 100) / 100,
-    opacity: Math.round((0.1 + 0.9 * focus) * 100) / 100,
+    // Full gray-500 at the center, fading toward the edges about as light as before.
+    opacity: Math.round((0.35 + 0.65 * focus) * 100) / 100,
     angle: Math.round((random() - 0.5) * 60),
   });
 }
@@ -284,7 +285,7 @@ function DataBoundary() {
             x={stack.x}
             y={hostTop}
           />
-          <g fill="var(--ds-gray-1000)">
+          <g fill="var(--ds-gray-500)">
             {PARTICLES.map(({ angle, opacity, size, x, y }) => (
               <rect
                 fillOpacity={opacity}
