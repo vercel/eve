@@ -21,7 +21,7 @@ import set from "./extension/tools/set.ts";
 import status from "./extension/tools/status.ts";
 
 // The goal loop end to end in one session: the model sets a goal, the judge keeps it going
-// through the hook's ctx.followUp(), and the session stops once the judge finds it met.
+// through the hook's ctx.continue(), and the session stops once the judge finds it met.
 
 const ALICE = {
   attributes: {},
@@ -48,7 +48,7 @@ async function until(done: () => boolean, describe: () => string): Promise<void>
 }
 
 /**
- * Runs a session where the model sets a goal, then calls `status` each follow-up and replies
+ * Runs a session where the model sets a goal, then calls `status` each continuation and replies
  * "Worked on the report.". Returns once `turns` turns settled.
  */
 async function runGoalSession(name: string, turns: number) {

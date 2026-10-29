@@ -1,6 +1,6 @@
 # @eve/goal Extension Package
 
-This private package is the source of the `eve/extensions/goal` extension: a durable session goal, a judge that runs after every turn, and follow-ups through hook `ctx.followUp()`.
+This private package is the source of the `eve/extensions/goal` extension: a durable session goal, a judge that runs after every turn, and continuations through hook `ctx.continue()`.
 
 Before writing code, read the installed eve package docs for extensions, hooks, tools, instructions, and state.
 
@@ -8,7 +8,7 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 
 - Only the judge marks a goal met or impossible. The model may set a goal, with approval when `setApproval` is set; pausing, resuming, and clearing require the person's approval.
 - Keep the loop's guards and verdict handling in `extension/lib/policy.ts`, free of eve runtime imports, so unit tests cover them directly.
-- Continue only through `ctx.followUp()` from `turn.settled`. Never add another way to start turns.
+- Continue only through `ctx.continue()` from `turn.settled`. Never add another way to start turns.
 
 ## Build and publish
 

@@ -1,14 +1,14 @@
 import type { GoalVerdict } from "./judge.ts";
 import type { Goal } from "./state.ts";
 
-/** Follow-up turns in a row without a tool call before a goal pauses. */
+/** Continuation turns in a row without a tool call before a goal pauses. */
 export const MAX_IDLE_RUNS = 2;
 
 /** What a settled turn showed, read from the session view. */
 export interface SettledTurn {
   readonly outcome: "completed" | "failed" | "cancelled";
-  /** The turn ran on the goal's own follow-up, with no one else's input. */
-  readonly followedUp: boolean;
+  /** The turn ran on the goal's own continuation, with no one else's input. */
+  readonly continued: boolean;
   readonly toolCalls: number;
   /** Session spend so far, in US dollars, when the provider reported it. */
   readonly costUsd: number | undefined;
@@ -23,11 +23,11 @@ export function check(current: Goal, turn: SettledTurn): Check {
   if (turn.outcome !== "completed") {
     return { kind: "pause", reason: `The turn ${turn.outcome}.` };
   }
-  const idleRuns = turn.followedUp && turn.toolCalls === 0 ? current.idleRuns + 1 : 0;
+  const idleRuns = turn.continued && turn.toolCalls === 0 ? current.idleRuns + 1 : 0;
   if (idleRuns >= MAX_IDLE_RUNS) {
     return {
       kind: "pause",
-      reason: `${MAX_IDLE_RUNS} follow-up turns in a row made no tool calls.`,
+      reason: `${MAX_IDLE_RUNS} continuation turns in a row made no tool calls.`,
     };
   }
   return { idleRuns, kind: "judge" };
@@ -36,7 +36,7 @@ export function check(current: Goal, turn: SettledTurn): Check {
 /**
  * The goal after the judge's verdict, and the message that continues it, if it goes on. Every
  * turn is judged, so one that finishes the work at a limit is still met; the run and spend
- * limits only stop the next follow-up.
+ * limits only stop the next continuation.
  */
 export function settle(
   current: Goal,
@@ -64,7 +64,7 @@ export function settle(
   return {
     goal: {
       ...judged,
-      followedUp: true,
+      continued: true,
       idleRuns: turn.idleRuns,
       lastReason: verdict.reason,
       runs: current.runs + 1,
@@ -74,7 +74,7 @@ export function settle(
 }
 
 export function pause(current: Goal, reason: string): Goal {
-  return { ...current, followedUp: false, lastReason: reason, status: "paused" };
+  return { ...current, continued: false, lastReason: reason, status: "paused" };
 }
 
 /** Spend since the goal was set. */

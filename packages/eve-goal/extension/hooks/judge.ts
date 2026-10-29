@@ -22,14 +22,14 @@ export default defineHook({
       const turnCalls = calls(ctx.view, { turnId });
       const input = deliveries(ctx.view, { turnId });
       const costUsd = usage(ctx.view).total.costUsd;
-      // A turn is the goal's own when it queued the follow-up and no person's message joined it.
-      const followedUp =
-        current.followedUp === true &&
+      // A turn is the goal's own when it queued the continuation and no person's message joined it.
+      const continued =
+        current.continued === true &&
         input.length > 0 &&
         input.every(({ source }) => source !== undefined && "hook" in source && !!source.hook);
       const checked = check(current, {
         costUsd,
-        followedUp,
+        continued,
         outcome: event.data.outcome,
         toolCalls: turnCalls.length,
       });
@@ -70,10 +70,10 @@ export default defineHook({
         { costUsd, idleRuns: checked.idleRuns },
         extension.config,
       );
-      // Another hook's follow-up for a different principal refuses this one; the goal goes on
+      // Another hook's continuation for a different principal refuses this one; the goal goes on
       // from the next turn that settles.
-      const queued = next.message !== undefined && ctx.followUp(next.message).queued;
-      goal.update(() => (queued ? next.goal : { ...next.goal, followedUp: false }));
+      const queued = next.message !== undefined && ctx.continue(next.message).queued;
+      goal.update(() => (queued ? next.goal : { ...next.goal, continued: false }));
     },
   },
 });

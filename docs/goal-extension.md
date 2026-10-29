@@ -3,7 +3,7 @@ title: "Goal Extension"
 description: "Give a session a durable goal that a judge checks after every turn, and let the agent keep working until it's met."
 ---
 
-`eve/extensions/goal` keeps an agent working toward an objective across turns without someone prompting each step. After every turn, a judge reads the objective and what the turn surfaced, and decides whether the goal is met. If it isn't, the extension starts the next turn on its own, guided by the judge's reason. It stops when the goal is met, judged impossible, paused, or out of budget. The extension ships inside the `eve` package and is built on hook [`ctx.followUp()`](./guides/hooks#follow-up-a-turn-from-a-hook).
+`eve/extensions/goal` keeps an agent working toward an objective across turns without someone prompting each step. After every turn, a judge reads the objective and what the turn surfaced, and decides whether the goal is met. If it isn't, the extension starts the next turn on its own, guided by the judge's reason. It stops when the goal is met, judged impossible, paused, or out of budget. The extension ships inside the `eve` package and is built on hook [`ctx.continue()`](./guides/hooks#continue-a-turn-from-a-hook).
 
 ## Mount the extension
 
@@ -17,7 +17,7 @@ export default goal({ maxRuns: 30, maxCostUsd: 25 });
 | ------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `model`       | `"openai/gpt-6-luna-fast"` | The default judge's model: an AI Gateway model ID or a model instance.                                              |
 | `judge`       | a structured-output call   | Replaces the default judge: `(input) => Promise<{ verdict, reason, notes? }>`.                                      |
-| `maxRuns`     | `50`                       | Follow-ups a goal may queue before it pauses.                                                                       |
+| `maxRuns`     | `50`                       | Continuations a goal may queue before it pauses.                                                                    |
 | `maxCostUsd`  | unlimited                  | Model spend, in US dollars, the agent's turns may add before the goal pauses. The judge's own calls aren't counted. |
 | `setApproval` | none                       | An approval policy for the model's `goal__set` calls, such as `always()` from `eve/tools/approval`.                 |
 
@@ -55,10 +55,10 @@ Any [approval policy](./human-in-the-loop#approvals) works, including `once()` o
 After each turn of an active goal settles, the extension pauses the goal when:
 
 - the turn failed or was cancelled,
-- two of the goal's own follow-up turns in a row made no tool calls, or
+- two of the goal's own continuation turns in a row made no tool calls, or
 - the judge failed.
 
-Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. Every completed turn is judged, so one that finishes the work at a limit is still met. On `continue`, the goal pauses instead if it reached `maxRuns` or its spend reached `maxCostUsd`; otherwise the extension follows up with `Continue working toward the goal. <reason>` as the session's next message. The model reads it with a note that the hook sent it, not a person.
+Otherwise the judge returns `met`, `impossible`, or `continue` with a reason. Every completed turn is judged, so one that finishes the work at a limit is still met. On `continue`, the goal pauses instead if it reached `maxRuns` or its spend reached `maxCostUsd`; otherwise the extension continues with `Continue working toward the goal. <reason>` as the session's next message. The model reads it with a note that it was sent automatically, not by a person.
 
 The judge sees the turn's input, its reply, and its settled tool calls, not the whole transcript, so the agent should prove progress with tool output. With each verdict, the judge also writes short `notes` on what the evidence has proved so far, and reads them back on the next turn. A check that passed in an earlier turn still counts when a later turn only reports that it's done. A person's message always wins: the continuation yields to any turn that starts first, and that turn is judged next with the person's input in view. A "stop" or a change of direction reaches the verdict.
 

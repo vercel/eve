@@ -13,7 +13,7 @@ const goal: Goal = {
   status: "active",
 };
 
-const turn = { costUsd: 1, followedUp: true, outcome: "completed", toolCalls: 2 } as const;
+const turn = { costUsd: 1, continued: true, outcome: "completed", toolCalls: 2 } as const;
 const continued = { reason: "Two tests still fail in auth.", verdict: "continue" } as const;
 
 test("a completed turn with progress goes to the judge", () => {
@@ -27,11 +27,11 @@ test("a turn that didn't complete pauses the goal", () => {
   });
 });
 
-test("idle follow-ups pause on the second in a row, and other input resets the count", () => {
+test("idle continuations pause on the second in a row, and other input resets the count", () => {
   const idle = { ...turn, toolCalls: 0 };
   assert.deepEqual(check(goal, idle), { idleRuns: 1, kind: "judge" });
   assert.equal(check({ ...goal, idleRuns: 1 }, idle).kind, "pause");
-  assert.deepEqual(check({ ...goal, idleRuns: 1 }, { ...idle, followedUp: false }), {
+  assert.deepEqual(check({ ...goal, idleRuns: 1 }, { ...idle, continued: false }), {
     idleRuns: 0,
     kind: "judge",
   });
@@ -47,7 +47,7 @@ test("a turn at the run or spend limit is still judged, and can be met", () => {
   assert.equal(spent.goal.status, "met");
 });
 
-test("the run and spend limits stop the next follow-up", () => {
+test("the run and spend limits stop the next continuation", () => {
   const runs = settle({ ...goal, runs: 3 }, continued, turn0(), {});
   assert.equal(runs.goal.status, "paused");
   assert.equal(runs.goal.lastReason, "The goal reached its limit of 3 runs.");
@@ -65,7 +65,7 @@ test("continue counts a run and steers the next turn with the judge's reason", (
   const next = settle(goal, continued, { costUsd: 1, idleRuns: 1 }, {});
   assert.deepEqual(next.goal, {
     ...goal,
-    followedUp: true,
+    continued: true,
     idleRuns: 1,
     lastReason: "Two tests still fail in auth.",
     runs: 1,

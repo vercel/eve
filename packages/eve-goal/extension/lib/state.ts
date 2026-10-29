@@ -6,13 +6,13 @@ export type GoalStatus = "active" | "paused" | "met" | "impossible";
 export interface Goal {
   readonly objective: string;
   readonly status: GoalStatus;
-  /** Follow-ups the goal has queued. */
+  /** Continuations the goal has queued. */
   readonly runs: number;
   readonly maxRuns: number;
-  /** Follow-up turns in a row that made no tool calls. */
+  /** Continuation turns in a row that made no tool calls. */
   readonly idleRuns: number;
-  /** The goal queued the follow-up the next turn runs on. */
-  readonly followedUp?: boolean;
+  /** The goal queued the continuation the next turn runs on. */
+  readonly continued?: boolean;
   /** Session spend when the goal was set, once a call settles after it. */
   readonly costAtStart?: number;
   /** Why the goal last continued, paused, or settled. */
