@@ -328,6 +328,19 @@ The channel checks the grant before forwarded-principal handling or `onMessage` 
 
 Later messages, approvals, controls, and result reads use normal channel authentication. There is no additional creator-only rule or replacement-permission recheck. Anyone your channel admits to an existing session can use its configured stubs; apply the same application-specific session-access policy you need for ordinary sessions.
 
+## Agent info access
+
+`GET /eve/v1/info` returns authored instructions and server paths, so it serves only operators by default: `service` and `runtime` principals, plus callers `localDev()` admits when the channel's `auth` includes it. Other callers get `403` with code `info_forbidden`. An eve-channel authenticator can decide for its caller instead: `allowAgentInfo: true` grants access, and `false` denies it even to an operator. Like `allowToolStubs`, the flag applies only to the current request and is never persisted or forwarded.
+
+```ts
+import type { EveAuthFn } from "eve/channels/eve";
+
+const authenticateStaff: EveAuthFn = async (request) => {
+  const staff = await verifyStaffSession(request);
+  return staff ? { ...staff, allowAgentInfo: true } : null;
+};
+```
+
 ## Tool and connection auth
 
 Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Connections declare `auth` on the connection definition. Tools should resolve providers inline with `ctx.getToken(provider)` and call `ctx.requireAuth(provider)` only when a downstream service rejects a token; eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.

@@ -108,7 +108,7 @@ has completed. Idle preparation preserves the session ID, stream, history, and e
 active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
 for client usage and deployment routing.
 
-`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy, then serves only operator principals: `service` and `runtime` principals and any caller `localDev()` admits on a development server. Other callers the channel admits, such as `user` or `anonymous` principals, get `403` with code `info_forbidden`, because the payload includes authored instructions, skill and schedule markdown, and server paths. The route returns agent-info version 5. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
+`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy, then serves only operator principals: `service` and `runtime` principals and, when the channel's auth includes `localDev()`, any caller it admits on a development server. Other callers the channel admits, such as `user` or `anonymous` principals, get `403` with code `info_forbidden`, because the payload includes authored instructions, skill and schedule markdown, and server paths. The route returns agent-info version 5. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
 
 ### Request validation
 
@@ -314,7 +314,7 @@ Neither admits browser users or external clients in production. For a public app
 
 `eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve selects its default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
 
-To let your own operator credential read `/eve/v1/info`, have its `AuthFn` return `principalType: "service"` (as `jwtHmac()` and `jwtEcdsa()` do). Keep end-user strategies returning `"user"` so they cannot read it.
+To let your own operator credential read `/eve/v1/info`, have its `AuthFn` return `principalType: "service"` (as `jwtHmac()` and `jwtEcdsa()` do), or return `allowAgentInfo: true` from an `EveAuthFn`; see [Agent info access](../guides/auth-and-route-protection#agent-info-access). Keep end-user strategies returning `"user"` without the grant so they cannot read it.
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 

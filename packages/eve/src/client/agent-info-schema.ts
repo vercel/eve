@@ -245,6 +245,8 @@ const compositionDiagnostic = z.object({
  * Runtime contract for the authoritative `/eve/v1/info` v5 response. Parsing is
  * tolerant so a server may add fields and enum values without a version bump:
  * unknown keys are stripped and unknown enum strings read as `"unrecognized"`.
+ * Discriminated-union `kind` fields stay closed, so a new variant needs a
+ * version bump.
  */
 export const AgentInfoResultSchema = z
   .object({

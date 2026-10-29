@@ -173,9 +173,9 @@ Every error `eve/client` throws now extends `EveError` and carries a stable snak
 
 ## Read agent info with an operator credential
 
-`GET /eve/v1/info` and `client.info()` now serve only operators: `service` and `runtime` principals, such as Vercel OIDC, `jwtHmac()`, or `jwtEcdsa()` callers, and local development through `localDev()`. Other callers, including web chat end users, get `403` with code `info_forbidden`. If a browser app calls `client.info()`, move that call to your server or hardcode what it shows. To give another operator credential access, authenticate it with an auth function that returns `principalType: "service"`. `eve eval` and `eve remote` against a deployment need such a credential too.
+`GET /eve/v1/info` and `client.info()` now serve only operators: `service` and `runtime` principals, such as Vercel OIDC, `jwtHmac()`, or `jwtEcdsa()` callers, and local development through a configured `localDev()`. Other callers, including web chat end users, get `403` with code `info_forbidden`. If a browser app calls `client.info()`, move that call to your server or hardcode what it shows. To give another credential access, return `principalType: "service"` or `allowAgentInfo: true` from its eve-channel authenticator; `allowAgentInfo: false` denies a caller that would otherwise qualify. See [Agent info access](./auth-and-route-protection#agent-info-access). `eve eval` against a deployment needs such a credential too; `eve remote` connects without one but omits the agent details.
 
-The response is still agent-info version 5. The client now ignores unknown fields and reads unknown enum values as `"unrecognized"`; handle that value when you switch on fields such as `mode` or `sourceKind`. See [Inspect an agent](./client/overview#inspect-an-agent).
+The response is still agent-info version 5. The client now ignores unknown fields and reads unknown enum values as `"unrecognized"`; handle that value when you switch on fields such as `mode` or `sourceKind`. `kind` discriminants, such as a model endpoint's or an owner's `kind`, stay closed: a new variant comes with a version bump. See [Inspect an agent](./client/overview#inspect-an-agent).
 
 ## Update Workflow imports
 
