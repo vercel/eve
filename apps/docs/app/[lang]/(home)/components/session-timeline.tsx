@@ -608,8 +608,8 @@ export function SessionTimeline(): JSX.Element {
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
   const [count, setCount] = useState(0);
-  // A replay that runs to the end stays at the end, clear of the dock; stopping it or switching
-  // channels returns to the conversation's start.
+  // A replay that runs to the end stays at the end, clear of the dock; stopping it returns to the
+  // conversation's start.
   const [ended, setEnded] = useState(false);
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
@@ -702,6 +702,7 @@ export function SessionTimeline(): JSX.Element {
 
   // Switching channels pushes the current conversation out and the next one in, like moving
   // between screens: toward the left when the channel is further down the picker, else right.
+  // The next one comes in playing from its start, since picking a channel asks to see it.
   const pick = (id: string) => {
     if (id === platform) return;
     const list = listRef.current;
@@ -722,7 +723,7 @@ export function SessionTimeline(): JSX.Element {
       };
     }
     setPlatform(id as Platform);
-    stop();
+    play();
   };
 
   useLayoutEffect(() => {
