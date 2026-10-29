@@ -2,6 +2,6 @@
 "eve": patch
 ---
 
-Answer `POST /eve/v1/session` with an `operationId` using the id of the session that owns the operation.
+Hand every follow-up a losing session candidate accepted to the session that owns its `operationId`.
 
-Two creates racing for one `operationId` both get the owner's id, so a follow-up sent right away is not dropped by the run that lost the address. When no session claims the address within 15 seconds, the route answers 500 instead of an id that may not be the owner's.
+When two `POST /eve/v1/session` requests race for one `operationId`, the run that loses the address now releases its inbox and forwards its initial command and each follow-up it accepted, in order, to the owner. Before, it forwarded only the initial command, so a follow-up sent right away to the losing id was answered 202 and dropped. Creates that don't race are unchanged.

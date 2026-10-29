@@ -20,7 +20,6 @@ import {
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
-import { waitForContinuationOwner } from "#channel/channel-address.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_CALLBACK_ROUTE_PATTERN,
@@ -404,38 +403,12 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           );
         }
 
-        // The new run claims the operation's address asynchronously, and a concurrent create for
-        // the same operation may claim it first. Answering with the owner's id keeps a follow-up
-        // sent right away from landing on a run that only hands over its initial command.
-        let sessionId = handle.sessionId;
-        if (operationToken !== undefined) {
-          try {
-            const owner = await waitForContinuationOwner(
-              async () => {
-                const session = await args.resolveSession(operationToken);
-                return session === undefined ? undefined : { sessionId: session.id };
-              },
-              operationToken,
-              handle.sessionId,
-            );
-            sessionId = owner.sessionId;
-          } catch (error) {
-            const errorId = logError(log, "session-create owner wait failed", error, {
-              sessionId: handle.sessionId,
-            });
-            return Response.json(
-              { error: error instanceof Error ? error.message : String(error), errorId, ok: false },
-              { status: 500 },
-            );
-          }
-        }
-
         return Response.json(
-          createdSessionBody(sessionId, body, initialDeliveryId ?? handle.deliveryId),
+          createdSessionBody(handle.sessionId, body, initialDeliveryId ?? handle.deliveryId),
           {
             headers: {
               "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: sessionId,
+              [EVE_SESSION_ID_HEADER]: handle.sessionId,
             },
             status: 202,
           },

@@ -85,6 +85,7 @@ function createInbox() {
   return {
     claimSessionHook: vi.fn(async () => {}),
     dispose: vi.fn(async () => {}),
+    release: vi.fn(async (): Promise<unknown[]> => []),
   };
 }
 
@@ -176,13 +177,20 @@ describe("bootInitialOwner", () => {
     await expect(bootPromise).resolves.toBeDefined();
   });
 
-  it("settles an alias conflict and releases the inbox", async () => {
+  it("hands the owner its command, then every follow-up it caught, and releases the inbox", async () => {
     const inbox = createInbox();
     inbox.claimSessionHook
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce({ hookConflict: true });
+    const followUp = { auth: null, kind: "send", payload: { message: "follow-up" } } as const;
+    const delivered = { kind: "deliver", payloads: [{ message: "delivered" }] } as const;
+    inbox.release.mockResolvedValueOnce([
+      followUp,
+      { deliveryId: "cancel-1", kind: "cancel" },
+      delivered,
+    ]);
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
-    const continuationConflictCommand = { kind: "reset", reason: "replaced" } as const;
+    const continuationConflictCommand = { kind: "send", payload: { message: "first" } } as const;
 
     await expect(
       bootInitialOwner(
@@ -197,11 +205,35 @@ describe("bootInitialOwner", () => {
       ),
     ).resolves.toBeUndefined();
 
+    expect(inbox.release).toHaveBeenCalledOnce();
+    expect(inbox.dispose).not.toHaveBeenCalled();
     expect(settleContinuationConflictStep).toHaveBeenCalledWith({
-      command: continuationConflictCommand,
       continuationToken: "channel:conversation-1",
+      payloads: [continuationConflictCommand, followUp, delivered],
     });
-    expect(inbox.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("hands nothing over when a losing run has no command and caught nothing", async () => {
+    const inbox = createInbox();
+    inbox.claimSessionHook
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce({ hookConflict: true });
+    vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
+
+    await expect(
+      bootInitialOwner(
+        initialInput({
+          serializedContext: {
+            "eve.bundle": { source: { kind: "bundled" } },
+            "eve.continuationToken": "channel:conversation-1",
+          },
+        }),
+        "session-1",
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(inbox.release).toHaveBeenCalledOnce();
+    expect(settleContinuationConflictStep).not.toHaveBeenCalled();
   });
 
   it.each([
