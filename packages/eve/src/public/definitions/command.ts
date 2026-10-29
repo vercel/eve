@@ -17,6 +17,12 @@ export interface CommandSession {
   end(): Promise<void>;
 }
 
+/** Free text a command takes after its name. A structured shape can sit beside `hint` later. */
+export interface CommandInput {
+  /** What to type, shown after the name, such as `"[reason]"`. */
+  readonly hint: string;
+}
+
 /** Context passed to a {@link CommandDefinition}'s `run`. */
 export interface CommandContext {
   /** Text after the command name, trimmed. Empty when the caller passed none. */
@@ -45,12 +51,11 @@ interface CommandMetadata {
   /** One-line description shown in command discovery. */
   readonly description: string;
   /**
-   * Whether the command takes text after its name. With `"none"`, the default, clients run it only
-   * when it's typed alone, so a message that happens to start with its name stays a message.
+   * Text the command takes after its name, with a `hint` shown after the name, such as
+   * `{ hint: "[reason]" }`. Without `input`, clients run the command only when it's typed alone,
+   * so a message that happens to start with its name stays a message.
    */
-  readonly arguments?: "none" | "text";
-  /** Argument shape shown after the name, such as `"[reason]"`. Display only. */
-  readonly argumentHint?: string;
+  readonly input?: CommandInput;
   /** Other names that run this command, such as `["reset"]` for `new`. */
   readonly aliases?: readonly string[];
   // TODO: argument completion, e.g. `complete(argument)`, served to the terminal UI's typeahead.
@@ -160,7 +165,7 @@ export async function runCommand(
   if (found.command.session === "required" && ctx.session === undefined) {
     throw new CommandNeedsSessionError(found.name);
   }
-  if ((found.command.arguments ?? "none") === "none" && ctx.argument !== "") {
+  if (found.command.input === undefined && ctx.argument !== "") {
     throw new CommandTakesNoArgumentError(found.name);
   }
   const result = await found.command.run(ctx);

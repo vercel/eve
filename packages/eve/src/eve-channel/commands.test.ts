@@ -18,8 +18,7 @@ const ALICE = { principalId: "alice", principalType: "user" } as const;
 
 const escalate = defineCommand({
   description: "Hand this conversation to a person",
-  arguments: "text",
-  argumentHint: "[reason]",
+  input: { hint: "[reason]" },
   aliases: ["human"],
   session: "required",
   async run({ argument, session }) {
@@ -100,12 +99,11 @@ describe("eve channel commands", () => {
         {
           name: "escalate",
           description: "Hand this conversation to a person",
-          arguments: "text",
-          argumentHint: "[reason]",
+          input: { hint: "[reason]" },
           aliases: ["human"],
           session: "required",
         },
-        { name: "restart", description: "Start over", arguments: "none", session: "required" },
+        { name: "restart", description: "Start over", session: "required" },
       ],
     });
 

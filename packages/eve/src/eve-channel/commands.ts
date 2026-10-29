@@ -24,10 +24,9 @@ export function listEveCommandsResponse(commands: CommandDefinitions | undefined
     const entry: Mutable<CommandInfo> = {
       name,
       description: command.description,
-      arguments: command.arguments ?? "none",
       session: command.session ?? "optional",
     };
-    if (command.argumentHint !== undefined) entry.argumentHint = command.argumentHint;
+    if (command.input !== undefined) entry.input = { hint: command.input.hint };
     if (command.aliases !== undefined && command.aliases.length > 0)
       entry.aliases = command.aliases;
     return entry;
