@@ -14,6 +14,8 @@ import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { fixedTail, turns } from "#public/compaction/index.js";
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -95,6 +97,7 @@ function userTexts(prompt: Prompt): string[] {
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+  compactionStrategy?: CompactionStrategy,
 ) {
   const session: HarnessSession = {
     agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
@@ -109,6 +112,7 @@ async function compactWith(
   };
   return createToolLoopHarness({
     compactOnly: true,
+    compactionStrategy,
     handleEvent: (publication) => handleEvent(eventsOf(publication)),
     resolveModel: async () => model,
     tools: new Map(),
@@ -488,5 +492,138 @@ describe("announcements after a compaction during a turn", () => {
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
     ]);
+  });
+});
+
+describe("an authored compaction strategy", () => {
+  /** Records each line's facts and checks them against the event contract. */
+  function checkedEvents() {
+    const events: SessionEvent[] = [];
+    const issues: unknown[] = [];
+    const checker = createStreamChecker();
+    const at = "2026-10-28T00:00:00.000Z";
+    checker.check({ at, facts: [{ type: "session.started", data: {} }] }, 0);
+    let position = 1;
+    const handle = async (facts: readonly SessionEvent[]) => {
+      events.push(...facts);
+      issues.push(...checker.check({ at, facts }, position++));
+    };
+    return { events, handle, issues };
+  }
+
+  it("rewrites the history with its own summary, billed to the change's summary run", async () => {
+    const prompts: string[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        prompts.push(prompt[0]?.role === "system" ? prompt[0].content : "");
+        return summaryStream();
+      },
+    });
+    const seen: string[] = [];
+    const strategy: CompactionStrategy = async (history, ctx) => {
+      seen.push(ctx.reason);
+      const kept = turns(history);
+      const summary = await ctx.summarize(kept.slice(0, -1).flat(), {
+        instructions: "Name the report Alice asked for.",
+      });
+      return [...ctx.checkpoint(summary), ...(kept.at(-1) ?? [])];
+    };
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(seen).toEqual(["manual"]);
+    expect(prompts).toEqual([expect.stringContaining("Name the report Alice asked for.")]);
+    expect(result.session.history).toEqual([
+      expect.objectContaining({ kind: "context.compaction", role: "user" }),
+      { content: "Alice asked for the quarterly report.", role: "assistant" },
+      { content: "Thanks, keep going.", kind: "user", role: "user" },
+    ]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(issues).toEqual([]);
+  });
+
+  it("runs eve's default when wrapped in fixedTail()", async () => {
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+
+    const result = await compactWith(model, async () => {}, fixedTail());
+
+    expect(result.session.history).toContainEqual({
+      content: "Alice asked for the quarterly report.",
+      role: "assistant",
+    });
+  });
+
+  it("fails the change and keeps the history when the result drops a call's result", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const strategy: CompactionStrategy = () => [
+      {
+        content: [{ input: {}, toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" }],
+        role: "assistant",
+      },
+    ];
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          error: { message: expect.stringContaining("dropped its result") },
+          outcome: "failed",
+        },
+      },
+    ]);
+    expect(result.session.history).toHaveLength(3);
+    expect(issues).toEqual([]);
+  });
+
+  it("ends the session before the model call when an automatic result doesn't fit", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) =>
+        userTexts(prompt).length === 1
+          ? lookup(`Let me check. ${"lorem ipsum ".repeat(1_500)}`)
+          : answer(),
+    });
+    const session: HarnessSession = {
+      agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+      compaction: { recentWindowSize: 1, threshold: 2_000 },
+      continuationToken: "http:authored-overflow-session",
+      history: [],
+      sessionId: "authored-overflow-session",
+    };
+    const reasons: string[] = [];
+    const keepEverything: CompactionStrategy = (history, ctx) => {
+      reasons.push(ctx.reason);
+      return [...history];
+    };
+    const events: SessionEvent[] = [];
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      const fold = foldingHandler();
+      let stepped = await createToolLoopHarness({
+        compactionStrategy: keepEverything,
+        handleEvent: async (publication, messages) => {
+          events.push(...eventsOf(publication));
+          await fold(publication, messages);
+        },
+        resolveModel: async () => model,
+        tools: new Map([["lookup", lookupTool]]),
+      })(session, { message: "Which sources back the second claim?" });
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+    });
+
+    expect(reasons).toEqual(["automatic"]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { error: { message: expect.stringContaining("the limit is") }, outcome: "failed" } },
+    ]);
+    // Over the limit after compacting, the session can't continue, as with eve's default.
+    expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "session.ended" });
   });
 });

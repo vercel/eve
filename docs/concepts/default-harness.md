@@ -24,6 +24,10 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
+This is eve's default strategy, `fixedTail()`. To rewrite the history your own way, set
+[`compaction.compact`](../agent-config#custom-compaction-strategies). eve keeps deciding when to
+compact, and checks what the strategy returns.
+
 The summary call retries transient provider errors like any model call. If it
 still fails for any reason other than staying over the threshold, eve reports it
 as a failed model call: the turn fails with `MODEL_CALL_FAILED` and the history

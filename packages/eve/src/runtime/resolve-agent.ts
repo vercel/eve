@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type {
   CompiledAgentNodeManifest,
   CompiledAgentResources,
@@ -137,31 +138,47 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
         ...resolvedAgent,
         config: createResolvedAgentConfig(
           input.manifest,
-          await loadSessionUsageLimit(input.manifest, input.moduleMap, input.nodeId),
+          await loadAuthoredFunctions(input.manifest, input.moduleMap, input.nodeId),
         ),
       }
     : resolvedAgent;
 }
 
-/** Loads the authored `limits.sessionUsage` function, which the manifest can only mark. */
-async function loadSessionUsageLimit(
+/** The functions an agent config authors, which the manifest can only mark. */
+interface AuthoredFunctions {
+  readonly compact?: CompactionStrategy;
+  readonly sessionUsage?: SessionUsageLimit | false;
+}
+
+/** Loads `limits.sessionUsage` and `compaction.compact` from the agent config module. */
+async function loadAuthoredFunctions(
   manifest: CompiledAgentNodeManifest,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
-): Promise<SessionUsageLimit | false | undefined> {
-  if (manifest.config.limits?.sessionUsage === false) return false;
-  const source = manifest.config.source;
-  if (manifest.config.limits?.sessionUsage !== true || source === undefined) return undefined;
-  const definition = await loadResolvedModuleExport({
-    definition: source,
-    kindLabel: "agent config",
-    moduleMap,
-    nodeId,
-  });
-  return normalizeAgentDefinition(
-    definition,
+): Promise<AuthoredFunctions> {
+  const { config } = manifest;
+  const sessionUsage = config.limits?.sessionUsage === false ? false : undefined;
+  const source = config.source;
+  if (
+    source === undefined ||
+    (config.limits?.sessionUsage !== true && config.compaction?.compact !== true)
+  ) {
+    return { sessionUsage };
+  }
+  const definition = normalizeAgentDefinition(
+    await loadResolvedModuleExport({
+      definition: source,
+      kindLabel: "agent config",
+      moduleMap,
+      nodeId,
+    }),
     `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-  ).limits?.sessionUsage;
+  );
+  return {
+    compact: config.compaction?.compact === true ? definition.compaction?.compact : undefined,
+    sessionUsage:
+      config.limits?.sessionUsage === true ? definition.limits?.sessionUsage : sessionUsage,
+  };
 }
 
 function requireBindingOwner(
@@ -204,7 +221,7 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  sessionUsage: SessionUsageLimit | false | undefined,
+  { compact, sessionUsage }: AuthoredFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
@@ -229,9 +246,11 @@ function createResolvedAgentConfig(
 
   if (manifest.config.compaction !== undefined) {
     const compaction: {
+      compact?: CompactionStrategy;
       model?: NonNullable<NonNullable<ResolvedAgent["config"]>["compaction"]>["model"];
       thresholdPercent?: number;
     } = {};
+    if (compact !== undefined) compaction.compact = compact;
 
     if (manifest.config.compaction.model !== undefined) {
       compaction.model =

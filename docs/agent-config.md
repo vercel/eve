@@ -250,6 +250,56 @@ export default defineAgent({
 
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
+### Custom compaction strategies
+
+Set `compaction.compact` to decide how eve rewrites the history. eve still decides when: before a
+model call whose request is over the threshold (`reason: "automatic"`), or when a client calls
+`session.compact()` (`reason: "manual"`). The strategy receives the stored history and returns the
+history to keep:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { type CompactionStrategy, turns } from "eve/compaction";
+
+/** Summarizes every turn but the latest, which it keeps word for word. */
+const keepLatestTurn: CompactionStrategy = async (history, ctx) => {
+  const all = turns(history);
+  const summary = await ctx.summarize(all.slice(0, -1).flat(), {
+    instructions: "Keep every ticket ID exactly as written.",
+  });
+  return [...ctx.checkpoint(summary), ...(all.at(-1) ?? [])];
+};
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  compaction: { threshold: 0.8, compact: keepLatestTurn },
+});
+```
+
+- `ctx.summarize(messages, { model?, instructions? })` writes a summary with eve's checkpoint
+  prompt. It uses the turn model unless you pass `model`, and eve bills every call to the
+  compaction's summary run.
+- `ctx.checkpoint(summary)` builds the head eve recognizes on the next compaction. Put it first.
+- `turns(history)` groups the history by turn, so dropping whole turns never separates a tool call
+  from its result.
+- `ctx.tokens.limit` is the most history that fits under the threshold, and `ctx.tokens.estimate`
+  is the estimate eve checks an automatic result against.
+- Return `undefined` when nothing can be removed.
+
+`fixedTail()` from `eve/compaction` is eve's default strategy. Pass it `model` and `instructions`,
+or wrap it to keep part of the history out of its reach. With `compact`, choose the summary model
+in the strategy: `compaction.model` and `compaction.modelContextWindowTokens` configure only eve's
+default, and eve rejects them beside `compact`.
+
+eve checks each result before it applies it. A result fails the compaction, and leaves the history
+as it was, when it drops a tool call's result or a call, puts a checkpoint after other messages, or
+removes a user message's `kind`. An automatic result must also keep the turn's latest user message
+and fit within `ctx.tokens.limit`. If it doesn't, the session fails as it does when eve's default
+can't fit the history. eve never falls back to its default strategy.
+
+A step that fails and runs again calls the strategy again. Give effects outside eve, such as
+archiving the removed turns, an idempotency key derived from what they write.
+
 ## Runtime limits
 
 Use `limits` for framework-owned runtime caps. `sessionUsage` decides when the

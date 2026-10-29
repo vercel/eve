@@ -5,6 +5,8 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
+import { authoredRewrite } from "#harness/compaction/authored.js";
+import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import {
   type CompactionConfig,
   type HarnessSession,
@@ -199,6 +201,9 @@ export async function compactIfDue(
 
 /** What a history rewrite reads and calls while its change is open. */
 export interface HistoryRewriteContext {
+  readonly abortSignal: AbortSignal;
+  readonly changeId: string;
+  readonly sessionId: string;
   /** Always summarize: `session.compact()` asked, rather than a threshold. */
   readonly force: boolean;
   /** The threshold and measurement for the history alone, without what surrounds it. */
@@ -207,13 +212,18 @@ export interface HistoryRewriteContext {
   readonly historyTokens?: number;
   /** Writes a summary with the compaction model, under the change's summary run. */
   readonly summarize: CompactionSummarizer;
+  /** Writes a summary with `model`, or the compaction model, under the same run. */
+  summarizeWith(model?: PublicAgentStaticModelDefinition): CompactionSummarizer;
 }
 
-/** Rewrites the history under an open change: eve's default summarizes older turns. */
+/**
+ * Rewrites the history under an open change: eve's default summarizes older turns. `undefined`
+ * leaves the history as it is.
+ */
 export type HistoryRewrite = (
   messages: HarnessModelMessage[],
   ctx: HistoryRewriteContext,
-) => Promise<readonly ModelMessage[]>;
+) => Promise<readonly ModelMessage[] | undefined>;
 
 const defaultRewrite: HistoryRewrite = (messages, ctx) =>
   compactMessages(messages, ctx.config, ctx.summarize, ctx.force, ctx.historyTokens);
@@ -247,34 +257,48 @@ async function rewriteHistory(
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const executor = await summaryExecutor(step, input);
   let runOpen = change.runOpen;
-  const summarize: CompactionSummarizer = async (prompt) => {
-    if (!runOpen) {
-      runOpen = true;
-      await step.publish([
-        runRequested({ changeId: change.changeId }, change.runId),
-        runStarted({ attempt: 0, modelId: executor.modelId, runId: change.runId }),
-      ]);
-    }
-    const summary = await executor.summarize(prompt);
-    summaryUsage.push(summary.usage);
-    if (summary.text.trim().length === 0) {
-      throw new Error(
-        `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
-      );
-    }
-    return summary.text;
+  const executors = new Map<PublicAgentStaticModelDefinition, ReturnType<typeof summaryExecutor>>();
+  const executorFor = (model: PublicAgentStaticModelDefinition) => {
+    const known = executors.get(model) ?? summaryExecutor(step, input, model);
+    executors.set(model, known);
+    return known;
   };
+  const summarizeWith =
+    (model?: PublicAgentStaticModelDefinition): CompactionSummarizer =>
+    async (prompt) => {
+      const chosen = model === undefined ? executor : await executorFor(model);
+      if (!runOpen) {
+        runOpen = true;
+        await step.publish([
+          runRequested({ changeId: change.changeId }, change.runId),
+          runStarted({ attempt: 0, modelId: chosen.modelId, runId: change.runId }),
+        ]);
+      }
+      const summary = await chosen.summarize(prompt);
+      summaryUsage.push(summary.usage);
+      if (summary.text.trim().length === 0) {
+        throw new Error(
+          `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
+        );
+      }
+      return summary.text;
+    };
+  const strategy = step.config.compactionStrategy;
+  const rewrite = strategy === undefined ? defaultRewrite : authoredRewrite(strategy);
 
-  let rewritten: readonly ModelMessage[];
+  let rewritten: readonly ModelMessage[] | undefined;
   try {
     // A memory capture before compaction ran in the commit that started it. When it failed, the
     // compaction fails before it rewrites the history the capture couldn't keep.
     const captureFailure = takeCompactionCaptureFailure(step.ctx);
     if (captureFailure !== undefined) throw captureFailure;
-    rewritten = await defaultRewrite(
-      validateHarnessModelMessages(input.messages),
-      historyContext(step.session, { ...input, summarize }),
-    );
+    rewritten = await rewrite(validateHarnessModelMessages(input.messages), {
+      ...historyContext(step.session, { ...input, summarize: summarizeWith() }),
+      abortSignal: step.config.abortSignal ?? new AbortController().signal,
+      changeId: change.changeId,
+      sessionId: step.session.sessionId,
+      summarizeWith,
+    });
   } catch (error) {
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
@@ -290,7 +314,7 @@ async function rewriteHistory(
   // What the summary calls spent belongs to the summary run, in the commit that settles it.
   const usage = summaryUsageOf(summaryUsage);
   countSummaryUsage(step, input.betweenTurns, usage);
-  const messages = validateHarnessModelMessages(rewritten);
+  const messages = validateHarnessModelMessages(rewritten ?? input.messages);
   await step.publish(
     [
       // Every summary call that returned left an entry, even without usage.
@@ -311,7 +335,7 @@ async function rewriteHistory(
     ],
     messages,
   );
-  step.session = changeHistory(step.session, { rewrite: messages });
+  if (rewritten !== undefined) step.session = changeHistory(step.session, { rewrite: messages });
   return messages;
 }
 
@@ -329,7 +353,7 @@ function historyContext(
     readonly requestEnvelopeTokens: number | undefined;
     readonly summarize: CompactionSummarizer;
   },
-): HistoryRewriteContext {
+): Pick<HistoryRewriteContext, "config" | "force" | "historyTokens" | "summarize"> {
   const { compaction } = session;
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
@@ -376,14 +400,24 @@ async function summaryExecutor(
     readonly model: LanguageModel;
     readonly telemetryTurnId?: string;
   },
+  /** A strategy's own summary model, instead of the agent's compaction model or the turn's. */
+  override?: PublicAgentStaticModelDefinition,
 ): Promise<{
   readonly modelId: string;
   summarize(prompt: CompactionSummaryPrompt): ReturnType<typeof streamCompactionSummary>;
 }> {
   const { config, session } = step;
   const turnReference = requireSessionModelReference(session);
-  const reference = session.agent.compactionModelReference ?? turnReference;
-  const model = reference === turnReference ? input.model : await config.resolveModel(reference);
+  const reference =
+    typeof override === "string"
+      ? { id: override }
+      : (session.agent.compactionModelReference ?? turnReference);
+  const model =
+    override !== undefined && typeof override !== "string"
+      ? (override as LanguageModel)
+      : reference === turnReference
+        ? input.model
+        : await config.resolveModel(reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,

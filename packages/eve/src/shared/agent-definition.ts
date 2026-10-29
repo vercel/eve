@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -155,14 +156,45 @@ export interface InternalAgentCompactionDefinition {
    * eve defaults to `0.9` when this is omitted.
    */
   thresholdPercent?: number;
+  /**
+   * Whether the agent config module authors `compaction.compact`. It's a function, so the
+   * manifest only marks it; the runtime loads it from the config `source`.
+   */
+  compact?: boolean;
 }
 
 /**
  * Configures conversation compaction: when the model context window fills past
- * `threshold`, eve summarizes earlier turns to reclaim space. Every
- * field is optional; omit the block to use eve's defaults.
+ * `threshold`, eve compacts the history to reclaim space. Configure eve's default strategy,
+ * or supply your own in `compact`. Omit the block to use eve's defaults.
  */
-export interface PublicAgentCompactionDefinition {
+export type PublicAgentCompactionDefinition =
+  | PublicAgentDefaultCompactionDefinition
+  | PublicAgentCustomCompactionDefinition;
+
+/** A custom compaction strategy, which chooses its own summary model if it uses one. */
+export interface PublicAgentCustomCompactionDefinition {
+  /**
+   * Rewrites the history when eve compacts. Build one with `fixedTail()` from
+   * `eve/compaction`, or write your own.
+   */
+  readonly compact: CompactionStrategy;
+  /**
+   * Fraction of the primary model context window that triggers compaction.
+   *
+   * eve defaults to `0.9` when this is omitted.
+   */
+  readonly threshold?: number;
+  /** Configures eve's default strategy. With `compact`, choose the model in the strategy. */
+  readonly model?: never;
+  /** Configures eve's default strategy. With `compact`, choose the model in the strategy. */
+  readonly modelContextWindowTokens?: never;
+}
+
+/** eve's default compaction strategy: it summarizes earlier turns. */
+export interface PublicAgentDefaultCompactionDefinition {
+  /** Supplies a custom strategy, which replaces `model` and `modelContextWindowTokens`. */
+  readonly compact?: never;
   /**
    * Optional override for the compaction summary model's context window size,
    * in tokens.

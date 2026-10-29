@@ -314,6 +314,11 @@
       "import": "./dist/src/public/instructions/index.js",
       "default": "./dist/src/public/instructions/index.js"
     },
+    "./compaction": {
+      "types": "./dist/src/public/compaction/index.d.ts",
+      "import": "./dist/src/public/compaction/index.js",
+      "default": "./dist/src/public/compaction/index.js"
+    },
     "./context": {
       "types": "./dist/src/public/context/index.d.ts",
       "import": "./dist/src/public/context/index.js",
