@@ -106,6 +106,8 @@ Facts are grouped into families. Lifecycle facts introduce, update, or settle an
 | `context`     | `context.started`, `context.settled`                                 | A context change: `kind` `"compaction"` or `"clear"`.                                                                                                                                                                                                                                                                  |
 | `usage`       | `usage.recorded`                                                     | Model spend, owned by the run, call, or context change that spent it.                                                                                                                                                                                                                                                  |
 
+The conversation is a chain of turns. Each `turn.started` names the turn it `follows`, the one whose conversation it continues, or `null` for a first turn. A completed `context.settled` can change the conversation with `selects`: `null` empties it, as a clear does, and `{ turnId }` makes that earlier turn its newest, leaving out the turns after it. The next turn then follows the selected one. Either can name any earlier turn, so read the conversation with `conversation(view)` instead of assuming it holds every turn in order.
+
 Progress records are `content.delta` (a text or reasoning delta for a `partId`), `call.input` (a raw tool-input delta for a `callId`), and `call.progress` (a preliminary output snapshot for a `callId`).
 
 Call labels use `capability.label` before execution, `call.progress.data.label` for a progress
@@ -132,7 +134,7 @@ Within stream version 27, a later minor release can add:
 - fact types that only add information: a new family, or an update to a row such as `model.retried`, never the only way an entity opens or ends;
 - progress record types;
 - optional fields;
-- outcomes, interaction kinds, displays, and option styles.
+- outcomes, interaction kinds, context-change kinds, displays, and option styles.
 
 It never removes or renames a fact or field, changes what a fact means or which role it plays in its entity's lifecycle, or adds a required field. Anything else is a new stream version, which readers refuse.
 

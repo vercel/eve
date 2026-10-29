@@ -9,7 +9,7 @@ export interface TranscriptMessage {
 
 /** A session's text conversation, as {@link transcriptOf} reads it. */
 export interface TranscriptData {
-  /** Messages since the session's last clear, oldest first. */
+  /** The messages of the session's current conversation, oldest first. */
   readonly messages: readonly TranscriptMessage[];
 }
 
@@ -29,9 +29,12 @@ export interface TranscriptOptions {
  * The user's text is what each consumed delivery carries, after the history it imported; the
  * assistant's is each completed reply part. When one line consumes several deliveries, their
  * history comes before their messages, as the model reads them. Reasoning, narration, tool calls
- * and results, attachments, interactions, and interrupted or unfinished output are left out. A completed clear (`context.settled` selecting
- * nothing), or a reset that ended a stranded session, starts the transcript over, so text the
- * session no longer holds is never returned.
+ * and results, attachments, interactions, and interrupted or unfinished output are left out.
+ *
+ * Only the session's current conversation is returned: the newest turn, or the one a later
+ * context change selected, and the turns it follows back. A completed clear (`context.settled`
+ * selecting nothing), or a reset that ended a stranded session, starts the transcript over, so
+ * text the session no longer holds is never returned.
  *
  * @example
  * ```ts
@@ -55,12 +58,16 @@ export function transcriptOf(
       `transcriptOf: "maxMessages" must be a positive integer; received ${String(maxMessages)}.`,
     );
   }
-  let messages: TranscriptMessage[] = [];
+  // Each message keeps the turn it belongs to, so turns outside the conversation drop out.
+  let entries: { readonly message: TranscriptMessage; readonly turnId: string | undefined }[] = [];
+  const follows = new Map<string, string | null>();
+  let latestTurnId: string | undefined;
+  let selection: string | null | undefined;
   let resetDeliveryId: string | undefined;
   // Where the history of the deliveries the current line consumes goes: before their messages.
   let consumed: { readonly line: number | undefined; at: number } | undefined;
-  const append = (message: TranscriptMessage) => {
-    if (message.text.trim().length > 0) messages.push(message);
+  const append = (message: TranscriptMessage, turnId: string | undefined) => {
+    if (message.text.trim().length > 0) entries.push({ message, turnId });
   };
   for (const event of events) {
     const line = event.meta?.position?.line;
@@ -74,14 +81,20 @@ export function transcriptOf(
         )
           resetDeliveryId = event.data.deliveryId;
         break;
+      case "turn.started":
+        follows.set(event.data.turnId, event.data.follows);
+        latestTurnId = event.data.turnId;
+        selection = undefined;
+        break;
       case "delivery.consumed": {
-        consumed ??= { at: messages.length, line };
+        const { turnId } = event.data;
+        consumed ??= { at: entries.length, line };
         const history = (event.data.history ?? [])
           .filter(({ text }) => text.trim().length > 0)
-          .map(({ role, text }) => ({ role, text }));
-        messages.splice(consumed.at, 0, ...history);
+          .map(({ role, text }) => ({ message: { role, text }, turnId }));
+        entries.splice(consumed.at, 0, ...history);
         consumed.at += history.length;
-        append({ role: "user", text: textOf(event.data.parts) });
+        append({ role: "user", text: textOf(event.data.parts) }, turnId);
         break;
       }
       case "content.completed":
@@ -91,10 +104,12 @@ export function transcriptOf(
           event.data.interrupted !== true &&
           typeof event.data.value === "string"
         )
-          append({ role: "assistant", text: event.data.value });
+          append({ role: "assistant", text: event.data.value }, event.scope?.turnId);
         break;
       case "context.settled":
-        if (event.data.selects === null) messages = [];
+        if (event.data.outcome !== "completed" || event.data.selects === undefined) break;
+        if (event.data.selects === null) entries = [];
+        selection = event.data.selects === null ? null : event.data.selects.turnId;
         break;
       case "session.ended":
         if (
@@ -102,11 +117,33 @@ export function transcriptOf(
           "deliveryId" in event.data.cause &&
           event.data.cause.deliveryId === resetDeliveryId
         )
-          messages = [];
+          entries = [];
         break;
     }
   }
+  const conversation = conversationTurns(
+    follows,
+    selection === undefined ? latestTurnId : selection,
+  );
+  // A turn this stream never started is one it can't place, so its messages stay.
+  const messages = entries.flatMap(({ message, turnId }) =>
+    turnId === undefined || !follows.has(turnId) || conversation.has(turnId) ? [message] : [],
+  );
   return { messages: maxMessages === undefined ? messages : messages.slice(-maxMessages) };
+}
+
+/** The turn that heads the conversation and the turns it follows back. */
+function conversationTurns(
+  follows: ReadonlyMap<string, string | null>,
+  head: string | null | undefined,
+): ReadonlySet<string> {
+  const turns = new Set<string>();
+  let turnId = head;
+  while (turnId !== undefined && turnId !== null && !turns.has(turnId)) {
+    turns.add(turnId);
+    turnId = follows.get(turnId);
+  }
+  return turns;
 }
 
 function textOf(parts: readonly UserPart[]): string {

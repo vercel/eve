@@ -21,13 +21,14 @@ export interface DeliveryAdmittedData {
 }
 
 /**
- * A message from conversation eve did not run, such as a transcript an app stored. It is text
- * only: it names no turn or call, and records nothing eve did.
+ * A message from conversation eve did not run, such as a transcript an app stored. It names no
+ * turn or call, and records nothing eve ran.
  */
 export interface ImportedMessage {
   /** The app's own id for the message, when it gave one. eve never reads it. */
   readonly id?: string;
   readonly role: "user" | "assistant";
+  /** The message's plain text. */
   readonly text: string;
 }
 
