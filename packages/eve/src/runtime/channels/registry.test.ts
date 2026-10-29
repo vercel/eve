@@ -188,11 +188,13 @@ describe("deserializeRuntimeAdapter", () => {
     });
   });
 
-  // devalue keeps `{ key: undefined }` while JSON drops the key; both must
-  // rehydrate the same way.
-  it("falls back to the seed for stored undefined values", () => {
+  // Rehydration runs at every step boundary: an explicit `undefined` is a
+  // stored value, but a deleted key looks like a field added to the seed later.
+  it("keeps a stored undefined field and restores a deleted one", () => {
     const registry = createRuntimeAdapterRegistry({
-      channels: [makeChannelDefinition({ kind: "channel:test", state: { mode: "seed" } })],
+      channels: [
+        makeChannelDefinition({ kind: "channel:test", state: { cursor: "seed", mode: "seed" } }),
+      ],
     });
 
     const rehydrated = deserializeRuntimeAdapter(registry, {
@@ -200,7 +202,20 @@ describe("deserializeRuntimeAdapter", () => {
       state: { mode: undefined },
     });
 
-    expect(rehydrated.state).toEqual({ mode: "seed" });
+    expect(rehydrated.state).toStrictEqual({ cursor: "seed", mode: undefined });
+  });
+
+  it("restores stored state unchanged for an adapter without a seed", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test" })],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored" },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ mode: "stored" });
   });
 
   it("does not share nested seed values with the registry entry", () => {

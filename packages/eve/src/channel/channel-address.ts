@@ -2,7 +2,7 @@ import type { MessageContent } from "#shared/message-content.js";
 import type { Delivery } from "#shared/delivery.js";
 import { commandDelivery } from "#channel/delivery.js";
 
-import type { ChannelAdapter } from "#channel/adapter.js";
+import { type ChannelAdapter, seedChannelState } from "#channel/adapter.js";
 import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
   createChannelDeliveryMetadata,
@@ -130,13 +130,10 @@ export function createChannelAddress<TState = undefined>(input: {
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
       const state = (options as { readonly state?: TState }).state;
-      const adapter =
-        state === undefined
-          ? input.adapter
-          : {
-              ...input.adapter,
-              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-            };
+      const adapter = {
+        ...input.adapter,
+        state: seedChannelState(input.adapter.state, state as Record<string, unknown> | undefined),
+      };
       const runInput: RunInput = {
         idempotencyKey: options.idempotencyKey,
         adapter,
@@ -197,13 +194,13 @@ export function createChannelAddress<TState = undefined>(input: {
       if (owner !== undefined) return { created: false, session: toSession(owner.sessionId) };
       const state = (options as { readonly state?: TState }).state;
       const started = await input.runtime.createSession({
-        adapter:
-          state === undefined
-            ? input.adapter
-            : {
-                ...input.adapter,
-                state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-              },
+        adapter: {
+          ...input.adapter,
+          state: seedChannelState(
+            input.adapter.state,
+            state as Record<string, unknown> | undefined,
+          ),
+        },
         auth: options.auth,
         capabilities: { requestInput: true },
         channelName: input.channelName,

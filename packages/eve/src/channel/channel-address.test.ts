@@ -74,7 +74,7 @@ describe("createChannelAddress", () => {
       continuationToken: "slack:C1:T1",
       // Fresh creation inputs, used only if the owner's deployment was retired.
       successor: expect.objectContaining({
-        adapter: { kind: "slack" },
+        adapter: { kind: "slack", state: {} },
         channelName: "slack",
         continuationToken: "slack:C1:T1",
         input: expect.objectContaining({ message: "hello" }),

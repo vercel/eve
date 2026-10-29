@@ -142,9 +142,9 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
 
   /**
    * Initial state shape. Auto-serialized at step boundaries. On rehydration,
-   * the runtime merges the serialized state onto this seed, so fields added
-   * to the seed after a session started take their seed value, and
-   * re-attaches the adapter's behavior functions from the registry.
+   * the runtime restores top-level seed fields missing from the serialized
+   * state (see {@link seedChannelState}) and re-attaches the adapter's
+   * behavior functions from the registry.
    */
   readonly state?: Record<string, unknown>;
 
@@ -262,6 +262,20 @@ export function defaultDeliverResult(
  */
 export function getAdapterKind(adapter: ChannelAdapter): string {
   return adapter.kind;
+}
+
+/**
+ * Builds `channel.state` from an adapter's seed and the session's own state,
+ * at creation and at every step boundary. Keys present in `state` win, even
+ * when `undefined`; keys absent from it take a fresh copy of the seed value,
+ * so mutating a nested default never reaches the shared seed. Seeds must be
+ * plain JSON-like data (`structuredClone`).
+ */
+export function seedChannelState(
+  seed: Record<string, unknown> | undefined,
+  state: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  return { ...structuredClone(seed), ...state };
 }
 
 /**

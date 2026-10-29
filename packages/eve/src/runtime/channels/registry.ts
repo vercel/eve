@@ -1,5 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { getAdapterKind } from "#channel/adapter.js";
+import { getAdapterKind, seedChannelState } from "#channel/adapter.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -130,18 +130,11 @@ export function deserializeRuntimeAdapter(
     );
   }
 
-  // The seed fills fields added to it after this session started, so
-  // `context(state)` never sees them as `undefined`. Stored values win, but a
-  // stored `undefined` falls back to the seed: JSON drops such keys while
-  // devalue keeps them, and the result must not depend on the serializer.
-  // Clone the seed so in-place mutation of a nested default cannot leak into
-  // the shared registry entry.
-  const state: Record<string, unknown> = structuredClone(adapterConfig.state) ?? {};
-  for (const [key, value] of Object.entries(serialized.state)) {
-    if (value !== undefined) state[key] = value;
-  }
-
-  return { ...adapterConfig, state };
+  // Runs at every step boundary, not only on resume. The seed restores fields
+  // added to it after this session started, so `context(state)` never sees
+  // them missing; a deleted field is restored the same way, since the two
+  // cannot be told apart.
+  return { ...adapterConfig, state: seedChannelState(adapterConfig.state, serialized.state) };
 }
 
 function requireAdapterKind(
