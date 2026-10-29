@@ -4,7 +4,6 @@ import {
   isVercelAuthChallenge,
   vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
-import { AGENT_INFO_FORBIDDEN_CODE } from "#protocol/routes.js";
 import {
   formatAgentInfoForbiddenMessage,
   isAgentInfoForbidden,
@@ -49,15 +48,6 @@ export function classifyRemoteError(error: unknown, phase: RemoteProbePhase): Re
     return {
       state: "auth-required",
       challenge: { kind: "eve-oidc" },
-    };
-  }
-  if (isAgentInfoForbidden(error)) {
-    return {
-      state: "unavailable",
-      failure: {
-        code: AGENT_INFO_FORBIDDEN_CODE,
-        message: formatAgentInfoForbiddenMessage("The remote agent"),
-      },
     };
   }
   if (error instanceof ClientError) {
@@ -117,6 +107,11 @@ export async function probeRemoteInfo(input: {
     // The info route can be missing or use an older payload shape. Only call
     // the target ready once the public health route confirms a live Eve server.
     if (await probeDeploymentHealth(input.client)) return { state: "ready" };
+  }
+  // Chat works without inspection, so a credential the info route refuses
+  // still connects and only learns how to unlock the agent details.
+  if (isAgentInfoForbidden(error) && (await probeDeploymentHealth(input.client))) {
+    return { state: "ready", warning: formatAgentInfoForbiddenMessage("The remote agent") };
   }
   return classifyRemoteError(error, input.phase);
 }

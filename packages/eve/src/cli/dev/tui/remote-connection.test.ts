@@ -67,6 +67,11 @@ const TRUSTED_SOURCES_MISMATCH = [
   "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
 ].join("\n\n");
 
+const INFO_FORBIDDEN = new ClientError(
+  403,
+  JSON.stringify({ code: "info_forbidden", error: "Forbidden.", ok: false }),
+);
+
 function eveUnauthorized(error = "Authorization is required for this route."): ClientError {
   return new ClientError(401, JSON.stringify({ code: "unauthorized", error, ok: false }));
 }
@@ -184,20 +189,6 @@ describe("createRemoteConnectionController", () => {
       },
     },
     {
-      name: "an info route that refuses a non-operator credential",
-      error: new ClientError(
-        403,
-        JSON.stringify({ code: "info_forbidden", error: "Forbidden.", ok: false }),
-      ),
-      expected: {
-        state: "unavailable",
-        failure: {
-          code: "info_forbidden",
-          message: expect.stringContaining('principalType "service"'),
-        },
-      },
-    },
-    {
       name: "an ordinary HTTP failure",
       error: new ClientError(503, "Unavailable"),
       expected: { state: "unavailable", failure: { message: "Unavailable" } },
@@ -253,6 +244,36 @@ describe("createRemoteConnectionController", () => {
     const harness = createHarness({
       info: async () => {
         throw new AgentInfoResponseError(["agent: Required"]);
+      },
+    });
+    vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
+
+    await expect(harness.controller.check()).resolves.toMatchObject({ state: "unavailable" });
+  });
+
+  it("stays ready with an access hint when the info route refuses the credential", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw INFO_FORBIDDEN;
+      },
+    });
+    const health = vi.spyOn(harness.client, "health").mockResolvedValue({
+      ok: true,
+      status: "ready",
+      workflowId: "wf_test",
+    });
+
+    await expect(harness.controller.check()).resolves.toEqual({
+      state: "ready",
+      warning: expect.stringContaining("allowAgentInfo: true"),
+    });
+    expect(health).toHaveBeenCalledOnce();
+  });
+
+  it("is unavailable when the info route refuses the credential and health cannot confirm Eve", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw INFO_FORBIDDEN;
       },
     });
     vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
