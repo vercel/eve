@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
@@ -362,22 +366,59 @@ test("mints a repository-scoped token only during execution and redacts output",
     "cd '/workspace/internal-agents' && exec 'git' 'push' 'origin' 'HEAD:refs/heads/rui/my-branch'",
   );
   assert.equal(push.env?.GH_TOKEN, undefined);
-  assert.equal(push.env?.GIT_CONFIG_COUNT, "4");
+  assert.equal(push.env?.GIT_CONFIG_COUNT, "6");
   assert.equal(push.env?.GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
   assert.match(push.env?.GIT_CONFIG_VALUE_0 ?? "", /^Authorization: Basic /u);
   assert.doesNotMatch(JSON.stringify(push.env), /secret-token/u);
-  assert.equal(push.env?.GIT_CONFIG_VALUE_1, "/dev/null");
+  assert.equal(push.env?.GIT_CONFIG_VALUE_3, "/dev/null");
   assert.deepEqual(
-    [push.env?.GIT_CONFIG_KEY_2, push.env?.GIT_CONFIG_VALUE_2],
+    [push.env?.GIT_CONFIG_KEY_4, push.env?.GIT_CONFIG_VALUE_4],
     ["protocol.allow", "never"],
   );
   assert.deepEqual(
-    [push.env?.GIT_CONFIG_KEY_3, push.env?.GIT_CONFIG_VALUE_3],
+    [push.env?.GIT_CONFIG_KEY_5, push.env?.GIT_CONFIG_VALUE_5],
     ["protocol.https.allow", "always"],
   );
   assert.match(JSON.stringify(policies[0]), /secret-token/u);
   assert.equal(policies[1], "allow-all");
   assert.equal(output.stdout, "pushed [redacted]");
+});
+
+test("rewrites SSH GitHub remotes to HTTPS so they carry the credential", async () => {
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  await executeGitHubShell(WRITE, CONFIG, {
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox(runs, () => ({ exitCode: 0, stdout: "", stderr: "" }), []);
+    },
+  });
+  const repository = mkdtempSync(join(tmpdir(), "eve-git-ssh-"));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: repository,
+        encoding: "utf8",
+        env: { ...process.env, ...runs[0]!.env },
+      }).trim();
+    git("init", "-q");
+    for (const remote of [
+      "git@github.com:acme/widgets.git",
+      "ssh://git@github.com/acme/widgets.git",
+    ]) {
+      git("remote", "add", "origin", remote);
+      assert.equal(git("remote", "get-url", "origin"), "https://github.com/acme/widgets.git");
+      assert.equal(
+        git("remote", "get-url", "--push", "origin"),
+        "https://github.com/acme/widgets.git",
+      );
+      git("remote", "remove", "origin");
+    }
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
 });
 
 test("runs gh auth token with only the placeholder credential and redacts injected secrets", async () => {

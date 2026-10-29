@@ -107,7 +107,7 @@ Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. The sandbox 
 `github.authorize` is the agent's only access control: a command runs only when it returns `true`, and the token never reaches the sandbox otherwise. It runs before every `gh` call with the parsed `argv`, the caller's `auth`, the `repository` the call declared (or `null`), and the minted `token`. What the token reaches depends on `principalType`:
 
 - **`"app"`**: a GitHub App installation token for the declared repository, or for the whole installation when the call declares only an owner. `authorize` also receives that `owner`.
-- **`"user"`**: the caller's own token, which reaches whatever the caller can on GitHub. eve signs the caller in when needed and again when GitHub rejects the token. `authorize` receives no `owner`, because the token is not scoped to one.
+- **`"user"`**: the caller's own token, which reaches whatever the caller can on GitHub. eve signs the caller in when needed and again when GitHub rejects the token. `authorize` receives no `owner`, because the token is not scoped to one. `repository` is only what the model declared, and nothing ties it to the command, so it is a hint, not a boundary. Gate user-mode calls on `auth` instead, for example `({ auth }) => auth !== null`.
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";

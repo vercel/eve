@@ -12,6 +12,7 @@ import {
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
+import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
@@ -130,7 +131,6 @@ interface GitHubShellDependencies {
 const MAX_OUTPUT_BYTES = 100_000;
 const leaseQueues = new Map<string, Promise<void>>();
 const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
-const REPOSITORY = /^([A-Za-z0-9][A-Za-z0-9-]*)(?:\/([A-Za-z0-9._-]+))?$/u;
 /** How `gh` and `git` report a rejected token. */
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
 
@@ -153,8 +153,10 @@ export async function executeGitHubShell(
   dependencies: GitHubShellDependencies,
 ): Promise<GitHubShellOutput> {
   if (!config) throw new Error("GitHub command access is not configured for this agent.");
-  const argv = validateGitHubShellInput(input);
-  const { owner, repository, name } = declaredTarget(input.repository);
+  const {
+    argv,
+    target: { owner, repository, name },
+  } = validateGitHubShellInput(input);
   if (config.principalType === "user" ? owner && !repository : !owner) {
     throw new Error(
       config.principalType === "user"
@@ -231,10 +233,14 @@ export async function executeGitHubShell(
           GH_PROMPT_DISABLED: "1",
         };
         if (argv[0] !== "git") env.GH_TOKEN = placeholder;
-        // Applies to every git process, including the ones gh starts: the
-        // credential header reaches only HTTPS GitHub, and no hooks run.
+        // Defaults for every git process, including the ones gh starts. SSH
+        // GitHub remotes are rewritten to HTTPS so they carry the credential
+        // header. The command's own `-c` options still override these; the
+        // lease, not this config, bounds what the command can reach.
         const gitConfig: [string, string][] = [
           ["http.https://github.com/.extraheader", `Authorization: ${placeholderAuthorization}`],
+          ["url.https://github.com/.insteadOf", "git@github.com:"],
+          ["url.https://github.com/.insteadOf", "ssh://git@github.com/"],
           ["core.hooksPath", "/dev/null"],
           ["protocol.allow", "never"],
           ["protocol.https.allow", "always"],
@@ -384,7 +390,10 @@ export function parseCommand(command: string): string[] {
   return argv;
 }
 
-function validateGitHubShellInput(input: GitHubShellInput): string[] {
+function validateGitHubShellInput(input: GitHubShellInput): {
+  argv: string[];
+  target: ReturnType<typeof declaredTarget>;
+} {
   const argv = parseCommand(input.command);
   if (!input.description.trim()) throw new Error("description must describe the intended result.");
   // The credential lease is wired only into these executables: gh reads the
@@ -393,8 +402,7 @@ function validateGitHubShellInput(input: GitHubShellInput): string[] {
     throw new Error("GitHub commands must use gh, git, or gh-signed-commit.");
   }
   if (argv.length < 2) throw new Error(`A ${argv[0]} subcommand or argument is required.`);
-  declaredTarget(input.repository);
-  return argv;
+  return { argv, target: declaredTarget(input.repository) };
 }
 
 function declaredTarget(value: string | undefined): {
@@ -404,7 +412,7 @@ function declaredTarget(value: string | undefined): {
 } {
   const declared = value?.trim();
   if (!declared) return { owner: null, repository: null, name: null };
-  const match = REPOSITORY.exec(declared.replace(/\.git$/iu, ""));
+  const match = GITHUB_TARGET.exec(declared.replace(/\.git$/iu, ""));
   if (!match) throw new Error(`Invalid GitHub repository or owner ${JSON.stringify(value)}.`);
   const [, owner, name] = match;
   return { owner: owner!, repository: name ? `${owner}/${name}` : null, name: name ?? null };
