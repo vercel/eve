@@ -25,7 +25,14 @@ import { runApprovedCalls } from "#harness/hitl/approved-calls.js";
 import { takeTurnFailure } from "./intents.js";
 import { takeUserInstructionMessages } from "./kinds/instructions.js";
 import { dynamicTools } from "./kinds/tool.js";
-import { evaluateValues, isReactionFailedError, restoreReactions, runReactions } from "./runner.js";
+import {
+  evaluateValues,
+  isReactionFailedError,
+  programScope,
+  restoreReactions,
+  runReactions,
+  withMemos,
+} from "./runner.js";
 import { MEMOS_CAP, forgetSessionLive, memoBytes, readReactionsState, slotsOf } from "./state.js";
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
@@ -347,6 +354,27 @@ describe("evaluateValues", () => {
 
     expect(slotsOf(ctx, "instructions")).toEqual([]);
     expect(slotsOf(ctx, "tool")).toHaveLength(1);
+  });
+
+  it("keeps the session program's memos when it drops a removed definition's", async () => {
+    const policy: Evaluate = () => defineInstructions({ content: "Policy." });
+    const ctx = session(counted([]), [], [policy]);
+    await beforeCall(ctx, [user("a")]);
+    await withMemos(ctx, { label: "the session program", scope: programScope("next") }, (memo) =>
+      memo("style", () => "[n]"),
+    );
+
+    const bundle = ctx.get(BundleKey) as { resolvedAgent: object };
+    ctx.set(BundleKey, {
+      ...bundle,
+      resolvedAgent: { ...bundle.resolvedAgent, dynamicInstructionsResolvers: [] },
+    } as never);
+    await contextStorage.run(ctx, () =>
+      restoreReactions(ctx, { conversation: [user("a")], revision: "r2" }),
+    );
+
+    expect(slotsOf(ctx, "instructions")).toEqual([]);
+    expect(Object.keys(readReactionsState(ctx).memos ?? {})).toContain(programScope("next"));
   });
 
   it("fails without changing what's installed, keeps nothing for a failed memo, and runs it again", async () => {

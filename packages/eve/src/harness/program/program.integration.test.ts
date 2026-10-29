@@ -457,3 +457,44 @@ describe("a session program's agent", () => {
     expect(JSON.stringify(events)).not.toContain("10.0.0.7");
   });
 });
+
+describe("a session program's memos", () => {
+  it("keep what one decision learned for its next evaluation in the turn", async () => {
+    const { ctx } = reactionSession();
+    let lookups = 0;
+    const program: Program = (ctx) => ({
+      ...nativeProgram(ctx),
+      next: async (): Promise<Next> => {
+        const next = nativeNext(ctx);
+        // Alice's citation style, looked up once per turn.
+        const style = await ctx.memo(["citation-style", ctx.turn!.id], () => {
+          lookups += 1;
+          return "[n]";
+        });
+        if (!("settle" in next) || ctx.turn!.continuations > 0) return next;
+        return { model: { note: `Cite your sources as ${style}.` } };
+      },
+    });
+
+    const { prompts, result } = await runTurn(
+      program,
+      ["Two court cases back it.", "Two court cases back it [1]."],
+      { ctx },
+    );
+
+    expect(prompts).toEqual(["Which sources back the second claim?", "Cite your sources as [n]."]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it [1]." });
+    expect(lookups).toBe(1);
+  });
+
+  it("fail the turn generically where the step carries no session state", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = await runTurn(
+      (ctx) => ({ next: () => ctx.memo(["style"], () => ({ settle: { output: "Done." } })) }),
+      ["Two court cases back it."],
+    );
+
+    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's program failed." });
+  });
+});

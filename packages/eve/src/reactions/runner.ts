@@ -211,7 +211,7 @@ function dropRemovedSlots(ctx: ContextContainer, reactions: readonly Reaction[])
   const ids = new Set(reactions.map(({ id }) => id));
   const removed = Object.keys(state.slots).filter((id) => !ids.has(id));
   const removedMemos = Object.keys(state.memos ?? {}).filter(
-    (scope) => !ids.has(scope.split("#")[0]!),
+    (scope) => !scope.startsWith(PROGRAM_SCOPE) && !ids.has(scope.split("#")[0]!),
   );
   if (removed.length === 0 && removedMemos.length === 0) return;
   const slots = { ...state.slots };
@@ -254,28 +254,14 @@ async function evaluate(
   },
 ): Promise<{ readonly changed: boolean }> {
   const abortSignal = run.abortSignal ?? neverAborted;
-  const sessionId = sessionIdOf(ctx);
-  const kept = readReactionsState(ctx).memos?.[reaction.id];
-  const memos = openMemos({
-    abortSignal,
-    kept,
-    label: reaction.label,
-    scope: reaction.id,
-    sessionId,
-    afterDeployment: discardedByDeployment(ctx, reaction.id),
-  });
-  let contribution: Awaited<ReturnType<ValueReaction["contribute"]>>;
-  try {
-    const context = internalContext(ctx, reaction, { ...run, abortSignal, memo: memos.memo });
-    contribution = await reaction.contribute(await reaction.evaluate(context), context);
-  } catch (error) {
-    mergeMemos(ctx, reaction.id, memos.used());
-    throw error;
-  } finally {
-    memos.close();
-  }
-  const used = memos.used();
-  keepMemos(ctx, reaction.id, used);
+  const { result: contribution, used } = await withMemos(
+    ctx,
+    { abortSignal, label: reaction.label, scope: reaction.id },
+    async (memo) => {
+      const context = internalContext(ctx, reaction, { ...run, abortSignal, memo });
+      return await reaction.contribute(await reaction.evaluate(context), context);
+    },
+  );
   const value = parseJsonValue(contribution.value ?? null);
   const digest = digestOf(value);
   // In development, evaluate again with the memos fixed: a value that changes anyway depends on
@@ -303,6 +289,44 @@ async function evaluate(
   else writeLive(ctx, reaction.id, slot, contribution.live);
   return { changed: !unchanged || contribution.live !== undefined };
 }
+
+/**
+ * Runs `fn` with `scope`'s memos. When it succeeds, the scope keeps what this run used; when it
+ * fails, what ran joins what the scope had.
+ */
+export async function withMemos<T>(
+  ctx: ContextContainer,
+  input: { readonly scope: string; readonly label: string; readonly abortSignal?: AbortSignal },
+  fn: (memo: InternalContext["memo"]) => Promise<T>,
+): Promise<{ readonly result: T; readonly used: Readonly<Record<string, JsonValue>> }> {
+  const memos = openMemos({
+    abortSignal: input.abortSignal ?? neverAborted,
+    afterDeployment: discardedByDeployment(ctx, input.scope),
+    kept: readReactionsState(ctx).memos?.[input.scope],
+    label: input.label,
+    scope: input.scope,
+    sessionId: sessionIdOf(ctx),
+  });
+  let result: T;
+  try {
+    result = await fn(memos.memo);
+  } catch (error) {
+    mergeMemos(ctx, input.scope, memos.used());
+    throw error;
+  } finally {
+    memos.close();
+  }
+  const used = memos.used();
+  keepMemos(ctx, input.scope, used);
+  return { result, used };
+}
+
+/** The memo scope of one of the session program's decisions, which no definition owns. */
+export function programScope(decision: "agent" | "history" | "next"): string {
+  return `${PROGRAM_SCOPE}${decision}`;
+}
+
+const PROGRAM_SCOPE = "program:";
 
 /** Evaluates `reaction` again with its memos fixed, and reports a value that differs. */
 async function checkStable(

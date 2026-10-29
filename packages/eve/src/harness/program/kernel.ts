@@ -14,12 +14,16 @@ import { manifestValues } from "#reactions/bundle.js";
 import type { ValueReaction } from "#reactions/reaction.js";
 import { checkHistory } from "./check.js";
 import { nativeNext, nativeProgram } from "./native.js";
+import { SessionIdKey } from "#context/keys.js";
+import type { Memo } from "#dynamic/definition.js";
+import { programScope, withMemos } from "#reactions/runner.js";
 import {
   type Compaction,
   force,
+  type Lazy,
+  type Plan,
   type ModelStep,
   type Next,
-  type Program,
   type ProgramContext,
 } from "./program.js";
 
@@ -52,7 +56,7 @@ interface Decision {
   readonly compaction?: Compaction;
 }
 
-function programContext(step: Step, decision: Decision): ProgramContext {
+function programContext(step: Step, decision: Decision, memo: Memo): ProgramContext {
   const turnId = activeTurnIdOf(step.view().projection);
   const history = decision.history ?? step.session.history;
   const container = step.ctx as ContextContainer | undefined;
@@ -60,6 +64,7 @@ function programContext(step: Step, decision: Decision): ProgramContext {
     ...(decision.compaction !== undefined && { compaction: decision.compaction }),
     history,
     manifest: async () => (container === undefined ? [] : await manifestValues(container)),
+    memo,
     signal: step.config.abortSignal,
     tasks: { working: workingTaskIds(step.session) },
     turn:
@@ -74,8 +79,42 @@ function programContext(step: Step, decision: Decision): ProgramContext {
   };
 }
 
-function programOf(step: Step): Program {
-  return step.config.program ?? nativeProgram;
+/**
+ * Evaluates the session's program for one decision, and forces the field it decides. Each decision
+ * has its own memos, which keep what its latest evaluation used, as a dynamic value's do.
+ */
+async function evaluate<T>(
+  step: Step,
+  input: {
+    readonly decision: "agent" | "history" | "next";
+    readonly context: Decision;
+    readonly field: (plan: Plan, ctx: ProgramContext) => Lazy<T> | undefined;
+  },
+): Promise<{ readonly ctx: ProgramContext; readonly value: T | undefined }> {
+  const container = step.ctx as ContextContainer | undefined;
+  let ctx: ProgramContext | undefined;
+  const run = async (memo: Memo) => {
+    ctx = programContext(step, input.context, memo);
+    return await force(input.field((step.config.program ?? nativeProgram)(ctx), ctx));
+  };
+  if (container === undefined || !container.has(SessionIdKey)) {
+    const value = await run(() => {
+      throw new Error(
+        "ctx.memo keeps what it learns in the session's state, which this step doesn't carry.",
+      );
+    });
+    return { ctx: ctx!, value };
+  }
+  const { result } = await withMemos(
+    container,
+    {
+      abortSignal: step.config.abortSignal,
+      label: "the session program",
+      scope: programScope(input.decision),
+    },
+    run,
+  );
+  return { ctx: ctx!, value: result };
 }
 
 /** Asks the session's program what the turn does after a model step, and does it. */
@@ -84,16 +123,23 @@ export async function decideAfterModel(
   lastStep: ModelStep,
   settle: Settle,
 ): Promise<StepResult> {
-  const ctx = programContext(step, { lastStep });
-  let next: Next;
+  let decided: { readonly ctx: ProgramContext; readonly value: Next | undefined };
   try {
-    next = (await force(programOf(step)(ctx).next)) ?? nativeNext(ctx);
+    decided = await evaluate(step, {
+      context: { lastStep },
+      decision: "next",
+      field: (plan, ctx) => plan.next ?? (() => nativeNext(ctx)),
+    });
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
-    log.error("the session program threw; failing the turn", { error, turnId: ctx.turn?.id });
+    log.error("the session program threw; failing the turn", {
+      error,
+      turnId: step.position().turnId,
+    });
     return await failProgram(step);
   }
-  return await applyNext(step, ctx, next, settle);
+  const { ctx, value } = decided;
+  return await applyNext(step, ctx, value ?? nativeNext(ctx), settle);
 }
 
 async function applyNext(
@@ -146,12 +192,16 @@ export async function programValues(
   step: Step,
   conversation: readonly HarnessModelMessage[],
 ): Promise<readonly ValueReaction[]> {
-  const ctx = programContext(step, { history: conversation });
   try {
-    return (await force(programOf(step)(ctx).agent ?? ctx.manifest)) ?? [];
+    const { value } = await evaluate(step, {
+      context: { history: conversation },
+      decision: "agent",
+      field: (plan, ctx) => plan.agent ?? ctx.manifest,
+    });
+    return value ?? [];
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
-    log.error("the session program's agent threw", { error, turnId: ctx.turn?.id });
+    log.error("the session program's agent threw", { error, turnId: step.position().turnId });
     throw new ProgramFailedError(error);
   }
 }
@@ -195,14 +245,17 @@ export async function programHistory(
     },
     reason: input.reason,
   };
-  const ctx = programContext(step, { compaction, history: input.messages });
   let history: readonly HarnessModelMessage[] | undefined;
   try {
-    history = await force(programOf(step)(ctx).history ?? (() => compaction.native(ctx.history)));
+    ({ value: history } = await evaluate(step, {
+      context: { compaction, history: input.messages },
+      decision: "history",
+      field: (plan, ctx) => plan.history ?? (() => compaction.native(ctx.history)),
+    }));
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
     if (typeof error === "object" && error !== null && failures.has(error)) throw error;
-    log.error("the session program's history threw", { error, turnId: ctx.turn?.id });
+    log.error("the session program's history threw", { error, turnId: step.position().turnId });
     throw new ProgramFailedError(error);
   }
   if (history === undefined) return [...input.messages];

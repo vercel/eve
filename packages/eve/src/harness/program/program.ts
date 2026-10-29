@@ -1,4 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { Memo } from "#dynamic/definition.js";
 import type { ValueReaction } from "#reactions/reaction.js";
 import type { JsonValue } from "#shared/json.js";
 
@@ -52,6 +53,12 @@ export interface ProgramContext {
   readonly compaction?: Compaction;
   /** The dynamic values the agent's files declare, in the order eve evaluates them. */
   manifest(): Promise<readonly ValueReaction[]>;
+  /**
+   * Keeps what the program learns from outside, as a dynamic value's `ctx.memo` does. Each
+   * decision (`agent`, `history`, `next`) keeps what its latest evaluation used. A cache, not a
+   * record of effects: a deployment change or a crash can run it again.
+   */
+  readonly memo: Memo;
   readonly tasks: { readonly working: readonly string[] };
   readonly signal: AbortSignal | undefined;
 }
