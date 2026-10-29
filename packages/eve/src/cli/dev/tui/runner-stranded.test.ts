@@ -87,6 +87,90 @@ describe("EveTUIRunner with a stranded session", () => {
   });
 });
 
+describe("EveTUIRunner channel commands", () => {
+  it("offers the eve channel's commands and sends what a command returns", async () => {
+    const commandRequests: unknown[] = [];
+    const server = new FakeEveServer(reply("Done."), async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/eve/v1/commands") {
+        return Response.json({
+          ok: true,
+          commands: [
+            {
+              name: "triage",
+              description: "Triage issues",
+              argumentHint: "[label]",
+              session: "optional",
+            },
+          ],
+        });
+      }
+      if (path === "/eve/v1/commands/triage") {
+        commandRequests.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true, message: "Triage queued", send: "Triage the bugs." });
+      }
+      return Response.json({ ok: false }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", server.fetch);
+    let loaded!: () => void;
+    const commandsLoaded = new Promise<void>((resolve) => (loaded = resolve));
+    const outcomes: unknown[] = [];
+    const { renderer } = turnTaking(["/triage bugs", undefined], {
+      finishCommand: (outcome) => outcomes.push(outcome),
+      setPromptCommands: (commands) => {
+        if (commands.some((command) => command.name === "triage")) loaded();
+      },
+    });
+    const readInput = renderer.readInput;
+    if (readInput === undefined) throw new Error("turnTaking always reads input.");
+    // Submit only once the channel's commands are recognized.
+    renderer.readInput = async (options) => {
+      await commandsLoaded;
+      return await readInput(options);
+    };
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+
+    expect(commandRequests).toEqual([{ argument: "bugs" }]);
+    expect(outcomes).toEqual([{ kind: "result", message: "Triage queued" }]);
+    expect(server.requestsTo("POST", "/eve/v1/session")[0]?.body).toMatchObject({
+      message: "Triage the bugs.",
+    });
+  });
+
+  it("runs a command in the current session and starts fresh after it ends the session", async () => {
+    const commandRuns: string[] = [];
+    const server = new FakeEveServer(reply("Done."), async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/eve/v1/commands") {
+        return Response.json({
+          ok: true,
+          commands: [{ name: "restart", description: "Restart", session: "required" }],
+        });
+      }
+      commandRuns.push(path);
+      return Response.json({ ok: true, message: "Restarted", controls: ["end"] });
+    });
+    vi.stubGlobal("fetch", server.fetch);
+    const outcomes: unknown[] = [];
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer: turnTaking(["/restart", "Hello.", "/restart", "Again.", undefined], {
+        finishCommand: (outcome) => outcomes.push(outcome),
+      }).renderer,
+    }).run();
+
+    expect(outcomes).toEqual([
+      { kind: "result", summary: "/restart needs an active session" },
+      { kind: "result", message: "Restarted" },
+    ]);
+    expect(commandRuns).toEqual(["/eve/v1/session/session_1/commands/restart"]);
+    expect(server.sessionId).toBe("session_2");
+  });
+});
+
 describe("EveTUIRunner diagnostics", () => {
   it("names a tool that fails in the commit that requested it", async () => {
     const replied = reply("The lookup failed.");

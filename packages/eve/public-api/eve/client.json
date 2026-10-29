@@ -24,6 +24,8 @@
   "AgentObservation",
   "AgentObservationReason",
   "AskedCall",
+  "ChannelCommandInfo",
+  "ChannelCommandResult",
   "Client",
   "ClientAgentSession",
   "ClientAuth",
