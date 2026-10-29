@@ -17,6 +17,8 @@ interface AgentInvocationBase {
   readonly invocationId: string;
   readonly createdAt: string;
   readonly expiresAt?: string;
+  /** When the invocation's state last changed: its latest recorded event, or its creation. */
+  readonly updatedAt: string;
 }
 
 export type AgentInvocation =
@@ -24,6 +26,8 @@ export type AgentInvocation =
       readonly status: "working";
       readonly pollAfterMs: number;
       readonly result?: JsonValue;
+      /** What the agent is doing right now, such as `Query Snowflake`, from the session's activity. */
+      readonly statusMessage?: string;
     })
   | (AgentInvocationBase & {
       readonly status: "awaiting-input";

@@ -211,6 +211,21 @@ Requests are bounded: the whole MCP request body is limited to 1 MiB, `message` 
 - `agent_update` answers one pending batch. Re-sending the same answers after eve has accepted them returns the current invocation state; sending different answers for an already-answered batch is a conflict.
 - `agent_cancel` is cooperative and can race with completion. Poll `agent_get` until the status is terminal (`cancelled`, `completed`, or `failed`), not specifically `cancelled`.
 
+### Follow an invocation as a task
+
+Clients that support the MCP [Tasks extension](https://github.com/modelcontextprotocol/ext-tasks) (`io.modelcontextprotocol/tasks`) can follow an invocation with the standard task methods instead of polling the `agent_*` tools. The channel advertises the extension from `server/discover`. When a `tools/call` for `agent_start` declares the extension in its client capabilities, the call returns a task (`resultType: "task"`) instead of an invocation. The task ID is the invocation ID.
+
+| Method                 | Purpose                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `tasks/get`            | Read the task. A `working` task carries a `statusMessage` naming the calls the agent is running.  |
+| `subscriptions/listen` | With `notifications.taskIds`, stream a `notifications/tasks` snapshot each time the task changes. |
+| `tasks/update`         | Answer `inputRequests` with accepted elicitation results.                                         |
+| `tasks/cancel`         | Request cooperative cancellation.                                                                 |
+
+An `input_required` task lists each eve input request as a form elicitation: pick an option as `answer`, or type freeform `text`. A `completed` task's `result` is the same tool result `agent_get` returns. Sign-in requests appear as a `working` task whose `statusMessage` carries the sign-in URL or code. The stream closes once the task is terminal; listen again to keep following a task after a dropped connection.
+
+Task requests pass the same authentication and ownership checks as the `agent_*` tools. A request that does not declare the extension receives error `-32021`.
+
 ## Publish the agent's tools
 
 By default the channel serves only the `agent_*` tools. Set `tools: true` to also publish every tool the agent can run outside a conversation, and `agent: false` to stop serving the `agent_*` tools:

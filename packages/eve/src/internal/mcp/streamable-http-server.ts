@@ -132,7 +132,44 @@ export interface McpServerTool {
  */
 export interface McpServerFeature {
   readonly capabilities: McpJsonObject;
-  register(server: McpServer): void;
+  register?(server: McpServer): void;
+  /**
+   * 2026-07-28 methods eve serves before the SDK sees the request, for
+   * extensions the SDK does not know, such as `tasks/get`. A method that
+   * returns `undefined` hands the request back to the SDK.
+   */
+  readonly methods?: Readonly<Record<string, McpFeatureMethod>>;
+}
+
+/** Serves one request: a result, which eve wraps in a JSON-RPC response, or a whole response. */
+export type McpFeatureMethod = (
+  request: McpFeatureRequest,
+) => Promise<McpJsonObject | Response | undefined>;
+
+/** What a feature method sees of one 2026-07-28 request. */
+export interface McpFeatureRequest {
+  readonly auth: SessionAuthContext | null;
+  readonly clientCapabilities: unknown;
+  readonly id: string | number;
+  /** The `Mcp-Name` header, which mirrors the request's target, such as a task ID. */
+  readonly name: string | null;
+  readonly params: Readonly<Record<string, unknown>>;
+  /** Stamped as `io.modelcontextprotocol/serverInfo` on results. */
+  readonly serverInfo: { readonly name: string; readonly version: string };
+  readonly signal: AbortSignal;
+}
+
+/** A JSON-RPC error a feature method answers with. */
+export class McpProtocolError extends Error {
+  readonly code: number;
+  readonly data: McpJsonObject | undefined;
+
+  constructor(code: number, message: string, data?: McpJsonObject) {
+    super(message);
+    this.name = "McpProtocolError";
+    this.code = code;
+    this.data = data;
+  }
 }
 
 type InferSchemaOutput<TSchema> =
@@ -264,9 +301,65 @@ export function createMcpStreamableHttpServer(
     // headers; anything else keeps it. `_meta.baggage` is never read.
     return await otelContext.with(
       withMcpRequestTraceContext(otelContext.active(), parsedBody),
-      () => handler.fetch(request, { parsedBody }),
+      async () =>
+        (await serveFeatureMethod(options, request, parsedBody, auth)) ??
+        (await handler.fetch(request, { parsedBody })),
     );
   };
+}
+
+async function serveFeatureMethod(
+  options: McpStreamableHttpServerOptions,
+  request: Request,
+  body: unknown,
+  auth: SessionAuthContext | null,
+): Promise<Response | undefined> {
+  if (!isPlainRecord(body) || !claimsCurrentProtocolVersion(body)) return undefined;
+  const { id, method, params } = body;
+  if (typeof method !== "string" || (typeof id !== "string" && typeof id !== "number")) {
+    return undefined;
+  }
+  // A header that disagrees with the body is the SDK's to reject.
+  if (request.headers.get("mcp-method") !== method) return undefined;
+  const serve = options.features?.find((feature) => feature.methods?.[method])?.methods?.[method];
+  if (serve === undefined || !isPlainRecord(params)) return undefined;
+
+  const serverInfo = { name: options.name, version: options.version };
+  try {
+    const result = await serve({
+      auth,
+      clientCapabilities: declaredClientCapabilities(
+        isPlainRecord(params._meta) ? params._meta : undefined,
+      ),
+      id,
+      name: request.headers.get("mcp-name"),
+      params,
+      serverInfo,
+      signal: request.signal,
+    });
+    if (result === undefined || result instanceof Response) return result;
+    return Response.json({
+      id,
+      jsonrpc: "2.0",
+      result: {
+        resultType: "complete",
+        ...result,
+        _meta: { "io.modelcontextprotocol/serverInfo": serverInfo },
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof McpProtocolError)) logError(log, "MCP feature method failed", error);
+    const { code, data, message } =
+      error instanceof McpProtocolError
+        ? error
+        : { code: -32603, data: undefined, message: "Internal error" };
+    // In-band errors answer 200, except the transport-level ones the SDK also answers 400.
+    const status = code === -32020 || code === -32021 ? 400 : 200;
+    return Response.json(
+      { error: { code, message, ...(data === undefined ? {} : { data }) }, id, jsonrpc: "2.0" },
+      { status },
+    );
+  }
 }
 
 /**
@@ -461,7 +554,7 @@ function createServer(
   const server = new McpServer({ name: options.name, version: options.version }, serverOptions);
 
   for (const tool of tools.values()) tool.register(server, auth);
-  for (const feature of options.features ?? []) feature.register(server);
+  for (const feature of options.features ?? []) feature.register?.(server);
 
   return server;
 }
