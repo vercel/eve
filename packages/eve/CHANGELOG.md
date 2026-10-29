@@ -1,5 +1,18 @@
 # eve
 
+## 0.89.0
+
+Released 2026-10-29 · [Compare with 0.88.1](https://github.com/vercel/eve/compare/eve%400.88.1...eve%400.89.0)
+
+### Breaking Changes
+
+- Client `messages` now show only the session's current conversation, so messages from before a clear no longer appear.
+  `messages` and `transcriptOf()` follow each turn's `follows` and a completed context change's `selects`, as `conversation(view)` does, and leave out turns outside the conversation. The session `view` still holds every retained turn. ([#5597](https://github.com/vercel/eve/pull/5597))
+- The `gh` tool takes an optional `repository` instead of `permissions`, runs any `gh` or `git` subcommand, and leaves every access decision to `github.authorize`.
+  `github.principalType` is now required and decides what `authorize` receives: `{ argv, auth, owner, repository, token }` for `"app"`, and `{ argv, auth, repository, token }` for `"user"`, where `repository` may be `null`. eve no longer matches `--repo` and other explicit targets against the declared repository or limits `git` to `fetch`, `ls-remote`, `pull`, and `push`; check `argv` in `authorize` if your policy depends on them. ([#5595](https://github.com/vercel/eve/pull/5595))
+- `history` passed to `send()`, `create()`, or the eve channel's `onMessage` now rejects an entry with a field other than `id`, `role`, or `text` instead of dropping it.
+  `InvalidSessionHistoryError` names the entry and its unknown fields. Map stored messages to `{ id, role, text }` before passing them, so fields a later release accepts never change what an existing caller sends. ([#5597](https://github.com/vercel/eve/pull/5597))
+
 ## 0.88.1
 
 Released 2026-10-29 · [Compare with 0.88.0](https://github.com/vercel/eve/compare/eve%400.88.0...eve%400.88.1)
