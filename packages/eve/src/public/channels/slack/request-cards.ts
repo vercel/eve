@@ -9,8 +9,8 @@ import {
   type Interaction,
   type RefusedAnswer,
   type RequestBatch,
-  responderOf,
 } from "#channel/interaction-prompts.js";
+import { responderOf } from "#protocol/session-projection/reader.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { slackSessionTargetOf } from "#public/channels/slack/api.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
