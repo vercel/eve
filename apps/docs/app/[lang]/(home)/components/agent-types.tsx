@@ -533,8 +533,75 @@ function voiceLevel(t: number) {
     : Math.round(4 + 16 * Math.min(1, phrase * 3) * (0.6 + 0.4 * noise) * swell);
 }
 
+// The support chat's thread, and the follow-up the demo adds.
+const WEB_THREAD = [
+  { sent: true, text: "Where's my order #4821?" },
+  { sent: false, text: "It shipped yesterday and arrives Thursday." },
+];
+const WEB_QUESTION = { sent: true, text: "Can it come Wednesday instead?" };
+const WEB_ANSWER = { sent: false, text: "Done, it now arrives Wednesday." };
+
+/** The hero's WhatsApp bubble shape, in the support chat's colors. */
+function SupportBubble({
+  sent,
+  text,
+  className = "",
+}: {
+  sent: boolean;
+  text: string;
+  className?: string;
+}) {
+  // Not through cn: tailwind-merge reads text-copy-13 and the text color as one conflict.
+  return (
+    <p
+      className={`relative px-3 py-2 text-copy-13 ${
+        sent ? "ml-auto bg-gray-1000 text-background-100" : "bg-gray-alpha-200 text-gray-1000"
+      } ${className}`}
+      style={{ borderRadius: bubbleRadius }}
+    >
+      <Tail className={sent ? "text-gray-1000" : "text-gray-alpha-200"} flipped={sent} />
+      {text}
+    </p>
+  );
+}
+
+/**
+ * Grows a message in from nothing, so whatever holds it eases its height up. It takes back the
+ * stack's gap and grows it inside, and leaves room for the bubble's tail.
+ */
+function GrowIn({ children }: { children: ReactNode }) {
+  return (
+    <div className="-mt-2 grid motion-safe:animate-grow-in">
+      <div className="-mx-2 -mb-1 flex min-h-0 flex-col overflow-hidden px-2 pt-2 pb-1">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /** Customer support chat docked in a product, shown inside a browser window. */
-function WebAppClient() {
+function WebAppClient({ stage = 0 }: { stage?: number }) {
+  const followUp = [
+    ...(stage >= AGENTIC_WEB_ASKED ? [WEB_QUESTION] : []),
+    ...(stage >= AGENTIC_WEB_ANSWERED ? [WEB_ANSWER] : []),
+  ];
+  const list = useRef<HTMLDivElement>(null);
+  const messages = useRef<HTMLDivElement>(null);
+  // Whether the oldest messages are cut off at the top, so only then the top edge fades.
+  const [clipped, setClipped] = useState(false);
+
+  useEffect(() => {
+    const frame = list.current;
+    const content = messages.current;
+    if (!(frame && content)) return;
+    const observer = new ResizeObserver(() =>
+      setClipped(content.offsetHeight > frame.clientHeight + 1),
+    );
+    observer.observe(content);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <AppWindow
       className="min-h-0"
@@ -566,24 +633,32 @@ function WebAppClient() {
           {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. */}
           <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[15rem]:block" />
         </div>
-        <div className="absolute inset-x-3 bottom-3 flex flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
-          <span className="text-label-12 text-gray-900">Acme support</span>
-          {/* The hero's WhatsApp bubble shape, in this chat's colors. */}
-          <div className="flex flex-col gap-2">
-            <p
-              className="relative ml-auto bg-gray-1000 px-3 py-2 text-copy-13 text-background-100"
-              style={{ borderRadius: bubbleRadius }}
-            >
-              <Tail className="text-gray-1000" flipped />
-              Where's my order #4821?
-            </p>
-            <p
-              className="relative bg-gray-alpha-200 px-3 py-2 text-copy-13 text-gray-1000"
-              style={{ borderRadius: bubbleRadius }}
-            >
-              <Tail className="text-gray-alpha-200" />
-              It shipped yesterday and arrives Thursday.
-            </p>
+        {/* Pinned to the window's bottom, the chat grows up over the dashboard as messages
+            join, never past the window; past that, the oldest scroll up out of view. */}
+        <div className="absolute inset-x-3 bottom-3 flex max-h-[calc(100%-1.5rem)] flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
+          <span className="shrink-0 text-label-12 text-gray-900">Acme support</span>
+          <div
+            className="flex min-h-0 flex-col justify-end overflow-hidden"
+            ref={list}
+            style={{
+              maskImage: clipped
+                ? "linear-gradient(to bottom, transparent, black 24px)"
+                : undefined,
+            }}
+          >
+            <div className="flex flex-col gap-2" ref={messages}>
+              {WEB_THREAD.map((message) => (
+                <SupportBubble key={message.text} {...message} />
+              ))}
+              {followUp.map((message) => (
+                <GrowIn key={message.text}>
+                  <SupportBubble
+                    {...message}
+                    className={`${imessageIn} ${message.sent ? "origin-bottom-right" : "origin-bottom-left"}`}
+                  />
+                </GrowIn>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -774,14 +849,17 @@ const receivedBubble = {
 
 /**
  * How long each stage of the agentic apps demo waits before it shows: the call starting to
- * record, your iMessage question, the planner typing, its answer, then the call hanging up.
+ * record, the support chat's follow-up and its answer, your iMessage question, the planner
+ * typing, its answer, then the call hanging up.
  */
-const AGENTIC_DEMO = [400, 1600, 700, 1400, 1800];
+const AGENTIC_DEMO = [400, 1100, 1300, 1100, 700, 1400, 1500];
 const AGENTIC_RECORDING = 1;
-const AGENTIC_ASKED = 2;
-const AGENTIC_TYPING = 3;
-const AGENTIC_ANSWERED = 4;
-const AGENTIC_HUNG_UP = 5;
+const AGENTIC_WEB_ASKED = 2;
+const AGENTIC_WEB_ANSWERED = 3;
+const AGENTIC_ASKED = 4;
+const AGENTIC_TYPING = 5;
+const AGENTIC_ANSWERED = 6;
+const AGENTIC_HUNG_UP = 7;
 
 // The demo's follow-up in the planner thread, entering like the hero's bubbles.
 const imessageIn = "motion-safe:animate-bubble-in motion-reduce:animate-fade-in";
@@ -880,7 +958,7 @@ function AgenticAppsPreview({ stage }: { stage?: number }) {
         a clinic's front desk, and a personal planner in iMessage.
       </figcaption>
       <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3 sm:gap-4">
-        <WebAppClient />
+        <WebAppClient stage={stage} />
         <VoiceClient stage={stage} />
       </div>
       <IMessageClient stage={stage} />

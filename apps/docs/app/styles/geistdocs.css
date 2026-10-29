@@ -41,6 +41,7 @@ body:has([data-nights-route]) {
   --animate-scale-in: scale-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   --animate-fade-in: fade-in 200ms ease-out both;
   --animate-thinking-loader: thinking-loader 1.5s linear infinite;
+  --animate-grow-in: grow-in 300ms ease-in-out both;
 
   @keyframes bubble-in {
     from {
@@ -68,6 +69,16 @@ body:has([data-nights-route]) {
     }
     100% {
       background-position: 0% 50%;
+    }
+  }
+
+  /* A grid row opening from nothing, so content joining a stack eases its height in. */
+  @keyframes grow-in {
+    from {
+      grid-template-rows: 0fr;
+    }
+    to {
+      grid-template-rows: 1fr;
     }
   }
 
