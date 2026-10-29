@@ -288,12 +288,14 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
-  it("records who approved a call on its approval span, the id only as the turn's principal", async () => {
-    for (const { audience, records, id } of [
+  it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {
+    for (const { audience, records, id, outcome = "accepted" } of [
       { audience: "public", records: true, id: "slack:T1:U2" },
       { audience: "public", records: false, id: undefined },
       // An explicit policy records a private conversation's content, but never principal ids.
       { audience: "private", records: true, id: undefined },
+      // A denied call never runs, so only its approval names who denied it.
+      { audience: "public", records: true, id: "slack:T1:U2", outcome: "declined" },
     ] as const) {
       const { commit, spans } = session(
         () => ({ emit: true, recordInputs: records, recordOutputs: records }),
@@ -320,15 +322,23 @@ describe("a session's spans, from its committed lines", () => {
         } as SessionEvent,
       );
       await commit({
-        data: { cause: { responseId: "r_0" }, interactionId: "i_call_deploy", outcome: "accepted" },
+        data: { cause: { responseId: "r_0" }, interactionId: "i_call_deploy", outcome },
         scope: turn,
         type: "interaction.settled",
       } as SessionEvent);
       await commit(turnSettled({ outcome: "completed" }));
 
-      const [span] = (await spans()).filter((each) => each.name === "agent.approval");
+      const exported = await spans();
+      const span = exported.find((each) => each.name === "agent.approval");
       expect(span?.attributes["agent.approval.responder.type"]).toBe("user");
       expect(span?.attributes["agent.approval.responder.id"]).toBe(id);
+      const tool = exported.find((each) => each.name === "execute_tool deploy");
+      expect(tool?.attributes["agent.tool.approver.type"]).toBe(
+        outcome === "accepted" ? "user" : undefined,
+      );
+      expect(tool?.attributes["agent.tool.approver.id"]).toBe(
+        outcome === "accepted" ? id : undefined,
+      );
     }
   });
 
