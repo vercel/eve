@@ -6,7 +6,6 @@ import {
   createImportedHistoryMessages,
   createUserMessage,
   frameworkMessageKindForStepInput,
-  markFollowUp,
   type HarnessModelMessage,
   normalizeMessage,
   userContentOf,
@@ -130,14 +129,19 @@ export async function prepareTurnInput(
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
   if (staged !== undefined) {
-    const message = anchorToTurn(
-      kind === undefined
-        ? createUserMessage("user", staged)
-        : createFrameworkUserMessage(kind, staged),
-      turnId,
+    if (isContinuation(step, input)) {
+      messages.push(
+        anchorToTurn(createFrameworkUserMessage("context.instruction", CONTINUATION_NOTE), turnId),
+      );
+    }
+    messages.push(
+      anchorToTurn(
+        kind === undefined
+          ? createUserMessage("user", staged)
+          : createFrameworkUserMessage(kind, staged),
+        turnId,
+      ),
     );
-    const hooks = followUpHooks(step, input);
-    messages.push(hooks === undefined ? message : markFollowUp(message, hooks));
   }
   return {
     clientContext,
@@ -151,25 +155,24 @@ export async function prepareTurnInput(
   };
 }
 
+const CONTINUATION_NOTE =
+  "The next message was sent automatically after the last turn, not by a person.";
+
 /**
- * The hooks whose follow-ups the input is, read from its deliveries' `source.hook`, which the
- * admission commit recorded before the step. Input that coalesced a person's message isn't one.
+ * Whether hooks' `ctx.continue()` sent all of the input, read from its deliveries' `source.hook`,
+ * which the admission commit recorded before the step. The note goes into history with the
+ * message, so the prompt the model reads matches what's stored.
  */
-function followUpHooks(
-  step: Step,
-  input: HarnessStepInput | undefined,
-): readonly string[] | undefined {
+function isContinuation(step: Step, input: HarnessStepInput | undefined): boolean {
   const deliveries = input?.deliveries ?? [];
-  if (deliveries.length === 0) return undefined;
   const rows = step.view().projection.view.deliveries;
-  const hooks: string[] = [];
-  for (const { deliveryId } of deliveries) {
-    const source = rows[deliveryId]?.source;
-    const hook = source !== undefined && "hook" in source ? source.hook : undefined;
-    if (hook === undefined) return undefined;
-    if (!hooks.includes(hook)) hooks.push(hook);
-  }
-  return hooks;
+  return (
+    deliveries.length > 0 &&
+    deliveries.every(({ deliveryId }) => {
+      const source = rows[deliveryId]?.source;
+      return source !== undefined && "hook" in source && source.hook !== undefined;
+    })
+  );
 }
 
 /** The turn's input as it follows tool results: a user message needs a boundary before it. */

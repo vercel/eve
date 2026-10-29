@@ -10,17 +10,17 @@ import { readReactionsState, writeReactionsState, type PendingIntent } from "./s
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. A follow-up targets the next turn, for
-// the turn that settled. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one. A continuation targets the next turn,
+// for the turn that settled. Repeated requests add nothing.
 
 /** A command a hook asked for, before it's queued. */
 export type Command =
   | { readonly type: "cancel"; readonly reason?: string }
-  | { readonly type: "follow-up"; readonly turnId: string; readonly delivery: DeliverHookPayload };
+  | { readonly type: "continue"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
 /**
  * Adds a hook's commands to the session's queue. Cancels between turns are dropped; each hook's
- * follow-up joins the turn's one follow-up delivery.
+ * continuation joins the turn's one continuation delivery.
  */
 export function queueCommands(
   ctx: ContextContainer,
@@ -31,14 +31,14 @@ export function queueCommands(
   if (commands.length === 0) return;
   const state = readReactionsState(ctx);
   const intents = [...(state.intents ?? [])];
-  let { followUp } = state;
+  let { continuation } = state;
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
-    if (command.type === "follow-up") {
-      // A hook joins the turn's follow-up; `ctx.followUp()` already refused one it can't join.
-      const queued = followUp?.turnId === command.turnId ? followUp : undefined;
-      followUp = {
+    if (command.type === "continue") {
+      // A hook joins the turn's continuation; `ctx.continue()` already refused one it can't join.
+      const queued = continuation?.turnId === command.turnId ? continuation : undefined;
+      continuation = {
         delivery:
           queued === undefined
             ? command.delivery
@@ -60,7 +60,11 @@ export function queueCommands(
     changed = true;
   }
   if (changed) {
-    writeReactionsState(ctx, { ...state, intents, ...(followUp !== undefined && { followUp }) });
+    writeReactionsState(ctx, {
+      ...state,
+      intents,
+      ...(continuation !== undefined && { continuation }),
+    });
   }
 }
 

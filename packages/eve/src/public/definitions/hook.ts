@@ -32,10 +32,10 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
   : HookEventMap[HookEventType];
 
 /**
- * Which handlers may follow up a turn with `ctx.followUp()`, by event key. Total over every
+ * Which handlers may continue a turn with `ctx.continue()`, by event key. Total over every
  * key, so a new hook event doesn't compile until it chooses.
  */
-export const HOOK_FOLLOW_UP_KEYS = {
+export const HOOK_CONTINUE_KEYS = {
   "*": true,
   "call.input": false,
   "call.progress": false,
@@ -69,44 +69,44 @@ export const HOOK_FOLLOW_UP_KEYS = {
   "usage.recorded": false,
 } as const satisfies Readonly<Record<HookEventKey, boolean>>;
 
-/** Event keys whose handlers receive `ctx.followUp()`: `turn.settled`, and `*`. */
-export type HookFollowUpEventKey = {
-  [K in HookEventKey]: (typeof HOOK_FOLLOW_UP_KEYS)[K] extends true ? K : never;
+/** Event keys whose handlers receive `ctx.continue()`: `turn.settled`, and `*`. */
+export type HookContinueEventKey = {
+  [K in HookEventKey]: (typeof HOOK_CONTINUE_KEYS)[K] extends true ? K : never;
 }[HookEventKey];
 
 /**
- * Options for `ctx.followUp()`: the shared send options' `context`, and `auth`, optional. Omitted,
+ * Options for `ctx.continue()`: the shared send options' `context`, and `auth`, optional. Omitted,
  * `auth` names no sender, and the turn runs as the session's current identity. A principal makes
  * the turn act for them, and `null` runs it with no caller, as with `session.send()`. There's no
- * `idempotencyKey`: a turn has one follow-up, which eve records with the step and admits once.
+ * `idempotencyKey`: a turn has one continuation, which eve records with the step and admits once.
  */
-export type HookFollowUpOptions = Pick<SessionSendOptions, "context"> &
+export type HookContinueOptions = Pick<SessionSendOptions, "context"> &
   Partial<Pick<SessionSendOptions, "auth">>;
 
 /**
- * What `ctx.followUp()` did, decided when it's called. `queued` means eve recorded the message;
+ * What `ctx.continue()` did, decided when it's called. `queued` means eve recorded the message;
  * another turn that starts first, a cancel, a clear, or a reset still drops it.
  */
-export type HookFollowUpResult =
+export type HookContinueResult =
   | { readonly queued: true }
   | {
       readonly queued: false;
       /**
        * `not-settled`: a `*` handler ran for an event other than `turn.settled`.
        * `not-completed`: the turn failed, or something other than this hook cancelled it.
-       * `already-queued`: this hook already followed up this turn.
-       * `auth-conflict`: another hook's follow-up to this turn acts for someone else.
+       * `already-queued`: this hook already continued this turn.
+       * `auth-conflict`: another hook's continuation of this turn acts for a different principal.
        */
       readonly reason: "not-settled" | "not-completed" | "already-queued" | "auth-conflict";
     };
 
 /**
  * Every hook handler receives this context: the session as of the commit the event is in, the
- * handler's occurrence, and the ways a hook acts. Handlers for {@link HookFollowUpEventKey} also
- * receive {@link HookFollowUp.followUp}.
+ * handler's occurrence, and the ways a hook acts. Handlers for {@link HookContinueEventKey} also
+ * receive {@link HookContinue.continue}.
  */
 export type HookContext<TKey extends HookEventKey = HookEventKey> = HookBaseContext &
-  ([TKey] extends [HookFollowUpEventKey] ? HookFollowUp : unknown);
+  ([TKey] extends [HookContinueEventKey] ? HookContinue : unknown);
 
 /** What every hook handler receives. */
 export interface HookBaseContext extends SessionContext, Omit<SessionFrame, "session"> {
@@ -137,18 +137,18 @@ export interface HookBaseContext extends SessionContext, Omit<SessionFrame, "ses
 }
 
 /** What `turn.settled` and `*` handlers receive besides {@link HookBaseContext}. */
-export interface HookFollowUp {
+export interface HookContinue {
   /**
    * Starts the session's next turn with `message` after a turn completes, or after a turn this
    * hook cancelled, to redirect it. The message is recorded now and admitted once the session is
-   * idle, as a delivery whose source names this hook and the channel. Hooks that follow up the
-   * same turn share one next turn, each message its own payload, in hook order. It yields: any
-   * other turn that starts first, a `session.cancel()`, a clear, or a reset drops it, so a
-   * person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
+   * idle, as a delivery whose source names this hook and the channel, and the model is told no
+   * person wrote it. Hooks that continue the same turn share one next turn, each message its own
+   * payload, in hook order. It yields: any other turn that starts first, a `session.cancel()`, a
+   * clear, or a reset drops it, so a person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
    * receipt: the delivery doesn't exist until the session admits it. Like other hook effects, it's
    * lost if the step is interrupted before it's saved. Throws after the handler has settled.
    */
-  followUp(message: MessageContent, options?: HookFollowUpOptions): HookFollowUpResult;
+  continue(message: MessageContent, options?: HookContinueOptions): HookContinueResult;
 }
 
 /**
@@ -184,7 +184,7 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
 
 /**
  * Defines a hook. Each handler runs once for each matching fact a commit carries, before the next
- * model call. A handler can call `ctx.cancel`, `ctx.followUp` from `turn.settled`, or an external
+ * model call. A handler can call `ctx.cancel`, `ctx.continue` from `turn.settled`, or an external
  * service. Pass `ctx.occurrence.idempotencyKey` to services that support idempotency. A retry
  * does not run handlers again for facts already published. A handler that throws during a turn fails the turn;
  * catch optional errors.

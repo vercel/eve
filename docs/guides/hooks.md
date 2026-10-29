@@ -27,7 +27,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services, cancel the running turn, and follow up a settled turn with the session's next message. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services, cancel the running turn, and continue a settled turn with the session's next message. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -76,11 +76,20 @@ For typed channel metadata in dynamic resolvers or instrumentation, narrow with 
 
 ## Hook structure and context
 
-Every handler receives the same `HookContext`, including the shared session
-helpers documented in [Session context](./session-context):
+Every handler receives a `HookContext`, including the shared session
+helpers documented in [Session context](./session-context). `HookContext<K>` is
+keyed by the handler's event key, and only `turn.settled` and `*` handlers get
+`continue`, so annotate a helper that calls it with `HookContext<"turn.settled">`:
 
 ```ts
-interface HookContext extends SessionContext {
+type HookContext<K extends HookEventKey = HookEventKey> = HookBaseContext &
+  (K extends "turn.settled" | "*" ? HookContinue : {});
+
+interface HookContinue {
+  continue(message: MessageContent, options?: HookContinueOptions): HookContinueResult;
+}
+
+interface HookBaseContext extends SessionContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
   /** Where the event sits on the stream: its line, and its index in that line. */
@@ -92,8 +101,6 @@ interface HookContext extends SessionContext {
   readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
   readonly memo: Memo;
   cancel(reason?: string): void;
-  /** Only on `turn.settled` and `*` handlers. */
-  followUp(message: MessageContent, options?: HookFollowUpOptions): HookFollowUpResult;
 }
 ```
 
@@ -261,9 +268,9 @@ The same goes for the `call.progress` a workflow tool reports while the turn wai
 
 `ctx.cancel()` targets the turn being processed, including while its input is being admitted. Calls between turns without an incoming turn do nothing. Repeated requests cancel that turn only once; they never cancel a later turn. Hook-side `ctx.compact` and `ctx.once` are not available. Client and channel session compaction APIs are unchanged.
 
-## Follow up a turn from a hook
+## Continue a turn from a hook
 
-Call `ctx.followUp(message, options?)` from a `turn.settled` handler to start the session's next turn. This hook keeps the agent working until the tests pass, for at most ten more turns:
+Call `ctx.continue(message, options?)` from a `turn.settled` handler to start the session's next turn. This hook keeps the agent working until the tests pass, for at most ten more turns:
 
 ```ts title="agent/hooks/until-green.ts"
 import { defineState } from "eve/context";
@@ -282,7 +289,7 @@ export default defineHook({
         return;
       }
       attempts.update((n) => n + 1);
-      ctx.followUp(
+      ctx.continue(
         `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
       );
     },
@@ -290,13 +297,13 @@ export default defineHook({
 });
 ```
 
-Only `turn.settled` and `*` handlers receive `ctx.followUp`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the follow-up names no sender and the turn runs as the session's current identity.
+Only `turn.settled` and `*` handlers receive `ctx.continue`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the continuation names no sender and the turn runs as the session's current identity.
 
-The follow-up waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or reset, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and the model is told that a hook sent it. Like other hook effects, a follow-up is lost if the step that settled the turn is interrupted before it's saved. Bound loops yourself, as the example does.
+The continuation waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or reset, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and a note in the turn's history tells the model no person wrote it. Like other hook effects, a continuation is lost if the step that settled the turn is interrupted before it's saved. Bound loops yourself, as the example does.
 
-A turn can be followed up when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and follow up with a correction. When several hooks follow up the same turn, their messages share the next turn.
+A turn can be continued when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and continue with a correction. When several hooks continue the same turn, their messages share the next turn.
 
-`ctx.followUp()` returns `{ queued: true }`, or `{ queued: false, reason }` when it can't follow up the turn: `not-completed`, `already-queued`, `auth-conflict` (another hook's follow-up acts for a different principal), or `not-settled` (a `*` handler on another event).
+`ctx.continue()` returns `{ queued: true }`, or `{ queued: false, reason }` when it can't continue the turn: `not-completed`, `already-queued`, `auth-conflict` (another hook's continuation acts for a different principal), or `not-settled` (a `*` handler on another event).
 
 ## Subagent isolation
 
@@ -309,7 +316,7 @@ A subagent's approvals, questions, and sign-ins are also relayed to the parent s
 | Need                                              | Use                                            |
 | ------------------------------------------------- | ---------------------------------------------- |
 | Observe runtime events (audit, metrics, alerting) | `events.<type>` (or a channel adapter handler) |
-| Start the next turn after one settles             | `ctx.followUp()` from `events["turn.settled"]` |
+| Start the next turn after one settles             | `ctx.continue()` from `events["turn.settled"]` |
 | Provide structured input to the model on demand   | a tool                                         |
 | Make a value available across the entire step     | a context provider                             |
 | Subscribe to platform-specific events             | a channel adapter handler                      |

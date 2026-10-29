@@ -5,9 +5,13 @@ import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import type {
+  SessionInbox,
+  SessionInboxHandle,
+  SessionInboxPayload,
+} from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { pendingFollowUp } from "#reactions/follow-up.js";
+import { pendingContinuation } from "#reactions/continuation.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
@@ -16,25 +20,30 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
-vi.mock("#reactions/follow-up.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#reactions/follow-up.js")>()),
-  pendingFollowUp: vi.fn(),
+vi.mock("#reactions/continuation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#reactions/continuation.js")>()),
+  pendingContinuation: vi.fn(),
 }));
 
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
-  vi.mocked(pendingFollowUp).mockReset();
+  vi.mocked(pendingContinuation).mockReset();
 });
 
 interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
 }
 
+type MockInbox = SessionInbox &
+  Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
+
 /** Scripted inbox: serves reads in order. */
-function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
+function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
   const remaining = [...reads];
 
   return {
+    awaitingHandover: false,
+    async whenHandoverSettled() {},
     claimedTokens: [],
     takeLeading: () => [],
     async claimSessionHook() {},
@@ -93,7 +102,7 @@ type WaitInput = {
   >[0][K];
 };
 
-function waitInput(inbox: SessionInbox): WaitInput {
+function waitInput(inbox: MockInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     hasWorkingTasks: () => false,
@@ -124,15 +133,15 @@ function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
 }
 
 describe("nextTurnDelivery", () => {
-  const followUp: DeliverHookPayload = {
-    idempotencyKey: "ses:follow-up:turn_0",
+  const continuation: DeliverHookPayload = {
+    idempotencyKey: "ses:continue:turn_0",
     kind: "deliver",
     payloads: [{ message: "Keep going." }],
     turnPolicy: "queue",
   };
 
-  it("admits a hook's follow-up once nothing else waits", async () => {
-    vi.mocked(pendingFollowUp).mockReturnValue(followUp);
+  it("admits a hook's continuation once nothing else waits", async () => {
+    vi.mocked(pendingContinuation).mockReturnValue(continuation);
     const input = batchingInputFor([]);
 
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
@@ -141,8 +150,8 @@ describe("nextTurnDelivery", () => {
     });
   });
 
-  it("holds a follow-up behind input an awaited handover still holds back", async () => {
-    vi.mocked(pendingFollowUp).mockReturnValue(followUp);
+  it("holds a continuation behind input an awaited handover still holds back", async () => {
+    vi.mocked(pendingContinuation).mockReturnValue(continuation);
     // Alice's message arrived before the handover, and reads once it settles.
     let settled = false;
     const reads = [messageRead("Alice asks for the appendix.")];

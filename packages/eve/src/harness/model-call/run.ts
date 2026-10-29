@@ -25,7 +25,6 @@ import {
   previewPrompt,
   projectPrompt,
   type Prompt,
-  readsOnlyHistory,
   withClientContext,
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
@@ -122,10 +121,11 @@ export async function runModelStep(
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
-      // Usage measures what the model read only when nothing was placed among history's messages.
-      durableModelPromptMessageCount: readsOnlyHistory(prompt)
-        ? caller.modelMessages.length
-        : undefined,
+      // Usage measures what the model read only when no client context was spliced in.
+      durableModelPromptMessageCount:
+        prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
+          ? caller.modelMessages.length
+          : undefined,
       endsTurnTools: endsTurnTools(catalog, endsTurn),
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,

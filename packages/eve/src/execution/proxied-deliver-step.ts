@@ -85,7 +85,7 @@ async function routeProxiedDeliver(
   const children = new Map<string, ChildBucket>();
   let parentAction: RoutedDeliverPayload["parentAction"];
   // A typed answer joins the open turn, so only the turn's own principal may
-  // send one, as only they steer it, and never a hook's follow-up. Anyone
+  // send one, as only they steer it, and never a hook's continuation. Anyone
   // else's text waits for the turn to end; their button answers still settle a
   // request as its responder.
   const resolveMessage =

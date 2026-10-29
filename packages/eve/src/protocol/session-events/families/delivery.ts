@@ -5,8 +5,9 @@ import type { Envelope, Principal, UserPart } from "../envelope.js";
 
 /**
  * Where a delivery came from: a channel (with the schedule or hook that sent it), a control, or a
- * sign-in callback. A hook's `ctx.followUp()` names the hook's slug and the session's channel. The set is open. A parent session records which of its calls sent a child's
- * delivery on its own `child.sent`.
+ * sign-in callback. A hook's `ctx.continue()` names the hook's slug and the session's channel.
+ * The set is open. A parent session records which of its calls sent a child's delivery on its own
+ * `child.sent`.
  */
 export type DeliverySource =
   | { readonly channel: string; readonly scheduleId?: string; readonly hook?: string }

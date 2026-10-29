@@ -92,7 +92,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
-  dropYieldedFollowUps(ctx, input.written);
+  dropYieldedContinuations(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -404,21 +404,24 @@ function actOnCancels(
 }
 
 /**
- * A hook's follow-up yields: once another turn starts, a cancel or reset arrives, or the history
- * is cleared, the session no longer follows up the turn it was queued for, and it's dropped.
- * A compaction keeps it: the conversation it follows up is still there, summarized.
+ * A hook's continuation yields: once another turn starts, a cancel or reset arrives, or the
+ * history is cleared, the session no longer continues the turn it was queued for, and it's dropped.
+ * A compaction keeps it: the conversation it continues is still there, summarized.
  */
-function dropYieldedFollowUps(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
-  const { followUp, ...state } = readReactionsState(ctx);
-  if (followUp === undefined) return;
+function dropYieldedContinuations(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+  const { continuation, ...state } = readReactionsState(ctx);
+  if (continuation === undefined) return;
   const latestTurnId = latestTurnIdOf(currentProjection(ctx));
-  if (followUp.turnId === latestTurnId && !written.some(({ event }) => stopsFollowUps(event))) {
+  if (
+    continuation.turnId === latestTurnId &&
+    !written.some(({ event }) => stopsContinuations(event))
+  ) {
     return;
   }
   writeReactionsState(ctx, state);
 }
 
-function stopsFollowUps(event: WrittenEvent["event"]): boolean {
+function stopsContinuations(event: WrittenEvent["event"]): boolean {
   if (event.type === "context.settled") {
     return event.data.kind === "clear" && event.data.outcome === "completed";
   }

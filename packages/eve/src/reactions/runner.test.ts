@@ -659,7 +659,7 @@ describe("runReactions", () => {
     ]);
   });
 
-  describe("follow-ups", () => {
+  describe("continuations", () => {
     const settledFacts = [
       {
         data: { cause: { deliveryId: "d_1" }, follows: null, turnId: "turn-1" },
@@ -668,13 +668,13 @@ describe("runReactions", () => {
       { data: { outcome: "completed", turnId: "turn-1" }, type: "turn.settled" },
     ];
 
-    // A session whose turn-1 settled, and a hook that followed it up.
-    async function followedUp() {
+    // A session whose turn-1 settled, and a hook that continued it.
+    async function continued() {
       const ctx = session(noTools, [
         {
           events: {
             "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
-              ctx.followUp("Keep going."),
+              ctx.continue("Keep going."),
           },
           slug: "until-done",
         },
@@ -688,25 +688,25 @@ describe("runReactions", () => {
       );
       enterSessionProjectionAt(ctx, projection);
       await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
-      // The delivery carries what the hook passed, and no sender; the prompt adds the note.
-      const { followUp } = readReactionsState(ctx);
-      expect(followUp?.turnId).toBe("turn-1");
-      expect(followUp?.delivery).toMatchObject({
+      // The delivery carries what the hook passed, and no sender; intake adds the note.
+      const { continuation } = readReactionsState(ctx);
+      expect(continuation?.turnId).toBe("turn-1");
+      expect(continuation?.delivery).toMatchObject({
         deliveryMetadata: [{ channelKind: "http", hook: "until-done" }],
         turnPolicy: "queue",
       });
-      expect(followUp?.delivery).not.toHaveProperty("auth");
-      expect(followUp?.delivery.payloads).toEqual([{ message: "Keep going." }]);
+      expect(continuation?.delivery).not.toHaveProperty("auth");
+      expect(continuation?.delivery.payloads).toEqual([{ message: "Keep going." }]);
       return ctx;
     }
 
-    it("refuses a follow-up to a turn someone other than the hook cancelled", async () => {
+    it("refuses to continue a turn someone other than the hook cancelled", async () => {
       const results: unknown[] = [];
       const ctx = session(noTools, [
         {
           events: {
             "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
-              results.push(ctx.followUp("Keep going.")),
+              results.push(ctx.continue("Keep going.")),
           },
           slug: "until-done",
         },
@@ -726,20 +726,20 @@ describe("runReactions", () => {
       enterSessionProjectionAt(ctx, projection);
       await commit(ctx, { written: written(1, "turn.settled", cancelled) });
       expect(results).toEqual([{ queued: false, reason: "not-completed" }]);
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+      expect(readReactionsState(ctx).continuation).toBeUndefined();
     });
 
     const control = (control: string) =>
       written(2, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
 
-    it.each(["cancel", "reset"])("drops a follow-up when a %s arrives", async (kind) => {
-      const ctx = await followedUp();
+    it.each(["cancel", "reset"])("drops a continuation when a %s arrives", async (kind) => {
+      const ctx = await continued();
       await commit(ctx, { written: control(kind) });
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+      expect(readReactionsState(ctx).continuation).toBeUndefined();
     });
 
-    it("drops a follow-up when the history is cleared", async () => {
-      const ctx = await followedUp();
+    it("drops a continuation when the history is cleared", async () => {
+      const ctx = await continued();
       await commit(ctx, {
         written: written(2, "context.settled", {
           changeId: "c_1",
@@ -748,11 +748,11 @@ describe("runReactions", () => {
           selects: null,
         }),
       });
-      expect(readReactionsState(ctx).followUp).toBeUndefined();
+      expect(readReactionsState(ctx).continuation).toBeUndefined();
     });
 
-    it("keeps a follow-up through a compaction", async () => {
-      const ctx = await followedUp();
+    it("keeps a continuation through a compaction", async () => {
+      const ctx = await continued();
       await commit(ctx, { written: control("compact") });
       await commit(ctx, {
         written: written(3, "context.settled", {
@@ -762,7 +762,7 @@ describe("runReactions", () => {
           selects: null,
         }),
       });
-      expect(readReactionsState(ctx).followUp?.turnId).toBe("turn-1");
+      expect(readReactionsState(ctx).continuation?.turnId).toBe("turn-1");
     });
   });
 });

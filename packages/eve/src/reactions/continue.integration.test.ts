@@ -14,8 +14,8 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 
-// A hook's ctx.followUp() from a settled turn, read from what the model receives and what the session
-// admits.
+// A hook's ctx.continue() from a settled turn, read from what the model receives and what the
+// session admits.
 
 const ALICE = {
   attributes: {},
@@ -113,7 +113,7 @@ async function runSession(input: {
   return { inputs, log, prompts };
 }
 
-describe("hook ctx.followUp()", () => {
+describe("hook ctx.continue()", () => {
   it("starts the next turn after a completed turn, as a delivery from the hook", async () => {
     let settled = 0;
     const results: unknown[] = [];
@@ -129,19 +129,19 @@ describe("hook ctx.followUp()", () => {
               settled += 1;
               if (settled > 2) return;
               results.push(
-                ctx.followUp(`Keep going (${settled}).`, {
+                ctx.continue(`Keep going (${settled}).`, {
                   context: ["The report needs a summary."],
-                  // The second follow-up acts for Bob; the first names no sender.
+                  // The second continuation acts for Bob; the first names no sender.
                   ...(settled === 2 && { auth: BOB }),
                 }),
-                // A second follow-up to the same turn adds nothing, and says so.
-                ctx.followUp("Ignored."),
+                // A second continuation of the same turn adds nothing, and says so.
+                ctx.continue("Ignored."),
               );
             },
           },
         }),
       },
-      name: "hook-follow-up-continues",
+      name: "hook-continue-continues",
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Keep going (1).", "Keep going (2)."]);
@@ -151,7 +151,7 @@ describe("hook ctx.followUp()", () => {
       { queued: true },
       { queued: false, reason: "already-queued" },
     ]);
-    // The source keeps the channel; a follow-up names no sender unless it passes `auth`.
+    // The source keeps the channel; a continuation names no sender unless it passes `auth`.
     expect(log.filter((entry) => /^(admitted|principal):/u.test(entry))).toEqual([
       'admitted:{"channel":"http"}',
       "principal:alice",
@@ -160,14 +160,14 @@ describe("hook ctx.followUp()", () => {
       'admitted:{"channel":"http","hook":"until-done"}',
       "principal:bob",
     ]);
-    // The model reads which messages the hook sent, ahead of each one, on every later call.
-    const note = 'a follow-up the \\"until-done\\" hook sent after the last turn';
+    // History notes ahead of each continuation that no person wrote it, so every later call reads it.
+    const note = "sent automatically after the last turn, not by a person";
     expect(prompts[1]).toContain(note);
     expect(prompts[1]).toContain("The report needs a summary.");
     expect(prompts[2]?.split(note)).toHaveLength(3);
   }, 90_000);
 
-  it("reports why a * handler's follow-up wasn't queued, and offers none to other events", async () => {
+  it("reports why a * handler's continuation wasn't queued, and offers none to other events", async () => {
     const results: unknown[] = [];
     const { inputs, log } = await runSession({
       drive: async ({ log }) => {
@@ -178,16 +178,16 @@ describe("hook ctx.followUp()", () => {
         every: defineHook({
           events: {
             "*": (event, ctx) => {
-              if (event.type === "turn.started") results.push(ctx.followUp("Too early."));
+              if (event.type === "turn.started") results.push(ctx.continue("Too early."));
             },
             "turn.started": (_event, ctx) => {
-              // @ts-expect-error Only turn.settled and * handlers can follow up.
-              results.push(typeof ctx.followUp);
+              // @ts-expect-error Only turn.settled and * handlers can continue.
+              results.push(typeof ctx.continue);
             },
           },
         }),
       },
-      name: "hook-follow-up-ineligible",
+      name: "hook-continue-ineligible",
     });
 
     expect(results).toEqual(["undefined", { queued: false, reason: "not-settled" }]);
@@ -223,18 +223,18 @@ describe("hook ctx.followUp()", () => {
           events: {
             "turn.settled": (_event, ctx) => {
               settled += 1;
-              if (settled === 1) ctx.followUp("Keep going.");
+              if (settled === 1) ctx.continue("Keep going.");
             },
           },
         }),
       },
-      name: "hook-follow-up-yields",
+      name: "hook-continue-yields",
     });
 
     expect(inputs).toEqual(["Alice asks for the report.", "Bob asks for the appendix."]);
   }, 90_000);
 
-  it("drops a follow-up when the history is cleared before it's admitted", async () => {
+  it("drops a continuation when the history is cleared before it's admitted", async () => {
     let release!: () => void;
     const firstCall = new Promise<void>((resolve) => {
       release = resolve;
@@ -255,21 +255,21 @@ describe("hook ctx.followUp()", () => {
         "until-done": defineHook({
           events: {
             "turn.settled": (_event, ctx) => {
-              expect(ctx.followUp("Keep going.")).toEqual({ queued: true });
+              expect(ctx.continue("Keep going.")).toEqual({ queued: true });
             },
           },
         }),
       },
-      name: "hook-follow-up-cleared",
+      name: "hook-continue-cleared",
     });
 
     expect(inputs).toEqual(["Alice asks for the report."]);
     expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(1);
   }, 90_000);
 
-  it("merges follow-ups from several hooks into one next turn, for one principal", async () => {
-    const settled: Record<string, number> = { audit: 0, goal: 0, lint: 0 };
-    const results: Record<string, unknown[]> = { audit: [], goal: [], lint: [] };
+  it("merges continuations from several hooks into one next turn, for one principal", async () => {
+    const settled: Record<string, number> = { audit: 0, goal: 0, lint: 0, review: 0 };
+    const results: Record<string, unknown[]> = { audit: [], goal: [], lint: [], review: [] };
     const { inputs, log, prompts } = await runSession({
       drive: async ({ log }) => {
         await until(log, "turn:completed", 2);
@@ -280,7 +280,7 @@ describe("hook ctx.followUp()", () => {
           events: {
             "turn.settled": (_event, ctx) => {
               if ((settled.goal! += 1) === 1) {
-                results.goal!.push(ctx.followUp("Keep working on the report."));
+                results.goal!.push(ctx.continue("Keep working on the report."));
               }
             },
           },
@@ -289,39 +289,52 @@ describe("hook ctx.followUp()", () => {
           events: {
             "turn.settled": (_event, ctx) => {
               if ((settled.lint! += 1) === 1)
-                results.lint!.push(ctx.followUp("Fix the lint errors."));
+                results.lint!.push(ctx.continue("Fix the lint errors."));
             },
           },
         }),
-        // A follow-up for Bob can't share a turn that acts as the session.
+        // Naming Alice, the session's identity, acts for the same principal as naming no one.
+        review: defineHook({
+          events: {
+            "turn.settled": (_event, ctx) => {
+              if ((settled.review! += 1) === 1) {
+                results.review!.push(ctx.continue("Review the summary.", { auth: ALICE }));
+              }
+            },
+          },
+        }),
+        // A continuation for Bob can't share a turn that acts for Alice.
         "zz-audit": defineHook({
           events: {
             "turn.settled": (_event, ctx) => {
               if ((settled.audit! += 1) === 1) {
-                results.audit!.push(ctx.followUp("Audit it.", { auth: BOB }));
+                results.audit!.push(ctx.continue("Audit it.", { auth: BOB }));
               }
             },
           },
         }),
       },
-      name: "hook-follow-up-merges",
+      name: "hook-continue-merges",
     });
 
     expect(results).toEqual({
       audit: [{ queued: false, reason: "auth-conflict" }],
       goal: [{ queued: true }],
       lint: [{ queued: true }],
+      review: [{ queued: true }],
     });
     expect(inputs).toHaveLength(2);
     expect(inputs[1]).toContain("Keep working on the report.");
     expect(inputs[1]).toContain("Fix the lint errors.");
+    expect(inputs[1]).toContain("Review the summary.");
     expect(inputs[1]).not.toContain("Audit it.");
     expect(log.filter((entry) => entry.startsWith("admitted:"))).toEqual([
       'admitted:{"channel":"http"}',
       'admitted:{"channel":"http","hook":"goal"}',
       'admitted:{"channel":"http","hook":"lint"}',
+      'admitted:{"channel":"http","hook":"review"}',
     ]);
-    expect(prompts[1]).toContain('the \\"goal\\" and \\"lint\\" hooks sent');
+    expect(prompts[1]?.split("not by a person")).toHaveLength(2);
   }, 90_000);
 
   it("lets the hook that cancelled a turn redirect it, and no other hook", async () => {
@@ -341,7 +354,7 @@ describe("hook ctx.followUp()", () => {
             },
             "turn.settled": (event, ctx) => {
               if (event.data.outcome !== "cancelled") return;
-              results.guard!.push(ctx.followUp("Fix the code without editing test files."));
+              results.guard!.push(ctx.continue("Fix the code without editing test files."));
             },
           },
         }),
@@ -349,12 +362,12 @@ describe("hook ctx.followUp()", () => {
           events: {
             "turn.settled": (event, ctx) => {
               if (event.data.outcome !== "cancelled") return;
-              results.other!.push(ctx.followUp("Keep going."));
+              results.other!.push(ctx.continue("Keep going."));
             },
           },
         }),
       },
-      name: "hook-follow-up-redirects",
+      name: "hook-continue-redirects",
     });
 
     expect(results).toEqual({

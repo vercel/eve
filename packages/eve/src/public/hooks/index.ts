@@ -3,7 +3,7 @@
  *
  * A hook is a map of event handlers: each runs once for each matching fact a commit carries. A
  * handler can cancel the running turn with `ctx.cancel`, or start the session's next turn
- * with `ctx.followUp` once a turn settles. External effects use
+ * with `ctx.continue` once a turn settles. External effects use
  * `ctx.occurrence.idempotencyKey` for services that support idempotency.
  */
 
@@ -14,9 +14,9 @@ export {
   type HookEventKey,
   type HookEventMap,
   type HookEventType,
-  type HookFollowUpEventKey,
-  type HookFollowUpOptions,
-  type HookFollowUpResult,
+  type HookContinueEventKey,
+  type HookContinueOptions,
+  type HookContinueResult,
   type StreamEventHook,
   type StreamEventHooks,
   defineHook,

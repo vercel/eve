@@ -1,6 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingFollowUp } from "#reactions/follow-up.js";
+import { pendingContinuation } from "#reactions/continuation.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -33,7 +33,7 @@ export type NextTurnInstruction =
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader &
-    Partial<Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">>;
+    Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -59,21 +59,21 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    // A hook follows up the turn that settled only once nothing else waits; input that starts
+    // A hook continues the turn that settled only once nothing else waits; input that starts
     // another turn first discards it. Its idempotency key admits it once.
     if (queue.pendingCount === 0 && !inbox.hasPending()) {
-      const followUp = pendingFollowUp(
+      const continuation = pendingContinuation(
         cursor.serializedContext,
         latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
       );
-      if (followUp !== undefined) {
+      if (continuation !== undefined) {
         // Behind an awaited handover, older input is queued but unreadable: wait for it, so the
-        // follow-up yields to it as it would to anything readable.
-        if (inbox.awaitingHandover === true && inbox.whenHandoverSettled !== undefined) {
+        // continuation yields to it as it would to anything readable.
+        if (inbox.awaitingHandover) {
           await inbox.whenHandoverSettled();
           continue;
         }
-        if (queue.enqueueDelivery(followUp) !== undefined) continue;
+        if (queue.enqueueDelivery(continuation) !== undefined) continue;
       }
     }
 
