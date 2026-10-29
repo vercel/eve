@@ -1,4 +1,5 @@
 export { decide } from "#ai/decide.js";
+export { recordUsage, type RecordedUsage } from "#harness/usage-sink.js";
 export type {
   DecisionAnswer,
   DecisionInput,

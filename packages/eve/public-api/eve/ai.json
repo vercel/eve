@@ -7,5 +7,7 @@
   "DecisionResult",
   "DecisionState",
   "DecisionStatePart",
-  "decide"
+  "RecordedUsage",
+  "decide",
+  "recordUsage"
 ]

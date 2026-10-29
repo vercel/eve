@@ -29,6 +29,7 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { callProgress, callSettledFrom, callStarted } from "#harness/call-facts.js";
+import { withUsageCall } from "#harness/usage-sink.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -185,12 +186,14 @@ export async function executeToolCall(
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
           await input.publish(callStarted(callId, clearedBy === undefined ? {} : { clearedBy }));
-          const executed = invokeTool(definition, args, {
-            ...(input.responder !== undefined && { approval: { responder: input.responder } }),
-            abortSignal: input.abortSignal,
-            messages: [...input.messages],
-            toolCallId: callId,
-          });
+          const executed = withUsageCall(callId, () =>
+            invokeTool(definition, args, {
+              ...(input.responder !== undefined && { approval: { responder: input.responder } }),
+              abortSignal: input.abortSignal,
+              messages: [...input.messages],
+              toolCallId: callId,
+            }),
+          );
           // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
           // waiting, and whatever the tool returns later is dropped.
           const abandon = approval === "evaluate" ? input.abortSignal : undefined;
