@@ -170,6 +170,84 @@ describe("EveTUIRunner channel commands", () => {
   });
 });
 
+describe("EveTUIRunner channel commands that cancel", () => {
+  it("keeps a turn the command cancelled out of the composer", async () => {
+    const server: FakeEveServer = new FakeEveServer(
+      ({ body, deliveryId, turnId }) => [
+        { type: "delivery.admitted", data: { deliveryId } },
+        {
+          type: "turn.started",
+          data: { turnId, cause: { deliveryId }, follows: null },
+          scope: { turnId },
+        },
+        {
+          type: "delivery.consumed",
+          data: { deliveryId, turnId, parts: [{ kind: "text", text: String(body?.message) }] },
+        },
+      ],
+      async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/eve/v1/commands") {
+          return Response.json({
+            ok: true,
+            commands: [
+              {
+                name: "escalate",
+                description: "Escalate",
+                input: { hint: "[reason]" },
+                session: "required",
+              },
+            ],
+          });
+        }
+        // The command cancels the running turn on the server, as `/escalate` does.
+        server.emit([
+          {
+            type: "turn.settled",
+            data: { turnId: "turn_1", outcome: "cancelled" },
+            scope: { turnId: "turn_1" },
+          },
+          {
+            type: "delivery.settled",
+            data: { deliveryId: "delivery_1", turnId: "turn_1", outcome: "handled" },
+          },
+        ]);
+        return Response.json({ ok: true, message: "Escalated." });
+      },
+    );
+    vi.stubGlobal("fetch", server.fetch);
+    const views: AgentTUIConversationView[] = [];
+    const restoreDraft = vi.fn();
+    const inputs = ["Hello.", "/escalate refund failed"];
+    const renderer: AgentTUIRenderer = {
+      renderConversation: (view) => views.push(view),
+      restoreDraft,
+      finishCommand: vi.fn(),
+      readInput: vi.fn(async () => {
+        const text = inputs.shift();
+        if (text === "/escalate refund failed") {
+          // Run the command once the TUI reads the running turn from the session's stream.
+          await vi.waitFor(() => {
+            expect(views.at(-1)?.working).toBe(true);
+            expect(views.at(-1)?.data.view.session.latestTurnId).toBe("turn_1");
+          });
+        }
+        if (text === undefined) {
+          await vi.waitFor(() => expect(views.at(-1)?.working).toBe(false));
+          return undefined;
+        }
+        return { type: "submit", text } as const;
+      }),
+    };
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+
+    expect(restoreDraft).not.toHaveBeenCalled();
+  });
+});
+
 describe("EveTUIRunner diagnostics", () => {
   it("names a tool that fails in the commit that requested it", async () => {
     const replied = reply("The lookup failed.");
