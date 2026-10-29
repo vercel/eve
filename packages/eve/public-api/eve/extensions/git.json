@@ -1,11 +1,8 @@
 [
   "GitHubAttribution",
-  "GitHubAuth",
-  "GitHubAuthRequest",
   "GitHubAuthorize",
   "GitHubAuthorizeRequest",
   "GitHubCoAuthor",
-  "GitHubInstallationDetail",
   "GitHubLeaseBroker",
   "GitHubLeaseRule",
   "default"

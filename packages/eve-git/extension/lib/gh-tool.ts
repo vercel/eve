@@ -33,7 +33,7 @@ const ghOutputSchema = z.object({
 /** The Connect-brokered `gh` tool, rebuilt by the dynamic resolver with its current config. */
 export function defineGhTool(
   github: () => GitHubConfig | undefined,
-  description = ghToolDescription(github()?.auth ? "caller" : "repository"),
+  description = ghToolDescription(github()?.principalType === "user" ? "caller" : "repository"),
 ) {
   return defineTool({
     description,

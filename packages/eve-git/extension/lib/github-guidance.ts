@@ -36,7 +36,7 @@ Use GitHub CLI commands through the \`gh\` tool for issues, pull requests, revie
 Repositories that require verified signatures reject ordinary sandbox commits. Stage the intended changes explicitly, run \`gh-signed-commit --repo owner/name --branch <branch> -m <headline>\` through the \`gh\` tool, then create the draft pull request through the same tool.
 `;
 
-/** `callerScoped` describes user tokens from `github.auth` instead of repository-scoped app tokens. */
+/** `callerScoped` describes user tokens (`principalType: "user"`) instead of repository-scoped app tokens. */
 export function githubInstructions(github: boolean, callerScoped = false): string {
   const guidance = github
     ? connectInstructions(TOKEN_SCOPE[callerScoped ? "caller" : "repository"])

@@ -52,13 +52,13 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(skill.content, /gh pr create --draft/u);
 });
 
-test("with github.auth, guidance describes the caller's token instead of repository scope", async () => {
+test("with a user principal, guidance describes the caller's token instead of repository scope", async () => {
   extension({
     github: {
       connector: "github/acme-bot",
       org: "acme",
       broker: async () => {},
-      auth: () => ({ getToken: async () => ({ token: "user-token" }) }),
+      principalType: "user",
     },
   });
   const { content, tool } = await resolve();

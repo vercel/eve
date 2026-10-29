@@ -158,10 +158,8 @@ test("asks authorize with the caller, repository, and token before running", asy
 });
 
 test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401", async () => {
-  const provider = { principalType: "user" };
-  const authRequests: unknown[] = [];
-  const getTokenCalls: unknown[][] = [];
-  const requireAuthCalls: unknown[][] = [];
+  const getTokenCalls: Parameters<ToolContext["getToken"]>[] = [];
+  const requireAuthCalls: Parameters<ToolContext["requireAuth"]>[] = [];
   const getToken: ToolContext["getToken"] = async (...args) => {
     getTokenCalls.push(args);
     return { token: "user-token" };
@@ -170,13 +168,7 @@ test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401"
     requireAuthCalls.push(args);
     throw new Error("authorization required");
   };
-  const config = {
-    ...CONFIG,
-    auth: (request: unknown) => {
-      authRequests.push(request);
-      return provider as never;
-    },
-  };
+  const config = { ...CONFIG, principalType: "user" as const };
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   let stderr = "";
   const dependencies = {
@@ -194,31 +186,23 @@ test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401"
   await executeGitHubShell(READ, config, dependencies);
 
   const authKey = { authKey: "github:vercel:internal-agents" };
-  assert.deepEqual(authRequests, [
-    {
-      connector: "github/citron-compass",
-      repository: "vercel/internal-agents",
-      tokenParams: {
-        authorizationDetails: [
-          { type: "github_app_installation", org: "vercel", repositories: ["internal-agents"] },
-        ],
-      },
-    },
-  ]);
-  assert.deepEqual(getTokenCalls, [[provider, authKey]]);
+  assert.equal(getTokenCalls.length, 1);
+  const [provider, options] = getTokenCalls[0]!;
+  assert.deepEqual(options, authKey);
+  assert.equal(provider.principalType, "user");
+  assert.deepEqual(provider.vercelConnect, { connector: "github/citron-compass" });
   assert.equal(requireAuthCalls.length, 0);
 
   stderr = "HTTP 401: Bad credentials (https://api.github.com/graphql)";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
-  assert.deepEqual(requireAuthCalls, [[provider, authKey]]);
+  assert.equal(requireAuthCalls.length, 1);
+  assert.equal(requireAuthCalls[0]![0]!.principalType, "user");
+  assert.deepEqual(requireAuthCalls[0]![1], authKey);
 
   // gh-signed-commit reports a rejected token through its own API errors.
   stderr = "GitHub ref lookup failed: 401";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
-  assert.deepEqual(requireAuthCalls, [
-    [provider, authKey],
-    [provider, authKey],
-  ]);
+  assert.equal(requireAuthCalls.length, 2);
   assert.equal(runs.length, 3);
 });
 

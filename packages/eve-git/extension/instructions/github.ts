@@ -7,7 +7,7 @@ export default defineDynamic(() =>
   defineInstructions({
     content: githubInstructions(
       extension.config.github !== undefined,
-      extension.config.github?.auth !== undefined,
+      extension.config.github?.principalType === "user",
     ),
   }),
 );

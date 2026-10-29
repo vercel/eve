@@ -1,21 +1,11 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-import type {
-  GitHubAttribution,
-  GitHubAuth,
-  GitHubAuthorize,
-  GitHubConfig,
-} from "./lib/github-shell.ts";
+import type { GitHubAttribution, GitHubAuthorize, GitHubConfig } from "./lib/github-shell.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
 export type { GitHubCoAuthor } from "./lib/github-shell.ts";
 export type { GitHubAuthorize, GitHubAuthorizeRequest } from "./lib/github-shell.ts";
-export type {
-  GitHubAuth,
-  GitHubAuthRequest,
-  GitHubInstallationDetail,
-} from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
 export type { GitHubAttribution } from "./lib/github-shell.ts";
 
@@ -45,13 +35,12 @@ export default defineExtension({
          */
         authorize: fn<GitHubAuthorize>().optional(),
         /**
-         * Returns a user-scoped provider, such as `connect({ connector,
-         * tokenParams })`, for each `gh` command. The token then comes from
-         * `ctx.getToken`, which signs the caller in when needed, and a
-         * rejected token signs them in again. Without it, commands use the
-         * GitHub App installation token.
+         * Whose token `connector` mints, as in `connect({ connector,
+         * principalType })`. `"app"` (default) uses the GitHub App
+         * installation. `"user"` uses the caller's own GitHub token: eve signs
+         * them in when needed and again when GitHub rejects the token.
          */
-        auth: fn<GitHubAuth>().optional(),
+        principalType: z.enum(["app", "user"]).optional(),
       })
       .optional(),
   }),

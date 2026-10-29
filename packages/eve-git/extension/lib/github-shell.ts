@@ -11,6 +11,7 @@ import {
   type GitHubCoAuthor,
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
+import { connectUserAuthorization } from "./connect-user-auth.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
@@ -50,7 +51,6 @@ export interface GitHubConfig {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
-  readonly auth?: GitHubAuth;
   readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
@@ -58,6 +58,11 @@ export interface GitHubConfig {
   ) => Promise<void>;
   readonly connector: string;
   readonly org: string;
+  /**
+   * `"app"` (default) mints GitHub App installation tokens. `"user"` resolves
+   * the caller's own token through `ctx.getToken`, signing them in when needed.
+   */
+  readonly principalType?: "app" | "user";
 }
 
 /** What an `authorize` callback sees before a `gh` command runs. */
@@ -73,28 +78,12 @@ export interface GitHubAuthorizeRequest {
 /** Decides whether the session's caller may run a `gh` command against one repository. */
 export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
 
-/** What an `auth` callback sees before a `gh` command resolves its token. */
-export interface GitHubAuthRequest {
-  /** The configured `github.connector`. */
-  readonly connector: string;
-  /** The `owner/name` repository the command declared. */
-  readonly repository: string;
-  /** Token params scoping the token to `repository`; pass them to `connect({ tokenParams })`. */
-  readonly tokenParams: { authorizationDetails: GitHubInstallationDetail[] };
-}
-
 /** The Connect `github_app_installation` authorization detail for one repository. */
 export interface GitHubInstallationDetail {
   type: "github_app_installation";
   org: string;
   repositories: string[];
 }
-
-/**
- * Returns the provider a `gh` command resolves through `ctx.getToken`, such as
- * `connect({ connector, tokenParams })` from `@vercel/connect/eve`.
- */
-export type GitHubAuth = (request: GitHubAuthRequest) => ToolAuthProvider;
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -165,16 +154,16 @@ export async function executeGitHubShell(
   const repositories = repositoryNames(declaredRepositories, config.org);
   const repository = declaredRepositories[0]!;
   const auth = dependencies.auth ?? null;
-  const tokenParams: GitHubAuthRequest["tokenParams"] = {
-    authorizationDetails: [{ type: "github_app_installation", org: config.org, repositories }],
-  };
+  const authorizationDetails: GitHubInstallationDetail[] = [
+    { type: "github_app_installation", org: config.org, repositories },
+  ];
   let userAuth: { provider: ToolAuthProvider; options: ToolAuthOptions } | undefined;
   let token: string;
-  if (config.auth) {
+  if (config.principalType === "user") {
     if (!dependencies.getToken || !dependencies.requireAuth)
       throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
     userAuth = {
-      provider: config.auth({ connector: config.connector, repository, tokenParams }),
+      provider: connectUserAuthorization(config.connector, authorizationDetails),
       // One auth key per repository keeps eve's per-step token cache from
       // reusing another repository's token. Connect holds a single grant per
       // user, so only the first repository prompts a sign-in.
@@ -183,7 +172,7 @@ export async function executeGitHubShell(
     ({ token } = await dependencies.getToken(userAuth.provider, userAuth.options));
   } else {
     token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
-      ...tokenParams,
+      authorizationDetails,
       subject: { type: "app" },
     });
   }
