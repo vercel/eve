@@ -57,6 +57,22 @@ function HarnessTools() {
 // front one runs past the right edge.
 const windowWidth = 55;
 const sliver = 22;
+// The names' 0.5px outline, as text shadows around text filled with the window's color. A stroke
+// with a covering fill doesn't work: Safari ignores paint-order on HTML text, and draws stroked
+// and filled text on slightly different pixel grids, so the two never line up.
+const textOutline = [
+  [0.5, 0],
+  [-0.5, 0],
+  [0, 0.5],
+  [0, -0.5],
+  [0.35, 0.35],
+  [-0.35, 0.35],
+  [0.35, -0.35],
+  [-0.35, -0.35],
+]
+  .map(([x, y]) => `${x}px ${y}px 0 var(--ds-gray-700)`)
+  .join(", ");
+
 const APPS = [
   { name: "SvelteKit", Logo: SiSvelte, left: 5, back: true },
   { name: "Nuxt", Logo: SiNuxt, left: 5 + sliver, back: true },
@@ -86,25 +102,16 @@ function AgentUi() {
               </div>
             </div>
             <div className="flex flex-col gap-[0.5em]">
-              {/* The fill hides overlapping contours and the inner half of the stroke, leaving
-                  a 0.5px outer outline. Back windows' logos get the same treatment as the name;
-                  the front window shows the filled Next.js mark as the visual's accent. */}
+              {/* The names and the back windows' logos read as 0.5px outlines; the front window
+                  shows the filled Next.js mark as the visual's accent. */}
               <div className="flex items-center gap-[0.35em] whitespace-nowrap font-bold text-[1.25em] text-gray-700 tracking-[-0.01em]">
                 {back ? (
                   <Logo className="size-[0.9em] shrink-0 overflow-visible fill-background-100 stroke-current [paint-order:stroke_fill] [stroke-width:1px] [vector-effect:non-scaling-stroke] [&_path]:[vector-effect:non-scaling-stroke]" />
                 ) : (
                   <Logo className="size-[0.9em] shrink-0 text-gray-1000" />
                 )}
-                {/* Safari ignores paint-order on HTML text, so the fill is a second, unstroked copy
-                    over the stroked one. Both share one grid cell, so they lay out identically;
-                    an absolutely placed copy can land a pixel or two off. */}
-                <span className="inline-grid [-webkit-text-fill-color:var(--ds-background-100)]">
-                  <span className="[-webkit-text-stroke:1px_currentColor] [grid-area:1/1]">
-                    {name}
-                  </span>
-                  <span aria-hidden className="[grid-area:1/1]">
-                    {name}
-                  </span>
+                <span className="text-background-100" style={{ textShadow: textOutline }}>
+                  {name}
                 </span>
               </div>
               <div className="h-[1.3125em] w-3/4 shrink-0 rounded-[3px] bg-gray-200" />
