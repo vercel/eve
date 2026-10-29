@@ -65,7 +65,7 @@ export interface ChannelSource<TState = undefined> {
   cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   /** Queues context compaction without creating a session. */
   compact(options?: SessionControlOptions): Promise<Delivery>;
-  /** Clears model-message history without creating a session. */
+  /** Cancels the running turn and its tasks, then clears model-message history, in place. */
   clear(options?: SessionControlOptions): Promise<Delivery>;
   /** Retires the current owner without creating a replacement. */
   end(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;

@@ -976,7 +976,8 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
     signIns: [],
     events: [
       ...clearedInteractions(view),
-      // Clear runs between turns. A paused turn still owns a lifecycle; end it and its
+      // A clear cancels a running turn before it applies, but a turn parked on a request still
+      // owns a lifecycle; end it and its
       // non-task work before selecting an empty conversation, instead of dropping only its
       // private suspended steps and leaving the public turn and calls open forever.
       ...turnSettled(projection, { cause: input.cause, outcome: "cancelled" }),

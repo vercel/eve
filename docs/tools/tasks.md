@@ -230,6 +230,8 @@ correct an agent by calling it again with its `taskId`, or stop a task with `eve
 - **`eve__task_cancel`** stops one task's current work.
 - **`session.cancel()`** cancels the turn, the `execute` calls it waits on, and every working task
   in the session.
+- **`session.clear()`** cancels the running turn and every working task in the session, then clears
+  history.
 - **A failed turn** cancels every working task.
 - **The end of the session** ends every task.
 

@@ -75,6 +75,7 @@ export async function admitSessionInboxPayload(
     }
     case "clear":
       // A clear starts over: it stops the running turn and its tasks, as a reset does, then runs.
+      // It carries no origin: the queued control, not the cancel, settles its delivery.
       input.queue.enqueueControl("clear", controlOrigin(command));
       return { kind: "cancel" };
     case "compact":
