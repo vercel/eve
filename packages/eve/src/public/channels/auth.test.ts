@@ -1498,6 +1498,11 @@ describe("vercelOidc strategy helper", () => {
     await expect(Promise.resolve(authFn(request))).resolves.toBeNull();
   });
 
+  it("points object subject entries to eveVercelOidc instead of never matching them", () => {
+    const subjects = [{ subject: "owner:acme:project:runner:environment:preview" }];
+    expect(() => vercelOidc({ subjects: subjects as never })).toThrow(/eveVercelOidc/);
+  });
+
   it("returns identity only for project and subject matches despite a token-supplied stub grant", async () => {
     const issuer = await installMockedVercelIssuer("identity-only-subjects");
     const subject = "owner:acme:project:eval-runner:environment:preview";

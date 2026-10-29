@@ -1138,6 +1138,12 @@ export type VercelOidcOptions = VerifyVercelOidcOptions;
  * `Bearer` {@link withAuthChallenges} challenge for {@link routeAuth}'s 401.
  */
 export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
+  // JavaScript callers can pass eveVercelOidc's object entries, which would otherwise never match.
+  if (opts.subjects?.some((entry: unknown) => typeof entry !== "string")) {
+    throw new TypeError(
+      'vercelOidc: every subjects entry must be a string. For entries such as { subject, allowToolStubs: true }, use eveVercelOidc from "eve/channels/eve".',
+    );
+  }
   return withAuthChallenges(
     async (request) => {
       const token = extractBearerToken(request.headers.get("authorization"));
