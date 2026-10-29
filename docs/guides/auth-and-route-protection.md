@@ -36,9 +36,9 @@ export default eveChannel({
 
 ## The ordered auth walk
 
-`auth` takes a single `EveAuthFn` or an array that eve walks in order. `EveAuthFn` and `EveAuthResult` are exported from `eve/channels/eve`; identity-only `AuthFn` callbacks from `eve/channels/auth` also work. Each entry has three possible outcomes:
+`auth` takes a single authenticator or an array that eve walks in order. Each entry has three possible outcomes:
 
-- returns an `EveAuthResult` (identity with optional eve-channel permissions): accept the request and stop the walk
+- returns a verified identity, optionally with eve-channel permissions: accept the request and stop the walk
 - returns `null` / `undefined`: skip to the next entry
 - **throws**: reject with a specific status
 
@@ -117,7 +117,7 @@ Verifies a bearer JWT against the [Vercel OIDC issuer](https://vercel.com/docs/o
 
 Auth fails closed: routes reject unauthenticated traffic by default, and the OIDC user branch verifies `external_sub` against `VERCEL_PROJECT_ID` and the deployment environment, returning `false` when either is unset. An external-subject token cannot authenticate on a deployment that hasn't pinned its project.
 
-`subjects` accepts only strings (`readonly string[]`) and controls authentication, not channel permissions. Neither a subject match nor implicit current-project acceptance permits tool replacement. To permit [stubbed eval sessions](../evals/tool-stubs), wrap the verifier in a custom eve-channel callback as shown under [tool replacement permission](#tool-replacement-permission).
+`vercelOidc` accepts only subject strings and returns identity, not channel permissions. To permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve`. It uses the same verifier and adds subject-based grants; see [tool replacement permission](#tool-replacement-permission).
 
 #### `subjects` patterns and `vercelSubject(...)`
 
@@ -307,38 +307,34 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 ## Tool replacement permission
 
-Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` in the eve channel's verified `EveAuthResult`. The target's server configuration grants permission; request JSON cannot. Shared `AuthResult` and the verifier helpers carry identity only.
-
-Wrap `vercelOidc()` in an `EveAuthFn` to grant permission after verification. This channel authenticates both projects but permits tool replacement only for the eval runner's verified service/runtime principal:
+Creating a [stubbed eval session](../evals/tool-stubs) requires an explicit `allowToolStubs: true` from the target's server-side auth configuration. Request JSON cannot grant permission. For Vercel OIDC callers, use `eveVercelOidc`:
 
 ```ts title="agent/channels/eve.ts"
-import { vercelOidc, vercelSubject, withAuthChallenges } from "eve/channels/auth";
-import { eveChannel, type EveAuthFn } from "eve/channels/eve";
+import { vercelSubject } from "eve/channels/auth";
+import { eveChannel, eveVercelOidc } from "eve/channels/eve";
 
-const app = vercelSubject({ teamSlug: "acme", projectName: "app" });
-const evalRunner = vercelSubject({ teamSlug: "acme", projectName: "eval-runner" });
-const authenticate = vercelOidc({ subjects: [app, evalRunner] });
-
-const authenticateWithStubs: EveAuthFn = withAuthChallenges(
-  async (request) => {
-    const caller = await authenticate(request);
-    if (!caller) return null;
-    const canReplaceTools =
-      (caller.principalType === "service" || caller.principalType === "runtime") &&
-      caller.subject === evalRunner;
-    return canReplaceTools ? { ...caller, allowToolStubs: true } : caller;
-  },
-  [{ scheme: "Bearer" }],
-);
-
-export default eveChannel({ auth: [authenticateWithStubs] });
+export default eveChannel({
+  auth: [
+    eveVercelOidc({
+      subjects: [
+        vercelSubject({ teamSlug: "acme", projectName: "app" }),
+        {
+          subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }),
+          allowToolStubs: true,
+        },
+      ],
+    }),
+  ],
+});
 ```
 
-`vercelSubject` defaults to production. To grant another environment permission, build and check its exact subject too. Do not use a wildcard string in an equality check. `withAuthChallenges` preserves the wrapped verifier's Bearer challenge in a mixed auth walk.
+Both projects can authenticate; only the eval runner's verified service/runtime principal receives replacement permission. `eveVercelOidc` uses the shared Vercel OIDC verifier and declares its Bearer challenge automatically. Plain subject strings and implicit current-project acceptance grant ordinary access only. User principals never receive this helper's grant.
 
-The auth walk stops at the first accepted result; it does not merge grants from later callbacks. Replace the original OIDC entry with the wrapper rather than putting the wrapper after it. A caller accepted without `allowToolStubs: true` has ordinary access only. User principals do not receive the service/runtime grant in this example.
+`vercelSubject` defaults to production; set `environment` to another environment or `"*"` deliberately. Subject patterns use the same AWS IAM-style `*` matching as `vercelOidc`. Any matching entry with `allowToolStubs: true` grants permission; entries without it or with `false` do not revoke another match's grant.
 
-Custom authenticators can still return the flag directly after verifying their caller. For example, this alternative channel permits stubs only in local development:
+The auth walk still stops at the first accepted result. Replace the original `vercelOidc` entry with `eveVercelOidc` rather than adding it later: grants are not merged across authenticators.
+
+Custom authenticators can still return the flag after verifying their caller. Annotate grant-bearing callbacks with `EveAuthFn` (and named results with `EveAuthResult`) from `eve/channels/eve`. For example, this alternative channel permits stubs only in local development:
 
 ```ts
 import { localDev } from "eve/channels/auth";

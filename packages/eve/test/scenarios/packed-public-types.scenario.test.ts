@@ -73,6 +73,14 @@ import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
 import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
 import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
+import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
+import { vercelOidc } from "eve/channels/auth";
+const stubAuth: EveAuthFn = eveVercelOidc({
+  subjects: [{ subject: "owner:acme:project:eval-runner:environment:production", allowToolStubs: true }],
+});
+eveChannel({ auth: [vercelOidc(), stubAuth] });
+// @ts-expect-error Generic OIDC authenticates identities, not eve-channel permissions.
+vercelOidc({ subjects: [{ subject: "eval-runner", allowToolStubs: true }] });
 // @ts-expect-error Hook storage records are not part of eve's Workflow API.
 import { getHookByToken } from "eve/workflow/api";
 // @ts-expect-error Bare Workflow imports are no longer declared by eve.

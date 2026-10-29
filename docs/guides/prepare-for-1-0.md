@@ -80,25 +80,23 @@ Use `defineOpenAPIConnection` for OpenAPI connections. Keep the helper inside th
 
 ## Move tool replacement grants to eve-channel auth
 
-Shared `AuthResult` from `eve/channels/auth` now carries identity only. For custom eve-channel callbacks that return `allowToolStubs`, change explicit annotations to `EveAuthFn`; use `EveAuthResult` for named result types. Both types come from `eve/channels/eve`:
+For Vercel OIDC configurations with `{ subject, allowToolStubs }` entries, rename the helper and move its import to `eve/channels/eve`. Keep the subject declarations unchanged:
 
 ```diff
--import type { AuthFn, AuthResult } from "eve/channels/auth";
-+import type { EveAuthFn, EveAuthResult } from "eve/channels/eve";
+-import { vercelOidc } from "eve/channels/auth";
++import { eveVercelOidc } from "eve/channels/eve";
 
--const authenticate: AuthFn<Request> = async (request) => {
-+const authenticate: EveAuthFn = async (request) => {
-   // Verify the caller, then return identity with allowToolStubs when permitted.
- };
+-vercelOidc({
++eveVercelOidc({
+   subjects: [{ subject: evalRunner, allowToolStubs: true }],
+ });
 ```
 
-Identity-only callbacks can keep `AuthFn`. Its signature is now `AuthFn<TEvent = Request, TResult extends AuthResult = AuthResult>`. `EveAuthFn` is `AuthFn<Request, EveAuthResult>`, and `EveAuthResult` extends `AuthResult` with optional `allowToolStubs?: boolean`. Custom eve authenticators still return the same flag; do not move it into session attributes.
+`eveVercelOidc` uses the same verifier and automatically declares Bearer challenges. A matching subject entry with `allowToolStubs: true` grants permission only to verified service/runtime principals, not users. Plain strings and implicit current-project acceptance do not grant permission. Replace the original auth entry rather than adding the new helper after it: the first successful authenticator wins. See the [complete channel configuration](./auth-and-route-protection#tool-replacement-permission).
 
-`vercelOidc({ subjects })` now accepts only `readonly string[]`, not `{ subject, allowToolStubs }` objects. Replace grant objects with their subject strings for authentication, then wrap the verifier in a custom `EveAuthFn` for permission. After verification succeeds, check that `principalType` is `"service"` or `"runtime"` and that `subject` is on your explicit eval-runner allowlist before attaching `allowToolStubs: true`. Build exact subjects with `vercelSubject`; its default environment is production. See the complete [OIDC permission callback](./auth-and-route-protection#tool-replacement-permission).
+Generic `vercelOidc` from `eve/channels/auth` remains identity-only and accepts only subject strings. Identity-only configurations need no helper rename. For named grant-bearing options, use `EveVercelOidcOptions` from `eve/channels/eve` instead of `VercelOidcOptions`.
 
-Wrap that callback with `withAuthChallenges(callback, [{ scheme: "Bearer" }])` from `eve/channels/auth` to preserve OIDC's 401 challenge. Replace the original OIDC entry in the auth array: the first successful callback stops the walk, so a later callback cannot add a grant to an earlier result.
-
-The grant remains request-local. The eve channel checks it before forwarded identity or `onMessage` projection, then removes it before persisting or forwarding identity. Session creation with stubs and stub verification require the grant; later messages and result reads use ordinary channel auth. Your application's session-access policy still determines who can use an existing stubbed session. See [Tool stubs](../evals/tool-stubs#permit-tool-replacement).
+Custom eve-channel callbacks can still return `allowToolStubs`. Change grant-bearing `AuthFn` / `AuthResult` annotations to `EveAuthFn` / `EveAuthResult` from `eve/channels/eve`; identity-only callbacks keep their existing types. The grant remains request-local, not a persisted or forwarded session attribute. Session creation with stubs and stub verification require it; later messages and result reads retain ordinary channel auth and your application's session-access policy. See [Tool stubs](../evals/tool-stubs#permit-tool-replacement).
 
 ## Choose one sandbox layout
 

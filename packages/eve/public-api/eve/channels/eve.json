@@ -10,8 +10,10 @@
   "EveMessageContext",
   "EveMessageResult",
   "EveMessageResultOrPromise",
+  "EveVercelOidcOptions",
   "ForwardedAssertion",
   "TrustedForwarders",
   "defaultEveAuth",
-  "eveChannel"
+  "eveChannel",
+  "eveVercelOidc"
 ]
