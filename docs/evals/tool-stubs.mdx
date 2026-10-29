@@ -156,32 +156,38 @@ Parallel calls consume responses in arrival order, which can vary. Use separate 
 
 ## Permit tool replacement
 
-Tool replacement is denied by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), put the permission on the eval runner's verified subject:
+Tool replacement is denied by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), authenticate the caller first, then grant permission in a custom eve-channel callback:
 
 ```ts title="agent/channels/eve.ts"
-import { vercelOidc, vercelSubject } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject, withAuthChallenges } from "eve/channels/auth";
+import { eveChannel, type EveAuthFn } from "eve/channels/eve";
 
-export default eveChannel({
-  auth: [
-    vercelOidc({
-      subjects: [
-        vercelSubject({ teamSlug: "acme", projectName: "app" }),
-        {
-          subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }),
-          allowToolStubs: true,
-        },
-      ],
-    }),
-  ],
-});
+const app = vercelSubject({ teamSlug: "acme", projectName: "app" });
+const evalRunner = vercelSubject({ teamSlug: "acme", projectName: "eval-runner" });
+const authenticate = vercelOidc({ subjects: [app, evalRunner] });
+
+const authenticateWithStubs: EveAuthFn = withAuthChallenges(
+  async (request) => {
+    const caller = await authenticate(request);
+    if (!caller) return null;
+    const canReplaceTools =
+      (caller.principalType === "service" || caller.principalType === "runtime") &&
+      caller.subject === evalRunner;
+    return canReplaceTools ? { ...caller, allowToolStubs: true } : caller;
+  },
+  [{ scheme: "Bearer" }],
+);
+
+export default eveChannel({ auth: [authenticateWithStubs] });
 ```
 
-Both projects can authenticate; only the eval runner receives replacement permission. `vercelSubject` defaults to production; pass `environment: "*"` to include all environments. The target's server configuration supplies the grant after token verification. Request JSON cannot grant permission, and user principals do not inherit project grants.
+Both projects can authenticate; only the eval runner's verified service/runtime principal receives replacement permission. `vercelSubject` defaults to production. To permit preview or development runners, add their exact subjects to both the authentication list and the permission check. The target's server configuration supplies the grant after token verification. Request JSON cannot grant permission, and user principals do not receive this grant.
 
-Custom authenticators can return the same `allowToolStubs: true` after verifying the caller. See [authentication and route protection](../guides/auth-and-route-protection#tool-replacement-permission) for the grant rules and a local development example.
+`vercelOidc.subjects` accepts strings only and never grants tool replacement. The wrapper returns `EveAuthResult`, which adds `allowToolStubs` to the shared identity-only `AuthResult`. Use `EveAuthFn` from `eve/channels/eve` for callbacks returning this permission. `withAuthChallenges` retains the Bearer challenge when wrapping OIDC.
 
-Permission is checked at session creation before identity projection. Later messages and result reads use normal channel authentication. Anyone your channel admits to an existing session can use its stubs. Your application's session-access policy must provide the required isolation; an isolated eval deployment can use the same agent code.
+The first successful auth entry wins; eve does not combine grants from later entries. Replace the original OIDC entry with the wrapper, rather than adding the wrapper after it. Custom authenticators can still return `allowToolStubs: true` after verifying the caller. See [authentication and route protection](../guides/auth-and-route-protection#tool-replacement-permission) for the grant rules and a local development example.
+
+Permission is checked at session creation before identity projection. The grant is request-local and is removed before identity is persisted or forwarded. Later messages and result reads use normal channel authentication. Anyone your channel admits to an existing session can use its stubs. Your application's session-access policy must provide the required isolation; an isolated eval deployment can use the same agent code.
 
 The stub verification endpoint also requires `allowToolStubs`, checked before reading workflow status.
 

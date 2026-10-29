@@ -78,6 +78,28 @@ Every connection must use the helper for its protocol. A plain object is no long
 
 Use `defineOpenAPIConnection` for OpenAPI connections. Keep the helper inside the dynamic factory when authoring a dynamic connection. See [Connections](../connections).
 
+## Move tool replacement grants to eve-channel auth
+
+Shared `AuthResult` from `eve/channels/auth` now carries identity only. For custom eve-channel callbacks that return `allowToolStubs`, change explicit annotations to `EveAuthFn`; use `EveAuthResult` for named result types. Both types come from `eve/channels/eve`:
+
+```diff
+-import type { AuthFn, AuthResult } from "eve/channels/auth";
++import type { EveAuthFn, EveAuthResult } from "eve/channels/eve";
+
+-const authenticate: AuthFn<Request> = async (request) => {
++const authenticate: EveAuthFn = async (request) => {
+   // Verify the caller, then return identity with allowToolStubs when permitted.
+ };
+```
+
+Identity-only callbacks can keep `AuthFn`. Its signature is now `AuthFn<TEvent = Request, TResult extends AuthResult = AuthResult>`. `EveAuthFn` is `AuthFn<Request, EveAuthResult>`, and `EveAuthResult` extends `AuthResult` with optional `allowToolStubs?: boolean`. Custom eve authenticators still return the same flag; do not move it into session attributes.
+
+`vercelOidc({ subjects })` now accepts only `readonly string[]`, not `{ subject, allowToolStubs }` objects. Replace grant objects with their subject strings for authentication, then wrap the verifier in a custom `EveAuthFn` for permission. After verification succeeds, check that `principalType` is `"service"` or `"runtime"` and that `subject` is on your explicit eval-runner allowlist before attaching `allowToolStubs: true`. Build exact subjects with `vercelSubject`; its default environment is production. See the complete [OIDC permission callback](./auth-and-route-protection#tool-replacement-permission).
+
+Wrap that callback with `withAuthChallenges(callback, [{ scheme: "Bearer" }])` from `eve/channels/auth` to preserve OIDC's 401 challenge. Replace the original OIDC entry in the auth array: the first successful callback stops the walk, so a later callback cannot add a grant to an earlier result.
+
+The grant remains request-local. The eve channel checks it before forwarded identity or `onMessage` projection, then removes it before persisting or forwarding identity. Session creation with stubs and stub verification require the grant; later messages and result reads use ordinary channel auth. Your application's session-access policy still determines who can use an existing stubbed session. See [Tool stubs](../evals/tool-stubs#permit-tool-replacement).
+
 ## Choose one sandbox layout
 
 If both `agent/sandbox.ts` and `agent/sandbox/` exist, move the definition to `agent/sandbox/sandbox.ts`. The combination now fails discovery instead of silently ignoring the root definition.

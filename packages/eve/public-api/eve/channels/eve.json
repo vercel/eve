@@ -1,5 +1,7 @@
 [
   "ClientContextValue",
+  "EveAuthFn",
+  "EveAuthResult",
   "EveChannel",
   "EveChannelConfig",
   "EveChannelEvents",
