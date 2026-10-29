@@ -8,7 +8,6 @@ import {
   IconGitPullRequest,
   IconPlusCircle,
 } from "@vercel/geistdocs/assets/icons";
-import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type JSX,
@@ -20,9 +19,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { analyticsEvents } from "@/lib/analytics/events";
-import { canonicalRoutes, templatePath } from "@/lib/geistdocs/canonical";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
+import { templateGalleryUrl } from "@/lib/templates/links";
 import { cn } from "@/lib/utils";
 import {
   type Author,
@@ -35,7 +33,7 @@ import {
   TypingIndicator,
   bubbleRadius,
 } from "./chat";
-import { AppWindow, HomeSection, PrefetchLink } from "./section";
+import { AppWindow, HomeSection } from "./section";
 
 const logoClassName = "size-3.5 shrink-0 grayscale";
 
@@ -972,7 +970,7 @@ interface UseCase {
   id: string;
   name: string;
   text: string;
-  /** Template slug, or null to send people to the full gallery. */
+  /** Vercel template gallery slug, or null to send people to the full gallery. */
   template: string | null;
   cta: string;
   /** What the agent does, a short title and line each. */
@@ -1004,7 +1002,7 @@ const USE_CASES: UseCase[] = [
     id: "software-factory",
     name: "Software factory",
     text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
-    template: "eve-software-factory-template",
+    template: "eve-software-factory",
     cta: "Use the software factory template",
     features: [
       { title: "GitHub and Linear", text: "Picks up tasks where your team already files them." },
@@ -1157,13 +1155,8 @@ export function AgentTypes(): JSX.Element {
       action={
         <Button
           className="w-fit rounded-full text-base"
-          Component={PrefetchLink}
-          href={selected.template ? templatePath(selected.template) : canonicalRoutes.templates}
-          onClick={() =>
-            track(analyticsEvents.templateOpened, {
-              source: "home_examples",
-              template: selected.template ?? "gallery",
-            })
+          href={
+            selected.template ? `${templateGalleryUrl}/${selected.template}` : templateGalleryUrl
           }
           size="large"
         >
