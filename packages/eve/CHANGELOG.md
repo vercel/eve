@@ -1,5 +1,23 @@
 # eve
 
+## 0.88.1
+
+Released 2026-10-29 · [Compare with 0.88.0](https://github.com/vercel/eve/compare/eve%400.88.0...eve%400.88.1)
+
+### Features
+
+- Approval spans now record who approved or denied the call as `agent.approval.responder.type` and `agent.approval.responder.id`, an approved call's tool span records its approver as `agent.tool.approver.type` and `agent.tool.approver.id`, and the `interaction.settled` instrumentation event carries the same `responder`.
+  An approved call runs as the requester, so until now traces showed only the requester and an audit had to read the session stream to find the approver. The responder's id follows the same rule as the turn's principal ids: it is recorded only when the trace policy records both inputs and outputs and the conversation is public or running in development. ([#5596](https://github.com/vercel/eve/pull/5596))
+- The MCP channel's `agent_get` now returns an optional `statusMessage` while an invocation is `working`.
+  It names the tool call that is running, using the tool's activity label when it has one, so MCP clients can show progress instead of a bare `working`. ([#5314](https://github.com/vercel/eve/pull/5314))
+
+### Bug Fixes
+
+- Release notes now list breaking changes first and use plain headings, one paragraph per change, and a single compare link.
+  A `minor` changeset always appears under Breaking Changes, so breaking changes merged with an internal PR title are no longer left out. The 0.86.0 and 0.87.0 notes now include the two breaking changes they missed. ([#5588](https://github.com/vercel/eve/pull/5588))
+- Upgrade `undici` to `8.12.3` for the security fixes published in `8.12.2`.
+  A TLS 1.2 server that renegotiates to a certificate for another host now fails the `web_fetch` request instead of crashing the process. Thanks @pedro757 for reporting this in #5589. ([#5591](https://github.com/vercel/eve/pull/5591))
+
 ## 0.88.0
 
 ### Release eve@0.88.0 | 2026-10-29 | minor

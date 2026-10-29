@@ -1,5 +1,14 @@
 # @vercel/agent-runs
 
+## 0.0.4
+
+Released 2026-10-29 · [Compare with 0.0.3](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.3...%40vercel%2Fagent-runs%400.0.4)
+
+### Bug Fixes
+
+- Release notes now list breaking changes first and use plain headings, one paragraph per change, and a single compare link.
+  A `minor` changeset always appears under Breaking Changes, so breaking changes merged with an internal PR title are no longer left out. The 0.86.0 and 0.87.0 notes now include the two breaking changes they missed. ([#5588](https://github.com/vercel/eve/pull/5588))
+
 ## 0.0.3
 
 Released 2026-10-28 · [Compare with 0.0.2](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.2...%40vercel%2Fagent-runs%400.0.3)
