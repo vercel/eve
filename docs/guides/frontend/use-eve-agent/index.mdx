@@ -256,9 +256,11 @@ async function submit(text: string) {
 
 `runCommand` runs the command in the current session, when there is one, and applies its result before resolving:
 
-- `send` goes out as the next message, through the same path as `send()`.
-- When the command ended the session, such as `/new`, the store calls `newSession()`. `result.controls` lists the session controls the command applied, for UI that also reflects them, such as resetting a session route.
+- A follow-up message the command sends goes in on the server, so it arrives on the stream as your turn; the store follows `result.delivery`.
+- When the command ended the session, such as `/new`, `result.ended` is `true` and the store calls `newSession()`. `onSessionChange` reports it, for UI that also resets a session route.
 - `message` is for the caller only. The store doesn't add it to `messages`, so show it yourself.
+
+`parseSlashCommand` returns `undefined` for text after a command that takes no arguments, so `/clear the cache` is sent as an ordinary message.
 
 A command with `session: "required"` rejects with a `ClientError` before the first message. Show its `message` the same way. The [Web Chat](./nextjs) template does all of this, plus a `/` typeahead in its composer, when you pass `commands` to its `AgentChat`: `<AgentChat commands />`. It's off by default, so a deployed chat only offers commands you chose to. A store created from an existing `session` has no client of its own, so it can't list or run commands.
 

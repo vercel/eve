@@ -139,14 +139,15 @@ export default eveChannel({
 ## Browser
 
 - `useEveAgent` (React, Vue, Svelte) adds `commands()` and `runCommand(name, { argument })`, backed
-  by `SessionStore`. `runCommand` uses the store's current session and applies the result the same
-  way the TUI does: `send` goes through `send()`, and `end` calls `newSession()`.
+  by `SessionStore`. `runCommand` waits for a session still being created, runs the command in it,
+  follows the `delivery` eve sent for it, and calls `newSession()` when the result has `ended`.
+  A result that lands after another `newSession()` isn't applied.
 - `parseSlashCommand(text, commands)` from `eve/client` reads typed text as a listed command, by
   name or alias. UIs own presentation: the result's `message` isn't added to `messages`.
 - The Web Chat template offers commands only when the page opts in with `<AgentChat commands />`, so
   an agent's defaults never appear in a deployed chat unannounced. When on, it loads commands on mount, suggests matches while `/name` is typed (Tab
   completes the first), runs matches instead of sending them, shows `message` in the conversation,
-  and navigates to a fresh chat when a command ended the session.
+  and moves the URL to `/s` in place when a command ended the session.
 
 ## Extensions
 

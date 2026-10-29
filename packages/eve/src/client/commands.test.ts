@@ -3,10 +3,17 @@ import { describe, expect, it } from "vitest";
 import { parseSlashCommand, type ChannelCommandInfo } from "#client/commands.js";
 
 const commands: ChannelCommandInfo[] = [
-  { name: "new", description: "Start over", aliases: ["reset"], session: "required" },
+  {
+    name: "new",
+    description: "Start over",
+    arguments: "none",
+    aliases: ["reset"],
+    session: "required",
+  },
   {
     name: "standup",
     description: "Draft a standup",
+    arguments: "text",
     argumentHint: "[topic]",
     session: "optional",
   },
@@ -23,7 +30,7 @@ describe("parseSlashCommand", () => {
 
   it("leaves unknown commands and ordinary text as messages", () => {
     expect(parseSlashCommand("/unknown", commands)).toBeUndefined();
-    // `new` has no argument hint, so trailing text keeps the message from ending the session.
+    // `new` takes no arguments, so trailing text keeps the message from ending the session.
     expect(parseSlashCommand("/new plan for today", commands)).toBeUndefined();
     expect(parseSlashCommand("/", commands)).toBeUndefined();
     expect(parseSlashCommand("tell me about /standup", commands)).toBeUndefined();

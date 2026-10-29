@@ -327,10 +327,10 @@ export class SessionStore {
   }
 
   /**
-   * Runs one of the eve channel's slash commands in this store's session, when it has one, and
-   * applies what the command returned: `end` starts a fresh local session, and `send` goes out as
-   * the caller's next message. Resolves with the result so the caller can show its `message`.
-   * When `newSession()` runs before the command returns, its result is returned but not applied.
+   * Runs one of the eve channel's slash commands in this store's session, when it has one. A
+   * command that ended the session starts a fresh local one, and a follow-up message eve sent for
+   * the command is followed on the stream. Resolves with the result so the caller can show its
+   * `message`. When `newSession()` runs before the command returns, its result isn't applied.
    */
   async runCommand(
     name: string,
@@ -346,10 +346,9 @@ export class SessionStore {
     });
     // A newSession() while the command ran replaced the conversation it belongs to.
     if (this.#session !== session) return result;
-    if (result.controls?.includes("end") === true) this.newSession();
-    // Read what the controls changed, even when `followWhile` closed the stream.
-    else if (result.controls !== undefined && session !== undefined) this.#ensureStream();
-    if (result.send !== undefined) await this.send({ message: result.send });
+    if (result.ended === true) this.newSession();
+    // eve sent the command's follow-up as the caller; read its turn even if the stream closed.
+    else if (result.delivery !== undefined) this.follow(result.delivery);
     return result;
   }
 

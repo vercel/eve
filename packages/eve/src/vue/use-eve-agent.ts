@@ -82,8 +82,8 @@ export interface UseEveAgentReturn {
   /** Lists the eve channel's slash commands. Match typed text with `parseSlashCommand`. */
   readonly commands: () => Promise<readonly ChannelCommandInfo[]>;
   /**
-   * Runs an eve channel slash command in the current session, then applies its result: `end`
-   * starts a new session and `send` goes out as the next message. Show the returned `message`.
+   * Runs an eve channel slash command in the current session. A command that ended the session
+   * starts a new one, and its follow-up message arrives on the stream. Show the returned `message`.
    */
   readonly runCommand: (
     name: string,
