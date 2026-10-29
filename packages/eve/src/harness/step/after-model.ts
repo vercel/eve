@@ -37,6 +37,7 @@ import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js"
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
+import { compactAtTurnEnd } from "#harness/compaction/step.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("harness.tool-loop");
@@ -330,6 +331,7 @@ async function settleTurn(
   if (hookFailure !== undefined) return hookFailure;
   const schema = step.session.outputSchema;
   step.session = clearTurnClientContextState(step.session);
+  await compactAtTurnEnd(step);
 
   if (schema === undefined) {
     await step.apply(

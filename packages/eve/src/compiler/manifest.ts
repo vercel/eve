@@ -601,6 +601,7 @@ const compiledAgentWorkflowDefinitionSchema = z
 
 const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> = z
   .object({
+    compact: z.boolean().optional(),
     model: compiledRuntimeModelReferenceSchema.optional(),
     thresholdPercent: z.number().finite().min(0).max(1).optional(),
   })
@@ -1207,6 +1208,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
                 : [...config.build.externalDependencies],
           },
     compaction: {
+      compact: config.compaction?.compact,
       model:
         config.compaction?.model === undefined
           ? undefined

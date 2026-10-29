@@ -14,6 +14,8 @@ import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { fixedTail, turns } from "#public/compaction/index.js";
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -95,6 +97,7 @@ function userTexts(prompt: Prompt): string[] {
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+  compactionStrategy?: CompactionStrategy,
 ) {
   const session: HarnessSession = {
     agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
@@ -109,6 +112,7 @@ async function compactWith(
   };
   return createToolLoopHarness({
     compactOnly: true,
+    compactionStrategy,
     handleEvent: (publication) => handleEvent(eventsOf(publication)),
     resolveModel: async () => model,
     tools: new Map(),
@@ -488,5 +492,271 @@ describe("announcements after a compaction during a turn", () => {
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
     ]);
+  });
+});
+
+describe("an authored compaction strategy", () => {
+  /** Records each line's facts and checks them against the event contract. */
+  function checkedEvents(input: { readonly started: boolean } = { started: true }) {
+    const events: SessionEvent[] = [];
+    const issues: unknown[] = [];
+    const checker = createStreamChecker();
+    const at = "2026-10-28T00:00:00.000Z";
+    if (input.started) checker.check({ at, facts: [{ type: "session.started", data: {} }] }, 0);
+    let position = input.started ? 1 : 0;
+    const handle = async (facts: readonly SessionEvent[]) => {
+      events.push(...facts);
+      issues.push(...checker.check({ at, facts }, position++));
+    };
+    return { events, handle, issues };
+  }
+
+  it("rewrites the history with its own summary, billed to the change's summary run", async () => {
+    const prompts: string[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        prompts.push(prompt[0]?.role === "system" ? prompt[0].content : "");
+        return summaryStream();
+      },
+    });
+    const seen: string[] = [];
+    const strategy: CompactionStrategy = async (history, ctx) => {
+      seen.push(ctx.reason);
+      const kept = turns(history);
+      const summary = await ctx.summarize(kept.slice(0, -1).flat(), {
+        instructions: "Name the report Alice asked for.",
+      });
+      return [...ctx.checkpoint(summary), ...(kept.at(-1) ?? [])];
+    };
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(seen).toEqual(["manual"]);
+    expect(prompts).toEqual([expect.stringContaining("Name the report Alice asked for.")]);
+    expect(result.session.history).toEqual([
+      expect.objectContaining({ kind: "context.compaction", role: "user" }),
+      { content: "Alice asked for the quarterly report.", role: "assistant" },
+      { content: "Thanks, keep going.", kind: "user", role: "user" },
+    ]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(issues).toEqual([]);
+  });
+
+  it("runs eve's default when wrapped in fixedTail()", async () => {
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+
+    const result = await compactWith(model, async () => {}, fixedTail());
+
+    expect(result.session.history).toContainEqual({
+      content: "Alice asked for the quarterly report.",
+      role: "assistant",
+    });
+  });
+
+  it("fails the change and keeps the history when the result drops a call's result", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const strategy: CompactionStrategy = () => [
+      {
+        content: [{ input: {}, toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" }],
+        role: "assistant",
+      },
+    ];
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          error: { message: expect.stringContaining("but not its result") },
+          outcome: "failed",
+        },
+      },
+    ]);
+    expect(result.session.history).toHaveLength(3);
+    expect(issues).toEqual([]);
+  });
+
+  it("ends the session before the model call when an automatic result doesn't fit", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) =>
+        userTexts(prompt).length === 1
+          ? lookup(`Let me check. ${"lorem ipsum ".repeat(1_500)}`)
+          : answer(),
+    });
+    const session: HarnessSession = {
+      agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+      compaction: { recentWindowSize: 1, threshold: 2_000 },
+      continuationToken: "http:authored-overflow-session",
+      history: [],
+      sessionId: "authored-overflow-session",
+    };
+    const reasons: string[] = [];
+    const keepEverything: CompactionStrategy = (history, ctx) => {
+      reasons.push(ctx.reason);
+      return [...history];
+    };
+    const events: SessionEvent[] = [];
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      const fold = foldingHandler();
+      let stepped = await createToolLoopHarness({
+        compactionStrategy: keepEverything,
+        handleEvent: async (publication, messages) => {
+          events.push(...eventsOf(publication));
+          await fold(publication, messages);
+        },
+        resolveModel: async () => model,
+        tools: new Map([["lookup", lookupTool]]),
+      })(session, { message: "Which sources back the second claim?" });
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+    });
+
+    expect(reasons).toEqual(["automatic"]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { error: { message: expect.stringContaining("the limit is") }, outcome: "failed" } },
+    ]);
+    // Over the limit after compacting, the session can't continue, as with eve's default.
+    expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "session.ended" });
+  });
+  /** Runs one turn to its end with `strategy`, recording the facts and each model request. */
+  async function runTurn(strategy: CompactionStrategy, respond: (prompt: Prompt) => StreamResult) {
+    const requests: Parameters<MockLanguageModelV3["doStream"]>[0][] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        requests.push(options);
+        return respond(options.prompt);
+      },
+    });
+    const session: HarnessSession = {
+      agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+      compaction: { recentWindowSize: 1, threshold: 2_000, thresholdPercent: 0.5 },
+      continuationToken: "http:authored-trigger-session",
+      history: [],
+      sessionId: "authored-trigger-session",
+    };
+    const { events, handle, issues } = checkedEvents({ started: false });
+    let stepped: Awaited<ReturnType<ReturnType<typeof createToolLoopHarness>>> | undefined;
+    await contextStorage.run(new ContextContainer(), async () => {
+      const fold = foldingHandler();
+      stepped = await createToolLoopHarness({
+        compactionStrategy: strategy,
+        handleEvent: async (publication, messages) => {
+          await handle(eventsOf(publication));
+          await fold(publication, messages);
+        },
+        resolveModel: async () => model,
+        tools: new Map([["lookup", lookupTool]]),
+      })(session, { message: "Which sources back the second claim?" });
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+    });
+    return { events, issues, requests, session: stepped!.session };
+  }
+
+  const SUMMARY_PROMPT = "Write a handoff summary for the next model.";
+  const isSummaryRequest = (prompt: Prompt) => userTexts(prompt).at(-1) === SUMMARY_PROMPT;
+
+  it("runs at turn end when its trigger asks there, after the answer and before the turn settles", async () => {
+    const measures: unknown[] = [];
+    const phases: string[] = [];
+    const strategy: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        phases.push(ctx.phase);
+        const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT });
+        const asked = history.filter(
+          (message) => message.role === "user" && (message as { kind?: string }).kind === "user",
+        );
+        return [...ctx.checkpoint(summary), ...asked];
+      },
+      when: {
+        due: (measure) => {
+          measures.push(measure);
+          return measure.phase === "turn-end";
+        },
+        phases: ["step", "turn-end"],
+      },
+    };
+
+    const { events, issues, requests, session } = await runTurn(strategy, (prompt) =>
+      isSummaryRequest(prompt)
+        ? summaryStream()
+        : userTexts(prompt).length === 1 && !prompt.some((m) => m.role === "tool")
+          ? lookup("Let me check.")
+          : answer(),
+    );
+
+    expect(phases).toEqual(["turn-end"]);
+    expect(measures).toEqual([
+      expect.objectContaining({ contextWindowTokens: 4_000, phase: "step", threshold: 2_000 }),
+      expect.objectContaining({ phase: "step" }),
+      expect.objectContaining({ phase: "turn-end" }),
+    ]);
+    // The summary request reads the conversation under the agent's instructions, without tools.
+    const summaryRequest = requests.find((request) => isSummaryRequest(request.prompt))!;
+    expect(summaryRequest.prompt[0]).toEqual({ content: "You help Alice.", role: "system" });
+    expect(summaryRequest.tools).toBeUndefined();
+    const types = events.map((event) => event.type);
+    expect(types.indexOf("context.settled")).toBeLessThan(types.indexOf("turn.settled"));
+    // Two steps, then the summary run.
+    expect(types.filter((type) => type === "model.started")).toHaveLength(3);
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "context.compaction", role: "user" }),
+      { content: "Alice asked for the quarterly report.", role: "assistant" },
+      expect.objectContaining({ content: "Which sources back the second claim?", kind: "user" }),
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("keeps the turn's answer when a turn-end compaction fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const strategy: CompactionStrategy = {
+      compact: () => {
+        throw new Error("The notes store is down.");
+      },
+      when: { due: () => true, phases: ["turn-end"] },
+    };
+
+    const { events, issues, session } = await runTurn(strategy, () => answer());
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { error: { message: "The notes store is down." }, outcome: "failed" } },
+    ]);
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+    expect(session.history.at(-1)).toMatchObject({ role: "assistant" });
+    expect(issues).toEqual([]);
+  });
+
+  it("sends a prefix-reusing summary with the turn's instructions and tools, which it can't call", async () => {
+    let compacted = false;
+    const strategy: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        compacted = true;
+        const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT, reusePrefix: true });
+        return [...ctx.checkpoint(summary), ...history];
+      },
+      when: { due: () => !compacted },
+    };
+
+    const { requests, session } = await runTurn(strategy, (prompt) =>
+      isSummaryRequest(prompt) ? summaryStream() : answer(),
+    );
+
+    const [summaryRequest, turnRequest] = requests;
+    expect(isSummaryRequest(summaryRequest!.prompt)).toBe(true);
+    expect(summaryRequest!.prompt[0]).toEqual(turnRequest!.prompt[0]);
+    expect(summaryRequest!.tools?.map((tool) => tool.name)).toEqual(
+      turnRequest!.tools?.map((tool) => tool.name),
+    );
+    expect(summaryRequest!.toolChoice).toEqual({ type: "none" });
+    expect(session.history[0]).toMatchObject({ kind: "context.compaction" });
   });
 });

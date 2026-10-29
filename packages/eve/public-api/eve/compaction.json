@@ -1,0 +1,13 @@
+[
+  "CompactionContext",
+  "CompactionMeasure",
+  "CompactionPhase",
+  "CompactionReason",
+  "CompactionRewrite",
+  "CompactionStrategy",
+  "CompactionSummaryOptions",
+  "CompactionTrigger",
+  "FixedTailOptions",
+  "fixedTail",
+  "turns"
+]
