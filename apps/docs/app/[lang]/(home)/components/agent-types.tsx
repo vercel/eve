@@ -630,13 +630,14 @@ function WebAppClient({ stage = 0 }: { stage?: number }) {
               </span>
             ))}
           </span>
-          {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. */}
-          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[15rem]:block" />
+          {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. Left
+              out on phones, where the chat spans the window. */}
+          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] md:@[15rem]:block" />
         </div>
         {/* Pinned to the window's bottom, the chat grows up as messages join, stopping 8px
             short of the KPI row, which ends 106px down (12 + 106 + 8 = 126px off the height);
             past that, the oldest scroll up out of view. */}
-        <div className="absolute inset-x-3 bottom-3 flex max-h-[calc(100%-7.875rem)] flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
+        <div className="absolute inset-x-3 bottom-3 flex max-h-[calc(100%-7.875rem)] flex-col gap-3.5 rounded-lg p-1.5 material-menu md:left-auto md:w-56 md:max-w-[calc(100%-1.5rem)]">
           <span className="shrink-0 text-label-12 text-gray-900">Acme support</span>
           <div
             className="flex min-h-0 flex-col justify-end overflow-hidden"
@@ -1220,9 +1221,9 @@ export function AgentTypes(): JSX.Element {
             role="tabpanel"
           >
             {selected.ownWindows ? (
-              <div className="h-[30rem] sm:h-[26rem]">{selected.preview(demo?.stage)}</div>
+              <div className="h-[30rem] md:h-[26rem]">{selected.preview(demo?.stage)}</div>
             ) : (
-              <AppWindow className="h-[30rem] sm:h-[26rem]">
+              <AppWindow className="h-[30rem] md:h-[26rem]">
                 {selected.preview(demo?.stage)}
               </AppWindow>
             )}
