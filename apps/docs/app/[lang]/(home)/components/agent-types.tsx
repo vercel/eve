@@ -697,10 +697,21 @@ const formatDuration = (seconds: number) =>
 
 /**
  * A phone call to a clinic's front desk. It opens on a finished call whose recording plays
- * back; Record starts a new one, which runs the timer and records the waveform until End.
+ * back; Record starts a new one, which runs the timer and records the waveform until End. The
+ * demo records and hangs up on its own, and stopping it puts back the finished call.
  */
-function VoiceClient() {
-  const [call, setCall] = useState({ id: 0, live: false, seconds: 42 });
+function VoiceClient({ stage }: { stage?: number }) {
+  const [call, setCall] = useState({ id: 0, live: false, seconds: 42, demo: false });
+
+  useEffect(() => {
+    if (stage === undefined) {
+      setCall((c) => (c.demo ? { id: c.id + 1, live: false, seconds: 42, demo: false } : c));
+    } else if (stage === AGENTIC_RECORDING) {
+      setCall((c) => ({ id: c.id + 1, live: true, seconds: 0, demo: true }));
+    } else if (stage === AGENTIC_HUNG_UP) {
+      setCall((c) => (c.demo ? { ...c, live: false } : c));
+    }
+  }, [stage]);
 
   useEffect(() => {
     if (!call.live) return;
@@ -733,7 +744,9 @@ function VoiceClient() {
           }`}
           onClick={() =>
             setCall(
-              call.live ? { ...call, live: false } : { id: call.id + 1, live: true, seconds: 0 },
+              call.live
+                ? { ...call, live: false }
+                : { id: call.id + 1, live: true, seconds: 0, demo: false },
             )
           }
           type="button"
@@ -759,6 +772,22 @@ const receivedBubble = {
   tail: "text-[#E9E9EB] dark:text-[#26252A]",
 };
 
+/**
+ * How long each stage of the agentic apps demo waits before it shows: the call starting to
+ * record, your iMessage question, the planner typing, its answer, then the call hanging up.
+ */
+const AGENTIC_DEMO = [400, 1600, 700, 1400, 1800];
+const AGENTIC_RECORDING = 1;
+const AGENTIC_ASKED = 2;
+const AGENTIC_TYPING = 3;
+const AGENTIC_ANSWERED = 4;
+const AGENTIC_HUNG_UP = 5;
+
+// The demo's follow-up in the planner thread, entering like the hero's bubbles.
+const imessageIn = "motion-safe:animate-bubble-in motion-reduce:animate-fade-in";
+const IMESSAGE_QUESTION = { sent: true, text: "Can we make it 7:30?" };
+const IMESSAGE_ANSWER = { sent: false, text: "Moved it to 7:30. Your calendar's updated." };
+
 const IMESSAGE_THREAD: { sent: boolean; text: string }[] = [
   { sent: true, text: "Dinner with Sam on Friday?" },
   { sent: false, text: "Luna has a table at 7. Want it?" },
@@ -766,8 +795,26 @@ const IMESSAGE_THREAD: { sent: boolean; text: string }[] = [
   { sent: false, text: "Booked and added to your calendar." },
 ];
 
-/** A personal planning thread in an iMessage-style app. */
-function IMessageClient() {
+/** A personal planning thread in an iMessage-style app; the demo adds a follow-up. */
+function IMessageClient({ stage = 0 }: { stage?: number }) {
+  // The follow-up's bubbles grow from their tail's corner.
+  const thread = [
+    ...IMESSAGE_THREAD.map((message) => ({ ...message, entering: false })),
+    ...(stage >= AGENTIC_ASKED ? [{ ...IMESSAGE_QUESTION, entering: true }] : []),
+    ...(stage >= AGENTIC_ANSWERED ? [{ ...IMESSAGE_ANSWER, entering: true }] : []),
+  ];
+  const list = useRef<HTMLDivElement>(null);
+  // Whether earlier messages have scrolled up out of view, so only then the top edge fades.
+  const [scrolled, setScrolled] = useState(false);
+
+  // Where the follow-up doesn't fit, the thread follows it down like a chat, and the demo's
+  // reset scrolls back to the start.
+  useLayoutEffect(() => {
+    const node = list.current;
+    if (!node) return;
+    node.scrollTo({ top: stage ? node.scrollHeight : 0, behavior: stage ? "smooth" : "instant" });
+  }, [stage]);
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden material-large">
       <div className="flex shrink-0 flex-col items-center gap-1 border-gray-alpha-400 border-b py-2.5">
@@ -776,12 +823,26 @@ function IMessageClient() {
         </span>
         <span className="text-label-12 text-gray-1000">Planner</span>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-3 text-copy-13">
-        {IMESSAGE_THREAD.map((message) => {
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-3 text-copy-13"
+        onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 1)}
+        ref={list}
+        style={{
+          maskImage: scrolled ? "linear-gradient(to bottom, transparent, black 32px)" : undefined,
+        }}
+      >
+        {thread.map((message) => {
           const colors = message.sent ? sentBubble : receivedBubble;
           return (
             <p
-              className={`relative max-w-[85%] text-pretty px-3 py-1.5 ${colors.bubble}`}
+              className={cn(
+                "relative max-w-[85%] text-pretty px-3 py-1.5",
+                colors.bubble,
+                message.entering && [
+                  imessageIn,
+                  message.sent ? "origin-bottom-right" : "origin-bottom-left",
+                ],
+              )}
               key={message.text}
               style={{ borderRadius: bubbleRadius }}
             >
@@ -791,6 +852,26 @@ function IMessageClient() {
             </p>
           );
         })}
+        {stage === AGENTIC_TYPING ? (
+          <p
+            aria-label="Planner is typing"
+            className={cn(
+              "relative flex w-fit origin-bottom-left items-center gap-1 px-3 py-2.5",
+              imessageIn,
+              receivedBubble.bubble,
+            )}
+            style={{ borderRadius: bubbleRadius }}
+          >
+            <Tail className={receivedBubble.tail} />
+            {[0, 1, 2].map((dot) => (
+              <span
+                className="size-1.5 animate-blink rounded-full bg-current"
+                key={dot}
+                style={{ animationDelay: `${dot * 200}ms` }}
+              />
+            ))}
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2 p-2.5 pt-0">
         <span
@@ -807,7 +888,7 @@ function IMessageClient() {
   );
 }
 
-function AgenticAppsPreview() {
+function AgenticAppsPreview({ stage }: { stage?: number }) {
   return (
     <figure className="grid h-full grid-cols-[minmax(0,1fr)_9.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
       <figcaption className="sr-only">
@@ -816,9 +897,9 @@ function AgenticAppsPreview() {
       </figcaption>
       <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3 sm:gap-4">
         <WebAppClient />
-        <VoiceClient />
+        <VoiceClient stage={stage} />
       </div>
-      <IMessageClient />
+      <IMessageClient stage={stage} />
     </figure>
   );
 }
@@ -887,7 +968,8 @@ const USE_CASES: UseCase[] = [
       { title: "iMessage", text: "Threads that share memory with web and Slack." },
     ],
     ownWindows: true,
-    preview: () => <AgenticAppsPreview />,
+    demo: AGENTIC_DEMO,
+    preview: (stage) => <AgenticAppsPreview stage={stage} />,
   },
 ];
 
@@ -1075,7 +1157,7 @@ export function AgentTypes(): JSX.Element {
             role="tabpanel"
           >
             {selected.ownWindows ? (
-              <div className="h-[30rem] sm:h-[26rem]">{selected.preview()}</div>
+              <div className="h-[30rem] sm:h-[26rem]">{selected.preview(demo?.stage)}</div>
             ) : (
               <AppWindow className="h-[30rem] sm:h-[26rem]">
                 {selected.preview(demo?.stage)}
