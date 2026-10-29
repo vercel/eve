@@ -1690,6 +1690,52 @@ describe("work delegated to a child session", () => {
     expect([...blocks]).toEqual(["person"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
+  it("stops a working task when the conversation is cleared, and its result never arrives", async () => {
+    const never = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-clear-working-task",
+      {
+        message: "Delegate the deploy; no need to wait on it.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:"))
+            return heldReply("Child deployed.", never.wait);
+          prompts.push(prompt);
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          return "The deploy is underway.";
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until(
+          "underway",
+          (event) => event.type === "content.completed" && event.data.kind === "text",
+        );
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    const [ended] = ofType(events, "task.ended");
+    expect(ended?.data).toMatchObject({ outcome: "cancelled", reason: "turn-cancelled" });
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    // The cleared conversation's next turn reads only the new message: no task result or note.
+    const last = prompts.at(-1)!;
+    expect(last).not.toContain("call_agent");
+    expect(last).not.toContain(ended!.data.taskId);
+  });
 });
 
 describe("deliveries a child session reads", () => {
@@ -1915,6 +1961,32 @@ describe("controls between turns", () => {
 
     expect(prompts).toEqual([1, 1]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+  });
+
+  it("cancels a turn still generating when the conversation is cleared", async () => {
+    const never = gate();
+    const prompts: number[] = [];
+    const { events } = await withSession(
+      "edge-clear-running-turn",
+      {
+        message: "Write a long story.",
+        model: scriptedModel(({ said, users }) => {
+          prompts.push(users);
+          return said("What now?") ? "Fresh start." : heldReply("Once upon", never.wait, "a");
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("generating", (event) => event.type === "content.delta");
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(prompts).toEqual([1, 1]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
   });
 
   it("compacts between turns, and the next turn reads the summary", async () => {

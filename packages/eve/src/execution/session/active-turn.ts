@@ -278,7 +278,9 @@ export class ActiveTurn {
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
     if (payload.kind === "reset" || payload.kind === "session-failure") return true;
-    if (payload.kind !== "cancel" || this.#control) return false;
+    if (this.#control) return false;
+    if (payload.kind === "clear") return true;
+    if (payload.kind !== "cancel") return false;
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
