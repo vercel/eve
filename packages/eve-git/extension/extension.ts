@@ -29,8 +29,9 @@ export default defineExtension({
         attribution: fn<GitHubAttribution>().optional(),
         /**
          * The agent's only GitHub access control. Called before each `gh`
-         * command with the session's caller, the declared `owner/name`
-         * repository, and the minted token. Return `true` to run the command.
+         * command with the parsed argv, the session's caller, the declared
+         * owner and repository (either may be `null`), and the minted token.
+         * Return `true` to run the command.
          */
         authorize: fn<GitHubAuthorize>(),
         /**

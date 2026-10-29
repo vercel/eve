@@ -37,20 +37,20 @@ const CONFIG = {
 const READ: GitHubShellInput = {
   command: "gh pr view 2583 --repo vercel/internal-agents",
   description: "Read PR 2583",
-  permissions: [{ provider: "github", repositories: ["vercel/internal-agents"], access: "write" }],
+  repository: "vercel/internal-agents",
 };
 
 const WRITE: GitHubShellInput = {
   command: "git push origin HEAD:refs/heads/rui/my-branch",
   description: "Update the existing PR branch",
-  permissions: [{ provider: "github", repositories: ["vercel/internal-agents"], access: "write" }],
+  repository: "vercel/internal-agents",
   workingDirectory: "/workspace/internal-agents",
 };
 
 const CLONE: GitHubShellInput = {
   command: "gh repo clone vercel/internal-agents /workspace/internal-agents",
   description: "Clone the repository into the sandbox",
-  permissions: [{ provider: "github", repositories: ["vercel/internal-agents"], access: "write" }],
+  repository: "vercel/internal-agents",
 };
 
 test("parses simple argv quoting without enabling a shell language", () => {
@@ -94,7 +94,6 @@ test("runs clone without approval while retaining repository-scoped write-capabl
   });
 
   assert.equal(githubShellApproval(CLONE), "not-applicable");
-  assert.equal(CLONE.permissions[0].access, "write");
   assert.deepEqual(tokenCalls, [
     {
       connector: "github/citron-compass",
@@ -113,7 +112,7 @@ test("runs clone without approval while retaining repository-scoped write-capabl
   assert.equal(runs.length, 1);
 });
 
-test("asks authorize with the caller, repository, and token before running", async () => {
+test("asks authorize with the argv, caller, owner, repository, and token before running", async () => {
   const auth = {
     attributes: {},
     authenticator: "github-webhook",
@@ -146,10 +145,16 @@ test("asks authorize with the caller, repository, and token before running", asy
       },
       dependencies,
     ),
-    /not authorized to access vercel\/internal-agents/u,
+    /not authorized to run this command on vercel\/internal-agents/u,
   );
   assert.deepEqual(requests, [
-    { auth, repository: "vercel/internal-agents", token: "secret-token" },
+    {
+      argv: ["gh", "pr", "view", "2583", "--repo", "vercel/internal-agents"],
+      auth,
+      owner: "vercel",
+      repository: "vercel/internal-agents",
+      token: "secret-token",
+    },
   ]);
   assert.equal(runs.length, 0);
 
@@ -188,15 +193,21 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
     {
       ...READ,
       command: "gh pr view 7 --repo acme/widgets",
-      permissions: [{ provider: "github", repositories: ["acme/widgets"], access: "write" }],
+      repository: "acme/widgets",
     },
+    config,
+    dependencies,
+  );
+  // User tokens need no owner, so commands tied to no repository still run.
+  await executeGitHubShell(
+    { command: "gh api user/repos", description: "List the caller's repositories" },
     config,
     dependencies,
   );
 
   // No authKey: eve files both repositories' sign-in under the connector, so
   // one grant serves them, and no call carries repository-specific options.
-  assert.equal(getTokenCalls.length, 2);
+  assert.equal(getTokenCalls.length, 3);
   for (const [provider, options] of getTokenCalls) {
     assert.equal(options, undefined);
     assert.equal(provider.principalType, "user");
@@ -214,7 +225,7 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
   stderr = "GitHub ref lookup failed: 401";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
   assert.equal(requireAuthCalls.length, 2);
-  assert.equal(runs.length, 4);
+  assert.equal(runs.length, 5);
 });
 
 test("approves the full syntactically valid gh surface", () => {
@@ -231,21 +242,14 @@ test("approves the full syntactically valid gh surface", () => {
   }
 });
 
-test("fails closed on invalid permissions, missing commands, env assignments, and shell syntax", () => {
-  const readPush = {
-    ...WRITE,
-    permissions: [{ ...WRITE.permissions[0], access: "read" as const }] as const,
-  };
-  // @ts-expect-error Exercise runtime rejection of unsupported read-only permissions.
-  assert.deepEqual(githubShellApproval(readPush), {
-    type: "denied",
-    reason: "GitHub App commands require explicit write-capable access.",
-  });
+test("fails closed on missing commands, other executables, env assignments, and shell syntax", () => {
   for (const command of [
     "gh",
+    "git",
     "GH_TOKEN=stolen gh auth status",
     "env GH_TOKEN=stolen gh auth status",
     "bash -lc gh",
+    "curl https://api.github.com/user",
   ]) {
     const decision = githubShellApproval({ ...WRITE, command });
     assert.equal(typeof decision, "object", command);
@@ -256,26 +260,52 @@ test("fails closed on invalid permissions, missing commands, env assignments, an
   }
 });
 
-test("rejects empty or multiple permissions before sandbox access or token minting", async () => {
-  for (const permissions of [[], [...READ.permissions, ...READ.permissions]]) {
-    const input = { ...READ, permissions };
-    assert.deepEqual(githubShellApproval(input), {
-      type: "denied",
-      reason: "Exactly one GitHub permission is required.",
-    });
+test("allows any gh or git subcommand and leaves the decision to authorize", () => {
+  for (const command of [
+    "git clone https://github.com/vercel/eve.git",
+    "git remote -v",
+    "git push upstream HEAD",
+    "gh repo list vercel",
+    "gh search repos agent --owner vercel",
+  ]) {
+    assert.equal(githubShellApproval({ ...READ, command }), "not-applicable", command);
+  }
+});
+
+test("rejects invalid repositories before sandbox access or token minting", async () => {
+  for (const repository of ["not/a/repository", "-bad", "vercel/"]) {
+    const input = { ...READ, repository };
+    const decision = githubShellApproval(input);
+    assert.equal(typeof decision, "object", repository);
     await assert.rejects(
       executeGitHubShell(input, CONFIG, {
         sessionId: "session-1",
         async getSandbox() {
-          assert.fail("invalid permissions must not access the sandbox");
+          assert.fail("invalid repositories must not access the sandbox");
         },
         async getConnectToken() {
-          assert.fail("invalid permissions must not mint a token");
+          assert.fail("invalid repositories must not mint a token");
         },
       }),
-      /Exactly one GitHub permission is required/u,
+      /Invalid GitHub repository or owner/u,
+      repository,
     );
   }
+});
+
+test("requires an owner for app tokens before sandbox access", async () => {
+  await assert.rejects(
+    executeGitHubShell({ command: "gh api user/repos", description: "List repos" }, CONFIG, {
+      sessionId: "session-1",
+      async getSandbox() {
+        assert.fail("must not access the sandbox");
+      },
+      async getConnectToken() {
+        assert.fail("must not mint a token");
+      },
+    }),
+    /App tokens need repository set to an owner or owner\/name/u,
+  );
 });
 
 test("mints a repository-scoped token only during execution and redacts output", async () => {
@@ -323,16 +353,26 @@ test("mints a repository-scoped token only during execution and redacts output",
       },
     },
   ]);
-  assert.equal(runs.length, 5);
-  assert.match(runs[3]?.command ?? "", /git remote get-url --push origin/u);
-  assert.match(
-    runs[4]?.command ?? "",
-    /^cd '\/workspace\/internal-agents' && exec 'git' '-c' 'protocol\.allow=never' '-c' 'protocol\.https\.allow=always' 'push' 'https:\/\/github\.com\/vercel\/internal-agents\.git'/u,
+  assert.equal(runs.length, 1);
+  const push = runs[0]!;
+  assert.equal(
+    push.command,
+    "cd '/workspace/internal-agents' && exec 'git' 'push' 'origin' 'HEAD:refs/heads/rui/my-branch'",
   );
-  assert.equal(runs[4]?.env?.GH_TOKEN, undefined);
-  assert.match(runs[4]?.env?.GIT_CONFIG_VALUE_0 ?? "", /^Authorization: Basic /u);
-  assert.doesNotMatch(JSON.stringify(runs[4]?.env), /secret-token/u);
-  assert.equal(runs[4]?.env?.GIT_CONFIG_VALUE_1, "/dev/null");
+  assert.equal(push.env?.GH_TOKEN, undefined);
+  assert.equal(push.env?.GIT_CONFIG_COUNT, "4");
+  assert.equal(push.env?.GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
+  assert.match(push.env?.GIT_CONFIG_VALUE_0 ?? "", /^Authorization: Basic /u);
+  assert.doesNotMatch(JSON.stringify(push.env), /secret-token/u);
+  assert.equal(push.env?.GIT_CONFIG_VALUE_1, "/dev/null");
+  assert.deepEqual(
+    [push.env?.GIT_CONFIG_KEY_2, push.env?.GIT_CONFIG_VALUE_2],
+    ["protocol.allow", "never"],
+  );
+  assert.deepEqual(
+    [push.env?.GIT_CONFIG_KEY_3, push.env?.GIT_CONFIG_VALUE_3],
+    ["protocol.https.allow", "always"],
+  );
   assert.match(JSON.stringify(policies[0]), /secret-token/u);
   assert.equal(policies[1], "allow-all");
   assert.equal(output.stdout, "pushed [redacted]");
@@ -403,33 +443,74 @@ test("accepts workspace-relative working directories and rejects escapes", async
   );
 });
 
-test("rejects explicit command targets outside the declared repository before minting", async () => {
-  for (const command of [
-    "gh pr view 2583 --repo vercel/eve",
-    "gh pr view 2583 -R vercel/eve",
-    "gh pr view 2583 --repo=vercel/eve",
-    "gh --repo=vercel/eve pr view 2583",
-    "gh repo clone vercel/eve",
-    "gh repo view vercel/eve",
-    "gh repo fork vercel/eve",
-  ]) {
-    let tokenRequested = false;
-    await assert.rejects(
-      executeGitHubShell({ ...READ, command }, CONFIG, {
+test("leaves explicit command targets to authorize through argv", async () => {
+  const requests: { argv: readonly string[]; repository: string | null }[] = [];
+  await assert.rejects(
+    executeGitHubShell(
+      { ...READ, command: "gh pr view 2583 --repo vercel/eve" },
+      {
+        ...CONFIG,
+        authorize: ({ argv, repository }) => {
+          requests.push({ argv, repository });
+          return !argv.includes("--repo") || argv[argv.indexOf("--repo") + 1] === repository;
+        },
+      },
+      {
         sessionId: "session-1",
         async getConnectToken() {
-          tokenRequested = true;
           return "token";
         },
         async getSandbox() {
           return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
         },
-      }),
-      /not in the declared repositories/u,
-      command,
-    );
-    assert.equal(tokenRequested, false, command);
-  }
+      },
+    ),
+    /not authorized/u,
+  );
+  assert.deepEqual(requests, [
+    {
+      argv: ["gh", "pr", "view", "2583", "--repo", "vercel/eve"],
+      repository: "vercel/internal-agents",
+    },
+  ]);
+});
+
+test("mints an owner-wide installation token for owner-level discovery", async () => {
+  const tokenCalls: ConnectTokenParams[] = [];
+  const requests: { owner: string | null; repository: string | null }[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  await executeGitHubShell(
+    {
+      command: "gh repo list vercel",
+      description: "List vercel repositories",
+      repository: "vercel",
+    },
+    {
+      ...CONFIG,
+      authorize: ({ owner, repository }) => {
+        requests.push({ owner, repository });
+        return owner === "vercel";
+      },
+    },
+    {
+      sessionId: "session-1",
+      async getConnectToken(_connector, params) {
+        tokenCalls.push(params);
+        return "token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
+  );
+  assert.deepEqual(tokenCalls, [
+    {
+      authorizationDetails: [{ type: "github_app_installation", org: "vercel" }],
+      subject: { type: "app" },
+    },
+  ]);
+  assert.deepEqual(requests, [{ owner: "vercel", repository: null }]);
+  assert.equal(runs.length, 1);
 });
 
 test("scopes app tokens to the declared owner's installation and leaves owners to authorize", async () => {
@@ -441,13 +522,13 @@ test("scopes app tokens to the declared owner's installation and leaves owners t
       {
         ...READ,
         command: "gh pr view 7 --repo acme/widgets",
-        permissions: [{ provider: "github", repositories: ["acme/widgets"], access: "write" }],
+        repository: "acme/widgets",
       },
       {
         ...CONFIG,
         authorize: ({ repository }) => {
-          repositories.push(repository);
-          return repository.toLowerCase().startsWith("vercel/");
+          repositories.push(repository!);
+          return repository!.toLowerCase().startsWith("vercel/");
         },
       },
       {
@@ -461,7 +542,7 @@ test("scopes app tokens to the declared owner's installation and leaves owners t
         },
       },
     ),
-    /not authorized to access acme\/widgets/u,
+    /not authorized to run this command on acme\/widgets/u,
   );
   assert.deepEqual(tokenCalls, [
     {

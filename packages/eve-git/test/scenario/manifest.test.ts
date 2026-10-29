@@ -98,7 +98,7 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
   const input = tool.inputSchema.parse({
     command: "gh repo view acme/project",
     description: "Read the project metadata.",
-    permissions: [{ provider: "github", repositories: ["acme/project"], access: "write" }],
+    repository: "acme/project",
   });
   assert.equal(tool.approval({ toolInput: input }), "not-applicable");
   assert.equal(typeof tool.execute, "function");

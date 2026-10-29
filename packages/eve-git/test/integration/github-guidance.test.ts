@@ -53,6 +53,10 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);
   assert.match(content, /Use the `gh` tool for every authenticated GitHub operation/u);
   assert.match(content, /Load the pr skill before publishing/u);
+  // The agent discovers repositories itself instead of asking for an exact owner/name.
+  assert.match(content, /gh search repos/u);
+  assert.match(content, /gh repo list <owner>/u);
+  assert.match(content, /Do not ask the requester for an exact `owner\/name`/u);
   assert.match(skill.content, /gh-signed-commit/u);
   assert.match(skill.description, /signed commit/u);
   assert.match(skill.content, /gh pr create --draft/u);
@@ -79,9 +83,10 @@ test("with a user principal, guidance describes the caller's token instead of re
   for (const text of [content, tool.description]) {
     assert.match(text, /caller's own GitHub token/u);
     assert.match(text, /caller's GitHub permissions/u);
+    assert.match(text, /gh api user\/repos/u);
     assert.doesNotMatch(
       text,
-      /server-side repository scope|remains scoped to the declared repository/u,
+      /server-side repository scope|remains scoped to the declared repository|exactly one/u,
     );
   }
 });

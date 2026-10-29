@@ -96,13 +96,13 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | ---------------------- | ------------- | -------------------------------------------------------------------------------------------- |
 | `github.connector`     | With `github` | Connector that mints a GitHub token                                                          |
 | `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules   |
-| `github.authorize`     | With `github` | `authorize({ auth, repository, token })` decides whether each `gh` tool invocation may run   |
+| `github.authorize`     | With `github` | `authorize({ argv, auth, owner, repository, token })` decides whether each `gh` call may run |
 | `github.principalType` | No            | `"app"` (default) for GitHub App installation tokens, or `"user"` for the caller's own token |
 | `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`         |
 
-Each `gh` invocation declares exactly one `owner/name` repository, and every explicit command target must match it. By default the tool requests a GitHub App installation token for that owner's installation, scoped to that one repository; with `github.principalType` set to `"user"` it resolves the caller's own token instead. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
+Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command, with any subcommand, and may set `repository` to the `owner/name` it acts on or to an owner for discovery such as `gh repo list <owner>`. By default the tool requests a GitHub App installation token for that owner's installation, scoped to the repository when one is set; app tokens need at least an owner. With `github.principalType` set to `"user"` it resolves the caller's own token instead, and `repository` may be omitted for commands such as `gh api user/repos`. Every git process gets the credential header only for HTTPS GitHub, with other protocols and hooks disabled. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
-`github.authorize` is the agent's only repository access control, so it is required: a command runs only when it returns `true`. It runs during each `gh` tool execution, not when the session starts. The order is: validate the command and repository, mint the token, await `authorize({ auth, repository, token })`, install the credential lease, then run the command. `auth` is the session's current caller at tool invocation, or `null`. Returning `false` stops execution before the lease is installed or the command runs, so the token never reaches the sandbox or GitHub. The decision applies to that invocation only; it is neither cached for the session nor repeated for each GitHub API request.
+`github.authorize` is the agent's only repository access control, so it is required: a command runs only when it returns `true`. It runs during each `gh` tool execution, not when the session starts. The order is: parse the command and repository, mint the token, await `authorize({ argv, auth, owner, repository, token })`, install the credential lease, then run the command. `argv` is the parsed command, such as `["gh", "pr", "view", "7", "--repo", "acme/widgets"]`. `owner` and `repository` come from the declared `repository` and are `null` when it was an owner or omitted. eve does not match explicit targets such as `--repo` against the declaration; inspect `argv` in `authorize` when your policy depends on them. `auth` is the session's current caller at tool invocation, or `null`. Returning `false` stops execution before the lease is installed or the command runs, so the token never reaches the sandbox or GitHub. The decision applies to that invocation only; it is neither cached for the session nor repeated for each GitHub API request.
 
 The simplest policy limits the agent to one organization. Compare owners case-insensitively, as GitHub does:
 
@@ -115,7 +115,7 @@ export default git({
   github: {
     connector: "github/my-agent",
     broker: brokerGitHubLease,
-    authorize: ({ repository }) => repository.toLowerCase().startsWith("acme/"),
+    authorize: ({ owner }) => owner?.toLowerCase() === "acme",
   },
 });
 ```
@@ -133,7 +133,7 @@ export default git({
     broker: brokerGitHubLease,
     // GitHub channel sessions carry the commenter's login as `auth.subject`.
     async authorize({ auth, repository, token }) {
-      if (!repository.toLowerCase().startsWith("acme/")) return false;
+      if (!repository?.toLowerCase().startsWith("acme/")) return false;
       if (auth?.authenticator !== "github-webhook" || !auth.subject) return false;
       const response = await fetch(
         `https://api.github.com/repos/${repository}/collaborators/${auth.subject}`,
@@ -158,7 +158,7 @@ export default git({
   github: {
     connector: "github/my-agent",
     broker: brokerGitHubLease,
-    authorize: ({ repository }) => repository.toLowerCase().startsWith("acme/"),
+    authorize: ({ owner }) => owner?.toLowerCase() === "acme",
     principalType: "user",
   },
 });
@@ -166,7 +166,7 @@ export default git({
 
 The tool resolves the caller's token from `github.connector` through `ctx.getToken`. When the caller has no grant, eve signs them in and re-runs the call. The token request carries no repository details, so one grant covers every repository and later commands resolve tokens without another sign-in. When GitHub rejects the token (`HTTP 401`, `Bad credentials`, `Authentication failed`, or a `gh-signed-commit` `failed: 401`), the tool calls `ctx.requireAuth`, which evicts the token and signs the caller in again.
 
-A user token carries the caller's GitHub permissions across every account where the GitHub App is installed, not only the declared repository. The tool description and GitHub instructions tell the model that access is limited to what the caller can reach. `github.authorize` still runs before every command, with the caller's token, and remains the agent's repository policy.
+A user token carries the caller's GitHub permissions across every account where the GitHub App is installed, not only the declared repository, and `gh api` paths can reach any of them. The tool description and GitHub instructions tell the model that access is limited to what the caller can reach. `github.authorize` still runs before every command, with the caller's token, and remains the agent's repository policy.
 
 ### Credit the person behind a turn
 
@@ -187,7 +187,7 @@ export default git({
   github: {
     connector: "github/my-agent",
     broker: brokerGitHubLease,
-    authorize: ({ repository }) => repository.toLowerCase().startsWith("acme/"),
+    authorize: ({ owner }) => owner?.toLowerCase() === "acme",
     attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
   },
 });
@@ -217,7 +217,7 @@ directory, `agent/extensions/code/extension.ts`.
 
 For a custom GitHub command tool, `eve/extensions/git/sandbox` exports
 `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`.
-The execution helper enforces repository and command constraints and brokers a
+The execution helper parses the command, calls `authorize`, and brokers a
 credential lease; dependencies supply the session ID and sandbox access. Reuse
 `githubShellApproval` to reject invalid command inputs through the approval
 policy rather than bypassing those constraints.
