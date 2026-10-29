@@ -113,6 +113,20 @@ describe("eve channel commands", () => {
     );
   });
 
+  it("offers the session commands when commands is omitted", async () => {
+    const list = route("GET", "/eve/v1/commands", { auth: none() });
+    const response = await list(new Request("https://eve.test/eve/v1/commands"), args({}));
+    expect(await response.json()).toEqual({
+      ok: true,
+      commands: [
+        expect.objectContaining({ name: "new", aliases: ["reset"], session: "required" }),
+        expect.objectContaining({ name: "clear", session: "required" }),
+        expect.objectContaining({ name: "compact", session: "required" }),
+        expect.objectContaining({ name: "cancel", session: "required" }),
+      ],
+    });
+  });
+
   it("sends a command's follow-up into the session through onMessage, as the caller", async () => {
     const cancel = vi.fn().mockResolvedValue({});
     const send = vi.fn().mockResolvedValue({ sessionId: "wrun_A", deliveryId: "d_1" });

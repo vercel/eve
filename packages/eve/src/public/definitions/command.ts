@@ -93,6 +93,47 @@ export function defineCommand(definition: CommandDefinition): CommandDefinition 
   return definition;
 }
 
+/**
+ * The conversation controls every client offers: `new` (alias `reset`), `clear`, `compact`, and
+ * `cancel`. `eveChannel()` offers them when `commands` is omitted; spread them in to keep them
+ * alongside your own: `commands: { ...sessionCommands, standup }`.
+ */
+export const sessionCommands = {
+  new: defineCommand({
+    description: "Start a fresh session",
+    aliases: ["reset"],
+    session: "required",
+    async run({ session }) {
+      await session.end();
+      return { message: "Session ended. The next message starts a new one." };
+    },
+  }),
+  clear: defineCommand({
+    description: "Cancel the running turn and clear the session context",
+    session: "required",
+    async run({ session }) {
+      await session.clear();
+      return { message: "Clearing the session context." };
+    },
+  }),
+  compact: defineCommand({
+    description: "Compact the current session context",
+    session: "required",
+    async run({ session }) {
+      await session.compact();
+      return { message: "Compaction requested." };
+    },
+  }),
+  cancel: defineCommand({
+    description: "Cancel the running turn",
+    session: "required",
+    async run({ session }) {
+      await session.cancel();
+      return { message: "Cancellation requested." };
+    },
+  }),
+} satisfies CommandDefinitions;
+
 const COMMAND_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
 
 /**

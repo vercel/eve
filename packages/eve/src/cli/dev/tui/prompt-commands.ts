@@ -7,10 +7,6 @@ type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
-  | { type: "new" }
-  | { type: "cancel" }
-  | { type: "clear" }
-  | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
   | { type: "info" }
@@ -63,42 +59,6 @@ const PROMPT_COMMAND_DEFINITIONS = [
     typeahead: { maxArguments: 2, loadingLabel: "models" },
     build: (argument) => ({ type: "extension", name: "model", argument }),
     targets: ["local"],
-  },
-  {
-    name: "new",
-    history: "keep",
-    aliases: ["reset"],
-    description: "Start a fresh session",
-    takesArgument: false,
-    build: () => ({ type: "new" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "clear",
-    history: "keep",
-    aliases: [],
-    description: "Clear the session context and keep the session",
-    takesArgument: false,
-    build: () => ({ type: "clear" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "compact",
-    history: "keep",
-    aliases: [],
-    description: "Compact the current session context",
-    takesArgument: false,
-    build: () => ({ type: "compact" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "cancel",
-    history: "keep",
-    aliases: [],
-    description: "Cancel the running turn",
-    takesArgument: false,
-    build: () => ({ type: "cancel" }),
-    targets: ["local", "remote"],
   },
   {
     name: "login",
@@ -191,7 +151,7 @@ export function promptCommandsFor(target: PromptCommandTarget): readonly PromptC
   const commands = PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
     definition.targets.some((supportedTarget) => supportedTarget === target),
   );
-  // Remote sessions have no model picker, so keep bare `/` from defaulting to /new.
+  // Remote sessions have no model picker, so bare `/` leads with /help.
   if (target === "remote") {
     return [
       ...commands.filter((command) => command.name === "help"),
@@ -212,12 +172,9 @@ export function isPromptCommandAvailableFor(
 }
 
 /**
- * Recognizes the slash commands the prompt accepts. `/new` (and `/reset`)
- * starts a fresh session and transcript; `/cancel` stops the running turn;
- * `/clear` stops the running turn and clears context in place; `/compact` queues context compaction; `/exit` (and
- * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
- * outside the runner; the eve channel's commands come from `commands`. Anything else —
- * including unknown `/text` — is a normal message.
+ * Recognizes the slash commands the prompt accepts: the TUI's built-ins, plus the eve channel's
+ * commands when `commands` includes them, such as `/new`, `/clear`, `/compact`, and `/cancel` from
+ * the default channel. Anything else, including unknown `/text`, is a normal message.
  */
 export function parsePromptCommand(
   prompt: string,
@@ -256,7 +213,7 @@ export function isPromptControlCommand(
 
 /**
  * Appends the eve channel's commands after the built-ins. A built-in name or alias wins, so an
- * agent cannot shadow `/exit` or `/new`. A command without `input` matches only alone, so
+ * agent cannot shadow `/exit` or `/help`. A command without `input` matches only alone, so
  * `/name some text` stays an ordinary message instead of running it.
  */
 export function withChannelPromptCommands(

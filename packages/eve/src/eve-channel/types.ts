@@ -211,6 +211,9 @@ export interface EveChannelConfig {
    * `GET /eve/v1/commands` and run one with `POST /eve/v1/commands/:name`, or inside a session
    * with `POST /eve/v1/session/:sessionId/commands/:name`; every route uses {@link auth}. A
    * client's built-in command wins over a same-named channel command.
+   *
+   * Defaults to `sessionCommands` (`new`, `clear`, `compact`, `cancel`). Passing `commands`
+   * replaces them; spread `sessionCommands` in to keep them.
    */
   readonly commands?: CommandDefinitions;
 }

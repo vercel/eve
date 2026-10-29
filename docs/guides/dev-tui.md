@@ -22,10 +22,6 @@ Before your first message, the empty composer may suggest asking your local agen
 | Command     | Description                                                                                                                                                  |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`    | Choose the model, speed, and reasoning. Pass a model ID to set it directly: `/model provider/model-id`.                                                      |
-| `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
-| `/clear`    | Cancel the running turn and every working task, then clear the session's model-message history and keep the session.                                         |
-| `/compact`  | Compact the current session's context.                                                                                                                       |
-| `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
 | `/add`      | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to install it directly: `/add channel/slack`. |
 | `/deploy`   | Deploy the agent to Vercel production. Installs the Vercel CLI, signs in, and links the directory if needed.                                                 |
@@ -39,7 +35,16 @@ When a message or stream reconnection reaches a [stranded session](./deployment/
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
 
-The agent can add its own commands through the [eve channel's `commands`](../channels/eve#slash-commands). They appear after the built-in commands, locally and through `eve remote connect`, and refresh when the agent reloads.
+The agent adds its own commands through the [eve channel's `commands`](../channels/eve#slash-commands). They appear after the built-in commands, locally and through `eve remote connect`, and refresh when the agent reloads. The default eve channel offers these conversation commands:
+
+| Command    | Description                                                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `/new`     | End the session and start a fresh one. `/reset` is an alias.                                                         |
+| `/clear`   | Cancel the running turn and every working task, then clear the session's model-message history and keep the session. |
+| `/compact` | Compact the current session's context.                                                                               |
+| `/cancel`  | Cancel the current turn without discarding settled context.                                                          |
+
+An agent that sets its own `commands` keeps them by including `sessionCommands`. Esc and Ctrl+C cancel a running turn whatever commands the agent offers.
 
 ## Set up a new agent
 
