@@ -222,7 +222,7 @@ export function ArchitectureDiagram() {
     >
       <div>
         <LogoEveSvg className="ml-5 text-gray-1000" height={13} />
-        <div className="mt-3 flex flex-col gap-4 lg:flex-row">
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
             <GradientBorder />
