@@ -12,6 +12,7 @@ import type { ContextContainer } from "#context/container.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { manifestValues } from "#reactions/bundle.js";
 import type { ValueReaction } from "#reactions/reaction.js";
+import { authoredProgram } from "./authored.js";
 import { checkHistory } from "./check.js";
 import { nativeNext, nativeProgram } from "./native.js";
 import { SessionIdKey } from "#context/keys.js";
@@ -19,7 +20,9 @@ import type { Memo } from "#dynamic/definition.js";
 import { programScope, withMemos } from "#reactions/runner.js";
 import {
   type Compaction,
+  continuationsOf,
   force,
+  NOTE_KEY,
   type Lazy,
   type Plan,
   type ModelStep,
@@ -36,9 +39,6 @@ const log = createLogger("harness.program");
 
 /** How many notes a program can add to one turn. At the cap, eve's own loop decides. */
 export const MAX_CONTINUATIONS = 3;
-
-/** Marks the notes a program adds, with the turn they continued. */
-const NOTE_KEY = "eve.program";
 
 const PROGRAM_FAILED = {
   code: "PROGRAM_FAILED",
@@ -95,7 +95,8 @@ async function evaluate<T>(
   let ctx: ProgramContext | undefined;
   const run = async (memo: Memo) => {
     ctx = programContext(step, input.context, memo);
-    return await force(input.field((step.config.program ?? nativeProgram)(ctx), ctx));
+    const program = step.config.program ?? authoredProgram(container) ?? nativeProgram;
+    return await force(input.field(program(ctx), ctx));
   };
   if (container === undefined || !container.has(SessionIdKey)) {
     const value = await run(() => {
@@ -281,14 +282,4 @@ async function failProgram(step: Step): Promise<StepResult> {
     session: step.session,
     settledTurn: { isError: true, output: PROGRAM_FAILED.message },
   };
-}
-
-/** The notes programs added to this turn, which compaction may have summarized away. */
-function continuationsOf(history: readonly HarnessModelMessage[], turnId: string): number {
-  return history.filter(
-    (message) =>
-      message.role === "user" &&
-      message.kind === "execution.continuation" &&
-      message.metadata?.[NOTE_KEY] === turnId,
-  ).length;
 }

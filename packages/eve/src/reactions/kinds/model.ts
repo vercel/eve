@@ -74,6 +74,32 @@ export async function loadModelReaction(
   };
 }
 
+const HARNESS_MODEL_ID = "model:harness";
+
+/**
+ * The model `agent/harness.ts` chooses, in place of the agent's. `null` or `undefined` leaves the
+ * agent's own.
+ */
+export function harnessModelReaction(
+  bundle: CompiledBundle,
+  input: { readonly evaluate: ValueReaction["evaluate"]; readonly label: string },
+): ValueReaction {
+  return {
+    contribute: async (result) => {
+      if (result === null || result === undefined) return { value: null };
+      try {
+        return await contributionOf(result, bundle);
+      } catch (error) {
+        throw new DynamicModelSelectionError(error);
+      }
+    },
+    evaluate: input.evaluate,
+    id: HARNESS_MODEL_ID,
+    kind: "model",
+    label: input.label,
+  };
+}
+
 /** Resolves a model result to what the slot records, and the provider the process holds. */
 async function contributionOf(
   result: unknown,
@@ -98,9 +124,11 @@ async function contributionOf(
 export function getEffectiveModelSelection(
   ctx: Pick<ContextReader, "get">,
 ): LiveDynamicModelSelection | null {
-  const slot = readReactionsState(ctx).slots[MODEL_REACTION_ID];
-  if (slot !== undefined && slot.value !== null) {
-    const live = readLive(ctx, MODEL_REACTION_ID, slot);
+  const { slots } = readReactionsState(ctx);
+  for (const id of [HARNESS_MODEL_ID, MODEL_REACTION_ID]) {
+    const slot = slots[id];
+    if (slot === undefined || slot.value === null) continue;
+    const live = readLive(ctx, id, slot);
     return (
       (live?.live as LiveDynamicModelSelection | undefined) ?? {
         reference: slotValueOf<ModelSlotValue>(slot.value).reference,

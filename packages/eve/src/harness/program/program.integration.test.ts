@@ -13,6 +13,8 @@ import { reactionSession } from "#internal/testing/reaction-session.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { instructionsReaction } from "#reactions/kinds/instructions.js";
 import { nativeNext, nativeProgram } from "./native.js";
+import { harnessProgram } from "./authored.js";
+import type { SessionFrame } from "#dynamic/definition.js";
 import type { Next, Program, ProgramContext } from "./program.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
@@ -371,6 +373,38 @@ describe("a session program's history", () => {
       { data: { error: { message: "The agent's program failed." }, outcome: "failed" } },
     ]);
     expect(JSON.stringify(events)).not.toContain("10.0.0.7");
+  });
+});
+
+describe("a harness's history", () => {
+  // The kernel decides the same way for a harness; only its context differs.
+  const frame = () => ({ session: { id: "program-session" } }) as SessionFrame;
+
+  it("replaces eve's compaction with what its history returns", async () => {
+    const { events, fullPrompts, result } = await runTurn(
+      harnessProgram((ctx) => ({ history: () => ctx.compaction && ctx.history.slice(-1) }), frame),
+      ["Two court cases back it."],
+      { history: older, threshold: 600 },
+    );
+
+    expect(JSON.stringify(fullPrompts[0])).not.toContain("Earlier question");
+    expect(
+      events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
+    ).toEqual([]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it." });
+  });
+
+  it("leaves eve's compaction where its history returns undefined", async () => {
+    const { events } = await runTurn(
+      harnessProgram(() => ({ history: () => undefined }), frame),
+      ["A summary of the earlier exchanges.", "Two court cases back it."],
+      { history: older, threshold: 600 },
+    );
+
+    // eve's own compaction writes its summary with a model run the change owns.
+    expect(
+      events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
+    ).toHaveLength(1);
   });
 });
 

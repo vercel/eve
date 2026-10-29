@@ -92,3 +92,16 @@ export interface Plan {
 
 /** Cheap and synchronous: it says what each field is. Work belongs in the lazy fields. */
 export type Program = (ctx: ProgramContext) => Plan;
+
+/** Marks the notes a program adds, with the turn they continued. */
+export const NOTE_KEY = "eve.program";
+
+/** The notes programs added to this turn, which compaction may have summarized away. */
+export function continuationsOf(history: readonly HarnessModelMessage[], turnId: string): number {
+  return history.filter(
+    (message) =>
+      message.role === "user" &&
+      message.kind === "execution.continuation" &&
+      message.metadata?.[NOTE_KEY] === turnId,
+  ).length;
+}

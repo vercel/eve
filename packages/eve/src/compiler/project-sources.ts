@@ -33,6 +33,7 @@ export type ProjectedModuleSource =
         | "channel"
         | "config"
         | "extension"
+        | "harness"
         | "hook"
         | "instructions"
         | "memory"
@@ -68,6 +69,7 @@ const MODULE_KIND_BY_SLOT_ROOT: Partial<
   agent: "config",
   channels: "channel",
   extensions: "extension",
+  harness: "harness",
   hooks: "hook",
   instructions: "instructions",
   memory: "memory",
@@ -185,6 +187,7 @@ export function listApplicationModulePaths(manifest: AgentSourceManifest): strin
   const sources: readonly { readonly logicalPath: string; readonly sourceKind: string }[] = [
     ...(manifest.configModule === undefined ? [] : [manifest.configModule]),
     ...(manifest.sandbox === null ? [] : [manifest.sandbox]),
+    ...(manifest.harness === undefined ? [] : [manifest.harness]),
     ...manifest.channels,
     ...manifest.connections,
     ...manifest.hooks,
@@ -386,6 +389,7 @@ function projectManifest(input: {
   for (const source of input.manifest.hooks) pushModule(source);
   for (const source of input.manifest.memories) pushModule(source);
   if (input.manifest.sandbox !== null) pushModule(input.manifest.sandbox);
+  if (input.manifest.harness !== undefined) pushModule(input.manifest.harness);
   for (const source of input.manifest.tools) pushModule(source);
   for (const source of input.manifest.instructions) {
     if (source.sourceKind === "module") pushModule(source);

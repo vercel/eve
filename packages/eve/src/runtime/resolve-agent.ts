@@ -10,7 +10,8 @@ import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
 import { resolveDynamicDefinition } from "#runtime/resolve-dynamic.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";
-import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
+import { createResolvedModuleSourceRef, ResolveAgentError } from "#runtime/resolve-helpers.js";
+import { harnessOf } from "#public/definitions/harness.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
@@ -106,6 +107,22 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     input.moduleMap,
     input.nodeId,
   );
+  const harness =
+    input.manifest.harness === undefined
+      ? undefined
+      : harnessOf(
+          await loadResolvedModuleExport({
+            definition: input.manifest.harness,
+            kindLabel: "harness",
+            moduleMap: input.moduleMap,
+            nodeId: input.nodeId,
+          }),
+        );
+  if (input.manifest.harness !== undefined && harness === undefined) {
+    throw new ResolveAgentError(
+      `Export defineHarness((ctx) => ({ ... })) from "${input.manifest.harness.logicalPath}".`,
+    );
+  }
   const instructions = input.manifest.instructions.map((definition) =>
     createResolvedInstructionsDefinition(input.manifest, definition),
   );
@@ -117,6 +134,9 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
+    ...(harness !== undefined && {
+      harness: { harness, logicalPath: input.manifest.harness!.logicalPath },
+    }),
     hooks: resolvedHooks,
     instructions,
     metadata: {

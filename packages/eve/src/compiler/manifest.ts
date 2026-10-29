@@ -307,6 +307,9 @@ export interface CompiledHookDefinition extends ModuleSourceRef {
   readonly slug: string;
 }
 
+/** The authored `agent/harness.ts`, which decides how the agent's turns run. */
+export type CompiledHarnessDefinition = ModuleSourceRef;
+
 /**
  * Non-recursive compiled authored agent payload shared by the root agent and
  * every flattened subagent node.
@@ -949,6 +952,15 @@ const compiledHookDefinitionSchema: z.ZodType<CompiledHookDefinition> = z
   })
   .strict();
 
+const compiledHarnessDefinitionSchema: z.ZodType<CompiledHarnessDefinition> = z
+  .object({
+    exportName: z.string().optional(),
+    logicalPath: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+  })
+  .strict();
+
 const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
   .object({
     externalDependencies: z.array(z.string()).readonly(),
@@ -987,6 +999,7 @@ const compiledAgentResourceFields = {
   dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
   dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
   extensionMounts: z.array(compiledExtensionMountSchema).default([]),
+  harness: compiledHarnessDefinitionSchema.optional(),
   hooks: z.array(compiledHookDefinitionSchema),
   memories: z.array(compiledMemoryDefinitionSchema).default([]),
   sandbox: compiledSandboxDefinitionSchema,
@@ -1092,6 +1105,7 @@ export const compiledAgentManifestSchema = z
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
+    harness: compiledHarnessDefinitionSchema.optional(),
     hooks: z.array(compiledHookDefinitionSchema),
     memories: z.array(compiledMemoryDefinitionSchema).default([]),
     kind: z.literal(COMPILED_AGENT_MANIFEST_KIND),
@@ -1122,6 +1136,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
+  readonly harness?: CompiledHarnessDefinition;
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly memories?: readonly CompiledMemoryDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
@@ -1161,6 +1176,7 @@ export function createCompiledAgentResources(
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
     extensionMounts: [...(input.extensionMounts ?? [])],
+    ...(input.harness !== undefined && { harness: { ...input.harness } }),
     hooks: [...(input.hooks ?? [])],
     memories: [...(input.memories ?? [])],
     instructions: [...(input.instructions ?? [])],

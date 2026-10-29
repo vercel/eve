@@ -23,6 +23,14 @@
   "DynamicSubagentResult",
   "DynamicTurn",
   "EveLanguageModel",
+  "Harness",
+  "HarnessAgent",
+  "HarnessCompaction",
+  "HarnessContext",
+  "HarnessDefinition",
+  "HarnessModelStep",
+  "HarnessNext",
+  "HarnessPlan",
   "Memo",
   "Occurrence",
   "RemoteAgentDefinition",
@@ -33,5 +41,6 @@
   "TokenUsage",
   "defineAgent",
   "defineDynamic",
+  "defineHarness",
   "defineRemoteAgent"
 ]

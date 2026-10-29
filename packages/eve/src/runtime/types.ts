@@ -1,3 +1,4 @@
+import type { Harness } from "#public/definitions/harness.js";
 import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -442,6 +443,8 @@ export interface ResolvedAgent {
    * source and writes the contents into the sandbox template snapshot.
    */
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
+  /** The function `agent/harness.ts` defines, which decides how the agent's turns run. */
+  readonly harness?: { readonly harness: Harness; readonly logicalPath: string };
   readonly hooks: readonly ResolvedHookDefinition[];
   readonly memories: readonly ResolvedMemoryDefinition[];
   readonly skills: readonly ResolvedSkillDefinition[];

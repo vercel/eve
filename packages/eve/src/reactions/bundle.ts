@@ -9,6 +9,7 @@ import { loadModelReaction } from "./kinds/model.js";
 import { skillReaction, syncDynamicSkillFiles } from "./kinds/skill.js";
 import { subagentReaction } from "./kinds/subagent.js";
 import { toolReaction } from "./kinds/tool.js";
+import { harnessValues } from "#harness/program/authored.js";
 import type { BundleReactions, Reaction, ValueReaction } from "./reaction.js";
 
 const cache = new WeakMap<CompiledBundle, Promise<BundleReactions>>();
@@ -49,15 +50,18 @@ export async function bundleReactions(
 async function buildReactions(bundle: CompiledBundle): Promise<BundleReactions> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelReaction(bundle);
+  const harness = agent.harness === undefined ? undefined : harnessValues(agent.harness, bundle);
   const reactions: Reaction[] = [
     ...agent.hooks.map(hookReaction),
     ...agent.memories.flatMap(memoryReactions),
+    ...(harness === undefined ? [] : [harness.model]),
     ...(model === undefined ? [] : [model]),
     ...(agent.dynamicConnectionResolvers ?? []).map(connectionReaction),
     ...bundle.subagentRegistry.dynamicResolvers.map(subagentReaction),
     ...agent.dynamicToolResolvers.map(toolReaction),
     ...agent.dynamicSkillResolvers.map(skillReaction),
     ...agent.dynamicInstructionsResolvers.map(instructionsReaction),
+    ...(harness?.rest ?? []),
   ];
   return {
     effects: {

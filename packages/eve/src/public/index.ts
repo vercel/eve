@@ -33,6 +33,17 @@ export type {
   SessionFrame,
 } from "#dynamic/definition.js";
 export {
+  type Harness,
+  type HarnessAgent,
+  type HarnessCompaction,
+  type HarnessContext,
+  type HarnessDefinition,
+  type HarnessModelStep,
+  type HarnessNext,
+  type HarnessPlan,
+  defineHarness,
+} from "#public/definitions/harness.js";
+export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
   type RemoteAgentUrl,
