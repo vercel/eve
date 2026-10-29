@@ -6,15 +6,13 @@ const commands: ChannelCommandInfo[] = [
   {
     name: "new",
     description: "Start over",
-    arguments: "none",
     aliases: ["reset"],
     session: "required",
   },
   {
     name: "standup",
     description: "Draft a standup",
-    arguments: "text",
-    argumentHint: "[topic]",
+    input: { hint: "[topic]" },
     session: "optional",
   },
 ];
