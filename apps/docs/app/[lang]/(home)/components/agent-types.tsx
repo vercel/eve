@@ -856,7 +856,7 @@ function IMessageClient({ stage = 0 }: { stage?: number }) {
           <p
             aria-label="Planner is typing"
             className={cn(
-              "relative flex w-fit origin-bottom-left items-center gap-1 px-3 py-2.5",
+              "relative flex w-fit origin-bottom-left items-center gap-[3px] px-2.5 py-2",
               imessageIn,
               receivedBubble.bubble,
             )}
@@ -865,7 +865,7 @@ function IMessageClient({ stage = 0 }: { stage?: number }) {
             <Tail className={receivedBubble.tail} />
             {[0, 1, 2].map((dot) => (
               <span
-                className="size-1.5 animate-blink rounded-full bg-current"
+                className="size-[5px] animate-blink rounded-full bg-current"
                 key={dot}
                 style={{ animationDelay: `${dot * 200}ms` }}
               />
