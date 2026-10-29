@@ -47,7 +47,7 @@ body:
     attributes:
       label: eve version
       description: The exact version from your lockfile (`npm ls eve`), not a semver range. If the bug is a regression, the last known-good version is also very helpful.
-      placeholder: "eve@0.7.0 (worked in 0.6.2)"
+      placeholder: "eve@1.2.0 (worked in 1.1.3)"
     validations:
       required: true
   - type: textarea

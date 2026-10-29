@@ -1,7 +1,7 @@
 ---
-issue: "Maintainer-approved pre-1.0 API audit; stack #5486"
+issue: "Maintainer-approved 1.0 API audit; stack #5486"
 status: implemented
-last_updated: "2026-10-27"
+last_updated: "2026-10-29"
 ---
 
 # Public Workflow entries

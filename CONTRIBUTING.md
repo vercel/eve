@@ -122,10 +122,10 @@ contract generation in `_manifest.json`. Build against the oldest eve release
 your extension intends to support, then test that same distribution against
 newer releases. A consumer rejects distributions built by a newer eve release
 or against an unsupported distribution generation before executing extension
-code. The first release of this manifest format rejects older epoch-based
-distributions. If the release candidate's distribution contract remains
-compatible, 1.0 continues to support its generation without a rebuild; a
-breaking change requires an explicit generation change and rebuild guidance.
+code. This manifest format rejects older epoch-based distributions.
+Generations are independent of eve versions: a new eve major release still
+loads every supported generation without a rebuild, and a breaking distribution
+contract change requires an explicit generation change and rebuild guidance.
 
 Review changes to extension-facing APIs and runtime behavior for backwards
 compatibility within a supported generation. An API change does not require an
@@ -238,6 +238,30 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 
+### Versioning
+
+eve follows [semantic versioning](https://semver.org/). Pick the changeset bump
+from the change's effect on the public API described in the
+[stability policy](./docs/reference/typescript-api.md#stability-policy):
+
+| Bump    | Use for                                                                 |
+| ------- | ----------------------------------------------------------------------- |
+| `patch` | Bug fixes, performance improvements, and other changes that add no API. |
+| `minor` | New features and other backward-compatible additions to the public API. |
+| `major` | A breaking change to a stable public API.                               |
+
+Experimental and internal APIs have no compatibility promise, so changes to
+them never need `major`. When a stable API needs an incompatible replacement,
+add the replacement beside it, mark the old API `@deprecated`, and remove it in
+the next major release.
+
+When `.changeset/pre.json` exists, `main` is in Changesets prerelease mode:
+each release PR publishes the next prerelease, such as `1.0.0-rc.1`, under the
+npm dist-tag named in that file, and `latest` stays on the last stable release.
+Maintainers enter and leave prerelease mode with `pnpm changeset pre enter <tag>`
+and `pnpm changeset pre exit`. The release after exiting collects every
+prerelease's changesets into the stable version's notes.
+
 ### Changeset summaries
 
 Start the changeset summary with one complete sentence:
@@ -252,7 +276,7 @@ Restore the connection sign-in page after an authorization error.
 Thanks @octocat for reporting this in #1234.
 ```
 
-For a PR with a changeset, start the PR title with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. GitHub uses the PR title as the squash-merge subject; keep the prefix in that subject, which selects the category. A `minor` or `major` changeset always appears under **Breaking Changes**, whatever its prefix. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
+For a PR with a changeset, start the PR title with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. GitHub uses the PR title as the squash-merge subject; keep the prefix in that subject, which selects the category. A `major` changeset always appears under **Breaking Changes**, whatever its prefix. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
 
 Run `pnpm guard:invariants` to validate changeset summaries. CI also checks the actual PR title.
 

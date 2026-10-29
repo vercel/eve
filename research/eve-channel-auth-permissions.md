@@ -1,5 +1,5 @@
 ---
-issue: "Maintainer-approved pre-1.0 auth boundary cleanup; related #5479"
+issue: "Maintainer-approved auth boundary cleanup; related #5479"
 status: implemented
 last_updated: 2026-10-29
 ---

@@ -13,6 +13,9 @@ function registry(requirement) {
 
 test("accepts public requirements satisfied by the published Eve version", () => {
   assert.doesNotThrow(() => validatePublicRegistryRequirements(registry(">=0.31.3"), "0.31.3"));
+  assert.doesNotThrow(() =>
+    validatePublicRegistryRequirements(registry(">=1.0.0-rc.9"), "1.0.0-rc.10"),
+  );
 });
 
 test("rejects public requirements for an unpublished Eve version with staging guidance", () => {

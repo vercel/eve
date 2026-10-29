@@ -1,7 +1,7 @@
 ---
 issue: "1945"
 status: proposed
-last_updated: "2026-10-27"
+last_updated: "2026-10-29"
 ---
 
 # Dynamic agent configuration without fallbacks or placeholders
@@ -154,12 +154,12 @@ model-dependent work.
 
 ## Compatibility and validation
 
-This is an intentional pre-1.0 breaking change. Remove the fallback overload,
+This is an intentional breaking change. Remove the fallback overload,
 fallback generics, and fallback runtime guards. Bump the compiled manifest
 version. Publish new dynamic tool, skill, and instruction contract epochs while
 retaining older executable epochs. Bump and drop the affected hook epochs when
 model identity moves from session runtime metadata to step attribution. Add a
-minor changeset.
+major changeset.
 
 Coverage must include public type rejection, exact unions and schemas, scope
 precedence, durable live-object rejection, shared normalization, provider

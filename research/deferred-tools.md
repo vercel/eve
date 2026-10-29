@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-10-08"
+last_updated: "2026-10-29"
 ---
 
 # Deferred tools and skills
@@ -851,7 +851,7 @@ start.
    another way.
 3. **No compatibility layer.** There are no aliases for removed tools, no
    flags that restore old behavior, and no code or comments that mention the
-   old surface. Pre-1.0, eve prefers the breaking change.
+   old surface. The change is breaking and needs a `major` changeset.
 4. **Old tests are deleted, not ported.** A test that covers a removed path
    is deleted along with the path. Tests for the new design are written fresh
    in the testing PR, against the new surface. Old assertions are never

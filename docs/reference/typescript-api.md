@@ -5,7 +5,7 @@ description: "The define* helpers, the runtime ctx, and where each one is import
 
 This is the public surface of the `eve` package: the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The package's export map defines the full contract; source files that are not reachable through an exported package subpath are framework internals.
 
-For changes to an existing application, follow [Prepare for 1.0](../guides/prepare-for-1-0).
+To upgrade an existing application to eve 1.0, follow [Upgrade to 1.0](../guides/prepare-for-1-0).
 
 Identity comes from the filesystem, not a field you set. A tool at `agent/tools/get_weather.ts` is `get_weather`, and a connection at `agent/connections/linear.ts` is `linear`, so no definition carries a `name` or `id`.
 
@@ -196,6 +196,11 @@ have one home, `eve/sessions`; client factories and transport-specific types sta
 
 ## Stability policy
 
+eve follows [semantic versioning](https://semver.org/). A stable API changes
+incompatibly only in a major release, and a deprecated stable API keeps working
+until the next major release. Minor releases add backward-compatible features,
+and patch releases fix bugs.
+
 The `exports` field in `packages/eve/package.json` lists every package entry point.
 `eve/experimental/*` and `eve/internal/*` have no compatibility promise. The same
 applies to `experimental` fields in stable definitions, such as
@@ -213,7 +218,7 @@ example with a default branch, instead of switching exhaustively.
 
 `eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose
 types from the `chat` package (Chat SDK v4) as part of their contract. They track
-`chat` v4, so a future breaking `chat` major may require a corresponding eve change.
+`chat` v4, so a future breaking `chat` major may require a corresponding eve major release.
 
 The CLI setup wizard is not a public authoring API; Agent Builder's scaffold
 integration lives at `eve/internal/scaffold`.

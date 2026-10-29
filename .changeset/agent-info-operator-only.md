@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": major
 ---
 
 `GET /eve/v1/info` now serves only operator principals and returns 403 to end users.

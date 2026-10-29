@@ -49,7 +49,7 @@ describe("version-based extension compatibility", () => {
     });
   });
 
-  it("retains RC builds at 1.0 unless the distribution generation is dropped", () => {
+  it("loads builds from an earlier major release until their generation is dropped", () => {
     const rc = { ...manifest, builtWithEve: "0.85.0", contractMajor: 0 };
     expect(checkExtensionVersionCompatibility(rc, "1.0.0", [0])).toBeUndefined();
     expect(checkExtensionVersionCompatibility(rc, "1.0.0", [1])).toEqual({

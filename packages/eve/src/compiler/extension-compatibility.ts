@@ -12,9 +12,9 @@ export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
 /** A legacy distribution must be rebuilt before its contents can be mounted. */
 export class UnsupportedExtensionManifestVersionError extends Error {}
 
-// Generation 0 starts with the new manifest format. Retain it at 1.0 if the
-// release candidate's distribution contract remains compatible; otherwise
-// advance the producer generation and explicitly choose consumer support.
+// Generation 0 started with this manifest format. An incompatible distribution
+// contract change advances the producer generation and explicitly chooses
+// which older generations consumers still load.
 export const EXTENSION_DISTRIBUTION_CONTRACT_MAJOR = 0;
 export const SUPPORTED_EXTENSION_DISTRIBUTION_CONTRACT_MAJORS: readonly number[] = [0];
 

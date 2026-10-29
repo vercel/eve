@@ -1,7 +1,7 @@
 ---
 issue: "TBD (maintainer-requested research; no matching issue found)"
 status: implemented
-last_updated: "2026-10-17"
+last_updated: "2026-10-29"
 ---
 
 # Decision model routing in eve
@@ -12,7 +12,7 @@ Expose automatic model selection as `auto` from `eve/models` and standalone
 `decide` from `eve/ai`. Build both on AI SDK's `experimental_decide` API.
 `decide` accepts eve-owned state, typed questions, `maxRetries`, and `signal`, with an
 optional model defaulting to `typesafe-ai/jev`. It returns typed `answers` and normalized `usage`.
-The pre-1.0 cleanup owns these public shapes rather than exposing experimental SDK signatures.
+The 1.0 API cleanup owns these public shapes rather than exposing experimental SDK signatures.
 
 `auto` calls the shared `decide` wrapper. Model strings use the configured AI
 SDK default provider; without an override, the wrapper resolves eve's local

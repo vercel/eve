@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-10-20"
+last_updated: "2026-10-29"
 ---
 
 # eve tasks
@@ -591,7 +591,7 @@ the model's history, and clients see outcomes through `task.settled`. The eval a
 
 ## 8. Removed and changed
 
-These are the upgrade notes; everything is breaking and allowed pre-1.0.
+These are the upgrade notes; everything is breaking and needs a `major` changeset.
 
 - **Workflow tool bodies** keep `execute(input, ctx)`, `ctx.abortSignal`, and `ctx.callId`.
 - **`execution: "background"`** is replaced by defining `task(input, ctx)` in place of

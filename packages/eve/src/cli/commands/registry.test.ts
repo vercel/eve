@@ -1249,6 +1249,28 @@ describe("registry commands", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it.each([
+    [">=0.30.0", true],
+    [">=1.0.0", false],
+  ])("checks an eve prerelease against requirement %s", async (requires, installs) => {
+    const logger = createLogger();
+    resolveInstalledPackageInfo.mockReturnValueOnce({ name: "eve", version: "1.0.0-rc.0" });
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item", meta: { eve: { requires } } },
+    ]);
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", { skipSetup: true });
+
+    expect(addRegistryItems).toHaveBeenCalledTimes(installs ? 1 : 0);
+    expect(logger.errors).toEqual(
+      installs
+        ? []
+        : [
+            `This registry item requires eve ${requires}, but this project is using eve 1.0.0-rc.0. Upgrade eve and run the command again.`,
+          ],
+    );
+  });
+
   it("adds namespace mappings to package.json", async () => {
     const logger = createLogger();
 

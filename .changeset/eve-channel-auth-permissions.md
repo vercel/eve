@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": major
 ---
 
 Tool-stub grants on Vercel OIDC subjects move from `vercelOidc` to the new `eveVercelOidc` helper in `eve/channels/eve`.

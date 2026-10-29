@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer proposal; related PR #4930)"
 status: in-progress
-last_updated: "2026-10-21"
+last_updated: "2026-10-29"
 ---
 
 # Reject unknown HTTP request fields
@@ -40,7 +40,7 @@ Content-Type: application/json
 ```
 
 The accepted-field list must describe the actual route and supported protocol,
-including any recognized protocol-specific fields. The combined pre-1.0 cleanup
+including any recognized protocol-specific fields. The combined 1.0 API cleanup
 uses `answers` for follow-up responses.
 
 For multiple unknown fields, identify them in a deterministic order and include

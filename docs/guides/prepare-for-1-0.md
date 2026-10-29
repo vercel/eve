@@ -1,10 +1,10 @@
 ---
-title: "Prepare for 1.0"
-description: "Update session controls, authoring definitions, imports, public types, client errors, retry options, and terminal flags for the pre-1.0 API cleanup."
+title: "Upgrade to 1.0"
+description: "Update session controls, authoring definitions, imports, public types, client errors, retry options, terminal flags, and agent info access when upgrading to eve 1.0."
 url: /guides/prepare-for-1-0
 ---
 
-Use this checklist when upgrading an existing project to the coordinated pre-1.0 API cleanup release. These changes do not make the release 1.0; the [stability policy](../reference/typescript-api#stability-policy) still distinguishes stable and experimental APIs.
+Use this checklist when upgrading an existing project to eve 1.0. From 1.0, stable APIs change incompatibly only in a major release; the [stability policy](../reference/typescript-api#stability-policy) defines which APIs are stable and which are experimental.
 
 Upgrade eve in your agent server and apply the authored-file changes below so it builds. Deploy it before upgrading clients: new clients call the `/end` endpoint, which older servers do not serve. Then update frontend code and scripts.
 
