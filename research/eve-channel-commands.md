@@ -48,8 +48,11 @@ export const escalate = defineCommand({
 ```ts title="agent/channels/eve.ts"
 export default eveChannel({ auth, commands: { escalate } });
 
-// After the second PR, omitting `commands` offers `sessionCommands`:
-export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
+// After the second PR, a record adds to `sessionCommands`; a function changes or drops them:
+export default eveChannel({
+  auth,
+  commands: ({ clear, compact }) => ({ clear, compact, escalate }),
+});
 ```
 
 **Commands and names**
@@ -87,7 +90,9 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 **Defaults (second PR)**
 
 - `sessionCommands` is `{ new (alias reset), clear, compact, cancel }`.
-- `eveChannel()` offers them when `commands` is omitted. Passing `commands` replaces them.
+- `eveChannel()` always offers them. A `commands` record adds to them, and a same-named entry
+  replaces one. `commands: (defaults) => …` returns the full set, to drop or rename defaults. The
+  function form is also the hook extensions would use to contribute commands later.
 
 ## Wire protocol
 

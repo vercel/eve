@@ -60,8 +60,14 @@ describe("EveTUIRunner with a stranded session", () => {
         return Response.json({
           ok: true,
           commands: [
-            { name: "new", description: "New", aliases: ["reset"], session: "required" },
-            { name: "clear", description: "Clear", session: "required" },
+            {
+              name: "new",
+              description: "New",
+              arguments: "none",
+              aliases: ["reset"],
+              session: "required",
+            },
+            { name: "clear", description: "Clear", arguments: "none", session: "required" },
           ],
         });
       }
@@ -69,7 +75,7 @@ describe("EveTUIRunner with a stranded session", () => {
         commandRuns.push(path);
         return path.endsWith("/clear")
           ? Response.json(stranded, { status: 409 })
-          : Response.json({ ok: true, controls: ["end"] });
+          : Response.json({ ok: true, ended: true });
       }
       if (init?.method === "POST" && path === "/eve/v1/session/session_1") {
         await server.fetch(input, init);

@@ -165,7 +165,10 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
   const localDevConfigured = (Array.isArray(input.auth) ? input.auth : [input.auth]).some(
     isLocalDevAuth,
   );
-  const commands = input.commands ?? sessionCommands;
+  const commands =
+    typeof input.commands === "function"
+      ? input.commands(sessionCommands)
+      : { ...sessionCommands, ...input.commands };
   assertCommandNames("eve channel", commands);
 
   return defineChannel<undefined, EveEventContext>({
