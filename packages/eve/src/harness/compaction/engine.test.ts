@@ -2,7 +2,9 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
+import { compactMessages, getInputTokenCount } from "#harness/compaction/engine.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
+import { nativeHistory } from "#harness/program/native.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
@@ -251,18 +253,35 @@ describe("getInputTokenCount", () => {
   });
 });
 
-describe("shouldCompact", () => {
-  it("returns false when under threshold", () => {
+/** Whether eve's own history summarizes `messages` at the size eve measures for them. */
+async function shouldCompact(messages: ModelMessage[], compaction: CompactionConfig) {
+  let summarized = false;
+  await nativeHistory(
+    {
+      history: messages as HarnessModelMessage[],
+      size: { tokens: getInputTokenCount(messages, compaction) },
+      summarize: async (history) => {
+        summarized = true;
+        return [...history];
+      },
+    },
+    { threshold: compaction.threshold },
+  );
+  return summarized;
+}
+
+describe("eve's own history", () => {
+  it("returns false when under threshold", async () => {
     const messages: ModelMessage[] = [{ content: "short", role: "user" }];
-    expect(shouldCompact(messages, { ...config, threshold: 1_000 })).toBe(false);
+    expect(await shouldCompact(messages, { ...config, threshold: 1_000 })).toBe(false);
   });
 
-  it("returns true when over threshold", () => {
+  it("returns true when over threshold", async () => {
     const messages: ModelMessage[] = [{ content: "a".repeat(500), role: "user" }];
-    expect(shouldCompact(messages, config)).toBe(true);
+    expect(await shouldCompact(messages, config)).toBe(true);
   });
 
-  it("uses the fixed prompt envelope in threshold accounting", () => {
+  it("uses the fixed prompt envelope in threshold accounting", async () => {
     const messages: ModelMessage[] = [{ content: "Continue the investigation.", role: "user" }];
     const compaction: CompactionConfig = {
       lastKnownInputTokens: 200,
@@ -277,27 +296,27 @@ describe("shouldCompact", () => {
     ] satisfies ModelMessage[]);
 
     expect(
-      shouldCompact(messages, {
+      await shouldCompact(messages, {
         ...compaction,
         threshold: activeInputTokens + promptEnvelopeTokens,
       }),
     ).toBe(false);
     expect(
-      shouldCompact(messages, {
+      await shouldCompact(messages, {
         ...compaction,
         threshold: activeInputTokens + promptEnvelopeTokens - 1,
       }),
     ).toBe(true);
   });
 
-  it("does not compact an empty history based on prompt overhead alone", () => {
-    expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
+  it("does not compact an empty history based on prompt overhead alone", async () => {
+    expect(await shouldCompact([], { ...config, threshold: 0 })).toBe(false);
   });
 
   // #4292: a 40,000-character Chinese tool result costs about 30k o200k and
   // 40k cl100k tokens, but serialized length / 4 counted it as about 10k, so a
   // measured 165k prompt reached the 200k window without compacting.
-  it("compacts when a large CJK tool result pushes a measured prompt over the threshold", () => {
+  it("compacts when a large CJK tool result pushes a measured prompt over the threshold", async () => {
     const prompt: ModelMessage[] = [
       { content: "Summarize the attached Chinese report.", role: "user" },
     ];
@@ -317,7 +336,7 @@ describe("shouldCompact", () => {
     };
 
     expect(
-      shouldCompact([...prompt, report], {
+      await shouldCompact([...prompt, report], {
         lastKnownInputTokens: 165_000,
         lastKnownPromptMessageCount: prompt.length,
         recentWindowSize: 4,
@@ -341,7 +360,7 @@ describe("shouldCompact", () => {
 //
 // Every result is checked against `expectWellFormedCompaction`: no orphaned
 // tool_result, never trailing on an assistant message, and — unless the
-// window was exhausted — within the threshold on shouldCompact's own ruler,
+// window was exhausted — within the threshold on eve's own history's ruler,
 // so the result cannot immediately re-trigger compaction.
 
 const ENVELOPE_TOKENS = estimateTokens([
@@ -496,7 +515,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
         recentWindowSize: 1,
         threshold: 20_000,
       };
-      expect(shouldCompact(messages, measuredConfig)).toBe(true);
+      expect(await shouldCompact(messages, measuredConfig)).toBe(true);
       expect(estimateTokens(messages) + ENVELOPE_TOKENS).toBeLessThan(measuredConfig.threshold);
 
       const { result, summarizer } = await compact(messages, measuredConfig);
@@ -505,7 +524,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
       expect(result[1]).toEqual(assistant("checkpoint text"));
       expect(result.at(-1)).toEqual(messages.at(-1));
       expect(result).toHaveLength(3);
-      expect(shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
+      expect(await shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
     },
   );
 
@@ -521,7 +540,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
       recentWindowSize: 1,
       threshold: 20_000,
     };
-    expect(shouldCompact(messages, measuredConfig)).toBe(true);
+    expect(await shouldCompact(messages, measuredConfig)).toBe(true);
     const { result, summarizer } = await compact(messages, measuredConfig);
     expect(summarizer).not.toHaveBeenCalled();
     expect(result).toHaveLength(messages.length);
@@ -609,7 +628,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(value.length).toBeLessThan(2_400);
     expect(result.at(-1)).toEqual(user("what did you find?"));
     // The capped result cannot immediately re-trigger compaction.
-    expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
+    expect(await shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
   it("leaves an already-capped tool result unchanged on a later compaction", async () => {
@@ -1711,7 +1730,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
           }),
         );
         const stepConfig = config(history, threshold);
-        if (shouldCompact(history, stepConfig)) {
+        if (await shouldCompact(history, stepConfig)) {
           compactions += 1;
           history = await compactMessages(history, stepConfig, summarizer);
         }

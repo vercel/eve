@@ -9,8 +9,8 @@ import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import { nativeNext } from "./native.js";
-import type { Next, Program } from "./program.js";
+import { nativeNext, nativeProgram } from "./native.js";
+import type { Next, Program, ProgramContext } from "./program.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -84,21 +84,29 @@ function lastUserText(prompt: Prompt): string {
 async function runTurn(
   program: Program,
   answers: readonly unknown[],
-  outputSchema?: HarnessSession["outputSchema"],
+  options: {
+    readonly outputSchema?: HarnessSession["outputSchema"];
+    readonly history?: HarnessSession["history"];
+    readonly threshold?: number;
+    readonly compactOnly?: boolean;
+  } = {},
 ) {
+  const { outputSchema } = options;
   const prompts: string[] = [];
+  const fullPrompts: Prompt[] = [];
   const model = new MockLanguageModelV3({
     doStream: async ({ prompt }) => {
       prompts.push(lastUserText(prompt));
+      fullPrompts.push(prompt);
       const answer = answers[Math.min(prompts.length, answers.length) - 1];
       return outputSchema === undefined ? reply(String(answer)) : deliver(answer);
     },
   });
   const session: HarnessSession = {
     agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: { recentWindowSize: 10, threshold: options.threshold ?? 100_000 },
     continuationToken: "http:program-session",
-    history: [],
+    history: options.history ?? [],
     outputSchema,
     sessionId: "program-session",
   };
@@ -111,6 +119,7 @@ async function runTurn(
   await contextStorage.run(new ContextContainer(), async () => {
     const fold = foldingHandler();
     stepped = await createToolLoopHarness({
+      ...(options.compactOnly === true && { compactOnly: true }),
       handleEvent: async (publication, messages) => {
         const facts = eventsOf(publication);
         events.push(...facts);
@@ -120,10 +129,13 @@ async function runTurn(
       program,
       resolveModel: async () => model,
       tools: new Map(),
-    })(session, { message: "Which sources back the second claim?" });
+    })(
+      session,
+      options.compactOnly === true ? {} : { message: "Which sources back the second claim?" },
+    );
     while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
   });
-  return { events, issues, prompts, result: stepped! };
+  return { events, fullPrompts, issues, prompts, result: stepped! };
 }
 
 /** eve's own loop, except that `review` can send a settling output back to the model. */
@@ -192,7 +204,7 @@ describe("session programs", () => {
           : "List at least one source.";
       }),
       [{ sources: [] }, { sources: ["Smith v. Jones"] }],
-      outputSchema,
+      { outputSchema },
     );
 
     expect(seen).toEqual([{ sources: [] }, { sources: ["Smith v. Jones"] }]);
@@ -245,5 +257,144 @@ describe("session programs", () => {
 
     expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
     expect(result.settledTurn).toEqual({ isError: true, output: "The agent's program failed." });
+  });
+});
+
+/** Six earlier exchanges, about 2,400 characters of Alice's questions. */
+const older: HarnessSession["history"] = Array.from({ length: 6 }, (_, index) => [
+  {
+    content: `Earlier question ${index}: ${"y".repeat(400)}`,
+    kind: "user" as const,
+    role: "user" as const,
+  },
+  { content: `Earlier answer ${index}.`, role: "assistant" as const },
+]).flat();
+
+/** eve's own loop, with `history` deciding what the model reads about the past. */
+function withHistory(
+  history: (ctx: ProgramContext) => ProgramContext["history"] | undefined,
+): Program {
+  return (ctx) => ({ ...nativeProgram(ctx), history: () => history(ctx) });
+}
+
+describe("a session program's history", () => {
+  it("is asked before every model call, with the call's size", async () => {
+    const seen: unknown[] = [];
+    const { events, result } = await runTurn(
+      withHistory((ctx) => {
+        seen.push({ compact: ctx.compact, sized: (ctx.size?.tokens ?? 0) > 0 });
+        return ctx.history;
+      }),
+      ["Two court cases back it.", "Two court cases back it [1]."],
+      { history: older },
+    );
+
+    expect(seen).toEqual([{ compact: undefined, sized: true }]);
+    expect(events.filter((event) => event.type === "context.started")).toEqual([]);
+    expect(result.session.history.slice(0, older.length)).toEqual(older);
+  });
+
+  it("rewrites what the model has read, as a change, when it returns something else", async () => {
+    const { events, fullPrompts, issues, result } = await runTurn(
+      // Drop every earlier exchange past 600 tokens, keeping the question the model answers next.
+      withHistory((ctx) => (ctx.size!.tokens > 600 ? ctx.history.slice(-1) : ctx.history)),
+      ["Two court cases back it."],
+      { history: older },
+    );
+
+    expect(JSON.stringify(fullPrompts[0])).not.toContain("Earlier question");
+    expect(lastUserText(fullPrompts[0]!)).toBe("Which sources back the second claim?");
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    // No summary run: the program's history needed none.
+    expect(
+      events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
+    ).toEqual([]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it." });
+    expect(issues).toEqual([]);
+  });
+
+  it("is asked for session.compact(), between turns", async () => {
+    const seen: unknown[] = [];
+    const { events, result } = await runTurn(
+      withHistory((ctx) => {
+        seen.push({ compact: ctx.compact, turn: ctx.turn });
+        return ctx.compact === true ? ctx.history.slice(-2) : ctx.history;
+      }),
+      [],
+      { compactOnly: true, history: older },
+    );
+
+    // The second is eve checking that the program keeps what it returned.
+    expect(seen).toEqual([
+      { compact: true, turn: null },
+      { compact: undefined, turn: null },
+    ]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(result.session.history).toEqual(older.slice(-2));
+  });
+
+  it("fails the change when a rewrite drops the turn's input", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { events, prompts } = await runTurn(
+      withHistory((ctx) => (ctx.size!.tokens > 600 ? ctx.history.slice(0, 2) : ctx.history)),
+      ["Two court cases back it."],
+      { history: older },
+    );
+
+    expect(prompts).toEqual([]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          error: { message: expect.stringContaining("drops the turn's input") },
+          outcome: "failed",
+        },
+      },
+    ]);
+  });
+
+  it("fails the turn when it keeps rewriting what it returned", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let asked = 0;
+
+    const { events, prompts } = await runTurn(
+      // A different first answer each time it's asked.
+      withHistory((ctx) => [
+        { content: `Earlier answer, revision ${++asked}.`, role: "assistant" as const },
+        ...ctx.history.slice(1),
+      ]),
+      ["Two court cases back it."],
+      { history: older },
+    );
+
+    expect(prompts).toEqual([]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          error: { message: expect.stringContaining("changes what it returned") },
+          outcome: "failed",
+        },
+      },
+    ]);
+  });
+
+  it("fails the turn with a generic error when the program's history throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { events, prompts, result } = await runTurn(
+      withHistory(() => {
+        throw new Error("summary service at 10.0.0.7 is down");
+      }),
+      ["Two court cases back it."],
+      { history: older },
+    );
+
+    expect(prompts).toEqual([]);
+    expect(result.settledTurn).toMatchObject({ isError: true });
+    expect(JSON.stringify(events)).not.toContain("10.0.0.7");
   });
 });

@@ -21,6 +21,11 @@ export type HistoryChange =
   /** Tool exchanges a crash left unanswered gain their results; everything else stays. */
   | { readonly repaired: readonly ModelMessage[] }
   /**
+   * History becomes `messages`, which keep every message the model has read (what eve last
+   * measured it sending), and may change the ones it hasn't. That measurement still applies.
+   */
+  | { readonly unread: readonly ModelMessage[] }
+  /**
    * History is replaced, as a compaction or a clear replaces it. What eve measured about the old
    * history, and the announcements it held, no longer apply.
    */
@@ -46,6 +51,11 @@ function applyChange<T extends WithHistory>(session: T, change: HistoryChange): 
   if ("extend" in change) {
     const history = validateHarnessModelMessages(change.extend);
     assertKeeps(session.history, history);
+    return { ...session, history };
+  }
+  if ("unread" in change) {
+    const history = validateHarnessModelMessages(change.unread);
+    assertKeepsRead(session, history);
     return { ...session, history };
   }
   if ("repaired" in change) {
@@ -75,6 +85,19 @@ function assertKeeps(previous: readonly ModelMessage[], next: readonly ModelMess
       );
     }
     at += 1;
+  }
+}
+
+/** Under `eve dev` and in tests, an unread change keeps what the model has read as it was. */
+function assertKeepsRead(session: WithHistory, next: readonly ModelMessage[]): void {
+  if (!checksHistory()) return;
+  const read = session.compaction.lastKnownPromptMessageCount ?? session.history.length;
+  for (let index = 0; index < Math.min(read, session.history.length); index += 1) {
+    if (!sameMessage(session.history[index]!, next[index])) {
+      throw new Error(
+        `History changed message ${index}, which the model has read, without a rewrite. A change to what the model has read is a rewrite: use changeHistory(session, { rewrite }).`,
+      );
+    }
   }
 }
 
@@ -109,7 +132,7 @@ function sameMessage(a: ModelMessage, b: ModelMessage | undefined): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b);
 }
 
-function checksHistory(): boolean {
+export function checksHistory(): boolean {
   const configured = process.env.EVE_CHECK_SESSION_EVENTS;
   if (configured === "1") return true;
   if (configured === "0") return false;

@@ -1,3 +1,4 @@
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { JsonValue } from "#shared/json.js";
 
 // A session program is a function of the session that says what should happen next. eve
@@ -34,9 +35,33 @@ export interface ProgramTurn {
   readonly lastStep?: ModelStep;
 }
 
+/** How big the next model call is, as eve estimates it before sending it. */
+export interface HistorySize {
+  /** The call's estimated input tokens: instructions, tools, and the history. */
+  readonly tokens: number;
+  /** The model's context window, when eve knows it. */
+  readonly window?: number;
+}
+
+/** eve's summary of older turns: a checkpoint, and the recent turns whole. */
+export type Summarize = (
+  history: readonly HarnessModelMessage[],
+  options?: {
+    /** The call's input tokens to aim under. eve's own threshold when absent. */
+    readonly tokens?: number;
+  },
+) => Promise<HarnessModelMessage[]>;
+
 export interface ProgramContext {
   /** The running turn, or `null` between turns. */
   readonly turn: ProgramTurn | null;
+  readonly history: readonly HarnessModelMessage[];
+  /** The next model call's size, where eve asks for the history. */
+  readonly size?: HistorySize;
+  /** `session.compact()` asked for a compaction, where eve asks for the history. */
+  readonly compact?: true;
+  /** eve's summarizer. Only where eve asks for the history; elsewhere it throws. */
+  readonly summarize: Summarize;
   readonly tasks: { readonly working: readonly string[] };
   readonly signal: AbortSignal | undefined;
 }
@@ -52,7 +77,14 @@ export type Next =
    */
   | { readonly settle: { readonly output: JsonValue | null } };
 
+/** What a program says should be true. A field it leaves out is eve's own. */
 export interface Plan {
+  /**
+   * What the model reads about the past, which becomes the session's history. eve asks before
+   * each model call and for `session.compact()`. `undefined` is eve's own: summarize past the
+   * threshold, or the history as it is.
+   */
+  readonly history?: Lazy<readonly HarnessModelMessage[] | undefined>;
   readonly next?: Lazy<Next>;
 }
 
