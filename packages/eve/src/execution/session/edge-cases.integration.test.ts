@@ -1805,6 +1805,61 @@ describe("deliveries a child session reads", () => {
 });
 
 describe("controls between turns", () => {
+  it.each(["idle", "during a turn"] as const)(
+    "refuses a command this owner does not know when %s, so its delivery settles",
+    async (when) => {
+      const release = gate();
+      const { events } = await withSession(
+        `edge-unknown-command-${when === "idle" ? "idle" : "turn"}`,
+        {
+          message: "Say hello.",
+          model: scriptedModel(({ said }) =>
+            said("Still there?")
+              ? "Still here."
+              : when === "idle"
+                ? "Hello."
+                : heldReply("Hello.", release.wait, "Hel"),
+          ),
+          tools: [],
+        },
+        async (session) => {
+          if (when === "idle") await session.next("first");
+          else await session.until("generating", (event) => event.type === "content.delta");
+          // A control from a newer eve, such as one an older owner on another deployment reads.
+          await session.control("from-the-future" as "clear", { turnId: "turn_0" });
+          release.open();
+          await session.until(
+            "refused",
+            (event) => event.type === "delivery.settled" && event.data.outcome === "refused",
+          );
+          await session.send("Still there?");
+          await session.until(
+            "second",
+            (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+          );
+        },
+      );
+
+      const refused = ofType(events, "delivery.settled").find(
+        (event) => event.data.outcome === "refused",
+      );
+      expect(refused?.data).toEqual({
+        deliveryId: "control_0",
+        outcome: "refused",
+        reason: 'This session does not support the "from-the-future" command.',
+      });
+      expect(ofType(events, "delivery.admitted")).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveryId: "control_0",
+            source: { control: "from-the-future" },
+          }),
+        }),
+      );
+      expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    },
+  );
+
   it.each([1, 4])(
     "keeps summary usage when a context.settled hook cancels with %s model calls per step",
     async (modelCallsPerStep) => {

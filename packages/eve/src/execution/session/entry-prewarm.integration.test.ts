@@ -501,7 +501,7 @@ describe("first turn abort hooks", () => {
 });
 
 describe("controls before a prewarmed session's first message", () => {
-  it("settles each one ignored once the session has started", async () => {
+  it("settles each one ignored, or refused when unknown, once the session has started", async () => {
     const runtime = await createTestRuntime({ agent: { name: "prewarmed-controls" } });
 
     await runtime.run(async () => {
@@ -521,11 +521,13 @@ describe("controls before a prewarmed session's first message", () => {
         // Alice cancels, clears, and compacts before she has said anything.
         const controls = ["cancel", "clear", "compact"] as const;
         for (const kind of controls) await resumeHook(inboxToken, { deliveryId: kind, kind });
+        // A command from a newer eve is refused, also only once the session has started.
+        await resumeHook(inboxToken, { deliveryId: "unknown", kind: "from-the-future" });
         await resumeHook(inboxToken, handoffFollowUp("dpl_inline", "Say hello.", "first-message"));
         const settled = new Set<string>();
         const events = await stream.nextUntil((event) => {
           if (event.type === "delivery.settled") settled.add(event.data.deliveryId);
-          return [...controls, "first-message"].every((id) => settled.has(id));
+          return [...controls, "unknown", "first-message"].every((id) => settled.has(id));
         });
 
         expect(events[0]?.type).toBe("session.started");
@@ -537,6 +539,12 @@ describe("controls before a prewarmed session's first message", () => {
             }),
           );
         }
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "delivery.settled",
+            data: expect.objectContaining({ deliveryId: "unknown", outcome: "refused" }),
+          }),
+        );
         // The early clear and compaction leave Alice's first turn alone.
         expect(events.some((event) => event.type === "context.started")).toBe(false);
       } finally {

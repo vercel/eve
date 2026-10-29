@@ -172,8 +172,10 @@ Everything that reaches a session arrives as a delivery: a message, an answer, a
 | `awaiting-input` | The turn paused on an interaction. The delivery's answer is the pause; the answer resumes the turn. |
 | `applied`        | A control or answer took effect.                                                                    |
 | `ignored`        | It had nothing to act on, or a cancel or clear ended its turn before the turn read it.              |
-| `refused`        | Its sender may not do what it asked; `reason` says why.                                             |
+| `refused`        | Its sender may not do what it asked, or the session can't run it; `reason` says why.                |
 | `failed`         | It couldn't be handled, such as when the session ended first.                                       |
+
+A control the session's eve version doesn't support, such as one added in a later release, settles `refused`: a session keeps running on the deployment that started it, so it can receive controls newer than its code. Sessions started by earlier eve versions drop such a control instead, and its delivery never settles.
 
 `POST /eve/v1/session/:sessionId` returns the message's `deliveryId`, so a client resuming from an old cursor knows which `delivery.settled` ends its response. Steering and coalesced messages each keep their own delivery. The id is assigned before dispatch,
 not derived from stream position. An answer-only delivery stops on its own `delivery.settled`.

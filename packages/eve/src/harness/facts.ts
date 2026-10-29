@@ -184,18 +184,30 @@ export function controlAdmitted(delivery: ControlDelivery, control: string): Ses
   return fact("delivery.admitted", data);
 }
 
-export interface ControlSettlement {
-  readonly control: ControlDelivery;
-  readonly source: "cancel" | "clear" | "compact";
-  readonly outcome: "ignored" | "applied";
-}
+export type ControlSettlement =
+  | {
+      readonly control: ControlDelivery;
+      readonly source: "cancel" | "clear" | "compact";
+      readonly outcome: "ignored" | "applied";
+    }
+  | {
+      readonly control: ControlDelivery;
+      /** The command's kind, as it arrived: this owner may not know it. */
+      readonly source: string;
+      readonly outcome: "refused";
+      readonly reason: string;
+    };
 
 /** A control that finishes without a step of its own, admitted and settled together. */
 export function controlSettled(settlement: ControlSettlement): SessionEvent[] {
   const { control, outcome, source } = settlement;
   return [
     controlAdmitted(control, source),
-    fact("delivery.settled", { deliveryId: control.deliveryId, outcome }),
+    fact("delivery.settled", {
+      deliveryId: control.deliveryId,
+      outcome,
+      ...(settlement.outcome === "refused" && { reason: settlement.reason }),
+    }),
   ];
 }
 

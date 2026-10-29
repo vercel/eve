@@ -74,6 +74,10 @@ export async function nextTurnDelivery(input: {
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
+    if (admitted.kind === "refused") {
+      await input.ignore(admitted.settlement);
+      continue;
+    }
     if (admitted.kind !== "cancel") continue;
     const projection = storedProjection(readDurableSession(cursor.sessionState).state);
     const view = projection.view;

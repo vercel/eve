@@ -2,7 +2,13 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
 
-import type { RuntimeActionResultHookPayload, SessionControlIdentity } from "#channel/types.js";
+import type {
+  RuntimeActionResultHookPayload,
+  SessionAuthContext,
+  SessionControlIdentity,
+} from "#channel/types.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import type {
   ControlOrigin,
   DeliveryAdmission,
@@ -21,6 +27,8 @@ type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel"; readonly origin?: ControlOrigin }
   | { readonly kind: "consumed" }
+  /** A control this owner cannot run: settle it refused, so its sender doesn't wait forever. */
+  | { readonly kind: "refused"; readonly settlement: ControlSettlement }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -55,7 +63,8 @@ export async function admitSessionInboxPayload(
   } catch (error) {
     if (!(error instanceof SessionInboxPayloadError)) throw error;
     await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-    return { kind: "consumed" };
+    const settlement = refusalOf(value, error.message);
+    return settlement === undefined ? { kind: "consumed" } : { kind: "refused", settlement };
   }
 
   switch (command.kind) {
@@ -98,4 +107,24 @@ export function controlOrigin(command: SessionControlIdentity): ControlOrigin {
   return command.auth === undefined
     ? { deliveryId: command.deliveryId }
     : { auth: command.auth, deliveryId: command.deliveryId };
+}
+
+/**
+ * The refusal of an undecodable payload that names its delivery: a control from a newer eve, or
+ * a malformed one. Its sender awaits that delivery's settlement. Without a delivery id, nobody
+ * waits on it, and the payload is only dropped.
+ */
+function refusalOf(value: SessionInboxPayload, reason: string): ControlSettlement | undefined {
+  const { auth, deliveryId, kind } = value as Record<string, unknown>;
+  if (typeof deliveryId !== "string" || deliveryId.length === 0) return undefined;
+  const origin =
+    typeof auth === "object" && auth !== null
+      ? { auth: auth as SessionAuthContext, deliveryId }
+      : { deliveryId };
+  return {
+    control: controlDeliveryOf(origin),
+    outcome: "refused",
+    reason,
+    source: typeof kind === "string" && kind.length > 0 ? kind : "unknown",
+  };
 }
