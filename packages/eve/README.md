@@ -10,9 +10,7 @@ The framework is called eve. The published npm package is `eve`. The CLI binary 
 
 The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
 
-## Preview Terms and Safeguards
-
-eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+## Safeguards
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 

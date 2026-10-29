@@ -4,7 +4,7 @@ const EVE_ORIGIN = "https://eve.dev";
 
 export const createLlmsIndex = (): string => `# eve
 
-> eve is a filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or self-hosted infrastructure. eve is currently in beta.
+> eve is a filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or self-hosted infrastructure.
 
 Use this file to choose the smallest relevant documentation set. Use \`/sitemap.md\` for the exhaustive page map and \`/llms-full.txt\` only for offline indexing or a large context window. For an installed project, prefer \`node_modules/eve/docs/\`: those docs match the installed eve version, while eve.dev documents the latest release.
 

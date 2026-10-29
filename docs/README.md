@@ -39,8 +39,6 @@ Important naming note:
 
 ## Legal and safeguards
 
-eve is in preview; the framework, APIs, documentation, and behavior may change before general availability.
-
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
 You are responsible for configuring approval policies, tool restrictions, connection scopes, route/session authorization, sandbox controls, telemetry exports, and other safeguards appropriate for your use case.
