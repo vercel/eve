@@ -153,7 +153,8 @@ async function callConnectionTool(
   }
   // Validation may have run before a sign-in made the tools listable.
   const isEventAction = client.eventActions?.ownsName(toolName) === true;
-  const checked = await checkCall(connection, listing.tools, toolName, rawInput, !isEventAction);
+  const modelInput = withoutProvidedArguments(connection, rawInput, !isEventAction);
+  const checked = await checkCall(connection, listing.tools, toolName, modelInput);
   if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
   const { input, tool } = checked;
 
@@ -224,39 +225,44 @@ async function checkInput(
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };
     return { issues: [{ message: listingFailureMessage(connection.connectionName, error) }] };
   }
-  const checked = await checkCall(
-    connection,
-    tools,
-    toolName,
-    input,
-    client.eventActions?.ownsName(toolName) !== true,
-  );
-  return "issues" in checked ? { issues: checked.issues } : { value: checked.input };
+  const remote = client.eventActions?.ownsName(toolName) !== true;
+  const modelInput = withoutProvidedArguments(connection, input, remote);
+  const checked = await checkCall(connection, tools, toolName, modelInput);
+  // The call validates this value again when it runs. Defaults are filled only there,
+  // because a filled default its own schema rejects, such as Pydantic's `null` for
+  // `x: str = None`, would fail that second check.
+  return "issues" in checked ? { issues: checked.issues } : { value: modelInput };
 }
 
 type CallCheck =
   | { readonly input: JsonObject; readonly tool: ConnectionToolMetadata }
   | { readonly issues: readonly StandardSchemaV1.Issue[] };
 
+/** Provided values replace these keys at execution, so a model value for one is dropped, not rejected. */
+function withoutProvidedArguments(
+  connection: ResolvedConnectionDefinition,
+  input: unknown,
+  remote: boolean,
+): Record<string, unknown> {
+  const provided = remote ? (connection.toolCall?.providedArguments ?? {}) : {};
+  return Object.fromEntries(
+    Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
+  );
+}
+
 /** The tool a call runs and its input with schema defaults filled in, or why it cannot run. */
 async function checkCall(
   connection: ResolvedConnectionDefinition,
   tools: readonly ConnectionToolMetadata[],
   toolName: string,
-  input: unknown,
-  remote = true,
+  input: Record<string, unknown>,
 ): Promise<CallCheck> {
   const tool = tools.find((entry) => entry.name === toolName);
   if (tool === undefined) {
     return { issues: [{ message: unknownToolMessage(connection, toolName, tools) }] };
   }
-  // Provided values replace these keys at execution, so a model value for one is dropped, not rejected.
-  const provided = remote ? (connection.toolCall?.providedArguments ?? {}) : {};
-  const modelInput = Object.fromEntries(
-    Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
-  );
   const result = await defineJsonSchema(tool.inputSchema as JsonObject)["~standard"].validate(
-    modelInput,
+    input,
   );
   if (result.issues === undefined) return { input: result.value as JsonObject, tool };
   return {
