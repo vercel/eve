@@ -21,6 +21,7 @@ import { SessionExecution } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
+import { findRewindBoundary } from "#execution/session/history-boundaries.js";
 import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -404,6 +405,7 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: expired() };
         case "clear":
         case "compact":
+        case "rewind":
           if (next.origin !== undefined)
             await ignore({
               control: controlDeliveryOf(next.origin),
@@ -516,11 +518,28 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
-          action = await runTurn(
-            next.origin === undefined
-              ? { control: next.kind }
-              : { control: next.kind, controlDelivery: controlDeliveryOf(next.origin) },
-          );
+        case "rewind":
+          {
+            const target = next.kind === "rewind" ? next.origin?.turnId : undefined;
+            // Admission already stopped the running turn and its tasks. Results they delivered
+            // before then must not reach the conversation the rewind selects either.
+            if (
+              target !== undefined &&
+              findRewindBoundary(
+                cursor.sessionState.snapshot.session.state,
+                cursor.history.length,
+                target,
+              ) !== undefined
+            ) {
+              await cancelWorkingTasks(cursor, "turn-cancelled", { discardResults: true });
+            }
+            action = await runTurn({
+              control: next.kind,
+              ...(target !== undefined && { rewindTo: target }),
+              controlDelivery:
+                next.origin === undefined ? undefined : controlDeliveryOf(next.origin),
+            });
+          }
           continue;
         case "cancel-turn":
           await execution.cancelTurnWork();

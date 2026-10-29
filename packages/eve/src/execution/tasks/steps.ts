@@ -198,6 +198,8 @@ interface TaskCancellationInput {
   readonly taskIds: readonly string[];
   /** Also stop the workflow tool runs the turn waits on. */
   readonly turnCalls?: boolean;
+  /** Drop results not yet delivered to the model when its context is reset. */
+  readonly discardResults?: boolean;
 }
 
 async function cancelTasks(
@@ -205,6 +207,9 @@ async function cancelTasks(
 ): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
+  if (input.discardResults === true) {
+    table = { ...table, tasks: table.tasks.map((task) => ({ ...task, results: [] })) };
+  }
   const settles: Decision[] = [];
   const withdraws: Decision[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };

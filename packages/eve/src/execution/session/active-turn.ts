@@ -4,7 +4,7 @@ import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import { admitSessionInboxPayload, rewindApplies } from "#execution/session/admission.js";
 import {
   isSteeringDelivery,
   isSteeringMessage,
@@ -280,6 +280,8 @@ export class ActiveTurn {
     if (payload.kind === "reset" || payload.kind === "session-failure") return true;
     if (this.#control) return false;
     if (payload.kind === "clear") return true;
+    if (payload.kind === "rewind")
+      return typeof payload.turnId === "string" && rewindApplies(this.input.cursor, payload.turnId);
     if (payload.kind !== "cancel") return false;
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }

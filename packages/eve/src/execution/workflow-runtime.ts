@@ -438,7 +438,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 
 /**
  * What a command means for a stranded owner, which can run none. `reset` ends
- * the session. A send or `clear` needs the session to run, so it is refused
+ * the session. A send, `clear`, or `rewind` needs the session to run, so it is refused
  * and the caller decides whether to reset. `cancel` and `compact` find no
  * active session.
  */
@@ -454,6 +454,7 @@ async function settleStrandedCommand<TCommand extends SessionCommand>(
     }
     case "send":
     case "clear":
+    case "rewind":
       throw sessionStrandedError(stranded);
     default:
       return inactiveCommandResult(command);

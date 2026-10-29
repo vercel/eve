@@ -8,6 +8,11 @@ import type {
   WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
 import { diffValue, snapshotValue } from "#shared/value-delta.js";
+import {
+  readHistoryBoundaries,
+  retainHistoryBoundaries,
+  writeHistoryBoundaries,
+} from "#execution/session/history-boundaries.js";
 
 // Steps only: the workflow body applies what this returns with `applySessionStateDelta`, and
 // can't import the session's publication.
@@ -50,13 +55,44 @@ export async function withSessionStateDelta(
     });
   }
   const { serializedContext, sessionState, history, ...result } = await work(input);
-  const candidateState = sessionState ?? base.sessionState;
+  let candidateState = sessionState ?? (base.sessionState as DurableSessionState | undefined);
+  // Every history-changing step participates, not only turn steps: cancellation and recovery
+  // can change history too. New boundaries are added by the turn step after its turn settles.
+  if (Array.isArray(base.history) && history !== undefined && candidateState !== undefined) {
+    const previousState = (base.sessionState as DurableSessionState | undefined)?.snapshot.session
+      .state;
+    const previous = readHistoryBoundaries(previousState);
+    const nextState = candidateState.snapshot.session.state;
+    const proposed = readHistoryBoundaries(nextState);
+    const proposedIds = new Set(proposed.map((boundary) => boundary.turnId));
+    const retained = retainHistoryBoundaries(
+      previous,
+      base.history.length,
+      diffValue(base.history, history),
+    ).filter((boundary) => proposedIds.has(boundary.turnId));
+    const knownIds = new Set(previous.map((boundary) => boundary.turnId));
+    const added = proposed.filter(
+      (boundary) => !knownIds.has(boundary.turnId) && boundary.length <= history.length,
+    );
+    if (previous.length > 0 || proposed.length > 0) {
+      candidateState = {
+        ...candidateState,
+        snapshot: {
+          ...candidateState.snapshot,
+          session: {
+            ...candidateState.snapshot.session,
+            state: writeHistoryBoundaries(nextState, [...retained, ...added]),
+          },
+        },
+      };
+    }
+  }
   const next = {
     serializedContext,
     sessionState:
       candidateState === undefined || sessionWritable === undefined
-        ? sessionState
-        : followInterruptedAttempt(sessionWritable, candidateState as DurableSessionState),
+        ? candidateState
+        : followInterruptedAttempt(sessionWritable, candidateState),
     history,
   };
   const stateDelta: { -readonly [K in keyof SessionStateDelta]: SessionStateDelta[K] } = {};

@@ -49,6 +49,8 @@ export interface Session extends SessionReader {
   prewarm(): Promise<PrewarmSessionResult>;
   clear(options?: SessionControlOptions): Promise<Delivery>;
   compact(options?: SessionControlOptions): Promise<Delivery>;
+  /** Selects a settled turn as the last turn kept in the conversation. */
+  rewind(turnId: string, options?: SessionControlOptions): Promise<Delivery>;
   /** Retires this session without creating a replacement or changing this handle's ID. */
   end(options?: SessionControlOptions & { readonly reason?: string }): Promise<Delivery>;
   /**
@@ -240,6 +242,13 @@ export function createSession(
     },
     async clear(options) {
       const command = controlCommand({ kind: "clear" as const }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
+    },
+    async rewind(turnId, options) {
+      if (typeof turnId !== "string" || turnId.length === 0)
+        throw new Error("rewind() requires a turn id.");
+      const command = controlCommand({ kind: "rewind" as const, turnId }, options);
       const result = await runtime.dispatchSession({ command, sessionId: id });
       return commandDelivery(runtime, result, command.deliveryId);
     },

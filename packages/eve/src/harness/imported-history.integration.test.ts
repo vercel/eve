@@ -2,6 +2,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { writeHistoryBoundaries } from "#execution/session/history-boundaries.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { eachEvent, withPublished } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -122,4 +123,55 @@ it("reads imported history before each turn's context and message, and records i
     ["d_0", "turn_0", earlier],
     ["d_1", "turn_1", later],
   ]);
+});
+
+it("rewinds model history and makes the next turn follow the selected turn", async () => {
+  const llm = model();
+  const events: SessionEvent[] = [];
+  const config = {
+    handleEvent: eachEvent(async (event: SessionEvent) => {
+      events.push(event);
+    }),
+    resolveModel: async () => llm,
+    tools: new Map(),
+  };
+  const harness = createToolLoopHarness(config);
+  const session: HarnessSession = {
+    agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    continuationToken: "http:rewind",
+    history: [],
+    sessionId: "rewind",
+  };
+  const first = await harness(...delivered(session, "d_0", { history: [], message: "First" }));
+  const second = await harness(
+    ...delivered(first.session, "d_1", { history: [], message: "Discard this" }),
+  );
+  const withBoundary = {
+    ...second.session,
+    state: writeHistoryBoundaries(second.session.state, [
+      { turnId: "turn_0", follows: null, length: first.session.history.length },
+    ]),
+  };
+  const rewound = await createToolLoopHarness({ ...config, rewindTo: "turn_0" })(withBoundary);
+  expect(rewound.session.history).toEqual(first.session.history);
+  await harness(...delivered(rewound.session, "d_2", { history: [], message: "Try again" }));
+  expect(prompted(llm.doStreamCalls[2])).toEqual([
+    "user: First",
+    "assistant: ok",
+    "user: Try again",
+  ]);
+  expect(events.filter((event) => event.type === "turn.started").at(-1)).toMatchObject({
+    data: { follows: "turn_0" },
+  });
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: "context.settled",
+      data: expect.objectContaining({
+        kind: "rewind",
+        outcome: "completed",
+        selects: { turnId: "turn_0" },
+      }),
+    }),
+  );
 });

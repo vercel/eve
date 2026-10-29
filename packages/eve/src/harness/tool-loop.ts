@@ -40,6 +40,11 @@ import type {
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { eventsOf } from "#harness/publication.js";
+import { controlAdmitted, fact } from "#harness/facts.js";
+import {
+  findRewindBoundary,
+  writeHistoryBoundaries,
+} from "#execution/session/history-boundaries.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
@@ -122,6 +127,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session: initialSession,
     });
 
+    if (config.rewindTo !== undefined) return rewindContext(step, config.rewindTo);
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
 
@@ -232,6 +238,79 @@ async function clearContext(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
   return { next: null, session: replaceSessionHistory(step.session, []) };
+}
+
+/** Rewind the model history and the selected public conversation together. */
+async function rewindContext(step: Step, turnId: string): Promise<StepResult> {
+  const found = findRewindBoundary(step.session.state, step.session.history.length, turnId);
+  const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
+  if (found === undefined) {
+    const change = clear(step.view(), {
+      cause: delivery === undefined ? undefined : { deliveryId: delivery.deliveryId },
+    });
+    const started = change.events.find((event) => event.type === "context.started");
+    if (started === undefined || started.type !== "context.started")
+      throw new Error("Missing context change.");
+    await step.apply({
+      turn: step.view().turn,
+      events: [
+        ...(delivery === undefined ? [] : [controlAdmitted(delivery, "rewind")]),
+        fact("context.started", { ...started.data, kind: "rewind" }),
+        fact("context.settled", {
+          changeId: started.data.changeId,
+          kind: "rewind",
+          outcome: "failed",
+          error: {
+            code: "REWIND_UNAVAILABLE",
+            message: "That turn's model history is no longer available.",
+          },
+        }),
+        ...(delivery === undefined
+          ? []
+          : [
+              fact("delivery.settled", {
+                deliveryId: delivery.deliveryId,
+                outcome: "failed",
+                reason: "rewind-unavailable",
+              }),
+            ]),
+      ],
+    });
+    return { next: null, session: step.session };
+  }
+  await step.apply(
+    controlled(delivery, "rewind", (cause) => {
+      const cleared = clear(step.view(), { cause });
+      const started = cleared.events.find((event) => event.type === "context.started");
+      if (started === undefined || started.type !== "context.started")
+        throw new Error("Missing context change.");
+      const start = fact("context.started", { ...started.data, kind: "rewind" });
+      return {
+        ...cleared,
+        clearsHistory: undefined,
+        events: [
+          ...cleared.events.filter(
+            (event) => event.type !== "context.started" && event.type !== "context.settled",
+          ),
+          start,
+          fact("context.settled", {
+            changeId: started.data.changeId,
+            kind: "rewind",
+            outcome: "completed",
+            selects: { turnId },
+          }),
+        ],
+      };
+    }),
+  );
+  const state = writeHistoryBoundaries(step.session.state, found.retained);
+  return {
+    next: null,
+    session: replaceSessionHistory(
+      { ...step.session, state },
+      step.session.history.slice(0, found.boundary.length),
+    ),
+  };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

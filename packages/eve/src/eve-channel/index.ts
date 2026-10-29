@@ -31,6 +31,7 @@ import {
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
+  EVE_SESSION_REWIND_ROUTE_PATTERN,
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_END_ROUTE_PATTERN,
@@ -63,6 +64,7 @@ import {
   createSessionStreamResponse,
   deriveOperationContinuationToken,
   parseCancelTurnBody,
+  parseRewindBody,
   parseCreateBody,
   parseIncludeTailIndex,
   parseOptionalJsonRequest,
@@ -604,6 +606,29 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           );
         }
         return deliveryResponse(result);
+      }),
+
+      POST(EVE_SESSION_REWIND_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseRewindBody(req);
+        if (body instanceof Response) return body;
+        try {
+          const result = await attachSession(sessionId).rewind(body.turnId, {
+            auth: sessionAuthFromResult(authResult),
+          });
+          return deliveryResponse(result);
+        } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
+          const errorId = logError(log, "session-rewind request failed", error, { sessionId });
+          return Response.json(
+            { error: "Failed to rewind the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
       }),
 
       POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params }) => {

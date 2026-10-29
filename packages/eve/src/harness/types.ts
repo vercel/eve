@@ -312,6 +312,7 @@ export interface ToolLoopHarnessConfig {
   readonly sessionUsageLimit?: SessionUsageLimit;
   /** Clears model-message history without running a model turn. */
   readonly clearOnly?: boolean;
+  readonly rewindTo?: string;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
   /** The delivery a clear or compact control arrived as; its facts name it. */

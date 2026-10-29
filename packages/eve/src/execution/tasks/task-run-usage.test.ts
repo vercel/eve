@@ -8,6 +8,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
+import { cancelWorkingTasks } from "#execution/tasks/session.js";
 import {
   cancelTask,
   createTask,
@@ -244,6 +245,27 @@ describe("delegated agent usage", () => {
     const task = readTaskTable(committed(alice.cursor).state).tasks[0];
     expect(task?.calls).toEqual([]);
     expect(task?.run).toBeUndefined();
+  });
+
+  it("cancels working tasks on a context reset", async () => {
+    const alice = sessionWithTask({ name: "reviewer", ownInputTokens: 100 });
+    await cancelWorkingTasks(alice.cursor, "turn-cancelled", { discardResults: true });
+    const task = readTaskTable(committed(alice.cursor).state).tasks[0];
+    expect(task?.calls).toEqual([]);
+    expect(task?.run).toBeUndefined();
+  });
+
+  it("discards undelivered task results when the context is reset", async () => {
+    const alice = sessionWithTask({ name: "reviewer", ownInputTokens: 100 });
+    await alice.execution.handleWorkflowMessage({
+      from: alice.from,
+      kind: "reply",
+      callIds: [alice.from.callId],
+      output: "obsolete result",
+    });
+    expect(readTaskTable(committed(alice.cursor).state).tasks[0]?.results).toHaveLength(1);
+    await cancelWorkingTasks(alice.cursor, "turn-cancelled", { discardResults: true });
+    expect(readTaskTable(committed(alice.cursor).state).tasks[0]?.results).toEqual([]);
   });
 
   it("reclaims a run address once stopping it confirms outright cancellation", async () => {

@@ -6,6 +6,7 @@ import { DeliveryResponseSchema, type DeliveryReceipt } from "#protocol/delivery
 import {
   createEveSessionCancelRoutePath,
   createEveSessionClearRoutePath,
+  createEveSessionRewindRoutePath,
   createEveSessionCompactRoutePath,
   createEveSessionEndRoutePath,
   createEveSessionRoutePath,
@@ -14,6 +15,7 @@ import {
 const paths = {
   cancel: createEveSessionCancelRoutePath,
   clear: createEveSessionClearRoutePath,
+  rewind: createEveSessionRewindRoutePath,
   compact: createEveSessionCompactRoutePath,
   end: createEveSessionEndRoutePath,
 };
@@ -67,7 +69,12 @@ export async function sendClientControl(input: {
   const { signal, turnId, reason } = input.options ?? {};
   // Controls reject unknown fields, and option objects passed by variable skip
   // excess-property checks, so each body carries only its own control fields.
-  const body = input.kind === "cancel" ? { turnId } : input.kind === "end" ? { reason } : {};
+  const body =
+    input.kind === "cancel" || input.kind === "rewind"
+      ? { turnId }
+      : input.kind === "end"
+        ? { reason }
+        : {};
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
   const response = await fetch(
