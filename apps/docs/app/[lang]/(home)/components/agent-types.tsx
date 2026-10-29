@@ -550,7 +550,7 @@ function WebAppClient() {
             wide enough to keep them clear of the chat. */}
         <div aria-hidden className="flex select-none flex-col gap-2">
           <span className="font-medium text-copy-14 text-gray-1000">Past orders</span>
-          <span className="mt-1 hidden grid-cols-3 gap-2 @[19rem]:grid">
+          <span className="mt-1 hidden grid-cols-3 gap-2 @[15rem]:grid">
             {["1,284", "$48.2k", "96%"].map((metric) => (
               <span
                 className="flex flex-col gap-2 rounded-md border border-gray-alpha-400 p-2.5"
@@ -564,7 +564,7 @@ function WebAppClient() {
             ))}
           </span>
           {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. */}
-          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[19rem]:block" />
+          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[15rem]:block" />
         </div>
         <div className="absolute inset-x-3 bottom-3 flex flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
