@@ -26,6 +26,8 @@ React, [Vue](./use-eve-agent-vue), and [Svelte](./use-eve-agent-svelte) share th
 | `clear`, `compact` | Queue a context change and return its delivery                                 |
 | `end`              | Retire the server-side session and return its delivery                         |
 | `newSession`       | Clear local state and the local session cursor                                 |
+| `commands`         | List the agent's slash commands. See [Slash commands](#slash-commands)         |
+| `runCommand`       | Run a slash command in the current session and apply its result                |
 
 About snapshots:
 
@@ -233,6 +235,32 @@ For an existing idle session, `prewarm()` can move it to the deployment that acc
 | `end()`        | Retires the server-side session and returns its delivery                                       |
 
 After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
+
+## Slash commands
+
+An agent can offer slash commands through its [eve channel's `commands`](../../channels/eve#slash-commands); the default channel offers `/new`, `/clear`, `/compact`, and `/cancel`. `commands()` lists them, and `parseSlashCommand` from `eve/client` reads typed text as one of them:
+
+```tsx
+import { parseSlashCommand, type ChannelCommandInfo } from "eve/client";
+
+const [commands, setCommands] = useState<readonly ChannelCommandInfo[]>([]);
+useEffect(() => void agent.commands().then(setCommands, () => {}), [agent.commands]);
+
+async function submit(text: string) {
+  const command = parseSlashCommand(text, commands);
+  if (command === undefined) return await agent.send(text);
+  const result = await agent.runCommand(command.command.name, { argument: command.argument });
+  if (result.message !== undefined) showNotice(result.message);
+}
+```
+
+`runCommand` runs the command in the current session, when there is one, and applies its result before resolving:
+
+- `send` goes out as the next message, through the same path as `send()`.
+- When the command ended the session, such as `/new`, the store calls `newSession()`. `result.controls` lists the session controls the command applied, for UI that also reflects them, such as resetting a session route.
+- `message` is for the caller only. The store doesn't add it to `messages`, so show it yourself.
+
+A command with `session: "required"` rejects with a `ClientError` before the first message. Show its `message` the same way. The [Web Chat](./nextjs) template does all of this, plus a `/` typeahead in its composer. A store created from an existing `session` has no client of its own, so it can't list or run commands.
 
 ## Resume a saved session
 

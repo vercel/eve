@@ -183,6 +183,33 @@ describe("SessionStore acceptance and observation", () => {
     current.newSession();
     expect(current.snapshot.session).toBeUndefined();
   });
+  it("runs a slash command in its session and applies what the command returned", async () => {
+    const server = agent();
+    const fetchAgent = vi.mocked(fetch).getMockImplementation()!;
+    const commandBodies: unknown[] = [];
+    vi.mocked(fetch).mockImplementation(async (request, init) => {
+      const path = new URL(String(request)).pathname;
+      if (path === "/eve/v1/session/session_1/commands/standup") {
+        commandBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true, message: "Drafting.", send: "Draft my standup." });
+      }
+      if (path === "/eve/v1/session/session_1/commands/new") {
+        return Response.json({ ok: true, controls: ["end"] });
+      }
+      return await fetchAgent(request, init);
+    });
+    const current = store({ initialSession });
+
+    expect(await current.runCommand("standup", { argument: "today" })).toEqual({
+      message: "Drafting.",
+      send: "Draft my standup.",
+    });
+    expect(commandBodies).toEqual([{ argument: "today" }]);
+    expect(server.posts).toEqual(["/eve/v1/session/session_1"]);
+
+    await current.runCommand("new");
+    expect(current.snapshot.session).toBeUndefined();
+  });
   it("preserves refreshed inbox handles in saved snapshots and session-change callbacks", async () => {
     agent();
     const fetchAgent = vi.mocked(fetch).getMockImplementation()!;

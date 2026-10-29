@@ -25,6 +25,7 @@ import type { DeliveryReceipt } from "#protocol/delivery.js";
 import { toError } from "#shared/errors.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 import type { ClientSessionState, SendTurnPayload } from "#client/types.js";
+import type { ChannelCommandInfo, ChannelCommandResult } from "#client/commands.js";
 
 export type {
   SessionStoreCallbacks,
@@ -316,6 +317,41 @@ export class SessionStore {
     } finally {
       this.#turnWaiters.delete(check);
     }
+  }
+
+  /** Lists the eve channel's slash commands from `GET /eve/v1/commands`. */
+  async commands(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<readonly ChannelCommandInfo[]> {
+    return await this.#commandClient().commands(options);
+  }
+
+  /**
+   * Runs one of the eve channel's slash commands in this store's session, when it has one, and
+   * applies what the command returned: `end` starts a fresh local session, and `send` goes out as
+   * the caller's next message. Resolves with the result so the caller can show its `message`.
+   */
+  async runCommand(
+    name: string,
+    options: { readonly argument?: string; readonly signal?: AbortSignal } = {},
+  ): Promise<ChannelCommandResult> {
+    const sessionId = this.#session?.id;
+    const result = await this.#commandClient().runCommand(name, {
+      ...options,
+      ...(sessionId !== undefined && { sessionId }),
+    });
+    if (result.controls?.includes("end") === true) this.newSession();
+    if (result.send !== undefined) await this.send({ message: result.send });
+    return result;
+  }
+
+  #commandClient(): Client {
+    if (this.#client === undefined) {
+      throw new Error(
+        "Slash commands need a store that owns its client. Create it with `baseUrl` or `agent` instead of `session`.",
+      );
+    }
+    return this.#client;
   }
 
   compact(): Promise<Delivery> {

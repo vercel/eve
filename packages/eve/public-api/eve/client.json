@@ -84,5 +84,6 @@
   "isAnswer",
   "parseAnswer",
   "parseAnswers",
+  "parseSlashCommand",
   "transcriptOf"
 ]

@@ -1,6 +1,11 @@
 "use client";
 
-import { ClientError, type MessagePart } from "eve/client";
+import {
+  ClientError,
+  parseSlashCommand,
+  type ChannelCommandInfo,
+  type MessagePart,
+} from "eve/client";
 import {
   activeTurn,
   activity,
@@ -12,7 +17,7 @@ import {
 } from "eve/events";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -46,6 +51,10 @@ export function AgentChat({
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [commands, setCommands] = useState<readonly ChannelCommandInfo[]>([]);
+  const [commandNotice, setCommandNotice] = useState<string>();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasSubmittedMessage = useRef(false);
   const replaceSessionRoute = (nextSessionId: string) => {
     if (sessionId !== undefined) return;
@@ -76,6 +85,28 @@ export function AgentChat({
     },
   });
 
+  // The agent's eve channel commands, such as /new and /clear. A server without them offers none.
+  useEffect(() => {
+    let active = true;
+    agent.commands().then(
+      (loaded) => active && setCommands(loaded),
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [agent.commands]);
+  const suggestions = commandSuggestions(draft, commands);
+
+  const fillCommand = (command: ChannelCommandInfo) => {
+    const textarea = textareaRef.current;
+    if (textarea === null) return;
+    textarea.value = `/${command.name} `;
+    textarea.focus();
+    setDraft(textarea.value);
+    setHasInputText(true);
+  };
+
   const isBusy = agent.status === "busy";
   // A turn waiting on a person is open while the store is idle; it still takes steering and Stop.
   const turnOpen = activeTurn(agent.view) !== undefined;
@@ -97,7 +128,8 @@ export function AgentChat({
       ? "The model is temporarily unavailable. Please try again."
       : failed?.message;
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
-  const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
+  const hasConversationContent =
+    sessionless || !isEmpty || errorMessage !== undefined || commandNotice !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
   // A session that ended outside eve never settles its requests, so they stay open, yet it
@@ -125,9 +157,30 @@ export function AgentChat({
     if ((text.length === 0 && message.files.length === 0) || isResuming) return;
 
     setHasInputText(false);
+    setDraft("");
+    setCommandNotice(undefined);
     setCancellationError(undefined);
     hasSubmittedMessage.current = true;
     if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId);
+
+    const command = message.files.length === 0 ? parseSlashCommand(text, commands) : undefined;
+    if (command !== undefined) {
+      try {
+        const result = await agent.runCommand(command.command.name, {
+          argument: command.argument,
+        });
+        // The command ended this session, so start over the way "New chat" does.
+        if (result.controls?.includes("end") === true) {
+          window.location.assign("/s");
+          return;
+        }
+        if (result.message !== undefined) setCommandNotice(result.message);
+      } catch (error) {
+        setCommandNotice(error instanceof Error ? error.message : "The command failed.");
+      }
+      return;
+    }
+
     const options = turnOpen ? { turnPolicy: "steer" as const } : undefined;
 
     if (message.files.length === 0) {
@@ -155,8 +208,18 @@ export function AgentChat({
     <PromptInput onSubmit={handleSubmit}>
       <PromptInputTextarea
         disabled={isResuming}
-        onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
+        onChange={(event) => {
+          setHasInputText(event.currentTarget.value.trim().length > 0);
+          setDraft(event.currentTarget.value);
+        }}
+        onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+          const first = suggestions[0];
+          if (event.key !== "Tab" || first === undefined) return;
+          event.preventDefault();
+          fillCommand(first);
+        }}
         placeholder="Send a message…"
+        ref={textareaRef}
       />
       <ComposerAction
         hasInputText={hasInputText}
@@ -208,6 +271,7 @@ export function AgentChat({
               ),
             )}
             {showPendingThinking ? <PendingActivity activity={now} /> : null}
+            {commandNotice !== undefined ? <CommandNotice message={commandNotice} /> : null}
             {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
           </ConversationContent>
           <ConversationScrollButton />
@@ -227,7 +291,12 @@ export function AgentChat({
             <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
           </div>
         )}
-        <div className="w-full">{composer}</div>
+        <div className="relative w-full">
+          {suggestions.length > 0 ? (
+            <CommandSuggestions commands={suggestions} onSelect={fillCommand} />
+          ) : null}
+          {composer}
+        </div>
       </div>
     </main>
   );
@@ -260,6 +329,65 @@ function ComposerAction({
     >
       <SquareIcon className="size-3 fill-current" />
     </PromptInputButton>
+  );
+}
+
+/** Commands matching a `/name` being typed, before its argument starts. */
+function commandSuggestions(
+  draft: string,
+  commands: readonly ChannelCommandInfo[],
+): readonly ChannelCommandInfo[] {
+  const typed = /^\/([a-z0-9-]*)$/u.exec(draft)?.[1];
+  if (typed === undefined) return [];
+  return commands.filter((command) =>
+    [command.name, ...(command.aliases ?? [])].some((name) => name.startsWith(typed)),
+  );
+}
+
+function CommandSuggestions({
+  commands,
+  onSelect,
+}: {
+  readonly commands: readonly ChannelCommandInfo[];
+  readonly onSelect: (command: ChannelCommandInfo) => void;
+}) {
+  return (
+    <div
+      aria-label="Commands"
+      className="absolute bottom-full left-0 z-30 mb-2 w-full rounded-xl border bg-popover p-1 text-sm shadow-md"
+      role="listbox"
+    >
+      {commands.map((command) => (
+        <button
+          aria-selected={false}
+          className="flex w-full items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-accent"
+          key={command.name}
+          onClick={() => onSelect(command)}
+          onMouseDown={(event) => event.preventDefault()}
+          role="option"
+          type="button"
+        >
+          <span className="font-mono">/{command.name}</span>
+          {command.argumentHint !== undefined ? (
+            <span className="font-mono text-muted-foreground">{command.argumentHint}</span>
+          ) : null}
+          <span className="truncate text-muted-foreground">{command.description}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A command's reply to the person who ran it. It isn't part of the session's messages. */
+function CommandNotice({ message }: { readonly message: string }) {
+  return (
+    <Message aria-live="polite" from="assistant">
+      <MessageContent>
+        <p className="text-muted-foreground text-sm" role="status">
+          {message}
+        </p>
+      </MessageContent>
+    </Message>
   );
 }
 

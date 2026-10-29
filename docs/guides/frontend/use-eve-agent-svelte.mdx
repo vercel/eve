@@ -45,15 +45,15 @@ Call the binding once for a conversation and read its reactive getters directly.
 
 The state fields are reactive getters; the commands are ordinary methods:
 
-| Property                                                                                  | Svelte shape                                       |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `messages`, `agents`                                                                      | Reactive getters for each projected snapshot field |
-| `view`                                                                                    | `SessionView`                                      |
-| `status`                                                                                  | `UseEveAgentStatus`                                |
-| `error`                                                                                   | `Error \| undefined`                               |
-| `events`                                                                                  | `readonly SessionStreamEvent[]`                    |
-| `session`                                                                                 | `ClientSessionState \| undefined`                  |
-| `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                            |
+| Property                                                                                                            | Svelte shape                                       |
+| ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `messages`, `agents`                                                                                                | Reactive getters for each projected snapshot field |
+| `view`                                                                                                              | `SessionView`                                      |
+| `status`                                                                                                            | `UseEveAgentStatus`                                |
+| `error`                                                                                                             | `Error \| undefined`                               |
+| `events`                                                                                                            | `readonly SessionStreamEvent[]`                    |
+| `session`                                                                                                           | `ClientSessionState \| undefined`                  |
+| `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `end`, `newSession`, `commands`, `runCommand` | Methods                                            |
 
 Read the getters directly in templates, `$derived`, or `$effect`. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
 
