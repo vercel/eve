@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { resolveProvidedArguments } from "#runtime/connections/provided-arguments.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { once } from "#tools/approval/policies.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -101,5 +103,81 @@ describe("connection approval context", () => {
     const perTool = once();
     const { request } = setup(undefined, perTool);
     expect(await request("delete_issue")).toBe(await perTool({} as ApprovalContext));
+  });
+});
+
+describe("connection tool call", () => {
+  const user = (principalId: string): SessionAuthContext => ({
+    attributes: {},
+    authenticator: "test",
+    issuer: "test",
+    principalId,
+    principalType: "user",
+  });
+
+  /** Alice's tracker call, whose provided `approvedBy` reads who approved it. */
+  function call(responder?: SessionAuthContext) {
+    const connection = {
+      connectionName: "tracker",
+      description: "Issue tracker.",
+      logicalPath: "connections/tracker.ts",
+      protocol: "mcp",
+      sourceId: "tracker",
+      sourceKind: "module",
+      toolCall: {
+        providedArguments: {
+          approvedBy: ({ approval }) => approval?.responder.principalId ?? null,
+          requestedBy: ({ session }) => session.auth.current?.principalId ?? null,
+        },
+      },
+      url: "https://tracker.example.com/mcp",
+    } as ResolvedConnectionDefinition;
+    const client: ConnectionClient = {
+      close: async () => {},
+      connect: async () => undefined,
+      executeTool: async (toolName, args, options) => ({
+        structuredContent: await resolveProvidedArguments({
+          args,
+          callId: options.callId,
+          connection,
+          toolName,
+        }),
+      }),
+      getToolMetadata: async () => tools,
+    };
+    const registry: ConnectionRegistry = {
+      dispose: async () => {},
+      getClient: () => client,
+      getConnectionApproval: () => undefined,
+      getConnectionNames: () => ["tracker"],
+      getConnections: () => [connection],
+    };
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: user("alice"), initiator: user("alice") },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    return contextStorage.run(ctx, async () =>
+      connectionEntry(registry, connection, "delete_issue").execute!(
+        {},
+        {
+          messages: [],
+          toolCallId: "call-1",
+          ...(responder !== undefined && { approval: { responder } }),
+        },
+      ),
+    );
+  }
+
+  it("gives an approved call's provided arguments its approver, still as the requester", async () => {
+    await expect(call(user("bob"))).resolves.toEqual({
+      approvedBy: "bob",
+      requestedBy: "alice",
+    });
+  });
+
+  it("gives a call that needed no approval no approver", async () => {
+    await expect(call()).resolves.toEqual({ approvedBy: null, requestedBy: "alice" });
   });
 });

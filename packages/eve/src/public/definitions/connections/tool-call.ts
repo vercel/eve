@@ -1,8 +1,8 @@
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonValue } from "#public/types/json.js";
+import type { ConnectionCallbackContext } from "#shared/connection-types.js";
 
 /** Context available while resolving an application-provided connection tool argument. */
-export type ProvidedArgumentContext = SessionContext & {
+export type ProvidedArgumentContext = ConnectionCallbackContext & {
   /** Replay-stable id of the current connection tool call. */
   readonly callId: string;
   /** Bare tool or operation name published by the remote connection. */

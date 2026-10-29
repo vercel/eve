@@ -213,6 +213,35 @@ export default defineMcpClientConnection({
 
 For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, allow-lists, or other safeguards appropriate to the action.
 
+### Send the approver to the server
+
+An approved connection call runs as the requester: its `auth` token and `ctx.session.auth.current` stay the requester's. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, so the server can act for the approver where you choose to:
+
+```ts title="agent/connections/gateway.ts"
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://gateway.example.com/mcp",
+  description: "Internal systems through the MCP gateway.",
+  approval: {
+    request: always(),
+    response: ({ response }) =>
+      admins.includes(response.principal.principalId)
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "Only admins can approve gateway calls." },
+  },
+  headers: async (ctx) => {
+    const approver = ctx.approval?.responder;
+    return {
+      Authorization: `Bearer ${await gatewayToken(approver ?? ctx.session.auth.current)}`,
+    };
+  },
+});
+```
+
+`ctx.approval` is absent for calls that needed no approval, and while eve connects to the server and lists its tools. The approver's identity reaches only the requests of the call they approved. Pair it with an `approval.response` policy so only people whose access the call may use can approve it.
+
 ## Interactive OAuth via Vercel Connect
 
 When the server uses OAuth and you want each end-user to sign in through their own browser, turn on interactive authorization with [Vercel Connect](https://vercel.com/docs/connect). The `connect()` helper from `@vercel/connect/eve` handles consent, encrypted token storage, and refresh, then hooks all of that into eve's authorization flow.
