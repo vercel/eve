@@ -1,3 +1,6 @@
+import type { ChannelCommandInfo } from "#client/commands.js";
+import { stripAnsi, stripTerminalControls } from "#cli/ui/terminal-text.js";
+
 export type PromptCommandExtensionName = "login" | "model" | "add" | "deploy";
 
 type PromptCommandTarget = "local" | "remote";
@@ -253,17 +256,12 @@ export function isPromptControlCommand(
 
 /**
  * Appends the eve channel's commands after the built-ins. A built-in name or alias wins, so an
- * agent cannot shadow `/exit` or `/new`.
+ * agent cannot shadow `/exit` or `/new`. A command without an `argumentHint` takes no argument,
+ * so `/name some text` stays an ordinary message instead of running it.
  */
 export function withChannelPromptCommands(
   builtins: readonly PromptCommandSpec[],
-  channel: readonly {
-    name: string;
-    description: string;
-    argumentHint?: string;
-    aliases?: readonly string[];
-    session: "optional" | "required";
-  }[],
+  channel: readonly ChannelCommandInfo[],
 ): readonly PromptCommandSpec[] {
   const taken = new Set(builtins.flatMap((spec) => [spec.name, ...spec.aliases]));
   const added = channel
@@ -271,9 +269,11 @@ export function withChannelPromptCommands(
     .map((command): PromptCommandSpec => ({
       name: command.name,
       aliases: (command.aliases ?? []).filter((alias) => !taken.has(alias)),
-      description: command.description,
-      argumentHint: command.argumentHint,
-      takesArgument: true,
+      // The agent's text reaches the terminal, so it can't carry controls or break the row layout.
+      description: terminalLine(command.description),
+      argumentHint:
+        command.argumentHint === undefined ? undefined : terminalLine(command.argumentHint),
+      takesArgument: command.argumentHint !== undefined,
       history: "keep",
       build: (argument) => ({
         type: "channel",
@@ -283,6 +283,10 @@ export function withChannelPromptCommands(
       }),
     }));
   return added.length === 0 ? builtins : [...builtins, ...added];
+}
+
+function terminalLine(text: string): string {
+  return stripTerminalControls(stripAnsi(text.split(/\r?\n/u, 1)[0] ?? "")).trim();
 }
 
 /**

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { Client } from "#client/client.js";
 import { ClientError } from "#client/client-error.js";
+import { CommandResponseError } from "#client/commands.js";
 import { HealthResponseError } from "#client/health-response-error.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
@@ -764,4 +765,22 @@ describe("Client request policy", () => {
       await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
     },
   );
+});
+
+describe("Client commands", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("rejects an unrecognized command body with a typed error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({ ok: true, commands: [{ name: "escalate", session: "sometimes" }] }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const error = await client.commands().catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(CommandResponseError);
+    expect((error as CommandResponseError).issues.join("\n")).toContain("session");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("not json"));
+    await expect(client.runCommand("escalate")).rejects.toThrow(CommandResponseError);
+  });
 });

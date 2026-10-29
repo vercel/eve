@@ -2,6 +2,7 @@ import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
 import { createLogger, logError } from "#internal/logging.js";
+import type { CommandControl, CommandInfo, CommandRunResult } from "#protocol/commands.js";
 import {
   CommandNeedsSessionError,
   type CommandDefinitions,
@@ -13,19 +14,14 @@ import {
 
 const log = createLogger("eve.channel.commands");
 
-/** Session controls a command applied, so the client can mirror them locally. */
-type CommandControl = "cancel" | "clear" | "compact" | "end";
-
 /** `GET /eve/v1/commands`: discovery metadata only, never the handlers. */
 export function listEveCommandsResponse(commands: CommandDefinitions | undefined): Response {
   const listed = Object.entries(commands ?? {}).map(([name, command]) => {
-    const entry: {
-      name: string;
-      description: string;
-      argumentHint?: string;
-      aliases?: readonly string[];
-      session: "optional" | "required";
-    } = { name, description: command.description, session: command.session ?? "optional" };
+    const entry: { -readonly [K in keyof CommandInfo]: CommandInfo[K] } = {
+      name,
+      description: command.description,
+      session: command.session ?? "optional",
+    };
     if (command.argumentHint !== undefined) entry.argumentHint = command.argumentHint;
     if (command.aliases !== undefined && command.aliases.length > 0)
       entry.aliases = command.aliases;
@@ -79,7 +75,7 @@ export async function runEveCommandResponse(input: {
       { status: 500 },
     );
   }
-  const body: { ok: true; message?: string; send?: string; controls?: CommandControl[] } = {
+  const body: { ok: true } & { -readonly [K in keyof CommandRunResult]: CommandRunResult[K] } = {
     ok: true,
     ...result,
   };

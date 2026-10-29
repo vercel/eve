@@ -59,7 +59,11 @@ export type {
   PrepareSend,
 } from "#client/session-store.js";
 
-export type { ChannelCommandInfo, ChannelCommandResult } from "#client/commands.js";
+export {
+  CommandResponseError,
+  type ChannelCommandInfo,
+  type ChannelCommandResult,
+} from "#client/commands.js";
 
 export type {
   AgentInfoEntry,
