@@ -96,10 +96,13 @@ function AgentUi() {
                   <Logo className="size-[0.9em] shrink-0 text-gray-1000" />
                 )}
                 {/* Safari ignores paint-order on HTML text, so the fill is a second, unstroked copy
-                    laid over the stroked one. */}
-                <span className="relative [-webkit-text-fill-color:var(--ds-background-100)]">
-                  <span className="[-webkit-text-stroke:1px_currentColor]">{name}</span>
-                  <span aria-hidden className="absolute inset-0">
+                    over the stroked one. Both share one grid cell, so they lay out identically;
+                    an absolutely placed copy can land a pixel or two off. */}
+                <span className="inline-grid [-webkit-text-fill-color:var(--ds-background-100)]">
+                  <span className="[-webkit-text-stroke:1px_currentColor] [grid-area:1/1]">
+                    {name}
+                  </span>
+                  <span aria-hidden className="[grid-area:1/1]">
                     {name}
                   </span>
                 </span>
