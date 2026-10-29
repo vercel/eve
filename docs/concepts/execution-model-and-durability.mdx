@@ -172,7 +172,7 @@ restart affected sessions before rolling back.
 
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or the default sandbox environment.
 
-For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
+For self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -187,7 +187,7 @@ export default defineAgent({
 });
 ```
 
-The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state), [agent.ts](../agent-config#workflow-world), and [Workflow Worlds](https://workflow-sdk.dev/worlds).
+The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.x` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Workflow worlds](../guides/deployment/workflow-worlds) to choose and configure a world, [agent.ts](../agent-config#workflow-world), and the Workflow SDK's [Workflow Worlds](https://workflow-sdk.dev/worlds).
 
 ## Agent loop and sandbox
 

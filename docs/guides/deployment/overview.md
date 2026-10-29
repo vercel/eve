@@ -1,30 +1,39 @@
 ---
 title: "Overview"
-description: "Choose a deployment strategy and prepare an eve agent for production."
+description: "How an eve agent runs in production, and the backends you choose on Vercel or your own infrastructure."
 ---
 
-Deploy eve to Vercel or run it as a Node service on your own infrastructure. Your deployment strategy determines the build output, workflow storage, sandbox provider, and routing. The agent’s filesystem-based configuration remains portable across these strategies.
+An eve agent runs in production as a standard Node server built with [Nitro](https://nitro.build). Every session runs as a durable workflow on the open-source [Workflow SDK](https://workflow-sdk.dev/), so conversations, human approvals, and subagent work survive restarts and long waits. The server delegates storage and isolation to a few backends, and choosing a deployment target means choosing those backends. Your agent directory stays the same on every target.
 
-## Choose a deployment strategy
+## Backends
 
-Choose where the eve runtime will run:
+| Backend          | What it does                                                        | On Vercel                                    | Self-hosted                                                    |
+| ---------------- | ------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------- |
+| Workflow world   | Stores sessions, queues their work, and resumes them after restarts | Vercel Workflow                              | [Local, Postgres, or another world package](./workflow-worlds) |
+| Sandbox provider | Runs the `bash`, `read_file`, and `write_file` tools                | Vercel Sandbox                               | Docker by default, or another [provider](../../sandbox)        |
+| Model access     | Sends model calls                                                   | AI Gateway via OIDC                          | AI Gateway API key or an AI SDK provider package               |
+| Schedules        | Runs authored [schedules](../../schedules)                          | Vercel Cron                                  | The schedule runner in `eve start`                             |
+| Observability    | Records traces of sessions, turns, and tool calls                   | [Agent Runs](../../observability/agent-runs) | [OpenTelemetry](../../observability/otel)                      |
 
-| Strategy                       | Build output           | Workflows                      | Sandbox          | Choose it when                                        |
-| ------------------------------ | ---------------------- | ------------------------------ | ---------------- | ----------------------------------------------------- |
-| [Vercel](./vercel)             | `.vercel/output`       | Vercel Workflow                | Vercel Sandbox   | You want Vercel to operate the runtime services       |
-| [Self-hosting](./self-hosting) | `.output/` Node server | Local or custom Workflow world | Docker or custom | You operate your own Node or container infrastructure |
+eve selects a default for each backend, so a new agent deploys without backend configuration on either target.
+
+## Choose a deployment target
+
+| Target                         | Build output           | Choose it when                                                  |
+| ------------------------------ | ---------------------- | --------------------------------------------------------------- |
+| [Vercel](./vercel)             | `.vercel/output`       | You want Vercel to operate the backends                         |
+| [Self-hosting](./self-hosting) | `.output/` Node server | You run Node services on your own servers or container platform |
 
 eve is frontend agnostic and can be deployed within Next.js, Nuxt, SvelteKit, or TanStack Start applications. See [Frontend integrations](../frontend/overview) for more details.
 
 ## Prepare for production
 
-Every production deployment must satisfy the same runtime requirements:
+Every production deployment needs the same preparation:
 
 1. Run `eve build` to compile the agent and create host output.
 2. Provide a model credential and any secrets required by tools, connections, and route authentication.
 3. Replace `placeholderAuth()` with a production route policy before accepting browser traffic.
-4. Select workflow and sandbox implementations that match the host.
-5. Verify the health route and complete a real agent turn.
+4. Verify the health route and complete a real agent turn.
 
 `eve build` always writes compiler artifacts under `.eve/`. A Vercel build also writes `.vercel/output`. A build for another host writes the standard Nitro server under `.output/`.
 
@@ -57,5 +66,5 @@ Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses 
 Follow the guide for your deployment platform or application topology:
 
 - [Deploy to Vercel](./vercel): use Vercel Build Output, Workflow, Sandbox, Cron, and observability
-- [Self-host eve](./self-hosting): run the Nitro Node server with infrastructure you manage
+- [Self-host eve](./self-hosting): run the Nitro Node server with backends you choose
 - [Frontend integrations](../frontend/overview): mount eve alongside Next.js, Nuxt, SvelteKit, or TanStack Start
