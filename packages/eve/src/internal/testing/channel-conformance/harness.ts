@@ -109,7 +109,9 @@ export type ChannelCapability =
   /** A person can press a rendered choice. */
   | "buttons"
   /** A person can send a plain-text message to the conversation. */
-  | "text-replies";
+  | "text-replies"
+  /** A person can run the eve channel's slash commands, such as `/clear`, from the composer. */
+  | "slash-commands";
 
 /**
  * Who can see the conversation a driver holds. Anything meant for the person

@@ -16,6 +16,7 @@ import {
 } from "#client/session-store.js";
 import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
+import type { ChannelCommandInfo, ChannelCommandResult } from "#client/commands.js";
 import type {
   ClientAuth,
   HeadersValue,
@@ -82,6 +83,16 @@ export interface UseEveAgentReturn {
   readonly end: () => Promise<Delivery>;
   readonly clear: () => Promise<Delivery>;
   readonly compact: () => Promise<Delivery>;
+  /** Lists the eve channel's slash commands. Match typed text with `parseSlashCommand`. */
+  readonly commands: () => Promise<readonly ChannelCommandInfo[]>;
+  /**
+   * Runs an eve channel slash command in the current session, then applies its result: `end`
+   * starts a new session and `send` goes out as the next message. Show the returned `message`.
+   */
+  readonly runCommand: (
+    name: string,
+    options?: { readonly argument?: string; readonly signal?: AbortSignal },
+  ) => Promise<ChannelCommandResult>;
   /** Submits a message and resolves on acceptance, not execution. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
@@ -232,6 +243,11 @@ class SvelteEveAgent implements UseEveAgentReturn {
   end = (): Promise<Delivery> => this.#store.end();
   clear = (): Promise<Delivery> => this.#store.clear();
   compact = (): Promise<Delivery> => this.#store.compact();
+  commands = (): Promise<readonly ChannelCommandInfo[]> => this.#store.commands();
+  runCommand = (
+    name: string,
+    options?: { readonly argument?: string; readonly signal?: AbortSignal },
+  ): Promise<ChannelCommandResult> => this.#store.runCommand(name, options);
 
   prewarm = (): Promise<void> => {
     return this.#store.prewarm();

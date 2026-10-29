@@ -53,7 +53,7 @@ let bundled: Promise<string> | undefined;
 export function webChatDriver(): ClientDriver {
   return {
     name: "web chat",
-    capabilities: ["attachments", "buttons", "text-replies"],
+    capabilities: ["attachments", "buttons", "slash-commands", "text-replies"],
     // A browser tab shows only the person using it.
     surface: "private",
     async open(host, wait) {

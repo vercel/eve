@@ -364,6 +364,7 @@ const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
   "another-person": "second person who can act",
   buttons: "buttons a person can press",
   "text-replies": "plain-text replies",
+  "slash-commands": "slash commands a person can run",
 };
 
 function variesByConversation(rule: (typeof channelContract)[number]): boolean {

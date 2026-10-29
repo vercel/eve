@@ -1186,6 +1186,31 @@ const attachmentRules = [
 ] as const satisfies readonly ContractRule[];
 
 /** The contract's rules, grouped by the kind of behavior they cover. */
+const COMMAND_GREETING = "Hello before clearing.";
+const AFTER_COMMAND = "Hello after clearing.";
+
+const commandRules = [
+  {
+    rule: "a typed /clear runs the channel's command instead of reaching the agent",
+    source: "docs/channels/eve.mdx#slash-commands",
+    requires: ["slash-commands"],
+    async run(conversation) {
+      await conversation.say(COMMAND_GREETING);
+      await conversation.waitForReplyTo(COMMAND_GREETING);
+      await conversation.say("/clear");
+      await conversation.waitForShown("Clearing the session context.");
+      // A reply to "/clear" would arrive before the reply to the next message.
+      await conversation.say(AFTER_COMMAND);
+      await conversation.waitForReplyTo(AFTER_COMMAND);
+      const shown = await conversation.shownTexts();
+      expect(
+        shown.some((text) => /^.*Bootstrap reply.*\/clear.*$/mu.test(text)),
+        "/clear reached the agent as a message",
+      ).toBe(false);
+    },
+  },
+] as const satisfies readonly ContractRule[];
+
 export const channelContractSections = [
   { title: "Questions", rules: questionRules },
   { title: "Tool approvals", rules: approvalRules },
@@ -1196,6 +1221,7 @@ export const channelContractSections = [
   { title: "Sign-ins", rules: signInRules },
   { title: "Tool callers", rules: callerRules },
   { title: "Attachments", rules: attachmentRules },
+  { title: "Slash commands", rules: commandRules },
 ] as const;
 
 type ChannelContractRule = (typeof channelContractSections)[number]["rules"][number];
