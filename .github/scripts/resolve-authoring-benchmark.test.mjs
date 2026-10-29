@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { publishedBenchmark } from "../../apps/benchmarks/lib/benchmark-config.ts";
+import {
+  publishedBenchmark,
+  publishedBenchmarkModels,
+} from "../../apps/benchmarks/lib/benchmark-config.ts";
 import {
   fixtureNames,
   nativeFixtureNames,
   prepareFixtures,
 } from "../../apps/benchmarks/lib/experiment-files.mjs";
 import {
+  benchmarkMatrix,
+  isSiteRun,
   parseDirective,
   requestOptions,
   resolveSelection,
@@ -117,4 +122,58 @@ test("all selects only the cases the native runner can prepare", async () => {
   assert.ok(fixtureNames(evalsRoot).includes("author-000-imessage"));
   assert.ok(!cases.includes("author-000-imessage"));
   await prepareFixtures(evalsRoot, { revision: "main" }, cases);
+});
+
+const mainDispatch = { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/main" };
+const fullSelection = {
+  models: publishedBenchmarkModels.map((model) => model.id).reverse(),
+  cases: [...publishedBenchmark.caseIds].reverse().join(","),
+  runs: String(publishedBenchmark.runs),
+};
+
+test("a full dispatch on main refreshes the site", () => {
+  assert.equal(
+    isSiteRun(resolveSelection({ models: "all", runs: "3" }, context), mainDispatch),
+    true,
+  );
+  assert.equal(isSiteRun(fullSelection, mainDispatch), true);
+});
+
+test("partial runs, other branches, and other events do not refresh the site", () => {
+  assert.equal(isSiteRun({ ...fullSelection, models: ["kimi-k3"] }, mainDispatch), false);
+  assert.equal(
+    isSiteRun(
+      { ...fullSelection, models: [...fullSelection.models, "claude-haiku-5-5"] },
+      mainDispatch,
+    ),
+    false,
+  );
+  assert.equal(
+    isSiteRun({ ...fullSelection, cases: "author-001-weather-tool" }, mainDispatch),
+    false,
+  );
+  assert.equal(isSiteRun({ ...fullSelection, runs: "1" }, mainDispatch), false);
+  assert.equal(
+    isSiteRun(fullSelection, { ...mainDispatch, GITHUB_REF: "refs/heads/feature" }),
+    false,
+  );
+  assert.equal(isSiteRun(fullSelection, { GITHUB_EVENT_NAME: "pull_request" }), false);
+  assert.equal(
+    isSiteRun(fullSelection, { GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/main" }),
+    false,
+  );
+});
+
+test("only site runs add the baseline treatment to the matrix", () => {
+  const selection = { models: ["kimi-k3", "gpt-6-sol-high"] };
+  assert.deepEqual(benchmarkMatrix(selection, false), [
+    { model: "kimi-k3", treatment: "guided" },
+    { model: "gpt-6-sol-high", treatment: "guided" },
+  ]);
+  assert.deepEqual(benchmarkMatrix(selection, true), [
+    { model: "kimi-k3", treatment: "guided" },
+    { model: "gpt-6-sol-high", treatment: "guided" },
+    { model: "kimi-k3", treatment: "baseline" },
+    { model: "gpt-6-sol-high", treatment: "baseline" },
+  ]);
 });

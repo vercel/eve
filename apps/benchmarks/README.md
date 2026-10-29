@@ -31,6 +31,13 @@ are immutable, and the manifest is written last. PR runs execute branch code, so
 set `pull_request` to the PR number (it is `null` for `main`). Dispatches on other branches are not
 published.
 
+A dispatch on `main` with `models=all`, the default (published) cases, and `runs=3` is a full run.
+Every supported model then also runs the `baseline` treatment, and a final job refreshes
+[eve.dev/benchmarks](https://eve.dev/benchmarks): it exports both treatments onto the newest
+`main`'s `apps/docs/lib/evals/benchmark-results.json` with `scripts/export-results.mjs` and commits
+the file to `main`. A model and treatment that did not produce a result for every published case
+keeps its previous row. Blob publication still covers only the `guided` treatment.
+
 Locally, pass several cases as separate or comma-separated arguments:
 `pnpm benchmark author-001-weather-tool,author-005-conditional-approval`.
 

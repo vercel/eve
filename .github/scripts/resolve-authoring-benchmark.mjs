@@ -91,6 +91,36 @@ export function requestOptions(env) {
   return parseDirective(env.PR_BODY);
 }
 
+/**
+ * A dispatch on main that covers every supported model on the published cases
+ * at the published run count is a full run: it also runs the baseline
+ * treatment so the site job can refresh eve.dev/benchmarks.
+ */
+export function isSiteRun(selection, env) {
+  if (env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_REF !== "refs/heads/main") {
+    return false;
+  }
+  return (
+    sameSet(
+      selection.models,
+      publishedBenchmarkModels.map((model) => model.id),
+    ) &&
+    sameSet(selection.cases.split(","), publishedBenchmark.caseIds) &&
+    Number(selection.runs) === publishedBenchmark.runs
+  );
+}
+
+/** One benchmark job per model and treatment. Only full runs add the baseline. */
+export function benchmarkMatrix(selection, site) {
+  const treatments = site ? ["guided", "baseline"] : ["guided"];
+  return treatments.flatMap((treatment) => selection.models.map((model) => ({ model, treatment })));
+}
+
+function sameSet(left, right) {
+  const set = new Set(left);
+  return set.size === new Set(right).size && right.every((value) => set.has(value));
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const evalsRoot = join(process.cwd(), "apps/benchmarks/evals");
   const options = requestOptions(process.env);
@@ -112,9 +142,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     caseExists: (name) => existsSync(join(evalsRoot, name, "CASE.ts")),
     allCases: () => allCases,
   });
-  console.log(JSON.stringify(selection, null, 2));
+  const site = isSiteRun(selection, process.env);
+  const matrix = benchmarkMatrix(selection, site);
+  console.log(JSON.stringify({ ...selection, site }, null, 2));
+  if (site) {
+    console.log(
+      "::notice::Full run: every supported model also runs the baseline treatment, and eve.dev/benchmarks is refreshed.",
+    );
+  }
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `run=true\nmodels=${JSON.stringify(selection.models)}\ncases=${selection.cases}\nruns=${selection.runs}\n`,
+    `run=true\nmodels=${JSON.stringify(selection.models)}\ncases=${selection.cases}\nruns=${selection.runs}\nsite=${site}\nmatrix=${JSON.stringify(matrix)}\n`,
   );
 }

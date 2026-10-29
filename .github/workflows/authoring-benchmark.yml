@@ -21,6 +21,13 @@ name: Authoring Benchmark
 # publish under authoring/pull-requests/<number>/, apart from main's
 # authoring/runs/. Dispatches on other branches keep their results in workflow
 # artifacts only.
+#
+# A dispatch on main that selects every supported model (`all`), the published
+# cases (the default), and the published run count (3) is a full run: every
+# model also runs the baseline treatment, and the site job refreshes
+# apps/docs/lib/evals/benchmark-results.json on main, which eve.dev/benchmarks
+# renders. Baseline artifacts are named authoring-baseline-*, so the Blob
+# publisher keeps seeing the guided treatment only.
 on:
   schedule:
     - cron: "41 8 * * *"
@@ -56,7 +63,6 @@ permissions:
 
 env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  TREATMENT: guided
 
 jobs:
   request:
@@ -72,6 +78,8 @@ jobs:
       models: ${{ steps.selection.outputs.models }}
       cases: ${{ steps.selection.outputs.cases }}
       runs: ${{ steps.selection.outputs.runs }}
+      site: ${{ steps.selection.outputs.site }}
+      matrix: ${{ steps.selection.outputs.matrix }}
       canary: ${{ steps.canary.outputs.ref }}
     steps:
       - name: Checkout code
@@ -162,7 +170,7 @@ jobs:
           exit 1
 
   benchmark:
-    name: Benchmark ${{ matrix.model }}
+    name: Benchmark ${{ matrix.model }} (${{ matrix.treatment }})
     needs: request
     if: needs.request.outputs.run == 'true'
     runs-on: ubuntu-latest
@@ -172,13 +180,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: ${{ fromJSON(needs.request.outputs.models) }}
+        include: ${{ fromJSON(needs.request.outputs.matrix) }}
     env:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       MODEL: ${{ matrix.model }}
+      TREATMENT: ${{ matrix.treatment }}
       CASES: ${{ needs.request.outputs.cases }}
       RUNS: ${{ needs.request.outputs.runs }}
       CANARY_REF: ${{ needs.request.outputs.canary }}
@@ -226,7 +235,7 @@ jobs:
         working-directory: apps/benchmarks
         run: |
           {
-            echo "### Authoring benchmark: ${MODEL}"
+            echo "### Authoring benchmark: ${MODEL} (${TREATMENT})"
             echo
             echo "eve canary \`${CANARY_REF:0:12}\`, ${RUNS} run(s) per case"
             echo
@@ -261,7 +270,9 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: authoring-benchmark-${{ matrix.model }}-${{ env.HEAD_SHA }}
+          # The Blob publisher downloads authoring-benchmark-*, the guided
+          # treatment; only the site job reads baseline artifacts.
+          name: ${{ matrix.treatment == 'baseline' && 'authoring-baseline' || 'authoring-benchmark' }}-${{ matrix.model }}-${{ env.HEAD_SHA }}
           path: apps/benchmarks/results/
           if-no-files-found: ignore
           retention-days: 14
@@ -316,9 +327,86 @@ jobs:
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
           BENCHMARK_SHA: ${{ env.HEAD_SHA }}
           BENCHMARK_EVE_REVISION: ${{ needs.request.outputs.canary }}
-          BENCHMARK_TREATMENT: ${{ env.TREATMENT }}
+          BENCHMARK_TREATMENT: guided
           BENCHMARK_MODELS: ${{ needs.request.outputs.models }}
           BENCHMARK_CASES: ${{ needs.request.outputs.cases }}
           BENCHMARK_RUNS: ${{ needs.request.outputs.runs }}
           BENCHMARK_PULL_REQUEST: ${{ github.event.pull_request.number }}
         run: node scripts/publish-results.mjs "$RUNNER_TEMP/artifacts"
+
+  # Refreshes eve.dev/benchmarks from a full run on main. Failed cases are
+  # benchmark data, so this runs even when benchmark jobs fail; a model and
+  # treatment without results for every published case keeps its previous row.
+  site:
+    name: Refresh eve.dev/benchmarks
+    needs: [request, benchmark]
+    if: >-
+      always() && needs.request.result == 'success' && needs.request.outputs.site == 'true' &&
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: authoring-benchmark-site
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @eve-internal/benchmarks...
+
+      - name: Prepare artifact directory
+        run: mkdir -p "$RUNNER_TEMP/artifacts"
+
+      - name: Download results
+        # Both treatments: authoring-benchmark-* (guided) and authoring-baseline-*.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: authoring-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Stage results
+        working-directory: apps/benchmarks
+        env:
+          BENCHMARK_SHA: ${{ env.HEAD_SHA }}
+          BENCHMARK_EVE_REVISION: ${{ needs.request.outputs.canary }}
+        run: node scripts/stage-site-results.mjs "$RUNNER_TEMP/artifacts"
+
+      # Export onto the newest main's results so retired-model history and rows
+      # this run did not complete carry over. createCommitOnBranch commits are
+      # signed by GitHub, which satisfies the signed-commit requirement.
+      - name: Commit results to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: apps/docs/lib/evals/benchmark-results.json
+          EVE_REVISION: ${{ needs.request.outputs.canary }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" -q .object.sha)
+          gh api "repos/$GITHUB_REPOSITORY/contents/$FILE?ref=$head" -H "Accept: application/vnd.github.raw" > "$FILE"
+          cp "$FILE" "$RUNNER_TEMP/before.json"
+          (cd apps/benchmarks && node scripts/export-results.mjs --revision "$EVE_REVISION")
+          # Every export stamps a new time, so compare the measurements.
+          if jq -e --slurpfile before "$RUNNER_TEMP/before.json" \
+            '{experiments, results} == ($before[0] | {experiments, results})' "$FILE" > /dev/null; then
+            echo "::warning::No model and treatment completed every published case; eve.dev/benchmarks is unchanged."
+            exit 0
+          fi
+          HEAD_OID="$head" node .github/scripts/eve-code-docs-snapshot.mjs --commit-payload "$FILE" \
+            "docs: refresh authoring benchmark results" > "$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
