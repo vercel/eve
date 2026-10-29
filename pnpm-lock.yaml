@@ -615,6 +615,12 @@ importers:
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
+      next:
+        specifier: 'catalog:'
+        version: 16.3.8(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.6
       zod:
         specifier: 'catalog:'
         version: 4.5.4
@@ -622,6 +628,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.15
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

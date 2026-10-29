@@ -1,8 +1,9 @@
 import { defineMemory } from "eve/memory";
 import { fileMemory } from "eve/memory/file";
+import { byPrincipal } from "eve/memory/scope";
 
 export default defineMemory({
-  description: "Facts the team shares about suppliers: lead times and minimum orders.",
+  description: "Each person's preferences, such as tone and formatting.",
   provider: fileMemory(),
-  scope: "team",
+  scope: byPrincipal,
 });

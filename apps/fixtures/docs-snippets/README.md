@@ -9,5 +9,5 @@ stay on one copy.
 Edit the file here, then run `node scripts/check-doc-fixtures.mjs --write` from
 the repository root to copy it into the page. `pnpm docs:check` fails when a
 page and its fixture differ, and `pnpm typecheck` compiles every snippet.
-`docs/quick-reference.md` is fully covered: every titled `ts` block on it needs
+`docs/quick-reference.md` is fully covered: every titled `ts` or `tsx` block on it needs
 a fixture.
