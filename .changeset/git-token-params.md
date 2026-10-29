@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": patch
 ---
 
 `git({ github: { auth } })` runs `gh` commands with the caller's own GitHub permissions.

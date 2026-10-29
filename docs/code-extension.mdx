@@ -101,7 +101,7 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | `github.auth`        | No            | `auth({ connector, repository, tokenParams })` returns a user-scoped provider for each `gh` call  |
 | `github.attribution` | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`              |
 
-The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
+The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation, or the caller's own token when `github.auth` is set. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
 `github.authorize` runs during each `gh` tool execution, not when the session starts. The order is: validate the command and repository, mint the repository-scoped app token, await `authorize({ auth, repository, token })`, install the credential lease, then run the command. `auth` is the session's current caller at tool invocation, or `null`. Returning `false` stops execution before the lease is installed or the command runs. The decision applies to that invocation only; it is neither cached for the session nor repeated for each GitHub API request.
 
@@ -150,7 +150,7 @@ export default git({
 });
 ```
 
-`tokenParams` scopes the token to the declared repository. When the caller has no grant, eve signs them in and re-runs the call. Connect keeps one grant per caller, so later repositories mint tokens without another sign-in. When GitHub rejects the token (`HTTP 401`, `Bad credentials`, or `Authentication failed`), the tool calls `ctx.requireAuth`, which evicts the token and signs the caller in again. `github.authorize` still runs, with the caller's token.
+A user token carries the caller's GitHub permissions, so the tool description and GitHub instructions tell the model that access is limited to what the caller can reach, not to one repository. Pass `tokenParams` through so Connect receives the declared repository. When the caller has no grant, eve signs them in and re-runs the call. Connect keeps one grant per caller, so later repositories resolve tokens without another sign-in. When GitHub rejects the token (`HTTP 401`, `Bad credentials`, `Authentication failed`, or a `gh-signed-commit` `failed: 401`), the tool calls `ctx.requireAuth`, which evicts the token and signs the caller in again. `github.authorize` still runs, with the caller's token.
 
 ### Credit the person behind a turn
 

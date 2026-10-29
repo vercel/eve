@@ -126,7 +126,7 @@ const MAX_OUTPUT_BYTES = 100_000;
 const leaseQueues = new Map<string, Promise<void>>();
 const ALLOWED_GIT_REMOTE_COMMANDS = new Set(["fetch", "ls-remote", "pull", "push"]);
 /** How `gh` and `git` report a rejected token. */
-const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for/u;
+const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
 
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;

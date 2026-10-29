@@ -51,3 +51,24 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(skill.description, /signed commit/u);
   assert.match(skill.content, /gh pr create --draft/u);
 });
+
+test("with github.auth, guidance describes the caller's token instead of repository scope", async () => {
+  extension({
+    github: {
+      connector: "github/acme-bot",
+      org: "acme",
+      broker: async () => {},
+      auth: () => ({ getToken: async () => ({ token: "user-token" }) }),
+    },
+  });
+  const { content, tool } = await resolve();
+  assert.ok(tool && "description" in tool && typeof tool.description === "string");
+  for (const text of [content, tool.description]) {
+    assert.match(text, /caller's own GitHub token/u);
+    assert.match(text, /caller's GitHub permissions/u);
+    assert.doesNotMatch(
+      text,
+      /server-side repository scope|remains scoped to the declared repository/u,
+    );
+  }
+});

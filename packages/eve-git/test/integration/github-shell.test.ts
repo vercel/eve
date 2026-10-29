@@ -211,7 +211,15 @@ test("resolves user-scoped tokens through ctx.getToken and re-authorizes on 401"
   stderr = "HTTP 401: Bad credentials (https://api.github.com/graphql)";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
   assert.deepEqual(requireAuthCalls, [[provider, authKey]]);
-  assert.equal(runs.length, 2);
+
+  // gh-signed-commit reports a rejected token through its own API errors.
+  stderr = "GitHub ref lookup failed: 401";
+  await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
+  assert.deepEqual(requireAuthCalls, [
+    [provider, authKey],
+    [provider, authKey],
+  ]);
+  assert.equal(runs.length, 3);
 });
 
 test("approves the full syntactically valid gh surface", () => {
