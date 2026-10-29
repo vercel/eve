@@ -30,7 +30,11 @@ my-agent/
     │   └── get_weather.ts
     ├── skills/             # Optional: procedures loaded on demand
     │   └── plan_a_trip.md
-    ├── channels/           # Optional: message channels (HTTP, Slack, Discord)
+    ├── connections/        # Optional: external services (MCP, OpenAPI)
+    │   └── linear.ts
+    ├── subagents/          # Optional: agents this agent can delegate to
+    │   └── researcher/
+    ├── channels/           # Optional: message channels (HTTP, Web Chat, Slack, Discord)
     │   └── slack.ts
     └── schedules/          # Optional: recurring cron jobs
         └── weekly_recap.ts
