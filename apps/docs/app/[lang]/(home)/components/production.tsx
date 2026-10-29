@@ -1,245 +1,295 @@
-import { SiImessage } from "@icons-pack/react-simple-icons";
+import {
+  SiDiscord,
+  SiGithub,
+  SiGooglechat,
+  SiImessage,
+  SiLinear,
+  SiTelegram,
+  SiWhatsapp,
+} from "@icons-pack/react-simple-icons";
 import {
   IconAgents,
   IconCheck,
-  IconChevronRightSmall,
-  IconClock,
   IconLinked,
-  IconSandbox,
+  IconMessage,
+  IconRoute,
   IconShieldCheck,
+  IconSparkles,
   IconThumbUp,
   IconUser,
   IconWorkflow,
 } from "@vercel/geistdocs/assets/icons";
-import Link from "next/link";
 import type { JSX, ReactNode } from "react";
-import { type LogoKey, logos } from "@/lib/integrations/logos";
+import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
-import { Frame, FrameHeader, HomeSection } from "./section";
+import {
+  FeatureCard,
+  GrayBadge,
+  RuledList,
+  monochromeLogo,
+  ruledRow,
+  Visual,
+  pct,
+  view,
+} from "./control-visual";
+import { HomeSection } from "./section";
 
-const logoClassName = "size-4 shrink-0 grayscale";
+// The visibility radar from vercel.com's enterprise page: a guard at the center, dashed rings,
+// and one sweep per ring that fades out at both ends, turned a different way on each (that
+// visual's center angles and sweeps). The rings sit a little tighter than its 34/58/82 so a
+// chip at the bottom of the outer ring stays inside the frame.
+const radar = { x: 160, y: 90, guard: 32 };
 
-const CHANNELS: { label: string; logo: ReactNode }[] = [
-  ...(
-    [
-      ["slack", "Slack"],
-      ["teams", "Microsoft Teams"],
-      ["discord", "Discord"],
-      ["telegram", "Telegram"],
-      ["whatsapp", "WhatsApp"],
-    ] as [LogoKey, string][]
-  ).map(([key, label]) => ({
-    label,
-    logo: logos[key]({ "aria-hidden": true, className: logoClassName }),
-  })),
-  { label: "iMessage", logo: <SiImessage aria-hidden className={logoClassName} /> },
-  ...(
-    [
-      ["googlechat", "Google Chat"],
-      ["github", "GitHub"],
-      ["linear", "Linear"],
-      ["twilio", "Twilio"],
-      ["web", "Web"],
-    ] as [LogoKey, string][]
-  ).map(([key, label]) => ({
-    label,
-    logo: logos[key]({ "aria-hidden": true, className: logoClassName }),
-  })),
-];
-
-function ChannelGrid() {
-  return (
-    <ul className="grid flex-1 list-none auto-rows-fr grid-cols-2 gap-px bg-gray-alpha-400 p-0 sm:grid-cols-3">
-      {CHANNELS.map((channel) => (
-        <li
-          className="flex items-center gap-2.5 bg-background-100 px-4 py-3.5 text-copy-14 text-gray-1000"
-          key={channel.label}
-        >
-          <span className="flex text-gray-1000">{channel.logo}</span>
-          <span className="truncate">{channel.label}</span>
-        </li>
-      ))}
-      <li className="flex items-center bg-background-100 px-4 py-3.5 text-copy-14 text-gray-900">
-        Your own channel
-      </li>
-    </ul>
-  );
+function ringPoint(r: number, degrees: number) {
+  const radians = (degrees * Math.PI) / 180;
+  return { x: radar.x + r * Math.cos(radians), y: radar.y + r * Math.sin(radians) };
 }
 
-const USERS = ["Alice", "Bob", "Carol"];
+const radarRings = [
+  { r: 34, center: -50, sweep: 55 },
+  { r: 56, center: 160, sweep: 60 },
+  { r: 78, center: 30, sweep: 50 },
+].map(({ center, r, sweep }) => ({
+  r,
+  from: ringPoint(r, center - sweep),
+  to: ringPoint(r, center + sweep),
+}));
 
-const USER_CAPABILITIES = ["Memory", "Schedules", "Skills"];
+// One chip every 36° around the guard, alternating between the middle and outer rings, so each
+// ring holds five spaced 72° apart and the layout mirrors left to right.
+const CHANNELS = (
+  [
+    { label: "WhatsApp", logo: <SiWhatsapp /> },
+    { label: "GitHub", logo: <SiGithub /> },
+    { label: "Slack", logo: logos.slack({ className: monochromeLogo }) },
+    { label: "Linear", logo: <SiLinear /> },
+    { label: "Discord", logo: <SiDiscord /> },
+    { label: "Telegram", logo: <SiTelegram /> },
+    { label: "Google Chat", logo: <SiGooglechat /> },
+    { label: "Microsoft Teams", logo: logos.teams({ className: monochromeLogo }) },
+    { label: "iMessage", logo: <SiImessage /> },
+    { label: "Web", logo: logos.web({}) },
+  ] satisfies { label: string; logo: ReactNode }[]
+).map((channel, i) => ({ ...channel, angle: 90 + i * 36, ring: i % 2 === 0 ? 2 : 1 }));
 
-const wireClassName = "bg-gray-alpha-500";
-
-function TenantArchitecture() {
+function ChannelRadar() {
   return (
-    <figure className="@container flex flex-1 items-center justify-center p-5 sm:p-6">
-      <figcaption className="sr-only">
-        One agent serves Alice, Bob, and Carol. Each of them has their own memory, schedules, and
-        skills.
-      </figcaption>
-      <div aria-hidden className="flex w-full max-w-[30rem] items-center">
-        <span className="shrink-0 rounded-lg border border-gray-alpha-500 bg-background-200 px-4 py-3 text-copy-14 text-gray-1000">
-          Agent
-        </span>
-        <span className={cn("h-px w-4 shrink-0 @md:w-6", wireClassName)} />
-        <span className="flex min-w-0 flex-1 flex-col">
-          {USERS.map((user, i) => (
-            <span className="relative flex items-center py-1.5" key={user}>
-              <span
-                className={cn(
-                  "absolute left-0 w-px",
-                  wireClassName,
-                  i === 0
-                    ? "top-1/2 bottom-0"
-                    : i === USERS.length - 1
-                      ? "top-0 bottom-1/2"
-                      : "inset-y-0",
-                )}
-              />
-              <span className={cn("h-px w-4 shrink-0 @md:w-6", wireClassName)} />
-              <span className="flex min-w-0 flex-1 flex-col gap-2 rounded-lg border border-gray-alpha-400 px-3 py-2.5 @md:flex-row @md:items-center @md:justify-between">
-                <span className="flex items-center gap-1.5 text-copy-14 text-gray-1000">
-                  <IconUser className="text-gray-900" size={14} />
-                  {user}
-                </span>
-                <span className="flex flex-wrap gap-1">
-                  {USER_CAPABILITIES.map((capability) => (
-                    <span
-                      className="rounded-md border border-gray-alpha-400 px-1.5 py-0.5 text-label-12 text-gray-900"
-                      key={capability}
-                    >
-                      {capability}
-                    </span>
-                  ))}
-                </span>
-              </span>
-            </span>
-          ))}
-        </span>
-      </div>
-    </figure>
-  );
-}
-
-function ModelDiff() {
-  const lines: { mark: " " | "-" | "+"; text: string }[] = [
-    { mark: " ", text: 'import { defineAgent } from "eve";' },
-    { mark: " ", text: "" },
-    { mark: " ", text: "export default defineAgent({" },
-    { mark: "-", text: '  model: "openai/gpt-6-luna-fast",' },
-    { mark: "+", text: '  model: "anthropic/claude-opus-5.5",' },
-    { mark: " ", text: "  modelOptions: {" },
-    { mark: " ", text: "    providerOptions: {" },
-    { mark: " ", text: "      // Fall back to Bedrock if Anthropic is down." },
-    { mark: " ", text: '      gateway: { order: ["anthropic", "bedrock"] },' },
-    { mark: " ", text: "    }," },
-    { mark: " ", text: "  }," },
-    { mark: " ", text: "});" },
-  ];
-
-  return (
-    <>
-      <FrameHeader>
-        <span className="font-mono text-copy-13-mono text-gray-1000">agent/agent.ts</span>
-        <span className="ml-auto">1 line changed</span>
-      </FrameHeader>
-      <pre className="overflow-x-auto py-3 font-mono text-copy-13-mono">
-        {lines.map((line, i) => (
-          <div
-            className={cn(
-              "grid w-max min-w-full grid-cols-[2.5rem_auto] pr-4",
-              line.mark === "-" && "bg-red-100 text-red-900",
-              line.mark === "+" && "bg-green-100 text-green-900",
-              line.mark === " " && "text-gray-1000",
-            )}
-            // Lines have no stable identity beyond their position in this fixed snippet.
-            key={i}
+    <Visual
+      caption={`One agent at the center of radar rings, reached from ${CHANNELS.map((channel) => channel.label).join(", ")}.`}
+      scene={radarRings.map(({ from, r, to }, index) => {
+        const gradient = `channel-radar-${index}`;
+        return (
+          <g key={r}>
+            <circle
+              cx={radar.x}
+              cy={radar.y}
+              r={r}
+              stroke="var(--ds-gray-alpha-200)"
+              strokeDasharray="2 3"
+            />
+            <defs>
+              <linearGradient
+                gradientUnits="userSpaceOnUse"
+                id={gradient}
+                x1={from.x}
+                x2={to.x}
+                y1={from.y}
+                y2={to.y}
+              >
+                <stop stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+                <stop offset="0.5" stopColor="var(--ds-gray-1000)" />
+                <stop offset="1" stopColor="var(--ds-gray-1000)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <path
+              d={`M${from.x} ${from.y}A${r} ${r} 0 0 1 ${to.x} ${to.y}`}
+              stroke={`url(#${gradient})`}
+              strokeLinecap="round"
+              strokeWidth="0.75"
+            />
+          </g>
+        );
+      })}
+    >
+      <span
+        className="absolute flex -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[45%]"
+        style={{
+          height: pct(radar.guard, view.height),
+          left: pct(radar.x, view.width),
+          top: pct(radar.y, view.height),
+          width: pct(radar.guard, view.width),
+        }}
+      >
+        <IconAgents />
+      </span>
+      {CHANNELS.map(({ angle, label, logo, ring }) => {
+        const { x, y } = ringPoint(radarRings[ring].r, angle);
+        return (
+          <span
+            className="absolute flex size-[6.5cqw] -translate-1/2 items-center justify-center rounded-full bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small) [&>svg]:size-[48%]"
+            key={label}
+            style={{
+              left: pct(x, view.width),
+              top: pct(y, view.height),
+            }}
           >
-            <span aria-hidden className="select-none text-center opacity-70">
-              {line.mark}
-            </span>
-            <span className="whitespace-pre">
-              {line.mark === "-" ? <span className="sr-only">Removed: </span> : null}
-              {line.mark === "+" ? <span className="sr-only">Added: </span> : null}
-              {line.text || " "}
-            </span>
-          </div>
-        ))}
-      </pre>
-    </>
+            {logo}
+          </span>
+        );
+      })}
+    </Visual>
   );
 }
 
-type Step = "model" | "code";
-
-const MODES: { label: string; steps: (Step | Step[])[] }[] = [
-  { label: "Fully agentic loop", steps: ["model", "model", "model", "model"] },
-  { label: "Workflow run by an agent", steps: ["model", ["code", "code", "code"], "model"] },
-  { label: "Workflow with agentic steps", steps: ["code", "model", "code", "code"] },
+// Each person's capabilities, resolved when their session runs. Avatars are two-stop
+// gradients in Geist colors, like Vercel's default avatars, so no image is fetched.
+const TENANTS = [
+  {
+    name: "Alice",
+    capabilities: ["Memory", "CRM tools"],
+    avatar: "linear-gradient(135deg, var(--ds-blue-600), var(--ds-teal-700))",
+  },
+  {
+    name: "Bob",
+    capabilities: ["Memory", "Schedules"],
+    avatar: "linear-gradient(135deg, var(--ds-amber-600), var(--ds-red-700))",
+  },
+  {
+    name: "Carol",
+    capabilities: ["Memory", "Legal skills"],
+    avatar: "linear-gradient(135deg, var(--ds-purple-600), var(--ds-pink-700))",
+  },
 ];
 
-const LEGEND: { step: Step; term: string }[] = [
-  { step: "model", term: "Agentic step" },
-  { step: "code", term: "Deterministic step" },
-];
-
-function StepMark({ step }: { step: Step }) {
+// The Acme logo from geistcn-assets (`logo-acme`), which marks each person as a member of the
+// Acme org, like the managed accounts visual on vercel.com's enterprise page.
+function AcmeLogo({ className }: { className?: string }) {
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "block size-3.5 shrink-0",
-        step === "model"
-          ? "rounded-full border-[1.5px] border-gray-1000"
-          : "rounded-[2px] bg-gray-1000",
-      )}
-    />
+    <svg aria-hidden className={className} fill="none" viewBox="0 0 16 16">
+      <path
+        clipRule="evenodd"
+        d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 10.63h2.13l2.44-4.26L8 4.5zm4.15 0h2.85l-1.42-2.5z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
   );
 }
 
-function StepConnector() {
-  return <span aria-hidden className="h-px min-w-3 flex-1 bg-gray-alpha-500" />;
+/** A member's avatar, badged with the org's logo ringed in the page's color. */
+function MemberAvatar({ avatar }: { avatar: string }) {
+  return (
+    <span className="relative size-[1.25em] shrink-0">
+      <span className="absolute inset-0 rounded-full" style={{ background: avatar }} />
+      <span className="absolute -right-[0.18em] -bottom-[0.18em] flex size-[0.625em] rounded-full bg-background-200 text-gray-1000 shadow-[0_0_0_0.1em_var(--ds-background-200)]">
+        <AcmeLogo className="size-full" />
+      </span>
+    </span>
+  );
 }
 
-function DeterminismModes() {
+function TenantCapabilities() {
   return (
-    <div className="flex flex-1 flex-col gap-6 p-5 sm:p-6">
-      <ul className="flex flex-1 list-none flex-col justify-center gap-7 p-0">
-        {MODES.map((mode) => (
-          <li
-            className="grid gap-2 sm:grid-cols-[13rem_minmax(0,1fr)] sm:items-center"
-            key={mode.label}
-          >
-            <span className="text-copy-14 text-gray-1000">{mode.label}</span>
-            <span className="flex items-center">
-              {mode.steps.map((step, i) => (
-                <span className="contents" key={`${mode.label}-${i}`}>
-                  {i > 0 ? <StepConnector /> : null}
-                  {Array.isArray(step) ? (
-                    <span className="flex items-center gap-1.5 rounded-md border border-gray-alpha-500 border-dashed px-2 py-1.5">
-                      {step.map((inner, j) => (
-                        <StepMark key={`${mode.label}-${i}-${j}`} step={inner} />
-                      ))}
-                    </span>
-                  ) : (
-                    <StepMark step={step} />
-                  )}
-                </span>
-              ))}
+    <Visual caption="One deployment resolves capabilities per person in the Acme org, each avatar badged with the Acme logo: Alice gets memory and CRM tools, Bob memory and schedules, and Carol memory and legal skills.">
+      <RuledList
+        header={
+          <>
+            <IconUser className="size-[1em]" />
+            Resolved per user
+          </>
+        }
+      >
+        {TENANTS.map(({ avatar, capabilities, name }) => (
+          <li className={cn(ruledRow, "gap-[0.5em]")} key={name}>
+            <MemberAvatar avatar={avatar} />
+            <span className="w-[4.5em] whitespace-nowrap text-[0.75em] text-gray-1000 leading-none">
+              {name}
             </span>
+            {capabilities.map((capability) => (
+              <GrayBadge key={capability}>{capability}</GrayBadge>
+            ))}
           </li>
         ))}
-      </ul>
-      <p className="flex flex-wrap items-center gap-x-6 gap-y-2 border-gray-alpha-400 border-t pt-4 text-copy-13 text-gray-1000">
-        {LEGEND.map((item) => (
-          <span className="flex items-center gap-2" key={item.step}>
-            <StepMark step={item.step} /> {item.term}
+      </RuledList>
+    </Visual>
+  );
+}
+
+// Three runs, each along a line that fades out at both ends: fully agentic, fully
+// deterministic, and both in one run. Deterministic steps are your code, in square chips;
+// agentic steps are round.
+type Step = "agent" | "code";
+const RUNS: Step[][] = [
+  ["agent", "agent", "agent", "agent"],
+  ["code", "code", "code", "code"],
+  ["code", "agent", "code", "code"],
+];
+const runY = (i: number) => 42 + i * 48;
+const stepX = (i: number) => 70 + i * 60;
+const run = { x0: 28, x1: 292 };
+
+// A `</>` code glyph in the docs icons' 16px, 1.5px-stroke style; the set doesn't include one.
+function CodeGlyph() {
+  return (
+    <svg aria-hidden fill="none" viewBox="0 0 16 16">
+      <path
+        d="M5 4.5 1.5 8 5 11.5M11 4.5 14.5 8 11 11.5M9.25 2.75l-2.5 10.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+const chip =
+  "absolute flex -translate-1/2 items-center justify-center bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)";
+
+function DeterminismRuns() {
+  return (
+    <Visual
+      caption="Three runs: a fully agentic loop of model steps, a deterministic workflow of code steps, and a workflow with one agentic step among its code steps."
+      scene={
+        <>
+          <defs>
+            <linearGradient
+              gradientUnits="userSpaceOnUse"
+              id="determinism-run"
+              x1={run.x0}
+              x2={run.x1}
+              y1="0"
+              y2="0"
+            >
+              <stop stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
+              <stop offset="0.14" stopColor="var(--ds-gray-alpha-500)" />
+              <stop offset="0.86" stopColor="var(--ds-gray-alpha-500)" />
+              <stop offset="1" stopColor="var(--ds-gray-alpha-500)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {RUNS.map((_, i) => (
+            <path d={`M${run.x0} ${runY(i)}H${run.x1}`} key={i} stroke="url(#determinism-run)" />
+          ))}
+        </>
+      }
+    >
+      {RUNS.flatMap((steps, i) =>
+        steps.map((step, j) => (
+          <span
+            className={cn(
+              chip,
+              step === "agent"
+                ? "size-[6.5cqw] rounded-full [&>svg]:size-[50%]"
+                : "size-[6.5cqw] rounded-[1.2cqw] [&>svg]:size-[50%]",
+            )}
+            key={`${i}-${j}`}
+            style={{ left: pct(stepX(j), view.width), top: pct(runY(i), view.height) }}
+          >
+            {step === "agent" ? <IconSparkles /> : <CodeGlyph />}
           </span>
-        ))}
-      </p>
-    </div>
+        )),
+      )}
+    </Visual>
   );
 }
 
@@ -247,46 +297,44 @@ const PRIMARY: {
   title: string;
   text: string;
   href: string;
+  icon: ReactNode;
   visual: ReactNode;
 }[] = [
   {
     title: "Agent chat on every channel",
     text: "Multiplayer and single-player chat across Slack, Teams, iMessage, WhatsApp, and the web. Channels are a framework primitive.",
     href: "/docs/channels/overview",
-    visual: <ChannelGrid />,
+    icon: <IconMessage aria-hidden size={16} />,
+    visual: <ChannelRadar />,
   },
   {
     title: "Multi-tenant with dynamic capabilities",
     text: "One deployment, every customer. Skills, schedules, memory, and tools resolved per user at runtime.",
     href: "/docs/guides/dynamic-capabilities",
-    visual: <TenantArchitecture />,
-  },
-  {
-    title: "Any model, no rewrite",
-    text: "Swap models with a one-line edit. Provider fallback included. Route different models to different tasks.",
-    href: "/docs/agent-config#set-the-model",
-    visual: <ModelDiff />,
+    icon: <IconUser aria-hidden size={16} />,
+    visual: <TenantCapabilities />,
   },
   {
     title: "Determinism where you need it",
     text: "Fully agentic loops, deterministic workflows, or both in one run. You choose per task.",
     href: "/docs/tools/workflows",
-    visual: <DeterminismModes />,
+    icon: <IconRoute aria-hidden size={16} />,
+    visual: <DeterminismRuns />,
   },
 ];
 
 const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[] = [
   {
-    title: "Durable execution",
-    icon: <IconWorkflow size={16} />,
-    text: "Checkpoints every step. Survives crashes, restarts, and days-long waits.",
-    href: "/docs/concepts/execution-model-and-durability",
+    title: "Any model, no rewrite",
+    icon: <IconSparkles size={16} />,
+    text: "Swap models with a one-line edit. Provider fallback included. Route different models to different tasks.",
+    href: "/docs/agent-config#set-the-model",
   },
   {
-    title: "Sandboxes",
-    icon: <IconSandbox size={16} />,
-    text: "An isolated environment per session for running code.",
-    href: "/docs/sandbox",
+    title: "Durable execution & scheduling",
+    icon: <IconWorkflow size={16} />,
+    text: "Checkpoints every step. Survives crashes, restarts, and days-long waits. Runs on crons, too.",
+    href: "/docs/concepts/execution-model-and-durability",
   },
   {
     title: "Human in the loop",
@@ -301,27 +349,15 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     href: "/docs/evals/overview",
   },
   {
-    title: "Subagents",
-    icon: <IconAgents size={16} />,
-    text: "Delegate to focused agents with their own tools and context.",
-    href: "/docs/subagents",
-  },
-  {
-    title: "Connections",
+    title: "Connections & subagents",
     icon: <IconLinked size={16} />,
-    text: "Connect to services over MCP and OpenAPI. Credentials stay in the runtime, never in the model.",
+    text: "Connect to services over MCP and OpenAPI, or delegate to focused subagents. Credentials stay in the runtime.",
     href: "/docs/connections",
   },
   {
-    title: "Scheduling",
-    icon: <IconClock size={16} />,
-    text: "Crons, plus schedules the agent sets itself.",
-    href: "/docs/schedules",
-  },
-  {
-    title: "Agent identity",
+    title: "Agent identity & sandboxes",
     icon: <IconShieldCheck size={16} />,
-    text: "Bring any OIDC provider. Act as the agent, or as the signed-in user with their approved permissions.",
+    text: "Bring any OIDC provider and act as the agent or the signed-in user. Code runs in an isolated sandbox per session.",
     href: "/docs/guides/auth-and-route-protection",
   },
 ];
@@ -329,49 +365,31 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
 export function Production(): JSX.Element {
   return (
     <HomeSection id="production" title="Everything you need to ship to production">
-      <div className="grid gap-x-6 gap-y-16 md:grid-cols-2">
+      <ul className="m-0 grid list-none gap-x-6 gap-y-16 p-0 md:grid-cols-12">
         {PRIMARY.map((feature) => (
-          <article className="flex min-w-0 flex-col" key={feature.title}>
-            <Frame className="flex flex-col md:min-h-[18.5rem]">{feature.visual}</Frame>
-            <h3 className="mt-6">
-              <Link
-                className="group inline-flex items-center text-heading-20 text-gray-1000"
-                href={feature.href}
-                prefetch={true}
-              >
-                {feature.title}
-                <IconChevronRightSmall
-                  className="text-gray-700 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-1000"
-                  size={16}
-                />
-              </Link>
-            </h3>
-            <p className="mt-2 max-w-[34rem] text-copy-16 text-gray-900">{feature.text}</p>
-          </article>
+          <FeatureCard
+            className="md:col-span-6 lg:col-span-4"
+            href={feature.href}
+            icon={feature.icon}
+            key={feature.title}
+            title={feature.title}
+            visual={feature.visual}
+          >
+            {feature.text}
+          </FeatureCard>
         ))}
-      </div>
-
-      {/* Hairlines come from the 1px gaps showing the list's background, so only the seams
-          between items are drawn and the outer edges stay open. Cells match the page background. */}
-      <ul className="mt-16 grid list-none gap-px bg-gray-alpha-400 p-0 sm:-mx-6 sm:grid-cols-2 lg:grid-cols-4">
+      </ul>
+      <ul className="m-0 mt-24 grid list-none gap-x-6 gap-y-12 p-0 md:grid-cols-12 lg:gap-y-24">
         {SECONDARY.map((feature) => (
-          <li className="flex flex-col gap-1.5 bg-background-200 py-8 sm:px-6" key={feature.title}>
-            <span aria-hidden className="mb-2 flex text-gray-900">
-              {feature.icon}
-            </span>
-            <Link
-              className="group inline-flex w-fit items-center text-heading-16 text-gray-1000"
-              href={feature.href}
-              prefetch={true}
-            >
-              {feature.title}
-              <IconChevronRightSmall
-                className="text-gray-700 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-1000"
-                size={16}
-              />
-            </Link>
-            <p className="text-copy-14 text-gray-900">{feature.text}</p>
-          </li>
+          <FeatureCard
+            className="md:col-span-6 lg:col-span-4"
+            href={feature.href}
+            icon={feature.icon}
+            key={feature.title}
+            title={feature.title}
+          >
+            {feature.text}
+          </FeatureCard>
         ))}
       </ul>
     </HomeSection>
