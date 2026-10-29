@@ -108,8 +108,7 @@ describe("development environment reload transactions", () => {
     expect(process.env.EVE_WATCH_ENV_SHARED).toBeUndefined();
   });
 
-  // `/login` in a workspace saves the connection at the workspace root (#5505).
-  it.fails("loads the workspace-root model connection for a workspace member", async () => {
+  it("loads the workspace-root model connection for a workspace member", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-workspace-"));
     temporaryDirectories.push(workspaceRoot);
     const appRoot = join(workspaceRoot, "agents", "support");
