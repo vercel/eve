@@ -160,13 +160,17 @@ async function callConnectionTool(
 
   let raw: unknown;
   try {
-    if (isEventAction)
-      return await client.eventActions!.execute(tool.name, input, {
-        abortSignal: options.abortSignal,
-        callId: options.toolCallId,
-      });
     // Only the call itself sees the approver; the listing above stays the requester's.
-    raw = await withConnectionApproval(connection.connectionName, options.approval?.responder, () =>
+    const approved = <T>(fn: () => T) =>
+      withConnectionApproval(connection.connectionName, options.approval?.responder, fn);
+    if (isEventAction)
+      return await approved(() =>
+        client.eventActions!.execute(tool.name, input, {
+          abortSignal: options.abortSignal,
+          callId: options.toolCallId,
+        }),
+      );
+    raw = await approved(() =>
       executeWithDeadline(connection.connectionName, client, tool.name, input, options),
     );
   } catch (error) {
