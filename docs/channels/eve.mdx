@@ -254,7 +254,7 @@ See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-t
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to stop the running turn and its tasks and remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+Post to `/eve/v1/session/:sessionId/clear` to cancel a running turn and every working task, then remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ### Compact context
 

@@ -24,7 +24,7 @@ for await (const event of delivery.stream()) {
 
 The cancellation delivery settles when the command is applied, including a no-op for a turn that already ended. Continue reading the original message's delivery to observe its outcome and advance its cursor. A live idle session also accepts cancellation; it does not return a separate `no_active_turn` result.
 
-Between turns, `session.compact()` queues context compaction without sending model input. `session.clear()` removes model-message history while retaining the session and its durable resources; a turn still running is cancelled first, and its tasks stop. Client `messages` and `transcriptOf()` then leave out everything before the clear. Await their deliveries before sending another turn:
+Between turns, `session.compact()` queues context compaction without sending model input. `session.clear()` cancels a running turn and every working task, then removes model-message history while retaining the session and its durable resources. Client `messages` and `transcriptOf()` then leave out everything before the clear. Await their deliveries before sending another turn:
 
 ```ts
 const compaction = await session.compact();

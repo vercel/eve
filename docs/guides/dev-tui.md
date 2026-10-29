@@ -23,7 +23,7 @@ Before your first message, the empty composer may suggest asking your local agen
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`    | Choose the model, speed, and reasoning. Pass a model ID to set it directly: `/model provider/model-id`.                                                      |
 | `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
-| `/clear`    | Stop the running turn and its tasks, then clear the session's model-message history and keep the session.                                                    |
+| `/clear`    | Cancel the running turn and every working task, then clear the session's model-message history and keep the session.                                         |
 | `/compact`  | Compact the current session's context.                                                                                                                       |
 | `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |

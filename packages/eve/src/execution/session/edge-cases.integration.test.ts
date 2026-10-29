@@ -1736,6 +1736,51 @@ describe("work delegated to a child session", () => {
     expect(last).not.toContain("call_agent");
     expect(last).not.toContain(ended!.data.taskId);
   });
+  it("drops a finished task's unread result when the conversation is cleared", async () => {
+    const never = gate();
+    const childReplied = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-clear-unread-task-result",
+      {
+        message: "Delegate the deploy, then keep talking.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:")) {
+            childReplied.open();
+            return "Child deployed.";
+          }
+          prompts.push(prompt);
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          // The parent keeps generating while the child finishes, so its result stays unread.
+          return heldReply("Still", never.wait, "going");
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("generating", (event) => event.type === "content.delta");
+        await waitForOwnerGate(childReplied.wait, "child reply", session.events);
+        // The child's result reaches the parent's inbox while the parent still generates.
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    expect(prompts.at(-1)).not.toContain("Child deployed.");
+  });
 });
 
 describe("deliveries a child session reads", () => {
