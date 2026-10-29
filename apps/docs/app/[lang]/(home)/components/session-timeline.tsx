@@ -1,18 +1,18 @@
 "use client";
 
 import {
-  Activity,
-  Check,
-  CircleDot,
-  CodeXml,
-  GitMerge,
-  GitPullRequestArrow,
-  Headset,
-  ScanSearch,
-  ShieldAlert,
-  ShieldCheck,
-} from "lucide-react";
-import { IconBox, IconCheck } from "@vercel/geistdocs/assets/icons";
+  IconBox,
+  IconChartActivity,
+  IconCheck,
+  IconCode,
+  IconGitMerge,
+  IconGitPullRequest,
+  IconHeadset,
+  IconMagnifyingGlass,
+  IconShieldCheck,
+  IconTarget,
+  IconWarning,
+} from "@vercel/geistdocs/assets/icons";
 import { LogoIconMicrosoftTeamsSvg } from "@vercel/geistdocs/assets/logos/logo-icon-microsoft-teams-svg";
 import { type JSX, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SiWhatsapp } from "@icons-pack/react-simple-icons";
@@ -37,11 +37,11 @@ import { AppWindow } from "./section";
 type Platform = "slack" | "teams" | "whatsapp";
 
 const AUTHORS = {
-  Coder: { name: "Coder", icon: CodeXml },
-  Reviewer: { name: "Reviewer", icon: ScanSearch },
-  Ops: { name: "Ops", icon: Activity },
+  Coder: { name: "Coder", icon: IconCode },
+  Reviewer: { name: "Reviewer", icon: IconMagnifyingGlass },
+  Ops: { name: "Ops", icon: IconChartActivity },
   Dana: { name: "Dana" },
-  Concierge: { name: "Acme Org", icon: Headset },
+  Concierge: { name: "Acme Org", icon: IconHeadset },
   Maya: { name: "Maya" },
 } satisfies Record<string, Author>;
 
@@ -125,7 +125,7 @@ const SLACK_BEATS: Beat[] = [
     body: "Picked up a P1 bug and reproduced it in a sandbox.",
     attachment: (
       <Card
-        icon={<CircleDot />}
+        icon={<IconTarget />}
         meta="acme/storefront#412 · opened by Dana"
         title="Saved carts disappear after sign-in"
       />
@@ -143,7 +143,7 @@ const SLACK_BEATS: Beat[] = [
     ),
     attachment: (
       <Card
-        icon={<GitPullRequestArrow />}
+        icon={<IconGitPullRequest />}
         meta="acme/storefront#418 · +84 −12 · 6 checks passed"
         title="fix(cart): keep guest items after sign-in"
       />
@@ -161,7 +161,7 @@ const SLACK_BEATS: Beat[] = [
     ),
     attachment: (
       <Card
-        icon={<ShieldAlert />}
+        icon={<IconWarning />}
         meta="cart/session.ts:42 · could pull another guest's cart into an account"
         title="Guest cart ID is trusted from the cookie"
       />
@@ -187,14 +187,14 @@ const SLACK_BEATS: Beat[] = [
     body: "Verified the fix. Security pass is clean, approving.",
     attachment: (
       <Card
-        icon={<ShieldCheck />}
+        icon={<IconShieldCheck />}
         meta="acme/storefront#418 · approved by Reviewer"
         title="fix(cart): keep guest items after sign-in"
       >
         <ul className="mt-1.5 flex list-none flex-col gap-1 p-0">
           {REVIEW_CHECKS.map((check) => (
             <li className="flex items-center gap-1.5 text-copy-13 text-gray-900" key={check}>
-              <Check aria-hidden className="size-3.5 shrink-0 text-gray-1000" />
+              <IconCheck aria-hidden className="size-3.5 shrink-0 text-gray-1000" />
               <span className="truncate">{check}</span>
             </li>
           ))}
@@ -210,7 +210,7 @@ const SLACK_BEATS: Beat[] = [
     body: "Merged and closed the issue. It goes out with the next deploy.",
     attachment: (
       <Card
-        icon={<GitMerge />}
+        icon={<IconGitMerge />}
         meta="acme/storefront#418 · merged into main · closed #412"
         title="fix(cart): keep guest items after sign-in"
       />
@@ -232,7 +232,7 @@ const TEAMS_BEATS: Beat[] = [
     body: "Checkout p95 latency is up 4x since the 2:05 PM deploy.",
     attachment: (
       <Card
-        icon={<Activity />}
+        icon={<IconChartActivity />}
         meta="storefront · p95 2.4s · started 2:06 PM"
         title="Checkout latency is degraded"
       />
@@ -271,7 +271,7 @@ const TEAMS_BEATS: Beat[] = [
     body: "Rolled back. p95 is at 610 ms and holding. I opened an issue to fix the query.",
     attachment: (
       <Card
-        icon={<CircleDot />}
+        icon={<IconTarget />}
         meta="acme/storefront#424 · assigned to Coder"
         title="perf(cart): index guest cart lookups"
       />

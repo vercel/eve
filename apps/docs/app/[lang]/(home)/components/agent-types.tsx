@@ -1,8 +1,14 @@
 "use client";
 
-import { IconPlusCircle } from "@vercel/geistdocs/assets/icons";
+import {
+  IconBrain,
+  IconBuildings,
+  IconChevronRight,
+  IconGitMerge,
+  IconGitPullRequest,
+  IconPlusCircle,
+} from "@vercel/geistdocs/assets/icons";
 import { track } from "@vercel/analytics";
-import { Brain, ChevronRight, Factory, GitMerge, GitPullRequestDraft } from "lucide-react";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   type JSX,
@@ -60,7 +66,7 @@ const FACTORY_APPROVED = 9;
 const FACTORY_CLOSED = 10;
 
 const FEEDBACK: Author = { name: "User feedback" };
-const FOREMAN: Author = { name: "foreman", icon: Factory };
+const FOREMAN: Author = { name: "foreman", icon: IconBuildings };
 
 // The hero's Slack agents are purple; the factory's foreman is one of them.
 const foremanAvatar = "bg-purple-700";
@@ -142,7 +148,7 @@ function SoftwareFactoryPreview({ stage }: { stage?: number }) {
           {shown >= FACTORY_PR ? (
             <div className={cn(demo && fadeIn)}>
               <Card
-                icon={closed ? <GitMerge /> : <GitPullRequestDraft />}
+                icon={closed ? <IconGitMerge /> : <IconGitPullRequest />}
                 meta={`acme/storefront#318 · ${closed ? "merged" : "draft, ready for review"}`}
                 title="fix(cart): keep guest items after sign-in"
               />
@@ -196,7 +202,7 @@ const BRAIN_ROWS = [
 ];
 
 const DANA: Author = { name: "Dana" };
-const BRAIN: Author = { name: "company-brain", icon: Brain };
+const BRAIN: Author = { name: "company-brain", icon: IconBrain };
 
 /**
  * How long each stage of the demo waits before it shows: Dana's question, the agent working,
@@ -455,7 +461,7 @@ function ThreadReply({ demo }: { demo: boolean }) {
         type="button"
       >
         <span className="flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-teal-700 text-white">
-          <Brain aria-hidden className="size-3" />
+          <IconBrain aria-hidden className="size-3" />
         </span>
         <span className="font-medium text-blue-900 text-copy-13">1 reply</span>
         {/* Unread until opened; hovering, or once read, shows when the reply came instead. */}
@@ -470,7 +476,7 @@ function ThreadReply({ demo }: { demo: boolean }) {
         >
           Today at 9:44 AM
         </span>
-        <ChevronRight
+        <IconChevronRight
           aria-hidden
           className={cn(
             "ml-auto size-4 shrink-0 text-gray-900 opacity-0 transition-[opacity,transform] duration-150 group-hover:opacity-100 group-focus-visible:opacity-100",
