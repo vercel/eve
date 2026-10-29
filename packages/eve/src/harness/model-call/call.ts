@@ -1,5 +1,4 @@
 import { changeHistory } from "#harness/session-machine/history.js";
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
   isStepCount,
@@ -54,8 +53,7 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { compactedTurnInput, maybeCompact } from "#harness/compaction/step.js";
-import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
+import { compactedTurnInput, compactIfDue } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
@@ -300,46 +298,20 @@ export class ModelCaller {
   /** Compacts the prompt when it's over the threshold, then rebuilds what depends on it. */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
-    const { config } = step;
-    let compaction: Awaited<ReturnType<typeof maybeCompact>>;
+    let compacted: HarnessModelMessage[] | undefined;
     try {
-      const { projection } = step.view();
-      compaction = await maybeCompact({
-        abortSignal: config.abortSignal,
-        auth: step.ctx?.get(AuthKey) ?? null,
-        change: {
-          changeId: nextChangeId(projection),
-          summaryRunId: nextRunId(projection),
-          turnId: step.position().turnId,
-        },
-        ctx: step.ctx,
-        emissionState: step.position(),
-        // A hook's compact intent compacts before this call, once.
-        messages: [...prompt.messages],
+      compacted = await compactIfDue(step, {
+        messages: prompt.messages,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
-        publish: step.publish,
-        view: () => step.view().projection.view,
         requestEnvelopeTokens: this.requestEnvelopeTokens,
-        resolveModel: config.resolveModel,
-        runtimeIdentity: config.runtimeIdentity,
-        session: step.session,
-        prepareTelemetry: (runId) =>
-          step.instrumentation?.prepareAttempt({
-            runId,
-            attempt: 0,
-            turnId: activeTurnId(step.position()),
-          }).telemetry,
-        traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
-      step.session = compaction.session;
-      if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
-    if (!compaction.compacted) return tools;
-    compactPrompt(step, prompt, compaction.messages);
+    if (compacted === undefined) return tools;
+    compactPrompt(step, prompt, compacted);
     // Compaction cleared what earlier requests announced, so this request announces it again. A
     // step that continues from tool results has no input of its own, so the announcement goes
     // before the turn's input, not after those results where the model reads it as the newest
@@ -347,10 +319,6 @@ export class ModelCaller {
     const turnInput = compactedTurnInput(prompt.messages);
     this.turnMessages =
       turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
-    step.session = {
-      ...step.session,
-      compaction: withoutPromptMeasurement(step.session.compaction),
-    };
     this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
   }
