@@ -234,19 +234,19 @@ describe("hook ctx.continue()", () => {
     expect(inputs).toEqual(["Alice asks for the report.", "Bob asks for the appendix."]);
   }, 90_000);
 
-  it("drops a continuation when the history is cleared before it's admitted", async () => {
+  it("runs no continuation when a clear cancels the turn that asked for it", async () => {
     let release!: () => void;
     const firstCall = new Promise<void>((resolve) => {
       release = resolve;
     });
+    const results: unknown[] = [];
     const { inputs, log } = await runSession({
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
-        // Alice clears the conversation while the first turn still runs; the clear waits for it.
+        // Alice clears the conversation while the first turn still runs; the clear cancels it.
         await resumeHook(inbox, { deliveryId: "clear-1", kind: "clear" });
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await until(log, "turn:cancelled", 1);
         release();
-        await until(log, "turn:completed", 1);
         await until(log, 'admitted:{"control":"clear"}', 1);
         await new Promise((resolve) => setTimeout(resolve, 500));
       },
@@ -255,7 +255,7 @@ describe("hook ctx.continue()", () => {
         "until-done": defineHook({
           events: {
             "turn.settled": (_event, ctx) => {
-              expect(ctx.continue("Keep going.")).toEqual({ queued: true });
+              results.push(ctx.continue("Keep going."));
             },
           },
         }),
@@ -263,8 +263,9 @@ describe("hook ctx.continue()", () => {
       name: "hook-continue-cleared",
     });
 
+    expect(results).toEqual([{ queued: false, reason: "not-completed" }]);
     expect(inputs).toEqual(["Alice asks for the report."]);
-    expect(log.filter((entry) => entry === "turn:completed")).toHaveLength(1);
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:cancelled"]);
   }, 90_000);
 
   it("merges continuations from several hooks into one next turn, for one principal", async () => {
