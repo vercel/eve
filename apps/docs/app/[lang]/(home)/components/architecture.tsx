@@ -327,13 +327,7 @@ export function ArchitectureDiagram() {
               )}
             >
               Self-hosted
-            </button>{" "}
-            <Link
-              href="https://github.com/vercel-labs/steve"
-              className="text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
-            >
-              (example)
-            </Link>
+            </button>
           </span>
         </div>
 
