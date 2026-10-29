@@ -2,10 +2,8 @@
 export interface CommandInfo {
   readonly name: string;
   readonly description: string;
-  /** Whether text may follow the name. Clients match a `"none"` command only when it's typed alone. */
-  readonly arguments: "none" | "text";
-  /** Argument shape to display after the name. */
-  readonly argumentHint?: string;
+  /** Text the command takes after its name. Without it, clients match the command only alone. */
+  readonly input?: { readonly hint: string };
   readonly aliases?: readonly string[];
   /** `"required"` commands run only inside a session. */
   readonly session: "optional" | "required";

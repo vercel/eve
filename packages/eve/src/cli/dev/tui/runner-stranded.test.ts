@@ -99,8 +99,7 @@ describe("EveTUIRunner channel commands", () => {
             {
               name: "triage",
               description: "Triage issues",
-              arguments: "text",
-              argumentHint: "[label]",
+              input: { hint: "[label]" },
               session: "optional",
             },
           ],
@@ -147,9 +146,7 @@ describe("EveTUIRunner channel commands", () => {
       if (path === "/eve/v1/commands") {
         return Response.json({
           ok: true,
-          commands: [
-            { name: "restart", description: "Restart", arguments: "none", session: "required" },
-          ],
+          commands: [{ name: "restart", description: "Restart", session: "required" }],
         });
       }
       commandRuns.push(path);

@@ -30,8 +30,7 @@ import { defineCommand } from "eve/channels";
 
 export const escalate = defineCommand({
   description: "Hand this conversation to a person on the support team",
-  arguments: "text",
-  argumentHint: "[reason]",
+  input: { hint: "[reason]" },
   aliases: ["human"],
   session: "required",
   async run({ argument, caller, session }) {
@@ -60,9 +59,11 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 - `commands` is keyed by the name without the slash. Names and aliases match
   `^[a-z][a-z0-9-]{0,31}$`, which also fits Slack's 32-character limit.
 - The channel throws when it is built if a name is invalid or two commands share a name or alias.
-- `arguments: "none" | "text"` (default `"none"`) decides whether text may follow the name.
-  `argumentHint` is display only. Clients match a `"none"` command only typed alone, so a message
-  that starts with `/clear` stays a message, and the routes answer `400` to an argument.
+- `input?: { hint }` (the shape ACP uses for available commands) marks a command that takes text
+  after its name; `hint` is shown after the name. Without it, clients match the command only typed
+  alone, so a message that starts with `/clear` stays a message, and the routes answer `400` to an
+  argument. A structured shape, such as Discord options or MCP prompt arguments, can sit beside
+  `hint` later.
 
 **`run` and its context**
 
@@ -90,11 +91,11 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 
 ## Wire protocol
 
-| Route                                            | Body            | Response                                                                                 |
-| ------------------------------------------------ | --------------- | ---------------------------------------------------------------------------------------- |
-| `GET /eve/v1/commands`                           | none            | `{ ok, commands: [{ name, description, arguments, argumentHint?, aliases?, session }] }` |
-| `POST /eve/v1/commands/:name`                    | `{ argument? }` | `{ ok, message? }`                                                                       |
-| `POST /eve/v1/session/:sessionId/commands/:name` | `{ argument? }` | `{ ok, message?, delivery?, ended? }`                                                    |
+| Route                                            | Body            | Response                                                               |
+| ------------------------------------------------ | --------------- | ---------------------------------------------------------------------- |
+| `GET /eve/v1/commands`                           | none            | `{ ok, commands: [{ name, description, input?, aliases?, session }] }` |
+| `POST /eve/v1/commands/:name`                    | `{ argument? }` | `{ ok, message? }`                                                     |
+| `POST /eve/v1/session/:sessionId/commands/:name` | `{ argument? }` | `{ ok, message?, delivery?, ended? }`                                  |
 
 - Every route uses the channel's `auth`. The session-scoped route checks the same thing as
   `/session/:id/clear`, that the caller passes `auth` and names the session, and answers `404`

@@ -256,8 +256,8 @@ export function isPromptControlCommand(
 
 /**
  * Appends the eve channel's commands after the built-ins. A built-in name or alias wins, so an
- * agent cannot shadow `/exit` or `/new`. A command whose `arguments` is `"none"` matches only
- * alone, so `/name some text` stays an ordinary message instead of running it.
+ * agent cannot shadow `/exit` or `/new`. A command without `input` matches only alone, so
+ * `/name some text` stays an ordinary message instead of running it.
  */
 export function withChannelPromptCommands(
   builtins: readonly PromptCommandSpec[],
@@ -271,9 +271,8 @@ export function withChannelPromptCommands(
       aliases: (command.aliases ?? []).filter((alias) => !taken.has(alias)),
       // The agent's text reaches the terminal, so it can't carry controls or break the row layout.
       description: terminalLine(command.description),
-      argumentHint:
-        command.argumentHint === undefined ? undefined : terminalLine(command.argumentHint),
-      takesArgument: command.arguments === "text",
+      argumentHint: command.input === undefined ? undefined : terminalLine(command.input.hint),
+      takesArgument: command.input !== undefined,
       history: "keep",
       build: (argument) => ({
         type: "channel",

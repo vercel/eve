@@ -63,6 +63,7 @@ export {
   type CommandSession,
   type CommandDefinition,
   type CommandDefinitions,
+  type CommandInput,
   type CommandResult,
 } from "#public/definitions/command.js";
 export type {

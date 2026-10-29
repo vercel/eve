@@ -14,8 +14,7 @@ export const ChannelCommandListSchema = z.object({
     z.object({
       name: z.string(),
       description: z.string(),
-      arguments: z.enum(["none", "text"]),
-      argumentHint: z.string().optional(),
+      input: z.object({ hint: z.string() }).optional(),
       aliases: z.array(z.string()).optional(),
       session: z.enum(["optional", "required"]),
     }),

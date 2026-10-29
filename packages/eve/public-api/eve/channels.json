@@ -28,6 +28,7 @@
   "CommandContext",
   "CommandDefinition",
   "CommandDefinitions",
+  "CommandInput",
   "CommandResult",
   "CommandSession",
   "CommittedLine",
