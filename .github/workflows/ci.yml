@@ -76,7 +76,7 @@ jobs:
         run: pnpm typecheck
 
   test-unit:
-    runs-on: ubuntu-latest
+    runs-on: vercel
 
     steps:
       - name: Checkout code
