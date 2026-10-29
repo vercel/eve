@@ -309,6 +309,52 @@ describe("ScheduleDispatcher", () => {
         vi.unstubAllEnvs();
       }
     });
+    // https://github.com/vercel/eve/issues/5598
+    it.fails("tags to() sends with the Vercel deployment running the schedule", async () => {
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+      try {
+        const runtime = createMockRuntime();
+        runtime.dispatchContinuation = vi
+          .fn()
+          .mockResolvedValue({ sessionId: "existing-session", status: "accepted" });
+        const thread: CompiledChannel = {
+          __kind: CHANNEL_SENTINEL,
+          routes: [],
+          adapter: { kind: "channel:thread" },
+          receive: async ({ auth, message, target }, { from }) =>
+            await from(String(target.address)).send(message, { auth }),
+        };
+        const resolved: ResolvedChannelDefinition = {
+          name: "thread",
+          method: "POST",
+          urlPath: "/thread",
+          logicalPath: "channels/thread.ts",
+          sourceId: "channel-thread",
+          sourceKind: "module",
+          adapter: thread.adapter,
+          definition: thread,
+          receive: thread.receive,
+          fetch: async () => new Response("ok"),
+        };
+        await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
+          scheduleId: "daily",
+          async run({ to }) {
+            await to(thread, { address: "C1:1761400000.000100" }).send("daily check", {
+              auth: null,
+            });
+          },
+        });
+        expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            command: expect.objectContaining({
+              delivery: expect.objectContaining({ acceptedDeploymentId: "dpl_current" }),
+            }),
+          }),
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
     it("rejects unregistered channels", async () => {
       const stranger = {
         __kind: CHANNEL_SENTINEL,
