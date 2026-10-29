@@ -9,7 +9,7 @@ last_updated: "2026-10-28"
 ## Summary
 
 A **loop stage** is a function an agent supplies to change one decision of eve's native loop,
-without replacing the loop. The first stage, `beforeSettle`, runs when a turn is about to settle
+without replacing the loop. The first stage, `experimental.loop.beforeSettle`, runs when a turn is about to settle
 with a reply. It can let the turn settle, or send the model a note and run it again in the same
 turn. That is enough for a critic, a citation check, a test gate, or a plan sign-off that the model
 must satisfy before the person sees an answer.
@@ -19,17 +19,20 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
-  experimental_loop: {
-    beforeSettle(turn) {
-      if (typeof turn.output === "string" && !/\[\d+\]/.test(turn.output)) {
-        return { continue: { note: "Cite a source for each claim, as [1], [2], …" } };
-      }
+  experimental: {
+    loop: {
+      beforeSettle(turn) {
+        if (typeof turn.output === "string" && !/\[\d+\]/.test(turn.output)) {
+          return { continue: { note: "Cite a source for each claim, as [1], [2], …" } };
+        }
+      },
     },
   },
 });
 ```
 
-The stage ships as `experimental_loop` so its shape can change after 1.0 without a major release.
+The stage ships under `defineAgent`'s existing `experimental` field, so its shape can change after
+1.0 without a major release.
 
 ## Why a stage, not a custom loop
 
@@ -62,9 +65,9 @@ interface SettlingTurn {
 }
 
 interface LoopStageContext {
-  readonly sessionId: string;
-  readonly turnId: string;
-  readonly signal: AbortSignal;
+  readonly session: { readonly id: string };
+  readonly turn: { readonly id: string };
+  readonly signal?: AbortSignal;
 }
 
 type BeforeSettleResult = { readonly continue: { readonly note: string } };
@@ -80,7 +83,7 @@ type BeforeSettleResult = { readonly continue: { readonly note: string } };
 - After `maxContinuations` continuations (default 3, at most 10), eve settles without calling the
   stage, so a stage that's never satisfied can't loop forever. eve counts continuations from the
   notes in history; a compaction during the turn can drop notes and restart the count.
-- A stage that throws fails the turn. The client sees a generic error; the server log has the
+- A stage that throws, or returns a continue without a note, fails the turn. The client sees a generic error; the server log has the
   cause.
 - A step that fails and runs again calls the stage again. Effects outside eve need idempotency
   keys, as with compaction strategies.
