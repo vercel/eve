@@ -26,6 +26,7 @@ import {
 } from "#harness/action-result-helpers.js";
 import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
 import { hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { chooseNext, type TurnNext } from "#harness/step/next.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -155,7 +156,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // History grows by append only; nothing rewrites earlier messages mid-turn,
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
-  // history, and it runs before the model call (see `maybeCompact`).
+  // history, and it runs before the model call (see `compactIfDue`).
   // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
@@ -175,24 +176,33 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       : responseTail;
   step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
-  const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
-  const continueLoop =
-    (!calledFinalOutput || finalOutputRejected) &&
-    ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
-      normalizedProviderHistory.outcomeEndsResponse ||
-      hasQueuedTurnInput(step.view()));
-  if (continueLoop) return { next: step.runStep, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The session waits for
-  // one to settle, then calls the model again in the same turn.
-  if (workingTasks.length > 0) {
-    return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
-  }
-
-  return settleTurn(step, {
-    result,
-    // Text written before an `endsTurn` call was narration, not the reply.
-    stepOutput: endsTurn ? null : stepOutput,
+  const next = chooseNext({
+    delivered: calledFinalOutput && !finalOutputRejected,
+    endsOnToolResults: responseTail.at(-1)?.role === "tool",
+    endsTurn: await stepEndsTurn(result, responseMessages, input.endsTurnTools),
+    providerOutcomeEndsResponse: normalizedProviderHistory.outcomeEndsResponse,
+    queuedInput: hasQueuedTurnInput(step.view()),
+    text: stepOutput,
+    workingTaskIds: workingTasks,
   });
+  return applyNext(step, next, result);
+}
+
+/** Applies the loop's choice for the turn. */
+async function applyNext(
+  step: Step,
+  next: TurnNext,
+  result: HarnessStepResult,
+): Promise<StepResult> {
+  switch (next.kind) {
+    case "continue":
+      return { next: step.runStep, session: step.session };
+    case "wait":
+      // The session waits for a task to settle, then calls the model again in the same turn.
+      return { held: { kind: "tasks", taskIds: next.taskIds }, next: null, session: step.session };
+    case "settle":
+      return settleTurn(step, { result, stepOutput: next.output });
+  }
 }
 
 /**
