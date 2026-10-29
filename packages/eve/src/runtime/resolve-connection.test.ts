@@ -56,7 +56,7 @@ describe("resolveConnectionDefinition", () => {
   });
 
   // #5630
-  it.fails("keeps an object-form approval with its response policy", async () => {
+  it("keeps an object-form approval with its response policy", async () => {
     const approval = {
       request: () => "user-approval" as const,
       response: () => ({ status: "allowed" as const }),
