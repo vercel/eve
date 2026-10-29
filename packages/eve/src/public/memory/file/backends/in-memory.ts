@@ -16,12 +16,12 @@ export function inMemory(): MemoryDocumentBackend {
   let revision = 0;
 
   return {
-    async read({ key, abortSignal: signal }) {
+    async read({ key, signal }) {
       signal.throwIfAborted();
       const document = store.get(key);
       return document === undefined ? null : { ...document };
     },
-    async write({ content, expectedVersion, key, abortSignal: signal }) {
+    async write({ content, expectedVersion, key, signal }) {
       signal.throwIfAborted();
       const current = store.get(key);
       if ((current?.version ?? null) !== expectedVersion) {

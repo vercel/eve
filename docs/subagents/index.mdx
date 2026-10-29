@@ -86,10 +86,10 @@ Local `eve dev` makes the bundled `self-modification__agent` subagent available 
 
 ### Vercel workspace peers
 
-In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent`. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
+In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent` from `eve/experimental/workspace`. The helper and its `WorkspaceAgentDefinition` and `WorkspaceAgentTransport` types are experimental and have no compatibility promise. The `agents/<name>/` workspace layout and `eve/vercel` integration remain stable. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
-import { defineWorkspaceAgent } from "eve";
+import { defineWorkspaceAgent } from "eve/experimental/workspace";
 
 export default defineWorkspaceAgent({
   name: "research",
@@ -99,7 +99,7 @@ export default defineWorkspaceAgent({
 The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the Vercel runtime environment. Local `vercel dev` routes workspace calls without deployment credentials; Vercel deployments route calls through the current deployment and authenticate with the caller's Vercel OIDC token. Named peers use their `/eve/<name>` mount. Outside those environments, provide an explicit transport with `url` and optional `auth` or `headers`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
-import { defineWorkspaceAgent } from "eve";
+import { defineWorkspaceAgent } from "eve/experimental/workspace";
 import { bearer } from "eve/agents/auth";
 
 export default defineWorkspaceAgent({
@@ -240,7 +240,7 @@ A call with the `taskId` of a child that is still working joins the child's curr
 
 eve adds a framework-injected `[Tasks]` note to the conversation that lists the working and idle tasks by `taskId` and tool, so the model can find a child to continue. See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels agent tasks.
 
-The parent holds each child for the life of the task's run, which lasts until the parent session ends or its task is cancelled. Then eve requests child shutdown, using authenticated reset requests for remote children. Cleanup is best effort: a child whose inbox or deployment is unavailable may remain running or parked. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
+The parent holds each child for the life of the task's run, which lasts until the parent session ends or its task is cancelled. Then eve requests child shutdown, using authenticated end-session requests for remote children. Cleanup is best effort: a child whose inbox or deployment is unavailable may remain running or parked. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or end-session behavior introduced by a newer eve version.
 
 ## When to split
 

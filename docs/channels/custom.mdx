@@ -27,7 +27,7 @@ export default defineChannel({
       const source = from(params.threadId);
 
       if (body.message === "/new") {
-        return Response.json(await source.reset({ reason: "User requested /new" }));
+        return Response.json(await source.end({ reason: "User requested /new" }));
       }
 
       const delivery = await source.send(body.message, { auth: null });
@@ -82,7 +82,7 @@ A route's `path` is its app URL; the channel filename does not prefix it. The ro
 
 Each route receives these operation surfaces:
 
-- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to a channel-local continuation address.
+- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `end` to a channel-local continuation address.
 - `resolveSession(address)` snapshots the session currently owning a channel-local continuation address.
 - `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID.
 - `to(channel, target).send(message, options)` hands work to another authored channel.
@@ -128,7 +128,7 @@ await source.respond(answers, { auth });
 await source.cancel({ turnId });
 await source.compact();
 await source.clear();
-await source.reset({ reason: "Start over" });
+await source.end({ reason: "Start over" });
 
 const currentSession = await resolveSession(threadId);
 ```
@@ -157,7 +157,7 @@ await session.respond(answers, { auth });
 await session.cancel({ turnId });
 await session.compact();
 await session.clear();
-await session.reset({ reason: "Retire this session" });
+await session.end({ reason: "Retire this session" });
 for await (const event of session.stream({ startIndex: 12 })) render(event);
 ```
 
@@ -169,7 +169,7 @@ For a stranded session, `Session.send()`, `Session.respond()`, and a following
 read through `Session.stream()` throw `SessionStrandedError` from `eve/channels` and deliver nothing.
 `stream({ follow: false })` still reads the recorded history up to the current tail without
 changing the session. `error.owner.eveVersion` names the eve release that built the session when it recorded one. Call
-`reset()` to end the stranded session, then start a new one:
+`end()` to retire the stranded session, then start a new one:
 
 ```ts
 import { SessionStrandedError } from "eve/channels";
@@ -178,7 +178,7 @@ try {
   await attachSession(sessionId).send(text, { auth });
 } catch (error) {
   if (!SessionStrandedError.is(error)) throw error;
-  await attachSession(sessionId).reset({ reason: "Session was stranded by an upgrade" });
+  await attachSession(sessionId).end({ reason: "Session was stranded by an upgrade" });
 }
 ```
 
@@ -325,12 +325,12 @@ Keep each route's `method` and `path` unless you mean to move the endpoint.
   `kind: "compaction"`.
 - `clear` removes model-message history in place. It preserves the system prompt,
   skills, tools, durable state, limits, address ownership, and session sandbox.
-- `reset` terminally retires the current session. A later address `send()` creates
+- `end` terminally retires the current session. A later address `send()` creates
   a fresh session; a fixed `Session` handle remains pinned to the retired ID.
 
 Control operations never create a session. Unknown or inactive targets throw
 `SessionNotActiveError`; an accepted no-op cancellation settles with `outcome: "ignored"`. Authenticate and deduplicate command webhooks before
-calling `reset`, because a delayed duplicate can retire a newer address owner.
+calling `end`, because a delayed duplicate can retire a newer address owner.
 
 ## CORS
 
@@ -536,11 +536,27 @@ slackContinuationToken({ channelId: "C0123ABC", threadTs: "1800000000.001234" })
 twilioContinuationToken({ from: "+15551234567", to: "+15557654321" }); // "+15551234567:+15557654321"
 ```
 
+Built-in channels export token builders from their own `eve/channels/<platform>` entry:
+
+| Builder                             | Address fields                                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `slackContinuationToken`            | `channelId`, `threadTs`                                                                                                 |
+| `slackCodeChannelContinuationToken` | `channelId` (positional argument)                                                                                       |
+| `twilioContinuationToken`           | `from`, optional `to`                                                                                                   |
+| `githubContinuationToken`           | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
+| `discordContinuationToken`          | `channelId`, optional `conversationId`                                                                                  |
+| `teamsContinuationToken`            | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
+| `telegramContinuationToken`         | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
+| `linearContinuationToken`           | `agentSessionId`                                                                                                        |
+
+Pass the resulting channel-local token to that channel's `from(...)` helper.
+Tokens are routing addresses, not credentials or substitutes for authorization.
+
 Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
 When another identity should address a session, add it with `channel.continuation?.alias(rawToken)`. The runtime preserves the current channel namespace and exposes the new token as `channel.continuation.token` for later handlers.
 
-Aliasing adds an address to the current session. Earlier addresses continue to resolve to the same session and accept the same payloads. `reset` terminally retires the current session and makes all its addresses available to later `send()` calls. `cancel` stops only the active turn and leaves the session, history, and continuation-token ownership intact.
+Aliasing adds an address to the current session. Earlier addresses continue to resolve to the same session and accept the same payloads. `end` terminally retires the current session and makes all its addresses available to later `send()` calls. `cancel` stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
 The `context(state, channel)` config option builds the per-step context read as `ctx.channel`
 in event handlers. Its second argument is `ChannelContext` from `eve/channels`: live
@@ -575,7 +591,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the aliasing session fails instead of taking it over. Every address claimed by the session remains active until the session ends or resets. Sessions with continuation addresses remain on their current deployment until Workflow supports atomic ownership transfer.
+At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the aliasing session fails instead of taking it over. Every address claimed by the session remains active until the session ends. Sessions with continuation addresses remain on their current deployment until Workflow supports atomic ownership transfer.
 
 Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias does not consume another address.
 

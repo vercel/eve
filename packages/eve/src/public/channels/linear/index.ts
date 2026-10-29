@@ -18,7 +18,7 @@ export {
   type LinearWebhookSecret,
 } from "#public/channels/linear/auth.js";
 
-export { defaultLinearAuth, defaultOnAgentSession } from "#public/channels/linear/defaults.js";
+export { defaultLinearAuth } from "#public/channels/linear/defaults.js";
 
 export {
   linearContinuationToken,

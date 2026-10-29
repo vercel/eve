@@ -160,7 +160,7 @@ describe("createChannelAddress", () => {
     await address.cancel({ turnId: "turn_1" });
     await address.compact();
     await address.clear();
-    await address.reset({ reason: "fresh start" });
+    await address.end({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
       command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_1" },

@@ -6,7 +6,13 @@ import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";
 
-declare const DEFINED_AGENT: unique symbol;
+/**
+ * Cross-instance brand stamped by {@link defineAgent}. The compiler rejects an `agent.ts` export
+ * without it, so a plain object can't pass for an agent definition. `Symbol.for` lets the
+ * compiler's module copy and the author's import share the key; a symbol key stays out of the
+ * `Object.keys`-based shape validators.
+ */
+const DEFINED_AGENT: unique symbol = Symbol.for("eve.defined-agent");
 
 export type {
   AgentModelOptionsDefinition,
@@ -36,19 +42,20 @@ export type {
  */
 export type AgentDefinition = PublicAgentDefinition;
 
-/** Literal-preserving value returned by {@link defineAgent}. */
+/** Literal-preserving value returned by {@link defineAgent}, carrying its brand. */
 export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAgent & {
   readonly [DEFINED_AGENT]: true;
 };
 
 /**
- * Agent configuration returned by a dynamic subagent resolver. The description
- * tells the parent agent when to delegate.
+ * Agent configuration returned by a dynamic subagent resolver: `defineAgent({ description, model })`.
+ * The description tells the parent agent when to delegate.
  */
-export type DynamicLocalSubagentDefinition = Extract<
-  AgentDefinition,
-  { readonly model: PublicAgentStaticModelDefinition }
-> & { readonly description: string };
+export type DynamicLocalSubagentDefinition = DefinedAgent<
+  Extract<AgentDefinition, { readonly model: PublicAgentStaticModelDefinition }> & {
+    readonly description: string;
+  }
+>;
 
 /** Definition a dynamic subagent resolver may select at runtime. */
 export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
@@ -73,8 +80,8 @@ export type DynamicSubagentResult = DynamicSubagentDefinition | null;
 export const defineDynamic = defineDynamicBase;
 
 /**
- * Defines the agent configuration authored in `agent.ts` and returns it
- * unchanged, preserving its literal type.
+ * Defines the agent configuration authored in `agent.ts`. Returns the same object, preserving its
+ * literal type, stamped with the brand the compiler requires: a plain object export is rejected.
  *
  * TypeScript checks the argument against {@link AgentDefinition}: any key outside
  * that shape is a compile error. The compiler derives identity (the agent name)
@@ -84,6 +91,12 @@ export const defineDynamic = defineDynamicBase;
 export function defineAgent<TAgent extends AgentDefinition>(
   definition: ExactDefinition<TAgent, AgentDefinition>,
 ): DefinedAgent<TAgent>;
-export function defineAgent(definition: AgentDefinition): AgentDefinition {
-  return definition;
+export function defineAgent(definition: AgentDefinition): DefinedAgent {
+  Object.defineProperty(definition, DEFINED_AGENT, { configurable: true, value: true });
+  return definition as DefinedAgent;
+}
+
+/** Whether `value` came from {@link defineAgent}. */
+export function isDefinedAgent(value: unknown): value is DefinedAgent {
+  return typeof value === "object" && value !== null && Reflect.get(value, DEFINED_AGENT) === true;
 }

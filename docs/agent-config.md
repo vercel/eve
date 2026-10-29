@@ -24,9 +24,11 @@ dev TUI with `/model anthropic/claude-opus-5.5`.
 The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `openai/gpt-6-luna-fast` and `reasoning: "high"`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
 
-A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+An `agent.ts` that configures a local agent, root or subagent, must export the value `defineAgent` returns, and a dynamic subagent resolver that selects a local agent must return one. The compiler rejects a plain object export with `Export defineAgent({...}) from "<path>".`
 
-`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
+A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider model instance remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+
+`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a model instance. eve types it as `EveLanguageModel` (exported from `eve` and `eve/models`), which every AI SDK language model satisfies.
 
 Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
@@ -43,9 +45,9 @@ export default defineAgent({
 
 For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-6-luna-fast` and cannot run in a deployment.
 
-`/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its `LanguageModel` when you need provider-specific configuration.
+`/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its language model when you need provider-specific configuration.
 
-Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
+Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct model instance.
 
 For every OpenAI or Anthropic model call, eve fills the provider's end-user
 safety identifier from the active turn's
@@ -166,7 +168,7 @@ export default defineAgent({
 });
 ```
 
-The function returns a Gateway model ID, an AI SDK `LanguageModel`, or a selection object. See
+The function returns a Gateway model ID, a model instance such as an AI SDK language model, or a selection object. See
 [Dynamic capabilities](./guides/dynamic-capabilities) for the context and memo rules.
 
 - **When it changes.** eve evaluates before each ordinary model call. A memo keyed by
@@ -235,13 +237,13 @@ Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
-Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
+Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `compaction.threshold` (a fraction from 0 to 1) to compact sooner:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   compaction: {
-    thresholdPercent: 0.75, // default 0.9
+    threshold: 0.75, // default 0.9
   },
 });
 ```
@@ -282,8 +284,9 @@ disable the timeout. Session expiration follows
 [run-data retention](#run-data-retention); a zero-retention session loses its
 stored payloads when it ends.
 
-`sessionUsage` gets two usage records with `inputTokens`, `outputTokens`,
-`cacheReadTokens`, `cacheWriteTokens`, and `costUsd`: `total` is everything
+`sessionUsage` gets two `TokenUsage` records (exported from `eve`) with
+`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and
+`costUsd`: `total` is everything
 the session has spent, and `window` is what it spent since the last approved
 continuation. `inputTokens` includes cache reads and writes. Subtract
 `cacheReadTokens` to count only new input; cache reads are the history a
@@ -325,8 +328,8 @@ export default defineAgent({
 });
 ```
 
-Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
-false` is not accepted. eve calls `sessionUsage` before each model call once
+Set `sessionUsage: false` to leave sessions uncapped. A callback that always
+returns `false` has the same effect. eve calls a configured callback before each model call once
 the window has usage. The model call that crosses a limit is allowed to finish
 because exact usage arrives after the call completes. Before the next model
 call, eve pauses the turn (`turn.paused`) and sends a deterministic
@@ -466,6 +469,7 @@ when the session starts; destination export filters and lifecycle-provider
 policies do not change it.
 
 Set `experimental.workflow.retention` explicitly to override this behavior.
+This override is experimental and has no compatibility promise.
 Use `0` to request deletion regardless of the tracing policy, or `"default"` to
 keep run data for the World's default period regardless of the tracing policy:
 

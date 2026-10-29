@@ -91,7 +91,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
-- `POST /eve/v1/session/:sessionId/reset` (retire the session)
+- `POST /eve/v1/session/:sessionId/end` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
@@ -126,7 +126,7 @@ repeating the request with the same key returns the same `deliveryId`, and the i
 again. Unlike a channel's [retried deliveries](./custom#retried-deliveries), whose duplicates get a
 new receipt settled `ignored`, the repeat's receipt is the original's. The session remembers its
 last 1,024 keys, so use a new key for new input. The compact and clear routes
-accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; reset accepts `reason`.
+accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; end accepts `reason`.
 
 Open payload objects such as `clientContext` keep their existing contracts. Delegated requests
 with a `callback` accept, and ignore, the retired `activityObserver` field so older senders keep
@@ -238,7 +238,7 @@ export default eveChannel({
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
-Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append its control delivery's `delivery.admitted` (`source: { control: "reset" }`) and `delivery.settled`, then `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ deliveryId }` naming that delivery, then close the stream. Existing readers finish when the stream ends.
+Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before ending the session. End attempts to append its control delivery's `delivery.admitted` (`source: { control: "reset" }`) and `delivery.settled`, then `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ deliveryId }` naming that delivery, then close the stream. Existing readers finish when the stream ends.
 
 A session started by an eve version before v27 stores v26 events. Its stream route serves them as the v27 lines they record, so v27 clients render that history: messages, reasoning, tool calls and results, approvals, questions, sign-ins, subagents, clears, and compactions. Streamed text previews aren't translated, so a v26 session that is still running shows each part once it completes.
 
@@ -254,15 +254,17 @@ See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-t
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `reset` route to end it instead. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ### Compact context
 
-Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
-### Reset a session
+<a id="reset-a-session" />
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. Reset also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+### End a session
+
+Post to `/eve/v1/session/:sessionId/end` to terminally retire that session. End never replaces the ID automatically; create a new session explicitly for a fresh conversation. End also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ## Replace or disable the defaults
 
@@ -339,6 +341,10 @@ export default eveChannel({
   audience: "public",
 });
 ```
+
+Audience also selects the default [run-data retention](../agent-config#run-data-retention).
+Outside development, private and unknown-audience sessions request deletion when
+they end. The Workflow World must support deletion to enforce it.
 
 `audience` controls observability content capture; it does not change who may
 call the endpoint. `auth` still controls access. For a classification that
@@ -444,7 +450,7 @@ export default defineChannel({
 
 The client then resumes that session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when a session already owned the address, or another `create()` or `send()` claimed it first. That session comes back unchanged and your `history` was not added, so check `created` before treating the session as seeded. Use a new address for each new conversation or branch.
 
-When the session at the address is [stranded](../guides/deployment/self-hosting#recover-a-stranded-session), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `reset()` on the address, then `create()` again.
+When the session at the address is [stranded](../guides/deployment/self-hosting#recover-a-stranded-session), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `end()` on the address, then `create()` again.
 
 `create()` returns once the new session claims its address, so a `send()` right after it reaches that session. It throws if no session claims the address within 15 seconds.
 

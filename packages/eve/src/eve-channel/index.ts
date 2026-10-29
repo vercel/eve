@@ -31,6 +31,7 @@ import {
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATTERN,
+  EVE_SESSION_END_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_DESCENDANT_STREAM_ROUTE_PATTERN,
@@ -584,30 +585,32 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         return deliveryResponse(result);
       }),
 
-      POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
-        if (authResult instanceof Response) return authResult;
-        const sessionId = requireSessionId(params);
-        if (sessionId instanceof Response) return sessionId;
-        const body = await parseResetBody(req);
-        if (body instanceof Response) return body;
-        let result: Awaited<ReturnType<Session["reset"]>>;
-        try {
-          result = await attachSession(sessionId).reset({
-            auth: sessionAuthFromResult(authResult),
-            reason: body.reason,
-          });
-        } catch (error) {
-          const commandError = sessionCommandErrorResponse(error);
-          if (commandError !== undefined) return commandError;
-          const errorId = logError(log, "session-reset request failed", error, { sessionId });
-          return Response.json(
-            { error: "Failed to reset the session.", errorId, ok: false },
-            { status: 500 },
-          );
-        }
-        return deliveryResponse(result);
-      }),
+      ...[EVE_SESSION_END_ROUTE_PATTERN, EVE_SESSION_RESET_ROUTE_PATTERN].map((path) =>
+        POST(path, async (req, { attachSession, params }) => {
+          const authResult = await routeAuth(req, input.auth);
+          if (authResult instanceof Response) return authResult;
+          const sessionId = requireSessionId(params);
+          if (sessionId instanceof Response) return sessionId;
+          const body = await parseResetBody(req);
+          if (body instanceof Response) return body;
+          let result: Awaited<ReturnType<Session["end"]>>;
+          try {
+            result = await attachSession(sessionId).end({
+              auth: sessionAuthFromResult(authResult),
+              reason: body.reason,
+            });
+          } catch (error) {
+            const commandError = sessionCommandErrorResponse(error);
+            if (commandError !== undefined) return commandError;
+            const errorId = logError(log, "session-end request failed", error, { sessionId });
+            return Response.json(
+              { error: "Failed to end the session.", errorId, ok: false },
+              { status: 500 },
+            );
+          }
+          return deliveryResponse(result);
+        }),
+      ),
 
       GET(EVE_SESSION_STUBS_ROUTE_PATTERN, async (req, { params }) => {
         const authResult = await routeAuth(req, input.auth);

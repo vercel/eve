@@ -76,7 +76,7 @@ function agent(onPost?: (deliveryId: string, path: string) => Promise<void> | vo
           );
         return Response.json({ ok: true, sessionId: "session_1", deliveryId });
       }
-      if (/\/(clear|compact|reset)$/.test(path.pathname)) {
+      if (/\/(clear|compact|end)$/.test(path.pathname)) {
         const deliveryId = `control_${controlSequence++}`;
         await onPost?.(deliveryId, path.pathname);
         return Response.json({ ok: true, sessionId: "session_1", deliveryId });
@@ -159,6 +159,30 @@ function appendPersonWait(server: ReturnType<typeof agent>) {
 }
 
 describe("SessionStore acceptance and observation", () => {
+  it("ends the server session without replacing its local identity until newSession", async () => {
+    const server = agent((deliveryId, path) => {
+      if (path.endsWith("/end"))
+        server.append(
+          [
+            { type: "delivery.admitted", data: { deliveryId, source: { control: "reset" } } },
+            { type: "delivery.settled", data: { deliveryId, outcome: "applied" } },
+            { type: "session.ended", data: { outcome: "completed", cause: { deliveryId } } },
+          ],
+          true,
+        );
+    });
+    const current = store({ initialSession });
+    const receipt = await current.end();
+    expect(await receipt.result()).toMatchObject({
+      sessionId: "session_1",
+      outcome: "applied",
+      sessionEnded: true,
+    });
+    expect(server.posts).toEqual(["/eve/v1/session/session_1/end"]);
+    expect(current.snapshot.session?.sessionId).toBe("session_1");
+    current.newSession();
+    expect(current.snapshot.session).toBeUndefined();
+  });
   it("preserves refreshed inbox handles in saved snapshots and session-change callbacks", async () => {
     agent();
     const fetchAgent = vi.mocked(fetch).getMockImplementation()!;

@@ -40,10 +40,32 @@ describe("authored workflow scope", () => {
           [configFile]: JSON.stringify({
             compilerOptions: { baseUrl: ".", paths: { "@/*": ["./*"] } },
           }),
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/instructions.md": "Call the probe tool.",
           "agent/tools/probe.ts":
-            'import { defineWorkflowTool } from "eve/tools"; import { describe } from "@/lib/describe"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, async execute() { "use workflow"; return describe(); } });',
+            'import { defineWorkflowTool } from "eve/tools"; import { run } from "@/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+          "agent/channels/probe.ts": `import { defineChannel, GET } from "eve/channels";
+import { start, getRun } from "eve/workflow/api";
+import { run } from "@/lib/run";
+export default defineChannel({ routes: [GET("/workflow-api", async () => {
+  const started = await start(run);
+  return Response.json(await getRun(started.runId).returnValue);
+})] });`,
+          "lib/run.ts": `import { createHook } from "eve/workflow";
+import { describe } from "@/lib/describe";
+import { deliver } from "./step";
+export async function run() {
+  "use workflow";
+  using hook = createHook<string>({ token: "workflow-api-probe" });
+  const returnedUndefined = await deliver();
+  return { marker: describe(), returnedUndefined, payload: await hook };
+}`,
+          "lib/step.ts": `import { resumeHook } from "eve/workflow/api";
+export async function deliver() {
+  "use step";
+  return (await resumeHook("workflow-api-probe", "approved")) === undefined;
+}`,
           "lib/describe.ts": `export function describe() { return ${JSON.stringify(ALIAS_MARKER)}; }`,
         },
       });
@@ -70,6 +92,15 @@ describe("authored workflow scope", () => {
         const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
         try {
           expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
+          const response = await fetch(new URL("/workflow-api", server.url), {
+            signal: AbortSignal.timeout(30_000),
+          });
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({
+            marker: ALIAS_MARKER,
+            returnedUndefined: true,
+            payload: "approved",
+          });
         } finally {
           await server.close();
         }
@@ -84,7 +115,8 @@ describe("authored workflow scope", () => {
       name: "workflow-agent-scope",
       installDependencies: true,
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Call the probe tool.",
         "agent/tools/probe.ts":
           'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
@@ -136,7 +168,8 @@ describe("authored workflow scope", () => {
       name: "workflow-raw-assets",
       installDependencies: true,
       files: {
-        [`${input.member}agent/agent.ts`]: 'export default { model: "openai/gpt-5.4" };',
+        [`${input.member}agent/agent.ts`]:
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         [`${input.member}agent/instructions.md`]: "Call the probe tool.",
         [`${input.member}agent/tools/probe.ts`]: `import { defineWorkflowTool } from "eve/tools"; import { run } from "${input.toPackageRoot}/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });`,
         "lib/run.ts":

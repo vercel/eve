@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.85.0",
+  "version": "0.88.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -37,6 +37,7 @@
   "files": [
     "bin",
     "dist",
+    "!dist/CHANGELOG.md",
     "docs",
     "NOTICE",
     "README.md"
@@ -201,6 +202,18 @@
       "types": "./dist/src/public/tools/workflow.d.ts",
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
+    },
+    "./workflow": {
+      "eve-source": "./src/public/workflow/index.ts",
+      "types": "./dist/src/public/workflow/index.d.ts",
+      "import": "./dist/src/public/workflow/index.js",
+      "default": "./dist/src/public/workflow/index.js"
+    },
+    "./workflow/api": {
+      "eve-source": "./src/public/workflow/api.ts",
+      "types": "./dist/src/public/workflow/api.d.ts",
+      "import": "./dist/src/public/workflow/api.js",
+      "default": "./dist/src/public/workflow/api.js"
     },
     "./workflow-modules": {
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
@@ -388,6 +401,24 @@
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
     },
+    "./experimental/workspace": {
+      "eve-source": "./src/public/experimental/workspace/index.ts",
+      "types": "./dist/src/public/experimental/workspace/index.d.ts",
+      "import": "./dist/src/public/experimental/workspace/index.js",
+      "default": "./dist/src/public/experimental/workspace/index.js"
+    },
+    "./experimental/sandbox/just-bash": {
+      "eve-source": "./src/public/experimental/sandbox/just-bash.ts",
+      "types": "./dist/src/public/experimental/sandbox/just-bash.d.ts",
+      "import": "./dist/src/public/experimental/sandbox/just-bash.js",
+      "default": "./dist/src/public/experimental/sandbox/just-bash.js"
+    },
+    "./experimental/channels/discord/gateway": {
+      "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
+      "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
+      "import": "./dist/src/public/experimental/channels/discord/gateway.js",
+      "default": "./dist/src/public/experimental/channels/discord/gateway.js"
+    },
     "./experimental/schedules/testing": {
       "eve-source": "./src/public/experimental/schedules/testing.ts",
       "types": "./dist/src/public/experimental/schedules/testing.d.ts",
@@ -455,11 +486,6 @@
       "types": "./dist/src/public/channels/discord/index.d.ts",
       "import": "./dist/src/public/channels/discord/index.js",
       "default": "./dist/src/public/channels/discord/index.js"
-    },
-    "./channels/discord/gateway": {
-      "types": "./dist/src/public/channels/discord/gateway/index.d.ts",
-      "import": "./dist/src/public/channels/discord/gateway/index.js",
-      "default": "./dist/src/public/channels/discord/gateway/index.js"
     },
     "./channels/twilio": {
       "types": "./dist/src/public/channels/twilio/index.d.ts",
@@ -567,17 +593,19 @@
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "directory": ".package",
+    "linkDirectory": false
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
+    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "node ./scripts/build-js.mjs",
     "build:types": "tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
-    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/copy-package-license.mjs . && node ../../scripts/write-package-changelog.mjs .",
+    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/stage-package.mjs .",
     "test:webchat": "vitest run --config vitest.browser.config.ts",
     "test:framework-fixtures": "vitest run --config vitest.framework-fixtures.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -591,7 +619,7 @@
   },
   "dependencies": {
     "nitro": "3.0.260903-beta",
-    "undici": "8.10.2"
+    "undici": "8.12.3"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const packageRoot = resolve(process.argv[2] ?? ".");
+const outputRoot = resolve(process.argv[3] ?? join(packageRoot, "dist"));
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 const directory = manifest.repository?.directory;
 if (typeof directory !== "string" || !/^packages\/[a-z0-9][a-z0-9-]*$/u.test(directory)) {
@@ -39,16 +40,10 @@ const index = headings.findIndex(({ version }) => version === requested);
 const selected = index >= 0 ? index : headings.findIndex(({ version }) => version === base);
 if (selected < 0) throw new Error(`No changelog entry for ${manifest.name}@${requested}.`);
 
-const entryLines = lines.slice(headings[selected].index + 1, headings[selected + 1]?.index);
-const first = entryLines.findIndex((line) => line.trim());
-const releasePrefix = `### Release ${manifest.name}@${headings[selected].version} | `;
-const hasReleaseHeading = first >= 0 && entryLines[first].startsWith(releasePrefix);
-const releaseHeading = hasReleaseHeading
-  ? `# ${entryLines[first].slice(4)}`
-  : `# Release ${manifest.name}@${headings[selected].version}`;
-const bodyLines = entryLines.slice(hasReleaseHeading ? first + 1 : 0);
+const releaseHeading = `# ${manifest.name} ${headings[selected].version}`;
 let bodyFence;
-const entry = bodyLines
+const entry = lines
+  .slice(headings[selected].index + 1, headings[selected + 1]?.index)
   .map((line) => {
     const next = nextFence(bodyFence, line);
     const inside = bodyFence || next;
@@ -73,5 +68,5 @@ const fullSha =
 const ref = gitRevision && selected === 0 ? (fullSha ?? gitRevision) : `refs/tags/${tag}`;
 const fullHistory = `https://raw.githubusercontent.com/vercel/eve/${ref}/${directory}/CHANGELOG.md`;
 const content = `${releaseHeading}\n\n${preview}${entry}\n\nFor an upgrade across multiple releases, review each version between the installed and target versions in the [target version's changelog](${fullHistory}).\n`;
-await mkdir(join(packageRoot, "dist"), { recursive: true });
-await writeFile(join(packageRoot, "dist", "CHANGELOG.md"), content);
+await mkdir(outputRoot, { recursive: true });
+await writeFile(join(outputRoot, "CHANGELOG.md"), content);

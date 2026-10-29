@@ -249,7 +249,7 @@ See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for exactly
 ## Start a new conversation
 
 - `newSession()` clears the chat and starts fresh. The old conversation stays on the server.
-- `reset()` ends the conversation on the server. Call `newSession()` afterward to clear it locally.
+- `end()` ends the conversation on the server. Call `newSession()` afterward to clear it locally.
 
 To make the first reply faster, pass `prewarm: true`. eve then creates the next session before the user sends anything. Turn it on only after your auth headers are ready. See [Prewarming](./use-eve-agent#prewarming).
 

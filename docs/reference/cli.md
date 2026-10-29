@@ -51,11 +51,13 @@ Existing packages do not need a target-selection prompt: run `eve init` from the
 
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                    | Type   | Default                                              | Description                                                                                                              |
-| ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
+| Flag                    | Type   | Default                                              | Description                                                                                                                   |
+| ----------------------- | ------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                     |
+| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored.      |
+| `--agents <names>`      | string | unset                                                | Create a new workspace with comma-separated agent names, such as `support,research`, or add members to an existing workspace. |
+| `-y, --yes`             | flag   | off                                                  | Accepted for compatibility; warns and has no effect.                                                                          |
+| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                               |
 
 ## `eve extension`
 
@@ -76,6 +78,7 @@ Creates a new extension package, installs dependencies, and initializes Git. Pri
 | No target                   | Same as `.` for humans; coding agents get a short setup guide |
 
 Create-only: cannot target an existing project that already has a `package.json`.
+`-y` and `--yes` are accepted for compatibility; they warn and have no effect.
 
 See [Extensions](/docs/extensions) for authoring and mount details.
 
@@ -278,10 +281,10 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                     |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                  |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                             |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                             |
-| `--subagents <mode>`                | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
+| `--show-tools <mode>`               | enum   | `auto-collapsed`   | Tool-call rendering                                             |
+| `--show-reasoning <mode>`           | enum   | `auto-collapsed`   | Reasoning rendering                                             |
+| `--show-subagents <mode>`           | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
+| `--show-connection-auth <mode>`     | enum   | `full`             | Connection-authorization rendering                              |
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
@@ -340,6 +343,8 @@ eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
 
 Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. `--print` starts a new conversation each time and does not answer pending requests; to answer that session's pending request or script multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
+
+Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `--show-tools`, `--show-reasoning`, `--show-subagents`, `--show-connection-auth`, `--assistant-response-stats`, `--context-size`, and `--logs`. The `--show-*` flags control rendering, not model reasoning effort. Set effort with `eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
 

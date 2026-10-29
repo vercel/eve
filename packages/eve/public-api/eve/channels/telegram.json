@@ -17,7 +17,6 @@
   "TelegramEventContext",
   "TelegramFetch",
   "TelegramHandle",
-  "TelegramHitlState",
   "TelegramInboundContext",
   "TelegramInboundResult",
   "TelegramInstrumentationMetadata",

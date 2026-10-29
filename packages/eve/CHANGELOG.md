@@ -1,5 +1,103 @@
 # eve
 
+## 0.88.0
+
+### Release eve@0.88.0 | 2026-10-29 | minor
+
+### 🚀 Features
+
+- `git({ github })` now requires an `authorize` callback as its only repository access control, drops `org`, and adds `principalType: "user"` to run `gh` commands with the caller's own GitHub permissions. [#5562](https://github.com/vercel/eve/pull/5562)
+
+  To migrate, remove `github.org` and move the restriction into `authorize`, for example `authorize: ({ repository }) => repository.toLowerCase().startsWith("acme/")`. Each command still declares one `owner/name` repository; app tokens are scoped to that repository in its owner's installation.
+
+  With `principalType: "user"`, the `gh` tool resolves the caller's token through `ctx.getToken`, so eve signs the caller in once for every repository and again when GitHub rejects the token.
+
+- Slack channels can add each sender's display name, real name, and email to model-visible message metadata with the new `messageContext.users` option. [#5536](https://github.com/vercel/eve/pull/5536)
+
+  `users: true` adds names, `users: { email: true }` adds emails too, and `users: { name: false, email: true }` adds emails only. The triggering author's profile is also written to `message.author` and the default Slack auth attributes. Pass `resolve(user, next)` to own caching around eve's `users.info` lookup.
+
+  Slack message metadata is now grouped into `<sender>`, `<bot>`, and `<thread>` blocks. `sender_type` and `sender_id` become `type` and `id` inside `<sender>`, `bot_user_id` and `is_mentioned` become `id` and `mentioned` inside `<bot>`, and the team, channel, and timestamp fields move into `<thread>`.
+
+### Other Changes
+
+See the [full list of changes](https://github.com/vercel/eve/compare/eve%400.87.0...eve%400.88.0).
+
+### Contributors
+
+- [@ruiconti](https://github.com/ruiconti)
+
+## 0.87.0
+
+Released 2026-10-28 · [Compare with 0.86.0](https://github.com/vercel/eve/compare/eve%400.86.0...eve%400.87.0)
+
+### Breaking Changes
+
+- Typed `eve/client` errors now extend the new `EveError` (from `eve/client` and `eve/sessions`) with a stable snake_case `code`, and `session.snapshot()` now returns the full session state, including the opaque `inbox` value.
+  Match `SessionNotActiveError` on `session_not_active` or `session_not_ready` instead of `EVE_SESSION_NOT_ACTIVE`, expect `ClientError.code` to be `http_error` when the response had none, and narrow with `ClientError.is(error)` and friends instead of `instanceof`. Persist the `session` that `snapshot()` returns as is to keep `inbox` across restores. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Rename the terminal display flags on `eve dev` and `eve remote connect` to `--show-tools`, `--show-reasoning`, `--show-subagents`, and `--show-connection-auth`.
+  The old `--tools`, `--reasoning`, `--subagents`, and `--connection-auth` display flags are no longer accepted, and rendering defaults are unchanged. Model reasoning effort still uses `--reasoning` on `eve init` and `eve set model`. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Rename `reset()` to `end()` on client sessions, frontend stores/hooks, and channel/Slack handles, and the HTTP retirement endpoint to `POST /eve/v1/session/:sessionId/end` (upgrade the server before using the new client).
+  Ending keeps the retired ID: use `newSession()` or `client.sessions.create()` for a fresh conversation, or `clear()` to clear context in place; remote-agent and session-history compatibility encodings remain unchanged. ([#5479](https://github.com/vercel/eve/pull/5479))
+- eve's authoring and configuration types no longer expose AI SDK, zod, OpenTelemetry, or channel-adapter types, so import eve's own types where you named the third-party ones.
+  Agent `model` fields accept `EveLanguageModel`, `DecisionModel` requires specification `v4`, memory providers return `MemoryToolSet` instead of the removed `MemoryToolDefinition`, `TokenUsage` is exported from `eve`, and `eve/instrumentation/otel`, `eve/channels/linq`, and `eve/channels/photon` export eve-owned span processor/exporter, `LinqWebhookVerifier`, and `PhotonIMessageWebhookVerifier`/`PhotonProjectCredentials` types. Any AI SDK language model or OpenTelemetry processor still type-checks wherever eve accepts one. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Import durable primitives from `eve/workflow` and run/hook operations from `eve/workflow/api`, because bare `workflow` imports now fail in authored modules.
+  Both entries declare eve-owned types: `start(workflow, args?)` takes no options, runs expose only `runId`, `status`, `returnValue`, and `cancel()`, and `getHookByToken` is removed, so pass a deterministic `token` to `createHook` and call `resumeHook(token, payload)`. Ambient Workflow types are no longer needed, though existing `eve/workflow-modules` tsconfig entries can stay through 1.x. ([#5479](https://github.com/vercel/eve/pull/5479))
+- The just-bash escape hatches and the Discord Gateway relay move to experimental entries, so update their imports.
+  Pass `customCommands` and `filesystem` as `JustBashSandbox.environment({ experimental: { customCommands, filesystem } })` and import their types, such as `JustBashCommand` and `JustBashFilesystem`, from `eve/experimental/sandbox/just-bash`. Import `runDiscordGatewayRelay` (formerly `experimental_runDiscordGatewayRelay`) from `eve/experimental/channels/discord/gateway` instead of `eve/channels/discord/gateway`. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Import `defineWorkspaceAgent`, `WorkspaceAgentDefinition`, and `WorkspaceAgentTransport` from `eve/experimental/workspace` instead of `eve`.
+  The helper is experimental; workspace layout and `eve/vercel` remain stable. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Builds now reject agent and connection definitions that don't come from eve's helpers.
+  Export `defineAgent({...})` from every local `agent.ts` (and return it from dynamic subagents), wrap static connections in `defineMcpClientConnection` or `defineOpenAPIConnection` (plain objects no longer default to MCP), and create sentinels only with `defineDynamic()`, `disableTool()`, and `disableRoute()`. Move an `agent/sandbox.ts` that sits beside `agent/sandbox/` to `agent/sandbox/sandbox.ts`. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Remove the undocumented public exports `isDisabledToolSentinel`, `isDisabledRouteSentinel`, `isInstrumentationDisabled`, `answerFromText`, `failureOf`, and Linear's `defaultOnAgentSession`.
+  Use `failure(view, turnId)` from `eve/events` on a folded view, or check raw `turn.settled` and `session.ended` events for `outcome === "failed"`. Omit `onAgentSession` to keep Linear's default handler. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Flatten client stream retry settings into `reconnect?: false | ReconnectOptions`.
+  Replace `streamReconnectPolicy: { reconnect: false }` with `reconnect: false`, move `streamOpenReconnectPolicy` fields under `reconnect`, and rename `retryableErrorStatuses` to `retryableStatuses`. The `StreamReconnectPolicy` and `StreamReconnectRetryPolicy` types are removed in favor of `ReconnectOptions`. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Rename `compaction.thresholdPercent` to `compaction.threshold`, which takes a 0–1 fraction.
+  The old key now fails with migration guidance. Set `limits.sessionUsage: false` to disable usage limits, including limits inherited from a parent agent. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Built-in channel state types no longer publish the default handlers' bookkeeping, so keep custom handler data in your own state keys.
+  Hidden fields include Slack `taskCards`, `threadStatus`, and the code-channel reply fields `replyThreadTs` and `pendingReplyThreadTs`, Chat SDK streaming fields, `pendingSignIns`, prompt-card fields, and Discord's `interactionToken` (read it from the Discord handle), and `TelegramHitlState` is no longer exported. `SendTurnPayload` is now exported from `eve/client`. ([#5479](https://github.com/vercel/eve/pull/5479))
+- Slack `initialMessage` now accepts Markdown, text, raw blocks, or a card, with optional files uploaded into the root message's thread.
+  Remove unsupported `Modal*`, `ExternalSelect*`, `TextInput*`, `CardJSXElement`, `CardJSXProps`, `isCardElement`, and `cardChildToFallbackText` exports, plus the card builders' JSX-props overloads and their `*Props`, `ContainerProps`, and `ChatElement` types. Call builders with their data forms such as `Button({ id, label })`, use `CardText` for labels, native Slack view data for modals, and `cardToFallbackText` for whole cards (see [Slack cards](https://eve.dev/docs/channels/slack#cards)). ([#5479](https://github.com/vercel/eve/pull/5479))
+- Memory document backend `read()` and `write()` inputs use `signal` again, restoring the pre-0.84.0 contract.
+  Only backends and direct calls using the `abortSignal` input from `0.84.x` need updating; memory and tool execution contexts still expose `ctx.abortSignal`. ([#5433](https://github.com/vercel/eve/pull/5433))
+
+### Features
+
+- Clarify that Next.js `servicePrefix` supports manually configured Vercel services and production proxying; it is not a legacy option. ([#5479](https://github.com/vercel/eve/pull/5479))
+
+## 0.86.1
+
+Not published; these changes shipped in 0.87.0.
+
+### Bug Fixes
+
+- Resolve catalog dependencies in staged packages so npm can install them. ([#5554](https://github.com/vercel/eve/pull/5554))
+- Restore current release notes to `CHANGELOG.md` at the package root. ([#5552](https://github.com/vercel/eve/pull/5552))
+
+## 0.86.0
+
+Released 2026-10-28 · [Compare with 0.85.0](https://github.com/vercel/eve/compare/eve%400.85.0...eve%400.86.0)
+
+### Breaking Changes
+
+- Remove the disabled scaffold agent helper and the legacy root-tool registry setup handoff.
+  Old scaffold imports must migrate to `eve/extensions/self-modification/local`; the current local and remote extensions and the old-layout migration error remain unchanged. ([#5518](https://github.com/vercel/eve/pull/5518))
+
+### Features
+
+- `EVE_CALLBACK_TRUSTED_ORIGINS` now accepts a leading `*.` label, such as `https://*.preview.example.com`, so a remote agent can trust preview parents whose deployment URLs change on every deploy.
+  The wildcard matches exactly one subdomain label, and `*.vercel.app` and trailing dots are rejected. ([#5539](https://github.com/vercel/eve/pull/5539))
+- Hide `eve init --channel-web-nextjs` from `eve init --help` in favor of `eve add channel/web`.
+  The flag still works. The README and coding-agent setup instructions now point to `eve add channel/web`, which also sets up sign-in. ([#5474](https://github.com/vercel/eve/pull/5474))
+- Ship current release notes at `dist/CHANGELOG.md` with a version-pinned link to the full changelog. ([#5446](https://github.com/vercel/eve/pull/5446))
+
+### Bug Fixes
+
+- The experimental Vercel schedule provider bundles Schedules SDK alpha.19 and identifies eve to the Schedules API with an `x-vss-framework: eve` header. ([#5528](https://github.com/vercel/eve/pull/5528))
+- A file returned by a tool now becomes a "could not be stored" note when the session's sandbox rejects the write, instead of failing the step and replaying its model call and tools. ([#4843](https://github.com/vercel/eve/pull/4843))
+- A turn's principal no longer changes while it runs.
+  Only the turn's own principal can answer a pending `ctx.ask()` or `ask_question` by typing, whether a workflow tool, a subagent or a remote agent asked; another person's text waits and runs as their own turn instead of answering the question under the asker's auth. A typed answer updates the claims on `ctx.session.auth.current`, so its `delivery.consumed` hook and the rest of the turn see the request that sent it. Someone else's button answer still settles the request as its responder. ([#4925](https://github.com/vercel/eve/pull/4925))
+
 ## 0.85.0
 
 ### Minor Changes

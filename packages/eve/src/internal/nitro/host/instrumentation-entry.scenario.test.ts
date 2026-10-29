@@ -135,7 +135,7 @@ describe("instrumentation before the Nitro entry", () => {
           dependencies: { "fixture-driver": "1.0.0" },
         }),
         "agent/agent.mjs":
-          'export default { model: "openai/gpt-5.4-mini", build: { externalDependencies: ["fixture-driver"] } };',
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4-mini", build: { externalDependencies: ["fixture-driver"] } });',
         "agent/instructions.md": "Help Alice check her database.",
         "agent/tools/check.mjs": [
           'import { defineTool } from "eve/tools";',

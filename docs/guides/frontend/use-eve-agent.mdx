@@ -24,7 +24,7 @@ React, [Vue](./use-eve-agent-vue), and [Svelte](./use-eve-agent-svelte) share th
 | `resume`           | Catch up to the durable tail. Later following obeys `followWhile`              |
 | `follow`           | Follow a delivery receipt from this or another store on the same session       |
 | `clear`, `compact` | Queue a context change and return its delivery                                 |
-| `reset`            | Retire the server-side session and return its delivery                         |
+| `end`              | Retire the server-side session and return its delivery                         |
 | `newSession`       | Clear local state and the local session cursor                                 |
 
 About snapshots:
@@ -184,7 +184,7 @@ function useSessionPanels(session: ClientSession) {
 ### Follow a receipt
 
 - `follow(receipt)` tracks an accepted receipt until it settles, even if the stream caught up before the server admitted it.
-- Pass only receipts from `send`, `respond`, `clear`, `compact`, or `reset` on the same session. A receipt the stream never admits keeps the store `"busy"` until the session ends or you call `newSession()`.
+- Pass only receipts from `send`, `respond`, `clear`, `compact`, or `end` on the same session. A receipt the stream never admits keeps the store `"busy"` until the session ends or you call `newSession()`.
 - `follow()` doesn't create a session or grant access.
 - Limit retries after stream errors, and resolve authorization failures before retrying.
 
@@ -230,9 +230,9 @@ For an existing idle session, `prewarm()` can move it to the deployment that acc
 | Command        | Effect                                                                                         |
 | -------------- | ---------------------------------------------------------------------------------------------- |
 | `newSession()` | Clears the local conversation and reuses the hook. The old session keeps running on the server |
-| `reset()`      | Retires the server-side session and returns its delivery                                       |
+| `end()`        | Retires the server-side session and returns its delivery                                       |
 
-After `reset()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
+After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
 
 ## Resume a saved session
 

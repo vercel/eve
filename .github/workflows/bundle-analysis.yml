@@ -197,7 +197,7 @@ jobs:
           STEPS_BASELINE_WEATHER_APP_OUTPUTS_PATH: ${{ steps.baseline_weather_app.outputs.path }}
         working-directory: ${{ steps.baseline.outputs.root }}
         run: |
-          node ./scripts/nitro-bundle-report.mjs \
+          node "$GITHUB_WORKSPACE/scripts/nitro-bundle-report.mjs" \
             --app "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_PATH}" \
             --app-label apps/fixtures/weather-agent \
             --package packages/eve \

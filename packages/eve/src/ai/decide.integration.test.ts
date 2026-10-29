@@ -109,7 +109,10 @@ describe("decide", () => {
     ).rejects.toThrow("not just its identity");
     const decider = decisionModel();
     const newerModel = { ...decider.model, specificationVersion: "v-next" };
-    await expect(decide({ model: newerModel, state, questions })).rejects.toThrow(/version/i);
+    await expect(
+      // @ts-expect-error Only the specification versions the AI SDK supports are accepted.
+      decide({ model: newerModel, state, questions }),
+    ).rejects.toThrow(/version/i);
     expect(decider.doDecide).not.toHaveBeenCalled();
   });
 

@@ -50,7 +50,7 @@ export interface ChannelSource<TState = undefined> {
    * Creates a session that waits for its first message, without running a
    * turn. When another session owns the address, or claims it concurrently,
    * returns that session unchanged with `created: false`; its `history` was not
-   * added. Throws `SessionStrandedError` when the owner is stranded; reset the
+   * added. Throws `SessionStrandedError` when the owner is stranded; end the session at the
    * address, then create again.
    */
   create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
@@ -68,7 +68,7 @@ export interface ChannelSource<TState = undefined> {
   /** Clears model-message history without creating a session. */
   clear(options?: SessionControlOptions): Promise<Delivery>;
   /** Retires the current owner without creating a replacement. */
-  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
+  end(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
 }
 
 /** Binds a raw channel-local continuation address to its current-owner operations. */
@@ -141,8 +141,8 @@ export function createChannelOperations<TState = undefined>(input: {
         async clear(options) {
           return await bound.clear(options);
         },
-        async reset(options) {
-          return await bound.reset(options);
+        async end(options) {
+          return await bound.end(options);
         },
       };
       return source;

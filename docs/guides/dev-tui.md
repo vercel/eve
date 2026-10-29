@@ -133,10 +133,10 @@ Use `/traces` to inspect traces recorded during local development. See [Local tr
 Use `eve dev` flags to control tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs:
 
 ```bash
-eve dev --tools full --reasoning collapsed --logs all
+eve dev --show-tools full --show-reasoning collapsed --logs all
 ```
 
-`--subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
+`--show-subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 

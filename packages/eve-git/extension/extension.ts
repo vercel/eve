@@ -21,7 +21,6 @@ export default defineExtension({
     github: z
       .object({
         connector: z.string().min(1),
-        org: z.string().min(1),
         broker: fn<GitHubLeaseBroker>(),
         /**
          * Resolves the person each turn publishes for. Their
@@ -29,11 +28,18 @@ export default defineExtension({
          */
         attribution: fn<GitHubAttribution>().optional(),
         /**
-         * Called before each `gh` command with the session's caller, the
-         * declared repository, and its scoped token. Return `false` to deny.
-         * Without it, the GitHub App installation is the only boundary.
+         * The agent's only GitHub access control. Called before each `gh`
+         * command with the session's caller, the declared `owner/name`
+         * repository, and the minted token. Return `true` to run the command.
          */
-        authorize: fn<GitHubAuthorize>().optional(),
+        authorize: fn<GitHubAuthorize>(),
+        /**
+         * Whose token `connector` mints, as in `connect({ connector,
+         * principalType })`. `"app"` (default) uses the GitHub App
+         * installation. `"user"` uses the caller's own GitHub token: eve signs
+         * them in when needed and again when GitHub rejects the token.
+         */
+        principalType: z.enum(["app", "user"]).optional(),
       })
       .optional(),
   }),

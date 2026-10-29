@@ -79,7 +79,7 @@ test("built extension mounts as git with only session-resolved GitHub contributi
 test("git__gh resolves an executable tool when GitHub is configured", async () => {
   const { appRoot, manifest } = await compileConsumer(
     "git-gh-consumer",
-    '{ github: { connector: "github/acme-bot", org: "acme", async broker() {} } }',
+    '{ github: { connector: "github/acme-bot", authorize: () => true, async broker() {} } }',
   );
   const resolver = manifest.dynamicTools.find((entry) => entry.slug === "git__gh");
   assert.ok(resolver);
@@ -92,7 +92,8 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
   const { moduleMap } = await import(pathToFileURL(moduleMapPath).href);
   const definition =
     moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID].modules[resolver.sourceId].default;
-  const tool = await definition.evaluate();
+  // A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
+  const tool = await definition[Symbol.for("eve.dynamic")]();
   assert.ok(tool, "gh resolved to null with github configured");
   const input = tool.inputSchema.parse({
     command: "gh repo view acme/project",

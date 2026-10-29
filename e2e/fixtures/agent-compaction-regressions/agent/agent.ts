@@ -1,5 +1,5 @@
 import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
 
 import {
@@ -220,7 +220,7 @@ const taskModel = mockModel({
   }),
 });
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   // Harness config wires the workflow world; the task model stays the
   // fixture's scripted mock regardless of the matrix model.
   ...e2eAgentConfig(),
@@ -229,13 +229,15 @@ export default defineAgent({
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-    thresholdPercent:
+    threshold:
       (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
     sessionUsage: ({ window }) => window.inputTokens - window.cacheReadTokens >= 100_000,
   },
 });
+
+export default agent;
 
 function findInitialCase(request: MockModelRequest): RegressionCase | undefined {
   for (const message of request.userMessages) {
