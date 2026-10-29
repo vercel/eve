@@ -213,6 +213,10 @@ for (let attempt = 0; PARTICLES.length < particleCount && attempt < 2000; attemp
   });
 }
 
+// Three particles around the center, drawn in full as the data the runtime holds: one low on the
+// left, one high in the middle, one low on the right.
+const ACCENT_PARTICLES = new Set([53, 51, 2]);
+
 function DataBoundary() {
   return (
     <Visual
@@ -286,9 +290,10 @@ function DataBoundary() {
             y={hostTop}
           />
           <g fill="var(--ds-gray-500)">
-            {PARTICLES.map(({ angle, opacity, size, x, y }) => (
+            {PARTICLES.map(({ angle, opacity, size, x, y }, index) => (
               <rect
-                fillOpacity={opacity}
+                fill={ACCENT_PARTICLES.has(index) ? "var(--ds-gray-1000)" : undefined}
+                fillOpacity={ACCENT_PARTICLES.has(index) ? 1 : opacity}
                 height={size}
                 key={`${x}-${y}`}
                 rx={size * 0.22}
