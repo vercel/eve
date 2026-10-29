@@ -241,8 +241,6 @@ export default defineMcpClientConnection({
 
 `ctx.approval.responder.getToken(provider)` resolves the approver's token as it does in a [`defineTool` tool](/docs/human-in-the-loop): it never starts a sign-in, and throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"` when the approver has no token. `headers` can't set `Authorization` when the connection also sets `auth`, so send the approver's token in another header, or omit `auth` and set `Authorization` yourself.
 
-Have the server answer a missing or invalid approver credential with `403`, not `401`. eve treats a `401` from an MCP server as a rejection of the connection's own token: it drops the requester's cached token and asks the requester to sign in again.
-
 `ctx.approval` is absent for calls that needed no approval, and while eve connects to the server and lists its tools. The approver's identity reaches only the requests of the call they approved. Pair it with an `approval.response` policy so only people whose access the call may use can approve it.
 
 ## Interactive OAuth via Vercel Connect
