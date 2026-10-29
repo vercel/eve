@@ -31,15 +31,42 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_APP_PRIVATE_KEY", privateKey);
   vi.stubEnv("GITHUB_WEBHOOK_SECRET", webhookSecret);
   vi.stubEnv("METRICS_TOKEN", "test-metrics-token");
-  // The channel fetches PR context from GitHub before dispatching and swallows
-  // failures, so no test reaches the real API.
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => {
-      throw new Error("network disabled in the grader");
-    }),
-  );
+  // No test reaches the real network. GitHub answers the way it would for the failed PR in
+  // these payloads: the App gets an installation token, and the Checks and Actions read
+  // endpoints a triage might consult list one failed run, so a channel hook that looks up the
+  // failure through `ctx.github` before starting the turn works as it would in production.
+  // Any other GitHub call is a 404.
+  vi.stubGlobal("fetch", vi.fn(offlineGitHub));
 });
+
+async function offlineGitHub(input: unknown, init?: RequestInit): Promise<Response> {
+  const { url, method } = new Request(input as RequestInfo, init);
+  if (!url.startsWith("https://api.github.com/")) throw new Error("network disabled in the grader");
+  const path = new URL(url).pathname;
+  if (method === "POST" && /^\/app\/installations\/\d+\/access_tokens$/.test(path)) {
+    return Response.json(
+      { token: "ghs_grader", expires_at: new Date(Date.now() + 3_600_000).toISOString() },
+      { status: 201 },
+    );
+  }
+  if (method === "GET") {
+    const failedRun = {
+      id: 991,
+      name: "test",
+      status: "completed",
+      conclusion: "failure",
+      html_url: "https://github.com/pinecone-labs/ledger/actions/runs/881/job/991",
+      output: { title: "1 test failed", summary: "ledger.test.ts > totals: expected 3, got 2" },
+    };
+    if (/\/check-suites\/\d+\/check-runs$|\/commits\/[^/]+\/check-runs$/.test(path)) {
+      return Response.json({ total_count: 1, check_runs: [failedRun] });
+    }
+    if (/\/actions\/runs\/\d+\/jobs$/.test(path)) {
+      return Response.json({ total_count: 1, jobs: [{ ...failedRun, steps: [] }] });
+    }
+  }
+  return Response.json({ message: "Not Found" }, { status: 404 });
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();

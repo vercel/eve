@@ -144,9 +144,9 @@ test("send_reminder reminds clients only within the caller's organization", asyn
   expect(await reminderCount("org_brightside", "inv_1042")).toBe(before + 1);
 
   const harborBefore = await reminderCount("org_harbor", "inv_2001");
-  await tool
-    .execute(await invoiceInput(tool, "inv_2001"), await toolContext(maya))
-    .catch(() => undefined);
+  const input = await invoiceInput(tool, "inv_2001");
+  const context = await toolContext(maya);
+  await settle(() => tool.execute(input, context));
   expect(await reminderCount("org_harbor", "inv_2001")).toBe(harborBefore);
 });
 
@@ -171,7 +171,7 @@ test("never voids for members or across organizations", async () => {
     if (status === "deny") return;
     if (status === "ask" && !(await approvalSettles(tool, user, input))) return;
     const context = await toolContext(user, status === "ask" ? { approvedBy: user } : {});
-    await tool.execute(input, context).catch(() => undefined);
+    await settle(() => tool.execute(input, context));
   };
 
   await attempt(leo, "inv_1042");
@@ -618,4 +618,14 @@ async function invoiceStatus(orgId: string, invoiceId: string): Promise<string |
 async function reminderCount(orgId: string, invoiceId: string): Promise<number> {
   const invoices = await import(moduleUrl(`${projectRoot}/lib/invoices.ts`));
   return (await invoices.getInvoice(orgId, invoiceId))?.reminders.length ?? 0;
+}
+
+/**
+ * Runs a call that may be refused, ignoring the refusal. A tool can refuse by rejecting or by
+ * throwing synchronously (a non-async `execute`); eve treats both as the call failing.
+ */
+async function settle(call: () => unknown): Promise<void> {
+  try {
+    await call();
+  } catch {}
 }

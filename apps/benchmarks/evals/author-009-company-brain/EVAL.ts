@@ -119,7 +119,7 @@ test("run_sql refuses writes without calling the warehouse", async () => {
     "INSERT INTO analytics.orders (id) VALUES (1)",
   ]) {
     const parsed = await parseInput(tool, { query });
-    if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
+    if (parsed.success) await settle(() => tool.execute(parsed.data, toolContext([])));
     expect(requests, query).toHaveLength(1);
   }
 });
@@ -277,7 +277,7 @@ test("analyst queries the warehouse read-only and cannot read Notion", async () 
   expect(requests).toHaveLength(1);
   expect(requests[0].url).toBe(`${warehouse}/query`);
   const parsed = await parseInput(tool, { query: "DELETE FROM analytics.orders" });
-  if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
+  if (parsed.success) await settle(() => tool.execute(parsed.data, toolContext([])));
   expect(requests).toHaveLength(1);
 
   const notion = sourceFiles("subagents/analyst", /\.ts$/).filter((file) =>
@@ -582,4 +582,14 @@ function forecastTool(resolved: any): any {
   if (resolved === null || resolved === undefined) return undefined;
   if (typeof resolved.execute === "function") return resolved;
   return resolved.revenue_forecast;
+}
+
+/**
+ * Runs a call that may be refused, ignoring the refusal. A tool can refuse by rejecting or by
+ * throwing synchronously (a non-async `execute`); eve treats both as the call failing.
+ */
+async function settle(call: () => unknown): Promise<void> {
+  try {
+    await call();
+  } catch {}
 }
