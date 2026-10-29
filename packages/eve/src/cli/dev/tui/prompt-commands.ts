@@ -7,6 +7,7 @@ export type PromptCommand =
   | { type: "new" }
   | { type: "cancel" }
   | { type: "clear" }
+  | { type: "rewind"; argument: string }
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
@@ -75,6 +76,16 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Clear the session context and keep the session",
     takesArgument: false,
     build: () => ({ type: "clear" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "rewind",
+    history: "omit",
+    aliases: [],
+    description: "Rewind and edit an earlier message",
+    argumentHint: "[number]",
+    takesArgument: true,
+    build: (argument) => ({ type: "rewind", argument }),
     targets: ["local", "remote"],
   },
   {

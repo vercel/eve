@@ -87,6 +87,90 @@ describe("EveTUIRunner with a stranded session", () => {
   });
 });
 
+describe("EveTUIRunner rewind", () => {
+  it("uses clear to edit the first message", async () => {
+    const server = new FakeEveServer();
+    vi.stubGlobal("fetch", server.fetch);
+    const { renderer } = turnTaking(["First.", "/rewind 1", undefined]);
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+    expect(server.requestsTo("POST", "/session_1/clear")).toHaveLength(1);
+    expect(renderer.readInput).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "First." }),
+    );
+  });
+
+  it("restores the latest steering message and rewinds its whole turn", async () => {
+    const respond = reply("Done.");
+    const server = new FakeEveServer((request) => {
+      const events = respond(request).map((event) =>
+        event.type === "turn.started" && request.turnId === "turn_2"
+          ? { ...event, data: { ...event.data, follows: "turn_1" } }
+          : event,
+      );
+      if (request.turnId !== "turn_2") return events;
+      const at = events.findIndex((event) => event.type === "delivery.consumed") + 1;
+      return [
+        ...events.slice(0, at),
+        { type: "delivery.admitted", data: { deliveryId: "steering" } },
+        {
+          type: "delivery.consumed",
+          data: {
+            deliveryId: "steering",
+            turnId: "turn_2",
+            parts: [{ kind: "text", text: "Correction." }],
+          },
+        },
+        ...events.slice(at),
+      ];
+    });
+    vi.stubGlobal("fetch", server.fetch);
+    const { renderer } = turnTaking(["First.", "Original.", "/rewind 1", undefined]);
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+    expect(server.requestsTo("POST", "/session_1/rewind")).toMatchObject([
+      { body: { turnId: "turn_1" } },
+    ]);
+    expect(renderer.readInput).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "Correction." }),
+    );
+  });
+
+  it("selects a previous turn and restores the discarded message as a draft", async () => {
+    const respond = reply("Done.");
+    const server = new FakeEveServer((request) =>
+      respond(request).map((event) =>
+        event.type === "turn.started" && request.turnId === "turn_2"
+          ? { ...event, data: { ...event.data, follows: "turn_1" } }
+          : event,
+      ),
+    );
+    vi.stubGlobal("fetch", server.fetch);
+    const outcomes: unknown[] = [];
+    const { renderer } = turnTaking(["First.", "Second.", "/rewind", undefined], {
+      chooseRewindMessage: vi.fn(async (choices) => choices.at(-1)?.messageId),
+      finishCommand: (outcome) => outcomes.push(outcome),
+    });
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+    expect(server.requestsTo("POST", "/session_1/rewind")).toMatchObject([
+      { body: { turnId: "turn_1" } },
+    ]);
+    expect(renderer.readInput).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "Second." }),
+    );
+    expect(outcomes).toContainEqual(
+      expect.objectContaining({ summary: expect.stringContaining("Rewound") }),
+    );
+  });
+});
+
 describe("EveTUIRunner diagnostics", () => {
   it("names a tool that fails in the commit that requested it", async () => {
     const replied = reply("The lookup failed.");

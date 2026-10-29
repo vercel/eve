@@ -1,4 +1,5 @@
 import { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import {
   activeTurn,
   delivery,
@@ -179,6 +180,13 @@ export type AgentTUIAgentHeader = {
   localDevelopment?: boolean;
 };
 
+/** One user message offered by the rewind picker, in conversation order. */
+export interface RewindChoice {
+  readonly messageId: string;
+  readonly text: string;
+  readonly hasFiles: boolean;
+}
+
 export type AgentTUIRenderer = {
   /**
    * Commits the startup card to the transcript before the first prompt and
@@ -216,6 +224,8 @@ export type AgentTUIRenderer = {
   renderCommandInvocation?(text: string): void;
   finishCommand?(outcome: CommandPresentation): void;
   choosePromptCommand?(commands: readonly PromptCommandSpec[]): Promise<string | undefined>;
+  /** Selects the user message to remove and edit; undefined cancels. */
+  chooseRewindMessage?(choices: readonly RewindChoice[]): Promise<string | undefined>;
   showInfoPanel?(text: string): Promise<void>;
   readonly setupFlow?: SetupFlowRenderer;
   /**
@@ -803,6 +813,8 @@ export class EveTUIRunner {
           invoke: () => this.#store.compact(),
         });
         return;
+      case "rewind":
+        return await this.#rewindConversation(command.argument);
       case "clear":
         await this.#runSessionCommand({
           absent: "No active session to clear",
@@ -1088,6 +1100,101 @@ export class EveTUIRunner {
     void this.#store.cancel().catch((error: unknown) => {
       this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
     });
+  }
+
+  /** Selects a message to edit, then removes that turn and its descendants from context. */
+  async #rewindConversation(argument: string): Promise<{ draft: string } | undefined> {
+    const snapshot = this.#store.snapshot;
+    if (snapshot.session === undefined) {
+      this.#finishCommand({ kind: "result", summary: "No active session to rewind" });
+      return;
+    }
+    if (hasOpenTurn(snapshot) || isWorking(snapshot.status)) {
+      this.#finishCommand({ kind: "result", summary: "Cancel the running turn first" });
+      return;
+    }
+    const messages = snapshot.messages
+      .filter(
+        (message) =>
+          message.role === "user" &&
+          !message.metadata?.imported &&
+          message.metadata?.turnId !== undefined,
+      )
+      .reverse();
+    if (messages.length === 0) {
+      this.#finishCommand({ kind: "result", summary: "No messages to rewind" });
+      return;
+    }
+    let messageId: string | undefined;
+    if (argument === "" && this.#renderer.chooseRewindMessage !== undefined) {
+      const choices = [...messages].reverse().map((message) => ({
+        messageId: message.id,
+        text: message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+        hasFiles: message.parts.some((part) => part.type === "file"),
+      }));
+      messageId = await this.#renderer.chooseRewindMessage(choices);
+      if (messageId === undefined) {
+        this.#finishCommand({ kind: "dismiss" });
+        return;
+      }
+    } else {
+      const selected = argument === "" ? "1" : argument;
+      if (!/^[1-9]\d*$/u.test(selected) || Number(selected) > messages.length) {
+        this.#finishCommand({
+          kind: "result",
+          summary: `Choose a message from 1 to ${messages.length}`,
+        });
+        return;
+      }
+      messageId = messages[Number(selected) - 1]!.id;
+    }
+    // A different client can change the conversation while the picker is open.
+    const current = this.#store.snapshot;
+    const message = current.messages.find(
+      (candidate) =>
+        candidate.id === messageId && candidate.role === "user" && !candidate.metadata?.imported,
+    );
+    if (message === undefined || hasOpenTurn(current) || isWorking(current.status)) {
+      this.#finishCommand({
+        kind: "result",
+        summary: "The conversation changed; try /rewind again",
+      });
+      return;
+    }
+    const turnId = message.metadata?.turnId;
+    const turn = turnId === undefined ? undefined : sessionTables(current.view).turns[turnId];
+    if (turn === undefined) {
+      this.#finishCommand({ kind: "result", summary: "That turn is no longer available" });
+      return;
+    }
+    try {
+      const delivery =
+        turn.follows === null ? await this.#store.clear() : await this.#store.rewind(turn.follows);
+      let failure: string | undefined;
+      for await (const event of delivery.stream()) {
+        if (event.type === "context.settled" && event.data.outcome === "failed")
+          failure = event.data.error?.message;
+      }
+      const result = await delivery.result();
+      if (result.status !== "completed")
+        throw new Error(failure ?? `The command settled ${result.status}.`);
+      this.#finishCommand({
+        kind: "result",
+        summary: message.parts.some((part) => part.type === "file")
+          ? "Rewound. Later messages are out of context; reattach files before sending."
+          : "Rewound. Edit the message to continue.",
+      });
+      return {
+        draft: message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+      };
+    } catch (error) {
+      this.#finishCommand({
+        kind: "result",
+        summary: "Couldn't rewind the session",
+        message: this.#strandedSessionNotice(error) ?? toErrorMessage(error),
+      });
+      return;
+    }
   }
 
   /** Runs a session mutation and gives every control command one completion policy. */

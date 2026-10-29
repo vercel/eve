@@ -12,6 +12,7 @@ import type {
   AgentTUIToolApprovalRequest,
   AgentTUIToolApprovalResponse,
   CommandPresentation,
+  RewindChoice,
 } from "./runner.js";
 import type { AgentTUIConversationView, TokenUsage } from "./conversation-view.js";
 import { ConversationTranscript, turnActivity, type TranscriptOptions } from "./transcript.js";
@@ -357,6 +358,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #view?: AgentTUIConversationView;
   /** Live blocks whose content the conversation projection owns. */
   #conversationBlockIds = new Set<string>();
+  /** Every block owned by the current conversation, including committed scrollback. */
+  readonly #projectedConversationIds = new Set<string>();
   /** Texts submitted while a turn ran, so their echoes use the steering gutter. */
   readonly #steeredMessages: string[] = [];
   #agentHeader?: AgentHeaderOptions;
@@ -1009,12 +1012,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   renderConversation(view: AgentTUIConversationView): void {
     const wasWorking = this.#view?.working === true;
+    const previousSelection = this.#view?.data.view.selection;
+    const selection = view.data.view.selection;
+    const changedSelection =
+      this.#view !== undefined &&
+      selection !== undefined &&
+      (previousSelection === undefined ||
+        (previousSelection?.turnId ?? null) !== (selection?.turnId ?? null));
     this.#view = view;
+    // Placement and task caches can retain lines from a discarded turn. Reproject them from
+    // the selected conversation before rebuilding the terminal's committed scrollback.
+    if (changedSelection) this.#transcript.reset();
     // A message queued during startup reaches the conversation without passing the prompt.
     if (view.conversation.messages.some((message) => message.role === "user")) {
       this.#hasUserMessage = true;
     }
     const projected = this.#transcript.project(view, this.#transcriptOptions());
+    if (changedSelection) this.#pruneConversation(projected);
+    for (const block of projected)
+      if (block.id !== undefined) this.#projectedConversationIds.add(block.id);
     const ids = new Set<string>();
     for (const [index, block] of projected.entries()) {
       const id = block.id!;
@@ -1048,7 +1064,27 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#inputActive) this.#commitTurnStats();
     }
     this.#syncActivityTicker();
+    if (changedSelection) this.#rebuildCommittedTranscript();
     this.#paint();
+    if (changedSelection) this.#replayTranscript();
+  }
+
+  /** Discard hidden conversation blocks from both the live region and scrollback history. */
+  #pruneConversation(projected: readonly Block[]): void {
+    const current = new Map(
+      projected.flatMap((block) => (block.id === undefined ? [] : [[block.id, block] as const])),
+    );
+    const retained = this.#transcriptBlocks.flatMap((block) => {
+      if (block.id === undefined || !this.#projectedConversationIds.has(block.id)) return [block];
+      const replacement = current.get(block.id);
+      return replacement === undefined ? [] : [replacement];
+    });
+    this.#transcriptBlocks.splice(0, this.#transcriptBlocks.length, ...retained);
+    this.#committedIds.clear();
+    for (const block of retained) if (block.id !== undefined) this.#committedIds.add(block.id);
+    for (const id of this.#conversationBlockIds) this.#removeBlock(id);
+    this.#conversationBlockIds.clear();
+    this.#projectedConversationIds.clear();
   }
 
   /**
@@ -1560,6 +1596,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#transcript.reset();
     this.#view = undefined;
     this.#conversationBlockIds = new Set();
+    this.#projectedConversationIds.clear();
     this.#steeredMessages.length = 0;
     this.#cancelRequested = false;
     this.#turnClock.reset();
@@ -1668,6 +1705,59 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
   }
 
+  /** Picks an earlier user message, newest selected, without presenting it as a command. */
+  async chooseRewindMessage(choices: readonly RewindChoice[]): Promise<string | undefined> {
+    if (choices.length === 0) return undefined;
+    this.#start();
+    this.#inputActive = false;
+    let selected = choices.length - 1;
+    this.#transientPanel = (width) => {
+      const visible = Math.max(1, this.#height() - 12);
+      const start = Math.max(0, Math.min(selected - visible + 1, choices.length - visible));
+      const rows = choices.slice(start, start + visible).map((choice, index) => {
+        const actual = start + index;
+        const pointer =
+          actual === selected ? this.#theme.colors.cyan(this.#theme.glyph.selectedPointer) : " ";
+        const text = stripTerminalControls(choice.text).replace(/\s+/gu, " ").trim() || "(no text)";
+        const suffix = choice.hasFiles ? " [attachment]" : "";
+        const label = `${choices.length - actual}. ${text}${suffix}`;
+        return `  ${pointer} ${clipVisible(label, Math.max(1, width - 5))}`;
+      });
+      return renderTransientDrawer(
+        [
+          this.#theme.colors.bold("  Choose a message to edit"),
+          this.#theme.colors.dim("  Its whole turn and later turns will be removed from context."),
+          "",
+          ...rows,
+        ],
+        ["↑/↓ move · Enter edit · Esc cancel"],
+        this.#theme,
+        width,
+      );
+    };
+    this.#paint();
+    return await new Promise((resolve) => {
+      this.#transientPanelClose = () => resolve(undefined);
+      this.#consumeKey = (key) => {
+        if (key.type === "up" || key.type === "ctrl-p") {
+          selected = Math.max(0, selected - 1);
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          selected = Math.min(choices.length - 1, selected + 1);
+          this.#paint();
+        } else if (key.type === "enter") {
+          const choice = choices[selected];
+          this.#closeTransientPanel(true);
+          resolve(choice?.messageId);
+        } else if (key.type === "escape" || key.type === "ctrl-c") {
+          this.#closeTransientPanel();
+          resolve(undefined);
+        }
+      };
+      this.#attachInput();
+    });
+  }
+
   /** Shows local application metadata without retaining it in the transcript. */
   async showInfoPanel(text: string): Promise<void> {
     this.#start();
@@ -1711,9 +1801,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
   }
 
-  #closeTransientPanel(): void {
+  #closeTransientPanel(keepCommand = false): void {
     this.#transientPanel = undefined;
-    this.finishCommand({ kind: "dismiss" });
+    if (!keepCommand) this.finishCommand({ kind: "dismiss" });
     this.#consumeKey = undefined;
     this.#transientPanelClose = undefined;
     this.#detachInput();

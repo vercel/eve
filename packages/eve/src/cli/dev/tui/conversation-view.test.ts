@@ -13,9 +13,9 @@ const usage = (inputTokens: number) => ({
   outputTokens: 1,
 });
 
-function turn(turnId: string, runId: string): SessionEvent[] {
+function turn(turnId: string, runId: string, follows: string | null = null): SessionEvent[] {
   return [
-    { data: { cause: { deliveryId: `d_${turnId}` }, follows: null, turnId }, type: "turn.started" },
+    { data: { cause: { deliveryId: `d_${turnId}` }, follows, turnId }, type: "turn.started" },
     { data: { owner: { turnId }, runId }, type: "model.requested" },
     {
       data: { attempt: 0, modelId: "\u001b[31mopenai/gpt\n5\u001b[0m", runId },
@@ -83,7 +83,7 @@ describe("tuiSessionData", () => {
       { data: {}, type: "session.started" },
       ...turn("turn_1", "run_1"),
       { data: { error, outcome: "failed", turnId: "turn_1" }, type: "turn.settled" },
-      ...turn("turn_2", "run_2"),
+      ...turn("turn_2", "run_2", "turn_1"),
       { data: { error, outcome: "failed", turnId: "turn_2" }, type: "turn.settled" },
       { data: { cause: { turnId: "turn_2" }, error, outcome: "failed" }, type: "session.ended" },
     ]);
@@ -93,6 +93,66 @@ describe("tuiSessionData", () => {
       { error, turnId: "turn_2" },
     ]);
     expect(data.sessionFailed).toBe(true);
+  });
+
+  it("uses model and context usage from the selected conversation", () => {
+    const first = turn("turn_1", "run_1");
+    const second = turn("turn_2", "run_2", "turn_1").map((event) =>
+      event.type === "model.started"
+        ? { ...event, data: { ...event.data, modelId: "other/model" } }
+        : event,
+    );
+    const events: SessionEvent[] = [
+      { data: {}, type: "session.started" },
+      ...first,
+      {
+        data: { kind: "model", owner: { runId: "run_1" }, usage: usage(10) },
+        type: "usage.recorded",
+      },
+      { data: { outcome: "completed", turnId: "turn_1" }, type: "turn.settled" },
+      ...second,
+      {
+        data: { kind: "model", owner: { runId: "run_2" }, usage: usage(25) },
+        type: "usage.recorded",
+      },
+      { data: { outcome: "completed", turnId: "turn_2" }, type: "turn.settled" },
+      { type: "context.started", data: { changeId: "change_1", kind: "rewind" } },
+      {
+        type: "context.settled",
+        data: {
+          changeId: "change_1",
+          kind: "rewind",
+          outcome: "completed",
+          selects: { turnId: "turn_1" },
+        },
+      },
+    ];
+    const data = read(events);
+    expect(data.modelId).toBe("openai/gpt 5");
+    expect(data.lastStepUsage?.inputTokens).toBe(10);
+    expect(data.usage.inputTokens).toBe(35);
+  });
+
+  it("hides failures from turns excluded by rewind and clear", () => {
+    const error = { code: "MODEL_FAILED", message: "The model failed." };
+    const events: SessionEvent[] = [
+      { data: {}, type: "session.started" },
+      ...turn("turn_1", "run_1"),
+      { data: { outcome: "completed", turnId: "turn_1" }, type: "turn.settled" },
+      ...turn("turn_2", "run_2", "turn_1"),
+      { data: { error, outcome: "failed", turnId: "turn_2" }, type: "turn.settled" },
+    ];
+    const settled = (selects: null | { turnId: string }): SessionEvent => ({
+      type: "context.settled",
+      data: { changeId: "change_1", kind: "rewind", outcome: "completed", selects },
+    });
+    const started: SessionEvent = {
+      type: "context.started",
+      data: { changeId: "change_1", kind: "rewind" },
+    };
+    expect(read(events).failures).toEqual([{ error, turnId: "turn_2" }]);
+    expect(read([...events, started, settled({ turnId: "turn_1" })]).failures).toEqual([]);
+    expect(read([...events, started, settled(null)]).failures).toEqual([]);
   });
 
   it("reads a failed session's error as the failure of the turn it cancelled", () => {

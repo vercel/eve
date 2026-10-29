@@ -18,6 +18,11 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
   });
 
+  it("parses rewind with an optional exchange number", () => {
+    expect(parsePromptCommand("/rewind")).toEqual({ type: "rewind", argument: "" });
+    expect(parsePromptCommand("/rewind 2")).toEqual({ type: "rewind", argument: "2" });
+  });
+
   it("parses /clear as a context clear", () => {
     expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
   });
