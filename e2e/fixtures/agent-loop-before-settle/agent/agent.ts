@@ -14,10 +14,14 @@ const model = mockModel({
   },
 });
 
+const harness = e2eAgentConfig();
+
 const agent: DefinedAgent = defineAgent({
-  ...e2eAgentConfig(),
+  ...harness,
   model,
   experimental: {
+    // Keep the harness's workflow world beside the loop stage.
+    ...harness.experimental,
     loop: {
       // A critic: a reply without a citation goes back to the model with a note.
       beforeSettle(turn) {
