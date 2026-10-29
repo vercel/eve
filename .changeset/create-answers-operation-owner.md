@@ -2,6 +2,6 @@
 "eve": patch
 ---
 
-Hand every follow-up a losing session candidate accepted to the session that owns its `operationId`.
+Forward messages sent to the losing session of a create race to the running session.
 
-When two `POST /eve/v1/session` requests race for one `operationId`, the run that loses the address now releases its inbox and forwards its initial command and each follow-up it accepted, in order, to the owner. Before, it forwarded only the initial command, so a follow-up sent right away to the losing id was answered 202 and dropped. Creates that don't race are unchanged.
+When two `POST /eve/v1/session` requests create a session for the same `operationId` at once, they can get different session IDs, but only one session runs. Before, a message sent right away to the other session's ID was answered 202 and dropped. Now messages accepted by the other session are forwarded to the running session instead of being dropped. Creates that don't race are unchanged.
