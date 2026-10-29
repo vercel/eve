@@ -217,7 +217,7 @@ export function createChannelAddress<TState = undefined>(input: {
       // may claim it first. Waiting for the owner lets an immediate `send()` find it, and tells
       // the caller whether its history landed: a losing run exits without forwarding anything.
       const claimed = await waitForContinuationOwner(
-        input.runtime,
+        () => input.runtime.resolveContinuation(namespacedToken),
         namespacedToken,
         started.sessionId,
       );
@@ -298,14 +298,18 @@ function withValidatedHistory(payload: SendPayload): SendPayload {
 
 const CREATE_CLAIM_TIMEOUT_MS = 15_000;
 
-async function waitForContinuationOwner(
-  runtime: Runtime,
+/**
+ * Polls `resolveOwner` until a session owns the continuation address a just-started run was
+ * created for. Throws once {@link CREATE_CLAIM_TIMEOUT_MS} passes without an owner.
+ */
+export async function waitForContinuationOwner(
+  resolveOwner: () => Promise<{ readonly sessionId: string } | undefined>,
   continuationToken: string,
   startedSessionId: string,
 ): Promise<{ readonly sessionId: string }> {
   const deadline = Date.now() + CREATE_CLAIM_TIMEOUT_MS;
   for (let delayMs = 25; ; delayMs = Math.min(delayMs * 2, 500)) {
-    const owner = await runtime.resolveContinuation(continuationToken);
+    const owner = await resolveOwner();
     if (owner !== undefined) return owner;
     if (Date.now() + delayMs > deadline) {
       // Unclaimed, the address may still go to this run or to a concurrent one, so neither
