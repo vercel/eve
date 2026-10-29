@@ -101,7 +101,7 @@ import type {
   EveEventContext,
 } from "#eve-channel/types.js";
 import { listEveCommandsResponse, runEveCommandResponse } from "#eve-channel/commands.js";
-import { assertCommandNames } from "#public/definitions/command.js";
+import { assertCommandNames, sessionCommands } from "#public/definitions/command.js";
 
 export * from "#eve-channel/types.js";
 export { eveVercelOidc, type EveVercelOidcOptions } from "#eve-channel/auth.js";
@@ -165,7 +165,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
   const localDevConfigured = (Array.isArray(input.auth) ? input.auth : [input.auth]).some(
     isLocalDevAuth,
   );
-  const commands = input.commands;
+  const commands = input.commands ?? sessionCommands;
   assertCommandNames("eve channel", commands);
 
   return defineChannel<undefined, EveEventContext>({

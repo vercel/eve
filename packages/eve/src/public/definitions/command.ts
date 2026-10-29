@@ -95,6 +95,47 @@ export function defineCommand(definition: CommandDefinition): CommandDefinition 
 }
 
 /**
+ * The conversation controls every client offers: `new` (alias `reset`), `clear`, `compact`, and
+ * `cancel`. `eveChannel()` offers them when `commands` is omitted; spread them in to keep them
+ * alongside your own: `commands: { ...sessionCommands, standup }`.
+ */
+export const sessionCommands = {
+  new: defineCommand({
+    description: "Start a fresh session",
+    aliases: ["reset"],
+    session: "required",
+    async run({ session }) {
+      await session.end();
+      return { message: "Session ended. The next message starts a new one." };
+    },
+  }),
+  clear: defineCommand({
+    description: "Cancel the running turn and clear the session context",
+    session: "required",
+    async run({ session }) {
+      await session.clear();
+      return { message: "Clearing the session context." };
+    },
+  }),
+  compact: defineCommand({
+    description: "Compact the current session context",
+    session: "required",
+    async run({ session }) {
+      await session.compact();
+      return { message: "Compaction requested." };
+    },
+  }),
+  cancel: defineCommand({
+    description: "Cancel the running turn",
+    session: "required",
+    async run({ session }) {
+      await session.cancel();
+      return { message: "Cancellation requested." };
+    },
+  }),
+} satisfies CommandDefinitions;
+
+/**
  * Rejects names a person cannot type as `/name`, and names or aliases two commands share. The
  * 32-character cap matches Slack's slash commands.
  */
