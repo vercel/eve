@@ -53,7 +53,57 @@ describe("resolveConnectionDefinition", () => {
     expect(resolved.headers).toBe(headers);
     expect(resolved.toolCall).toBe(toolCall);
   });
+
+  it("keeps an object-form approval so its tools stay gated", async () => {
+    const request = () => "user-approval" as const;
+    const response = () => ({ status: "allowed" as const });
+    const resolved = await resolveConnectionDefinition(
+      approvalDefinition,
+      approvalModuleMap({ request, response }),
+      undefined,
+    );
+
+    expect(resolved.approval).toEqual({ request, prompt: undefined, response });
+  });
+
+  it("rejects a malformed approval instead of leaving the connection ungated", async () => {
+    await expect(
+      resolveConnectionDefinition(
+        approvalDefinition,
+        approvalModuleMap({ response: () => ({ status: "allowed" }) }),
+        undefined,
+      ),
+    ).rejects.toThrow(/Connection "billing" at "connections\/billing.ts"/u);
+  });
 });
+
+const approvalDefinition: CompiledConnectionDefinition = {
+  connectionName: "billing",
+  description: "Billing",
+  logicalPath: "connections/billing.ts",
+  protocol: "mcp",
+  sourceId: "connections/billing",
+  sourceKind: "module",
+  url: "https://billing.example.com/mcp",
+};
+
+function approvalModuleMap(approval: unknown): CompiledModuleMap {
+  return {
+    nodes: {
+      [ROOT_COMPILED_AGENT_NODE_ID]: {
+        modules: {
+          [approvalDefinition.sourceId]: {
+            default: {
+              approval,
+              description: approvalDefinition.description,
+              url: approvalDefinition.url,
+            },
+          },
+        },
+      },
+    },
+  };
+}
 
 describe("toolResultFrom identity for connections sharing a host (#202)", () => {
   it("narrows each same-host OpenAPI connection through a copy of its definition", async () => {

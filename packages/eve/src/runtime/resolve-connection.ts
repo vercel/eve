@@ -7,6 +7,7 @@ import {
   normalizeOpenApiConnectionDefinition,
 } from "#internal/authored-definition/connection.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import {
   connectionDefinitionKey,
   registerDefinitionSource,
@@ -173,8 +174,11 @@ export async function resolveConnectionDefinition(
       result.spec = resolvedRecord.spec as ResolvedConnectionDefinition["spec"];
     }
 
-    if (typeof resolvedRecord.approval === "function") {
-      result.approval = resolvedRecord.approval as ResolvedConnectionDefinition["approval"];
+    if (resolvedRecord.approval !== undefined) {
+      result.approval = normalizeApproval(
+        resolvedRecord.approval,
+        `Connection "${definition.connectionName}" at "${definition.logicalPath}": "approval" must be a policy function or { request, prompt?, response? }.`,
+      );
     }
 
     return result;
