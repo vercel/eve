@@ -267,8 +267,6 @@ export type AgentTUIRenderer = {
   setLogDisplayMode?(mode: LogDisplayMode): void;
   /** Replaces the commands the composer offers once the agent's channel commands load. */
   setPromptCommands?(commands: readonly PromptCommandSpec[]): void;
-  /** Shows that the running turn is being cancelled, after a channel command cancelled it. */
-  showCancelling?(): void;
   /**
    * Commits any delayed local dev build errors immediately before dispatching
    * a user prompt. Renderers without process-log capture ignore it.
@@ -865,9 +863,8 @@ export class EveTUIRunner {
   }
 
   /**
-   * Runs an eve channel command on the server, in the current session when there is one. The
-   * controls it applied are mirrored locally, the way the TUI's own controls would apply them, and
-   * a returned `send` goes out as the next message.
+   * Runs an eve channel command on the server, in the current session when there is one. A command
+   * that ended the session starts a fresh conversation here.
    */
   async #runChannelCommand(
     command: Extract<PromptCommand, { type: "channel" }>,
@@ -891,11 +888,7 @@ export class EveTUIRunner {
       });
       return;
     }
-    if (result.controls?.includes("cancel") === true) {
-      this.#cancelRequested = true;
-      this.#renderer.showCancelling?.();
-    }
-    if (result.controls?.includes("end") === true) {
+    if (result.ended === true) {
       this.#resetConversation();
       this.#renderer.reset?.();
     }
@@ -904,7 +897,8 @@ export class EveTUIRunner {
         ? { kind: "dismiss" }
         : { kind: "result", message: result.message },
     );
-    if (result.send !== undefined) this.#submitMessage(result.send);
+    // eve already sent the command's follow-up as the caller; the turn arrives on the stream.
+    if (result.delivery !== undefined) this.#store.follow(result.delivery);
   }
 
   /**

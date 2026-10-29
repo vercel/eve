@@ -183,11 +183,11 @@ export class Client {
       body: JSON.stringify({ argument: options.argument ?? "" }),
       signal: options.signal,
     });
-    const { message, send, controls } = parseCommandResponse(ChannelCommandResultSchema, payload);
-    const result: { message?: string; send?: string; controls?: typeof controls } = {};
+    const { message, delivery, ended } = parseCommandResponse(ChannelCommandResultSchema, payload);
+    const result: { -readonly [K in keyof ChannelCommandResult]: ChannelCommandResult[K] } = {};
     if (message !== undefined) result.message = message;
-    if (send !== undefined) result.send = send;
-    if (controls !== undefined) result.controls = controls;
+    if (delivery !== undefined) result.delivery = delivery;
+    if (ended !== undefined) result.ended = ended;
     return result;
   }
 

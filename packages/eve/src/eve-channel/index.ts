@@ -226,12 +226,43 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (sessionId instanceof Response) return sessionId;
         const body = await parseCommandBody(req);
         if (body instanceof Response) return body;
+        // `run` reads `session.id` before any control dispatches, so it must name a real session.
+        if (!(await getRun(sessionId).exists)) {
+          return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+        }
+        const caller = sessionAuthFromResult(authResult);
+        const session = attachSession(sessionId);
         return await runEveCommandResponse({
           commands,
           name: params.name ?? "",
           argument: body.argument,
-          caller: sessionAuthFromResult(authResult),
-          session: attachSession(sessionId),
+          caller,
+          session: {
+            handle: session,
+            // The same path as a typed follow-up to this session, so `onMessage` decides its auth.
+            async deliver(message) {
+              const resolved = await resolveOnMessage({
+                auth: caller,
+                config: input,
+                message,
+                request: req,
+                sessionId,
+              });
+              if (resolved instanceof Response) return resolved;
+              return await session.send(
+                message,
+                attachClientContext(
+                  {
+                    auth: resolved.auth,
+                    context: resolved.context,
+                    history: resolved.history,
+                    title: resolved.title,
+                  },
+                  resolved.clientContext,
+                ),
+              );
+            },
+          },
         });
       }),
 

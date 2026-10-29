@@ -8,14 +8,13 @@ export type ChannelCommandInfo = CommandInfo;
 /** Result of running an eve channel slash command. */
 export type ChannelCommandResult = CommandRunResult;
 
-const CONTROLS = ["cancel", "clear", "compact", "end"] as const;
-
 export const ChannelCommandListSchema = z.object({
   ok: z.literal(true),
   commands: z.array(
     z.object({
       name: z.string(),
       description: z.string(),
+      arguments: z.enum(["none", "text"]),
       argumentHint: z.string().optional(),
       aliases: z.array(z.string()).optional(),
       session: z.enum(["optional", "required"]),
@@ -26,8 +25,8 @@ export const ChannelCommandListSchema = z.object({
 export const ChannelCommandResultSchema = z.object({
   ok: z.literal(true),
   message: z.string().optional(),
-  send: z.string().optional(),
-  controls: z.array(z.enum(CONTROLS)).optional(),
+  delivery: z.object({ sessionId: z.string(), deliveryId: z.string() }).optional(),
+  ended: z.literal(true).optional(),
 });
 
 /**

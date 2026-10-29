@@ -30,6 +30,7 @@ import { defineCommand } from "eve/channels";
 
 export const escalate = defineCommand({
   description: "Hand this conversation to a person on the support team",
+  arguments: "text",
   argumentHint: "[reason]",
   aliases: ["human"],
   session: "required",
@@ -54,11 +55,14 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 
 **Commands and names**
 
-- A command definition doesn't depend on any one channel, so other channels can offer the same
-  definitions later.
+- Commands belong to the eve channel. The definition has nothing eve-channel-specific in it, but
+  no other channel takes it yet.
 - `commands` is keyed by the name without the slash. Names and aliases match
   `^[a-z][a-z0-9-]{0,31}$`, which also fits Slack's 32-character limit.
 - The channel throws when it is built if a name is invalid or two commands share a name or alias.
+- `arguments: "none" | "text"` (default `"none"`) decides whether text may follow the name.
+  `argumentHint` is display only. Clients match a `"none"` command only typed alone, so a message
+  that starts with `/clear` stays a message, and the routes answer `400` to an argument.
 
 **`run` and its context**
 
@@ -67,8 +71,11 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 - `session` is the client's current session. It offers `cancel`, `clear`, `compact`, and `end`,
   with the caller's auth already bound.
 - `session` deliberately has no `send`. Continuing the conversation goes through the returned
-  `send`, which the client submits as the caller's own message, so `onMessage` and session auth
-  apply to it as they do to typed input.
+  `send`, which eve delivers into the command's session on the server, through `onMessage` with
+  the caller's auth, the same path as a typed follow-up. The turn arrives on the session's
+  stream, under the channel's turn policy, and the response carries its delivery receipt.
+- Session IDs are minted by the server, so a session-free command has nowhere to send: only a
+  command that received a `session` may return `send`.
 
 **`session: "required"`**
 
@@ -83,16 +90,21 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 
 ## Wire protocol
 
-| Route                                            | Body            | Response                                                                      |
-| ------------------------------------------------ | --------------- | ----------------------------------------------------------------------------- |
-| `GET /eve/v1/commands`                           | none            | `{ ok, commands: [{ name, description, argumentHint?, aliases?, session }] }` |
-| `POST /eve/v1/commands/:name`                    | `{ argument? }` | `{ ok, message?, send?, controls? }`                                          |
-| `POST /eve/v1/session/:sessionId/commands/:name` | `{ argument? }` | `{ ok, message?, send?, controls? }`                                          |
+| Route                                            | Body            | Response                                                                                 |
+| ------------------------------------------------ | --------------- | ---------------------------------------------------------------------------------------- |
+| `GET /eve/v1/commands`                           | none            | `{ ok, commands: [{ name, description, arguments, argumentHint?, aliases?, session }] }` |
+| `POST /eve/v1/commands/:name`                    | `{ argument? }` | `{ ok, message? }`                                                                       |
+| `POST /eve/v1/session/:sessionId/commands/:name` | `{ argument? }` | `{ ok, message?, delivery?, ended? }`                                                    |
 
 - Every route uses the channel's `auth`. The session-scoped route checks the same thing as
-  `/session/:id/clear`: the caller passes `auth` and names the session.
-- `controls` lists the session controls the command applied, so a client can mirror them. For
-  example, the TUI resets its view after `end` and shows a pending cancel after `cancel`.
+  `/session/:id/clear`, that the caller passes `auth` and names the session, and answers `404`
+  before `run` when the session doesn't exist, so `session.id` is always real. eve has no
+  per-session ownership check on any session route; adding one is a separate change across all
+  of them.
+- Clears and compactions show up on the session's stream, so the response doesn't report them.
+  `ended` tells the client to start a new session; `delivery` is the receipt for `send`.
+- These routes are the user-facing layer over the session controls. `/session/:id/clear` and
+  the other control routes stay the low-level API that `session.clear()` and SDKs use.
 - Unknown names or aliases return `404`. A session-required command on the session-free route
   returns `409`, and stranded or inactive sessions return the same `409` bodies as the other
   session routes.
@@ -125,6 +137,9 @@ that commands don't appear automatically when the extension is mounted.
 
 - **Argument completion:** a `complete(argument)` hook on `defineCommand`, served to the TUI's
   inline argument typeahead the way `/model` and `/add` complete today.
+- **Per-caller lists:** let listing see `{ caller, session? }`, or add an `enabled(ctx)` predicate,
+  so a command can be hidden per caller (admin-only) or per session state. ACP and MCP both
+  support lists that change. Until then, `run` can check `caller` and answer with a `message`.
 
 ## Later
 
