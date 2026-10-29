@@ -676,6 +676,19 @@ export function SessionTimeline(): JSX.Element {
     setOverflow((o) => (o.above === above && o.below === below ? o : { above, below }));
   };
 
+  // Resizing the box or reflowing its text can start or stop the overflow without a scroll
+  // event, and the overflow decides whether the box contains the page's scroll. Both nodes
+  // remount when the platform changes.
+  useEffect(() => {
+    const list = listRef.current;
+    const content = contentRef.current;
+    if (!(list && content)) return;
+    const observer = new ResizeObserver(() => measure(list));
+    observer.observe(list);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [platform]);
+
   const play = () => {
     setCount(0);
     setEnded(false);

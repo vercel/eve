@@ -270,6 +270,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? FOLLOW_UP - 1;
   const list = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLOListElement>(null);
   // Which edges have messages scrolled past them, so only those edges fade, as in the hero.
   const [overflow, setOverflow] = useState({ above: false, below: false });
 
@@ -290,6 +291,18 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
     measure();
   }, [demo, shown]);
 
+  // Resizing the box or reflowing its text can start or stop the overflow without a scroll
+  // event, and the overflow decides whether the box contains the page's scroll.
+  useEffect(() => {
+    const frame = list.current;
+    const messages = content.current;
+    if (!(frame && messages)) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    observer.observe(messages);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
       // Contain scrolling only while there is something to scroll: Chrome 144+ applies
@@ -306,7 +319,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
         maskImage: `linear-gradient(to bottom, ${overflow.above ? "transparent, black 40px" : "black"}, ${overflow.below ? "black calc(100% - 40px), transparent" : "black"})`,
       }}
     >
-      <ol className="m-0 flex list-none flex-col p-0 px-4 pb-3 [--reply-width:34rem]">
+      <ol className="m-0 flex list-none flex-col p-0 px-4 pb-3 [--reply-width:34rem]" ref={content}>
         {shown >= 1 ? (
           <SlackMessage
             author={DANA}
