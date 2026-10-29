@@ -330,7 +330,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #captureForeignOutput: boolean;
   readonly #diagnostics?: DevDiagnostics;
-  readonly #availablePromptCommands: readonly PromptCommandSpec[];
+  #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
 
@@ -934,20 +934,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
             const prompt =
               argumentOpen !== undefined && argumentSelected !== undefined
                 ? argumentTypeaheadCompletion(argumentOpen, argumentSelected)
-                : selected !== undefined && parsePromptCommand(editor.text) === null
+                : selected !== undefined &&
+                    parsePromptCommand(editor.text, this.#availablePromptCommands) === null
                   ? typeaheadCompletion(selected).trimEnd()
                   : editor.text;
             // An empty (or whitespace-only) buffer never submits.
             if (prompt.trim().length === 0) break;
-            if (promptCommandSpec(prompt)?.spec.history !== "omit") this.#promptHistory.add(prompt);
+            if (promptCommandSpec(prompt, this.#availablePromptCommands)?.spec.history !== "omit")
+              this.#promptHistory.add(prompt);
             this.#draft = EMPTY_LINE;
             this.#syncInput(EMPTY_LINE);
-            if (isPromptControlCommand(prompt)) {
+            if (isPromptControlCommand(prompt, this.#availablePromptCommands)) {
               // Commands echo as their own line so the elbow-connected
               // outcome has an invocation to hang under — never as a user
               // chat message.
               this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
-              if (working && parsePromptCommand(prompt)?.type === "cancel") {
+              if (
+                working &&
+                parsePromptCommand(prompt, this.#availablePromptCommands)?.type === "cancel"
+              ) {
                 this.#cancelRequested = true;
               }
             } else {
@@ -3411,6 +3416,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** The log sources the transcript currently renders. */
   logDisplayMode(): LogDisplayMode {
     return this.#logs;
+  }
+
+  showCancelling(): void {
+    this.#cancelRequested = true;
+    this.#paint();
+  }
+
+  /** Replaces the commands typeahead and submission recognize, such as after the agent reloads. */
+  setPromptCommands(commands: readonly PromptCommandSpec[]): void {
+    this.#availablePromptCommands = commands;
   }
 
   /**

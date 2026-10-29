@@ -54,6 +54,7 @@ import {
   formatPromptCommandHelp,
   parsePromptCommand,
   PROMPT_COMMANDS,
+  withChannelPromptCommands,
   type PromptCommand,
   type PromptCommandSpec,
   type ArgumentTypeaheadCommand,
@@ -264,6 +265,10 @@ export type AgentTUIRenderer = {
    * positions. Used by the `/loglevel` command.
    */
   setLogDisplayMode?(mode: LogDisplayMode): void;
+  /** Replaces the commands the composer offers once the agent's channel commands load. */
+  setPromptCommands?(commands: readonly PromptCommandSpec[]): void;
+  /** Shows that the running turn is being cancelled, after a channel command cancelled it. */
+  showCancelling?(): void;
   /**
    * Commits any delayed local dev build errors immediately before dispatching
    * a user prompt. Renderers without process-log capture ignore it.
@@ -437,7 +442,10 @@ export class EveTUIRunner {
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
   #startupActive = true;
   readonly #promptCommandHandler?: PromptCommandHandler;
-  readonly #availablePromptCommands: readonly PromptCommandSpec[];
+  readonly #builtinPromptCommands: readonly PromptCommandSpec[];
+  /** Built-ins plus the eve channel's commands, once they load. */
+  #availablePromptCommands: readonly PromptCommandSpec[];
+  #channelCommandsRevision = 0;
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #remoteAuthFlow?: RemoteAuthFlow;
@@ -538,7 +546,8 @@ export class EveTUIRunner {
     if (options.promptCommandHandler !== undefined) {
       this.#promptCommandHandler = options.promptCommandHandler;
     }
-    this.#availablePromptCommands = options.availablePromptCommands ?? PROMPT_COMMANDS;
+    this.#builtinPromptCommands = options.availablePromptCommands ?? PROMPT_COMMANDS;
+    this.#availablePromptCommands = this.#builtinPromptCommands;
     if (options.remote !== undefined) {
       this.#remoteAuthFlow = options.remote.runAuthFlow;
       this.#remoteConnection = createRemoteConnectionController({
@@ -660,6 +669,8 @@ export class EveTUIRunner {
     let prompt: string | undefined;
     this.#renderer.setStartupPhase?.("starting");
     await this.#loadInitialAgentInfo();
+    // Load the channel's commands before the first prompt, so a typed command can't race them.
+    await this.#refreshChannelCommands();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
@@ -683,6 +694,7 @@ export class EveTUIRunner {
       if (access?.kind === "authenticated") {
         const connection = this.#remoteConnection.current().connection;
         if (connection.state === "ready") this.#replaceAgentInfo(connection.info);
+        await this.#refreshChannelCommands();
       } else if (access?.kind === "failed" || access?.kind === "unavailable") {
         startupOutcome = {
           failed: true,
@@ -762,7 +774,7 @@ export class EveTUIRunner {
       }
       const text = prompt;
       prompt = undefined;
-      const command = parsePromptCommand(text);
+      const command = parsePromptCommand(text, this.#availablePromptCommands);
       if (command === null) {
         this.#submitMessage(text);
         continue;
@@ -847,7 +859,69 @@ export class EveTUIRunner {
       case "extension":
         await this.#executeExtensionCommand(command, title, { trigger: "command" });
         return;
+      case "channel":
+        return await this.#runChannelCommand(command);
     }
+  }
+
+  /**
+   * Runs an eve channel command on the server, in the current session when there is one. The
+   * controls it applied are mirrored locally, the way the TUI's own controls would apply them, and
+   * a returned `send` goes out as the next message.
+   */
+  async #runChannelCommand(
+    command: Extract<PromptCommand, { type: "channel" }>,
+  ): Promise<undefined> {
+    const sessionId = this.#store.snapshot.session?.sessionId;
+    if (sessionId === undefined && command.session === "required") {
+      this.#finishCommand({ kind: "result", summary: `/${command.name} needs an active session` });
+      return;
+    }
+    let result: Awaited<ReturnType<Client["runCommand"]>>;
+    try {
+      result = await this.#client.runCommand(command.name, {
+        argument: command.argument,
+        ...(sessionId !== undefined && { sessionId }),
+      });
+    } catch (error) {
+      this.#finishCommand({
+        kind: "result",
+        message: this.#strandedSessionNotice(error) ?? this.#formatTransportError(error),
+        summary: `/${command.name} failed`,
+      });
+      return;
+    }
+    if (result.controls?.includes("cancel") === true) {
+      this.#cancelRequested = true;
+      this.#renderer.showCancelling?.();
+    }
+    if (result.controls?.includes("end") === true) {
+      this.#resetConversation();
+      this.#renderer.reset?.();
+    }
+    this.#finishCommand(
+      result.message === undefined
+        ? { kind: "dismiss" }
+        : { kind: "result", message: result.message },
+    );
+    if (result.send !== undefined) this.#submitMessage(result.send);
+  }
+
+  /**
+   * Loads the eve channel's commands into discovery. Best-effort: a server without the route, or
+   * a caller it rejects, keeps the built-ins.
+   */
+  async #refreshChannelCommands(): Promise<void> {
+    const revision = ++this.#channelCommandsRevision;
+    let channel: Awaited<ReturnType<Client["commands"]>>;
+    try {
+      channel = await this.#client.commands();
+    } catch {
+      return;
+    }
+    if (this.#disposed || revision !== this.#channelCommandsRevision) return;
+    this.#availablePromptCommands = withChannelPromptCommands(this.#builtinPromptCommands, channel);
+    this.#renderer.setPromptCommands?.(this.#availablePromptCommands);
   }
 
   /** Sends a message; while work runs it steers the active turn instead. */
@@ -1580,6 +1654,7 @@ export class EveTUIRunner {
 
   #handleRuntimeArtifactsChanged(): void {
     void this.#refreshAgentInfo(true);
+    void this.#refreshChannelCommands();
   }
 
   /** Agents' own tool failures reach the diagnostics log whatever the subagent display mode. */

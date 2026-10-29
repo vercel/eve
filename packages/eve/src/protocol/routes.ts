@@ -28,6 +28,12 @@ export const AGENT_INFO_FORBIDDEN_CODE = "info_forbidden";
 export const AGENT_INFO_FORBIDDEN_MESSAGE =
   'Agent info is served only to operator credentials (principalType "service", "runtime", or "local-dev"). Authenticate as a service principal, for example with Vercel OIDC, or return allowAgentInfo: true from the eve channel\'s auth for this caller.';
 
+/** Stable route listing the eve channel's slash commands. */
+export const EVE_COMMANDS_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/commands`;
+
+/** Stable route pattern for running one eve channel slash command. */
+export const EVE_COMMAND_ROUTE_PATTERN = `${EVE_COMMANDS_ROUTE_PATH}/:name`;
+
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 
@@ -42,6 +48,9 @@ export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:ses
 
 /** Stable route pattern for clearing one exact session ID. */
 export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
+
+/** Stable route pattern for running one eve channel slash command inside one exact session ID. */
+export const EVE_SESSION_COMMAND_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/commands/:name`;
 
 /** Stable route pattern for ending one exact session ID. */
 export const EVE_SESSION_END_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/end`;

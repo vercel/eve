@@ -13,7 +13,9 @@ export type PromptCommand =
   | { type: "info" }
   | { type: "loglevel"; argument: string }
   | { type: "traces"; argument: string }
-  | { type: "extension"; name: PromptCommandExtensionName; argument: string };
+  | { type: "extension"; name: PromptCommandExtensionName; argument: string }
+  /** A command the agent's eve channel offers, run on the server. */
+  | { type: "channel"; name: string; argument: string; session: "optional" | "required" };
 
 /**
  * Metadata for one slash command. The registry describes commands — their
@@ -211,21 +213,25 @@ export function isPromptCommandAvailableFor(
  * starts a fresh session and transcript; `/cancel` stops the running turn;
  * `/clear` stops the running turn and clears context in place; `/compact` queues context compaction; `/exit` (and
  * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
- * outside the runner. Anything else — including unknown `/text` — is a normal
- * message.
+ * outside the runner; the eve channel's commands come from `commands`. Anything else —
+ * including unknown `/text` — is a normal message.
  */
-export function parsePromptCommand(prompt: string): PromptCommand | null {
-  const match = promptCommandSpec(prompt);
+export function parsePromptCommand(
+  prompt: string,
+  commands: readonly PromptCommandSpec[] = PROMPT_COMMANDS,
+): PromptCommand | null {
+  const match = promptCommandSpec(prompt, commands);
   return match === undefined ? null : match.spec.build(match.argument);
 }
 
 /** Resolve an invocation and its history policy from the same command definition. */
 export function promptCommandSpec(
   prompt: string,
+  commands: readonly PromptCommandSpec[] = PROMPT_COMMANDS,
 ): { spec: PromptCommandSpec; argument: string } | undefined {
   const trimmed = prompt.trim();
   if (!trimmed.startsWith("/")) return undefined;
-  for (const spec of PROMPT_COMMANDS) {
+  for (const spec of commands) {
     for (const alias of [spec.name, ...spec.aliases]) {
       const token = `/${alias}`;
       if (trimmed === token) return { spec, argument: "" };
@@ -238,8 +244,45 @@ export function promptCommandSpec(
 }
 
 /** True for prompts that are commands, which never echo as user messages. */
-export function isPromptControlCommand(prompt: string): boolean {
-  return parsePromptCommand(prompt) !== null;
+export function isPromptControlCommand(
+  prompt: string,
+  commands: readonly PromptCommandSpec[] = PROMPT_COMMANDS,
+): boolean {
+  return parsePromptCommand(prompt, commands) !== null;
+}
+
+/**
+ * Appends the eve channel's commands after the built-ins. A built-in name or alias wins, so an
+ * agent cannot shadow `/exit` or `/new`.
+ */
+export function withChannelPromptCommands(
+  builtins: readonly PromptCommandSpec[],
+  channel: readonly {
+    name: string;
+    description: string;
+    argumentHint?: string;
+    aliases?: readonly string[];
+    session: "optional" | "required";
+  }[],
+): readonly PromptCommandSpec[] {
+  const taken = new Set(builtins.flatMap((spec) => [spec.name, ...spec.aliases]));
+  const added = channel
+    .filter((command) => !taken.has(command.name))
+    .map((command): PromptCommandSpec => ({
+      name: command.name,
+      aliases: (command.aliases ?? []).filter((alias) => !taken.has(alias)),
+      description: command.description,
+      argumentHint: command.argumentHint,
+      takesArgument: true,
+      history: "keep",
+      build: (argument) => ({
+        type: "channel",
+        name: command.name,
+        argument,
+        session: command.session,
+      }),
+    }));
+  return added.length === 0 ? builtins : [...builtins, ...added];
 }
 
 /**

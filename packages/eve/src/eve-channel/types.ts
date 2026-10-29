@@ -14,6 +14,7 @@ import type {
   ChannelEvents,
 } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { CommandDefinitions } from "#public/definitions/command.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 export type { ForwardedAssertion, TrustedForwarders } from "#channel/forwarded-principal.js";
@@ -204,6 +205,14 @@ export interface EveChannelConfig {
    * the event data, {@link EveEventContext}, and `SessionContext` (the same shape as custom channels).
    */
   readonly events?: EveChannelEvents;
+  /**
+   * Slash commands offered to eve channel clients, keyed by name without the slash. Names are
+   * lowercase letters, digits, and hyphens, starting with a letter. Clients list them from
+   * `GET /eve/v1/commands` and run one with `POST /eve/v1/commands/:name`, or inside a session
+   * with `POST /eve/v1/session/:sessionId/commands/:name`; every route uses {@link auth}. A
+   * client's built-in command wins over a same-named channel command.
+   */
+  readonly commands?: CommandDefinitions;
 }
 
 /**

@@ -93,6 +93,9 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
 - `POST /eve/v1/session/:sessionId/end` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
+- `GET /eve/v1/commands` (list the channel's [slash commands](#slash-commands))
+- `POST /eve/v1/commands/:name` (run one slash command outside a session)
+- `POST /eve/v1/session/:sessionId/commands/:name` (run one slash command inside a session)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
@@ -390,6 +393,69 @@ export default eveChannel({
 ```
 
 `onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+
+### Slash commands
+
+`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. Declare a command with `defineCommand` from `eve/channels`:
+
+```ts title="agent/lib/commands.ts"
+import { defineCommand } from "eve/channels";
+
+import { openIssueCount } from "./issues";
+
+export const triage = defineCommand({
+  description: "Triage open issues",
+  argumentHint: "[label]",
+  aliases: ["t"],
+  async run({ argument }) {
+    const label = argument || "all";
+    return {
+      message: `${await openIssueCount(label)} open issues labeled ${label}`,
+      send: `Triage the open issues labeled ${label}.`,
+    };
+  },
+});
+```
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+import { triage } from "../lib/commands";
+
+export default eveChannel({
+  auth: [vercelOidc(), localDev()],
+  commands: { triage },
+});
+```
+
+The key is the command name, typed as `/triage`; `aliases` adds more names, such as `/t`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
+
+`run` receives:
+
+- `argument`: the trimmed text after the name, or an empty string.
+- `caller`: the route-auth result.
+- `session`: the client's current session, when it has one. `session.clear()`, `compact()`, `cancel()`, and `end()` apply as the caller and resolve once eve accepts them.
+
+Set `session: "required"` for a command that only makes sense in a conversation. `run` then always receives `session`, clients don't run the command before the first message, and the session-free route answers `409`:
+
+```ts
+export const clear = defineCommand({
+  description: "Clear the session context and keep the session",
+  session: "required",
+  async run({ session }) {
+    await session.clear();
+    return { message: "Clearing the session context." };
+  },
+});
+```
+
+`run` returns an optional result:
+
+- `message` is shown to the caller.
+- `send` is submitted as the caller's next message through the normal message route, so `onMessage` and session auth apply to it as they would to typed input.
+
+Return nothing for a command that only has side effects. Every command route uses the channel's `auth` policy. A session-scoped command checks the same thing as the other session routes: the caller passes `auth` and names the session. `GET /eve/v1/commands` returns `{ ok: true, commands: [{ name, description, argumentHint?, aliases?, session }] }`. Both run routes accept `{ argument?: string }` (at most 8,192 characters) and return `{ ok: true, message?, send?, controls? }`. `controls` lists the session controls the command applied (`cancel`, `clear`, `compact`, `end`) so a client can update its view; the terminal UI starts a fresh conversation after `end`. An unknown name or alias returns `404`. A stranded or inactive session returns the same `409` as the other session routes. When `run` throws, the route logs the error and returns a generic `500` with an `errorId`. The TypeScript client exposes the routes as `client.commands()` and `client.runCommand(name, { argument, sessionId })`.
 
 ### Turn context
 

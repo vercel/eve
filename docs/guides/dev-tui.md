@@ -39,6 +39,8 @@ When a message or stream reconnection reaches a [stranded session](./deployment/
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
 
+The agent can add its own commands through the [eve channel's `commands`](../channels/eve#slash-commands). They appear after the built-in commands, locally and through `eve remote connect`, and refresh when the agent reloads.
+
 ## Set up a new agent
 
 After interactive `eve init`, the TUI opens directly. eve keeps the project's selected connection. For a new connection, it checks explicit environment credentials, the saved machine default, and then the Vercel CLI's current team. Existing project OIDC connections remain supported. Automatic Vercel reuse validates account access without creating or linking a project.
