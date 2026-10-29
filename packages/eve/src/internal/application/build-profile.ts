@@ -39,6 +39,8 @@ interface ApplicationBuildProfileTiming {
 
 /** Stable JSON document written by `eve build --profile <path>`. */
 export interface ApplicationBuildProfile {
+  /** Build identity exposed to the Workflow World; self-hosted output only. */
+  readonly deploymentId?: string | undefined;
   readonly durationMs: number;
   readonly kind: "eve-build-profile";
   readonly output: ApplicationBuildProfileOutput;
@@ -143,11 +145,13 @@ export class ApplicationBuildProfiler {
 
 /** Creates the versioned report shape from completed timings and output measurements. */
 export function createApplicationBuildProfile(input: {
+  readonly deploymentId?: string | undefined;
   readonly output: ApplicationBuildProfileOutput;
   readonly target: ApplicationBuildProfileTarget;
   readonly timing: ApplicationBuildProfileTiming;
 }): ApplicationBuildProfile {
   return {
+    deploymentId: input.deploymentId,
     durationMs: input.timing.durationMs,
     kind: "eve-build-profile",
     output: input.output,

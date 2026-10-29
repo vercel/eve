@@ -62,7 +62,10 @@ describe("eve agent info route", () => {
 
     const { agentRoot, appRoot } = await createAppRoot("eve-agent-info-route-", APP_ROOT_OPTIONS);
 
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "tools"), { recursive: true });
     await writeFile(
@@ -139,7 +142,10 @@ describe("eve agent info route", () => {
       APP_ROOT_OPTIONS,
     );
 
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
     await compileAgent({
@@ -163,7 +169,10 @@ describe("eve agent info route", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await writeFile(
       join(agentRoot, "channels", "eve.mjs"),

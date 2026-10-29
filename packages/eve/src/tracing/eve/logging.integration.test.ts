@@ -6,7 +6,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { expect, it, vi } from "vitest";
-import { withCapture } from "#compiled/@eve/tracing/otel.js";
+import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 it("keeps logger-to-span error details behind the active output policy", async () => {

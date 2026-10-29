@@ -27,7 +27,7 @@ const colorQuestion = {
 
 describe("askQuestion", () => {
   it("defines a blocking workflow tool that asks through ctx.ask()", async () => {
-    const definition = askQuestion();
+    const definition = askQuestion;
     const ask = vi.fn().mockResolvedValue({ optionId: "Blue", status: "answered" });
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);

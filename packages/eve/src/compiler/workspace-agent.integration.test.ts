@@ -6,10 +6,16 @@ import { describe, expect, it } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 
-const rootConfig =
-  "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n";
-const peerConfig =
-  "export default { description: 'Research product questions.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n";
+const rootConfig = [
+  'import { defineAgent } from "eve";',
+  "export default defineAgent({ model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });",
+  "",
+].join("\n");
+const peerConfig = [
+  'import { defineAgent } from "eve";',
+  "export default defineAgent({ description: 'Research product questions.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });",
+  "",
+].join("\n");
 
 function workspaceFiles(subagent: string) {
   return {
@@ -36,7 +42,7 @@ describe("Vercel workspace subagent compilation", () => {
     const app = await createWorkspace(
       "eve-workspace-subagent-description-",
       [
-        'import { defineWorkspaceAgent } from "eve";',
+        'import { defineWorkspaceAgent } from "eve/experimental/workspace";',
         'export default defineWorkspaceAgent({ name: "research" });',
         "",
       ].join("\n"),
@@ -52,7 +58,7 @@ describe("Vercel workspace subagent compilation", () => {
     const app = await createWorkspace(
       "eve-workspace-subagent-description-override-",
       [
-        'import { defineWorkspaceAgent } from "eve";',
+        'import { defineWorkspaceAgent } from "eve/experimental/workspace";',
         "export default defineWorkspaceAgent({",
         '  description: "Research urgent support escalations.",',
         '  name: "research",',
@@ -74,7 +80,7 @@ describe("Vercel workspace subagent compilation", () => {
     const app = await createWorkspace(
       "eve-workspace-subagent-unknown-peer-",
       [
-        'import { defineWorkspaceAgent } from "eve";',
+        'import { defineWorkspaceAgent } from "eve/experimental/workspace";',
         "export default defineWorkspaceAgent({",
         '  description: "Research urgent support escalations.",',
         '  name: "missing",',

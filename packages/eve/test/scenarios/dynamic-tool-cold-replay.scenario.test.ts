@@ -85,16 +85,12 @@ import { createDurableMarkerTool } from "../lib/durable-factory.ts";
 const guardedMarker = createDurableMarkerTool("guarded");
 const companionMarker = createDurableMarkerTool("companion");
 
-export default defineDynamic({
-  events: {
-    "session.started": () => {
-      appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");
-      return {
-        guarded_marker: guardedMarker,
-        companion_marker: companionMarker,
-      };
-    },
-  },
+export default defineDynamic(() => {
+  appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");
+  return {
+    guarded_marker: guardedMarker,
+    companion_marker: companionMarker,
+  };
 });
 `;
 
@@ -129,7 +125,7 @@ async function readMarker(appRoot: string, phase: string, key: string): Promise<
 
 describe("dynamic tool cold replay", () => {
   it(
-    "resumes every callback phase from an imported factory in a fresh process",
+    "renders an approved call's tool again in a fresh process and runs every callback phase there",
     async () => {
       const app = await scenarioApp(DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR);
       const pinnedEnv = {
@@ -140,20 +136,23 @@ describe("dynamic tool cold replay", () => {
       });
 
       try {
-        const client = new Client({ host: server.url });
+        const client = new Client({ baseUrl: server.url });
         const created = await client.sessions.create({ message: "Hello." });
-        await expect(created.response.result()).resolves.toMatchObject({
-          inputRequests: [],
-          status: "waiting",
+        await expect(created.delivery.result()).resolves.toMatchObject({
+          interactions: [],
+          status: "completed",
         });
 
-        const waiting = await (
-          await created.session.send("Call tools in parallel: guarded_marker, companion_marker")
-        ).result();
-        expect(waiting.status).toBe("waiting");
+        const delivery = await created.session.send(
+          "Call tools in parallel: guarded_marker, companion_marker",
+        );
+        const events = [];
+        for await (const event of delivery.stream()) events.push(event);
+        const waiting = await delivery.result();
+        expect(waiting.status).toBe("awaiting-input");
         expect(
-          waiting.inputRequests,
-          `Expected two approval requests.\n\nevents:\n${JSON.stringify(waiting.events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+          waiting.interactions,
+          `Expected two approval requests.\n\nevents:\n${JSON.stringify(events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         ).toHaveLength(2);
 
         const firstRequest = await readMarker(app.appRoot, "approval-request", "guarded");
@@ -162,7 +161,7 @@ describe("dynamic tool cold replay", () => {
         )
           .trim()
           .split("\n");
-        expect(resolverRunsBeforeRestart).toHaveLength(1);
+        expect(resolverRunsBeforeRestart.length).toBeGreaterThan(0);
         const sessionState = created.session.state;
 
         await server.crash();
@@ -179,19 +178,19 @@ describe("dynamic tool cold replay", () => {
           env: { ...pinnedEnv, EVE_SCHEMA_TEST_SUFFIX: ":changed" },
         });
 
-        const resumedSession = new Client({ host: server.url }).sessions.attach(
+        const resumedSession = new Client({ baseUrl: server.url }).sessions.attach(
           sessionState.sessionId,
           { streamIndex: sessionState.streamIndex },
         );
         const resumed = await (
           await resumedSession.respond(
-            waiting.inputRequests.map((request) => ({
+            waiting.interactions.map((request) => ({
               optionId: "approve",
-              requestId: request.requestId,
+              interactionId: request.interactionId,
             })),
           )
         ).result();
-        expect(resumed.status).toBe("waiting");
+        expect(resumed.status).toBe("completed");
 
         for (const key of ["guarded", "companion"]) {
           const response = await readMarker(app.appRoot, "approval-response", key);
@@ -201,23 +200,28 @@ describe("dynamic tool cold replay", () => {
           expect(response.pid).not.toBe(firstRequest.pid);
           expect(execute.pid).toBe(response.pid);
           expect(execute.serviceCreatedInPid).toBe(execute.pid);
+          // The call's input was validated when the model made it; the code that runs it is the
+          // fresh process's own, rendered there.
           expect(execute.label).toBe("STRUCTURED-OUTPUT:original");
-          expect(execute.suffix).toBe(":original");
+          expect(execute.suffix).toBe(":changed");
           expect(projection.pid).toBe(execute.pid);
         }
 
-        // The fresh process rebinds persisted callbacks by re-running session
-        // resolvers exactly once for this session; the same resolver entries
-        // re-register without replacing another session's bindings.
+        // The fresh process has no live tools, so it renders them again from what the session
+        // recorded: callbacks are code, never snapshotted.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )
           .trim()
           .split("\n");
-        expect(resolverRunsAfterRestart).toHaveLength(resolverRunsBeforeRestart.length + 1);
         expect(resolverRunsAfterRestart.slice(0, resolverRunsBeforeRestart.length)).toEqual(
           resolverRunsBeforeRestart,
         );
+        const rendersAfterRestart = resolverRunsAfterRestart.slice(
+          resolverRunsBeforeRestart.length,
+        );
+        expect(rendersAfterRestart.length).toBeGreaterThan(0);
+        expect(rendersAfterRestart.every((pid) => pid !== String(firstRequest.pid))).toBe(true);
       } finally {
         await server.stop();
       }

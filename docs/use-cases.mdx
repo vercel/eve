@@ -1,0 +1,250 @@
+---
+title: "Use Cases"
+description: "The two most common use cases for eve are business agents that work for your own company and agents you ship to customers as a product."
+---
+
+eve gives you everything you need for production agents. The two most common use cases for eve are business agents that work for your own company and agents you ship to customers as a product.
+
+<UseCaseSummaries>
+  <UseCaseSummary
+    audience="For your team"
+    title="Business agents"
+    href="#business-agents"
+    channels={["slack", "teams", "github", "linear", "web"]}
+  >
+    Automate a company function, like analytics, a software factory, marketing, or finance.
+  </UseCaseSummary>
+  <UseCaseSummary
+    audience="For your customers"
+    title="Agent as a Service (AaaS)"
+    href="#agent-as-a-service-aaas"
+    channels={["imessage", "whatsapp", "telegram", "discord", "web"]}
+  >
+    Build multi-tenant agentic applications that scale as you grow.
+  </UseCaseSummary>
+</UseCaseSummaries>
+
+## Business agents
+
+A business agent takes on work for teams inside your company. The most common are software factories that plan, build, and review code alongside engineers, and company brains that answer employees' questions from internal data. Employees reach the agent in Slack, Microsoft Teams, or GitHub, and it acts on the company's own systems and data.
+
+<TemplateCards>
+  <TemplateCard title="Software factory" template="eve-software-factory-template">
+    Agents plan features, open pull requests, review code, and respond to incidents alongside an
+    engineering team.
+  </TemplateCard>
+  <TemplateCard title="Company brain" template="eve-company-brain-template">
+    One agent holds the company's skills, tools, and approved connections, reachable where employees
+    work, with each employee's own identity and connections.
+  </TemplateCard>
+  <TemplateCard
+    title="Marketing team"
+    template="marketing-team-eve-template"
+    label="Marketing team"
+  >
+    A lead agent routes work to specialists for positioning, long-form content, social, SEO, and
+    email, then publishes through Notion, Typefully, and Resend.
+  </TemplateCard>
+</TemplateCards>
+
+### How eve supports business agents
+
+An eve agent lives in [your repository](/docs/concepts/project-structure), so it is reviewed, deployed, and governed like the rest of your stack.
+
+<Capabilities>
+  <Capability
+    icon="channels"
+    title="Meet employees where they work"
+    href="/docs/channels/overview"
+    link="Channels"
+  >
+    One agent serves Slack, Microsoft Teams, GitHub, Linear, and your own web apps, with a session
+    for every conversation.
+  </Capability>
+  <Capability
+    icon="observability"
+    title="Govern and audit every run"
+    href="/docs/observability/instrumentation"
+    link="Observability"
+  >
+    OpenTelemetry traces and Agent Runs record every session, model call, and tool call, so you can
+    see what an agent did and why.
+  </Capability>
+  <Capability
+    icon="identity"
+    title="Use your identity provider"
+    href="/docs/guides/auth-and-route-protection"
+    link="Identity and access"
+  >
+    Verify callers with any OIDC issuer, JWTs, or your own authenticator. Each connection then acts
+    as the agent itself or on behalf of the signed-in user.
+  </Capability>
+  <Capability
+    icon="models"
+    title="Switch models without a code rewrite"
+    href="/docs/agent-config"
+    link="Models"
+  >
+    Changing models is a one-line edit in agent.ts, and requests can fall back to another provider
+    on failure.
+  </Capability>
+  <Capability
+    icon="connections"
+    title="Connect to approved services"
+    href="/docs/connections"
+    link="Connections"
+  >
+    Expose the MCP and OpenAPI services your IT team approves. Credentials stay in the runtime, and
+    the model never sees them.
+  </Capability>
+  <Capability
+    icon="evals"
+    title="Evaluate agent responses"
+    href="/docs/evals/overview"
+    link="Evals"
+  >
+    Evals are automated tests that run the agent through real turns and score the result with code
+    checks or a model judge, so you catch regressions when a prompt, tool, or model changes.
+  </Capability>
+  <Capability
+    icon="tools"
+    title="Put deterministic steps in the loop"
+    href="/docs/tools/workflows"
+    link="Workflow tools"
+  >
+    Tools are typed TypeScript functions the model chooses when to call. When a process must run the
+    same way every time, use a workflow tool instead. Its code fixes the order of steps, calls
+    subagents exactly where you say, and waits durably for approvals or webhooks between steps.
+  </Capability>
+  <Capability
+    icon="sandbox"
+    title="Run commands in sandboxed compute"
+    href="/docs/sandbox"
+    link="Sandbox"
+  >
+    Each session gets an isolated filesystem and shell for scripts, repositories, and generated
+    files.
+  </Capability>
+  <Capability
+    icon="approval"
+    title="Keep a human in the loop"
+    href="/docs/human-in-the-loop"
+    link="Human-in-the-loop"
+  >
+    Sessions pause while an approval is pending and resume durably when it resolves. A decision
+    model can auto-approve routine tool calls.
+  </Capability>
+</Capabilities>
+
+## Agent as a Service (AaaS)
+
+In AaaS, the agent is the product. One multi-tenant deployment serves many customers, and each of them trusts it with their work over long stretches of time. It has to serve every user durably and keep each tenant's data and identity separate from the next.
+
+<TemplateCards>
+  <TemplateCard title="Web chat" template="eve-chat-template">
+    A Next.js chat app with sign-in, persisted conversations, and long-term memory for each user.
+  </TemplateCard>
+  <TemplateCard title="iMessage agent" template="openinstinct-eve-template" label="iMessage">
+    A multi-tenant iMessage service with user accounts, scoped memory, an encrypted vault, and cloud
+    browser automation.
+  </TemplateCard>
+  <TemplateCard title="Voice agent" template="eve-voice-template">
+    Users talk to the agent in the browser while it runs tools, asks for approvals, and keeps
+    durable state.
+  </TemplateCard>
+</TemplateCards>
+
+### How eve supports AaaS
+
+Each end user gets their own [sessions](/docs/concepts/sessions-runs-and-streaming) and connections, running on the same agent project you deploy once.
+
+<Capabilities>
+  <Capability
+    icon="tenancy"
+    title="Isolate every tenant"
+    href="/docs/patterns/multi-tenant-auth"
+    link="Multi-tenancy"
+  >
+    Bind memory, connection credentials, and approval policy to the authenticated tenant and user,
+    so one customer's data and access never reach another.
+  </Capability>
+  <Capability
+    icon="dynamic"
+    title="Customize the agent per tenant"
+    href="/docs/guides/dynamic-capabilities"
+    link="Dynamic capabilities"
+  >
+    Resolve the model, tools, connections, skills, and instructions at runtime from the caller,
+    their tenant, or a feature flag, all from one deployment.
+  </Capability>
+  <Capability
+    icon="schedules"
+    title="Run work on fixed and dynamic schedules"
+    href="/docs/schedules"
+    link="Schedules"
+  >
+    Fixed cron schedules power digests and monitors with no user present. Experimental dynamic
+    schedules let users and agents create their own recurring or one-time runs at runtime.
+  </Capability>
+  <Capability
+    icon="observability"
+    title="Trace latency and every tool call"
+    href="/docs/observability/agent-runs"
+    link="Observability"
+  >
+    Traces and Agent Runs show per-turn latency and the tool calls behind each response.
+  </Capability>
+  <Capability
+    icon="models"
+    title="Route each request to the right model"
+    href="/docs/guides/decide"
+    link="Model selection"
+  >
+    Pick models per user, tenant, or feature, or let a decision model choose from your allowlist
+    automatically, to balance cost, latency, and quality.
+  </Capability>
+  <Capability
+    icon="durability"
+    title="Keep long-running sessions durable"
+    href="/docs/concepts/execution-model-and-durability"
+    link="Durable sessions"
+  >
+    Each user's session checkpoints every step, parks while it waits, and resumes on the next
+    message, even days later.
+  </Capability>
+  <Capability
+    icon="memory"
+    title="Keep long-term memory for each user"
+    href="/docs/memory"
+    link="Memory"
+  >
+    Each user gets their own long-term memory of preferences and facts. It carries across sessions,
+    stays isolated from other users, and lives in the provider you choose.
+  </Capability>
+  <Capability
+    icon="identity"
+    title="Act on behalf of each user"
+    href="/docs/connections"
+    link="User-scoped connections"
+  >
+    Connections authenticate to services like GitHub and Linear with each user's own grant, so tools
+    call them without managing tokens.
+  </Capability>
+  <Capability
+    icon="sandbox"
+    title="Run untrusted input in isolation"
+    href="/docs/sandbox"
+    link="Sandbox and subagents"
+  >
+    Each session processes user data in its own sandbox. Subagents take work that needs its own
+    prompt, tools, or sandbox.
+  </Capability>
+</Capabilities>
+
+## Start building
+
+Create an agent and open the terminal UI.
+
+```bash
+npx eve@latest init my-agent
+```

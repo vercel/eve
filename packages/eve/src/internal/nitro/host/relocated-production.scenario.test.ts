@@ -26,7 +26,8 @@ describe("relocated production applications", () => {
           compilerOptions: { baseUrl: ".", paths: { "@/*": ["./lib/*"] } },
         }),
         "apps/service/lib/marker.ts": 'export const marker = "app-bootstrap";',
-        "apps/service/agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "apps/service/agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "apps/service/agent/instructions.md": "Use the available tools.",
         "apps/service/agent/skills/probe.md":
           "---\ndescription: Probe the sandbox.\n---\nProbe content.",
@@ -63,9 +64,9 @@ describe("relocated production applications", () => {
         ].join("\n"),
         "packages/extension/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "0.0.0-test",
-          requires: { extension: 1, tool: 1 },
+          formatVersion: 3,
+          builtWithEve: "0.0.0",
+          contractMajor: 0,
         }),
       },
     });

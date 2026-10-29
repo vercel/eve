@@ -13,11 +13,7 @@ import {
   requireModuleBackedDefinitionLoadOptions,
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import {
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Compiled skill entry produced from one authored `skills/*` file.
@@ -70,7 +66,7 @@ export async function compileSkillSource(
         license: definition.license,
         logicalPath: source.logicalPath,
         owner: options.owner,
-        markdown: definition.markdown,
+        content: definition.content,
         metadata:
           definition.metadata === undefined
             ? undefined
@@ -94,15 +90,12 @@ export async function compileSkillSource(
   });
 
   if (isDynamicSentinel(exportValue)) {
-    assertResolverOnlyDynamicSentinel(
-      exportValue,
-      `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-    );
+    const message = `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
+    assertDynamicSentinelKeys(exportValue, message);
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, "");
     return {
       kind: "dynamic-skill",
       definition: {
-        eventNames: Object.keys(exportValue.events) as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,
@@ -125,7 +118,7 @@ export async function compileSkillSource(
       files: definition.files,
       license: definition.license,
       logicalPath: source.logicalPath,
-      markdown: definition.markdown,
+      content: definition.content,
       metadata:
         definition.metadata === undefined
           ? undefined
@@ -150,7 +143,7 @@ function compileSkillPackageSource(
     license: source.license,
     logicalPath: source.logicalPath,
     owner,
-    markdown: source.markdown,
+    content: source.content,
     metadata:
       source.metadata === undefined
         ? undefined

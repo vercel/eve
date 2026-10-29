@@ -7,7 +7,7 @@ const GOOG_PRICE = "178.92";
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInputRequests" | "requireInputRequest" | "respondAll" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respondAll" | "id" | "state"
 >;
 
 /**
@@ -27,9 +27,9 @@ export default defineEval({
     );
     const blocked = await waitForInput(t, started.session, "get_stock_price");
     const resumed = await blocked.respondAll("approve");
-    t.check(resumed.inputRequests, equals([]));
-    resumed.noFailedActions();
-    const completed = resumed.message?.includes(GOOG_PRICE)
+    t.check(resumed.interactions, equals([]));
+    resumed.noFailedCalls();
+    const completed = resumed.reply?.includes(GOOG_PRICE)
       ? resumed
       : await waitForMessage(t, blocked, GOOG_PRICE);
     completed.messageIncludes(GOOG_PRICE);
@@ -44,19 +44,19 @@ export default defineEval({
       "parent input hooks record the published approval once per subscriber",
       (events) => {
         if (!Array.isArray(observations) || observations.length !== 2) return false;
-        const approvals = events.filter((event) => event.type === "input.requested");
+        const approvals = events.filter(
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "approval",
+        );
         const approval = approvals[0];
-        if (approvals.length !== 1 || approval?.type !== "input.requested") return false;
+        if (approvals.length !== 1 || approval?.type !== "interaction.opened") return false;
+        const position = `${approval.meta.position.line}:${approval.meta.position.index}`;
         const records = observations as InputHookObservation[];
         return (
           records.every(
             (record) =>
               record.sessionId === started.sessionId &&
-              record.eventId === approval.meta.id &&
-              record.requestIds.length === approval.data.requests.length &&
-              record.requestIds.every(
-                (id, index) => id === approval.data.requests[index]?.requestId,
-              ),
+              record.position === position &&
+              record.interactionId === approval.data.interactionId,
           ) &&
           (["typed", "wildcard"] as const).every(
             (subscriber) =>
@@ -67,8 +67,8 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.calledSubagent("stock-price", { status: "completed", count: 1 });
-    t.noFailedActions();
+    t.calledAgent("stock-price", { status: "completed", count: 1 });
+    t.noFailedCalls();
   },
 });
 
@@ -79,13 +79,13 @@ async function waitForInput(
 ): Promise<SessionCursor> {
   let session = initialSession;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.pendingInputRequests.some((request) => request.action.toolName === toolName)) {
-      session.requireInputRequest({ toolName });
+    if (session.pendingInteractions.some((request) => request.call?.name === toolName)) {
+      session.requireInteraction({ toolName });
       return session;
     }
     const live = watchNextTurn(t, session, "subagent input wait");
     const turn = await live.result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = live.session;
   }
   throw new Error(`Subagent did not surface input for tool "${toolName}" after five turns.`);
@@ -100,16 +100,16 @@ async function waitForMessage(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const live = watchNextTurn(t, session, "subagent completion wait");
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker) === true) return turn;
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker) === true) return turn;
     session = live.session;
   }
   throw new Error(`Subagent result did not reach the parent after five turns.`);
 }
 
 function watchNextTurn(t: EveEvalContext, session: SessionCursor, operation: string) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error(`${operation} has no parent session cursor.`);
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }

@@ -72,7 +72,7 @@ If the user has not authorized the connector, the turn parks and the channel sho
 
 ## The token never reaches the model
 
-Right before each request to the MCP server, eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model sees tool names, descriptions, and results. The credential stays in the app runtime.
+Right before each request to the MCP server, eve resolves the user's bearer and, once the user has authorized, sends it as `Authorization: Bearer <token>`. The model sees tool names, descriptions, and results. The credential stays in the app runtime.
 
 Gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`) when needed. See [MCP connections](../connections/mcp).
 

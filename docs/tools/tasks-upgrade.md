@@ -4,6 +4,9 @@ description: "Move workflow tools, agent calls, clients, hooks, and evals from b
 url: /tools/tasks-upgrade
 ---
 
+> This guide names session events as they were before stream version 27. To move those events to
+> v27 facts, see [Upgrade to v27 session events](/docs/concepts/upgrade-to-v27-events).
+
 This release replaces background tasks with [tasks](/docs/tools/tasks). Every change below breaks
 the previous API. Work through the sections that apply to your agent. A workflow tool that uses
 none of `execution: "background"`, `dismissible`, or `ctx.agent` keeps its code: `execute(input,
@@ -141,7 +144,7 @@ Hooks subscribe the same way:
 +      if (event.data.status !== "completed") return;
 ```
 
-The eval assertion `t.calledSubagent(name, { status })` keeps its API and reads task events.
+The eval assertion `t.calledSubagent` is now `t.calledAgent(name, { status })` and reads call facts; see [Assertions](/docs/evals/assertions#the-matcher-mini-language).
 
 ## Handle open turns in clients
 
@@ -158,15 +161,18 @@ reports each wait with the new `turn.waiting` event, which carries the open turn
   subagent's question, emitted `turn.completed` and `session.waiting` in the middle of the turn.
   It now emits `input.requested` or `authorization.required`, then `turn.waiting`, and the turn
   resumes under the same `turnId` after the answer. The session you answer on emits
-  `input.resolved` for every question it routes an answer to. A tool approval the turn itself
-  requests still ends the turn with `turn.completed` and `session.waiting`.
+  `input.resolved` for every question it routes an answer to. A sign-in or tool approval the
+  turn itself requests holds the turn the same way, with `turn.waiting` on `"input"`.
 - **`turn.completed` comes only when the turn really ends,** and `session.waiting` always means
   the turn has ended.
 
 The TypeScript client's `send(...).result()` reads past `turn.waiting` and returns the final reply
-of a held turn, not the text written before the wait. It stops at `turn.waiting` only while a
-question is pending, and returns `status: "waiting"` with that question; `respond()` then reads the
-same turn to its end. A custom client that ends a response at `turn.completed` or
+of a held turn, not the text written before the wait. At `turn.waiting`, an unanswered input
+request (a question, approval, or `session-limit` prompt) makes `result()` return
+`status: "waiting"`; use `respond()` to answer it and continue reading the same turn.
+A sign-in keeps the response attached while its authorization callback is pending. Render the
+sign-in prompt from the live `authorization.required` event rather than waiting for `result()`.
+A custom client that ends a response at `turn.completed` or
 `session.waiting` mid-turn, or that shows the first completed message as the reply, should follow
 the same rule. See [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
 
@@ -179,6 +185,10 @@ client that accepts only versions up to 25 fails the stream with an unsupported-
 [Turns wait for their tasks](/docs/tools/tasks#turns-wait-for-their-tasks).
 
 ## Upgrade remote agents before their callers
+
+Later eve releases no longer serve protocol-1 callers or accept protocol-1 remote agents. Upgrade
+every caller and remote agent past 0.68 before you upgrade any of them past that later release.
+The rest of this section describes this release.
 
 The remote agent protocol is now version 2. Deploy each [remote agent](/docs/guides/remote-agents)
 before the deployments that call it. A remote agent on this release still serves callers on eve 0.66
@@ -197,5 +207,12 @@ Two things differ from a remote agent on the caller's own release:
 
 Each protocol-1 create logs `serving a remote agent protocol 1 caller` with the caller's origin.
 
-Upgrade a caller after every remote agent it calls. A caller on this release fails a call at start,
-with an error that names both versions, when the remote agent's deployment speaks protocol 1.
+Upgrade a caller after every remote agent it calls. A caller on this release accepts a protocol-1
+remote agent's results and failures, but that remote agent's approvals and sign-in requests don't
+reach the caller. Any other protocol mismatch fails the call at start, with an error that names
+both versions.
+
+Upgrade a caller and its remote agents together, or let the remote agents' in-flight work finish
+first. A remote agent's callbacks go to the caller's current production deployment, so approvals,
+questions, and sign-ins that an earlier remote agent sends after the caller upgrades are rejected
+and never reach the caller. The caller's own sessions stay on the deployment that started them.

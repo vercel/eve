@@ -31,13 +31,13 @@ export default defineEval({
         started.map((call) => call.callId),
       );
       const reportIds = settled.flatMap((settlement) => reportIdOf(settlement) ?? []);
-      const reply = turn.message ?? "";
+      const reply = turn.reply ?? "";
       return reportIds.length === 2 && reportIds.every((reportId) => reply.includes(reportId));
     });
     turn.eventsSatisfy(
       "the model never replies while reports compile",
       (events) => !heldTurn(events),
     );
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

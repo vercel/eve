@@ -10,13 +10,13 @@ export default defineEval({
     for (let index = 0; index < 6; index += 1) {
       const seed = await session.send(`${MEASURED_TOKENS_CASE} record evidence ${index}.`);
       seed.expectOk();
-      seed.notEvent("compaction.completed");
+      seed.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
     }
     const measured = await session.send(`${MEASURED_TOKENS_CASE} report high usage.`);
     measured.expectOk();
     const compacted = await session.send(`${MEASURED_TOKENS_CASE} verify the checkpoint.`);
     compacted.expectOk();
-    compacted.event("compaction.completed");
+    compacted.event("context.settled", { data: { kind: "compaction", outcome: "completed" } });
     compacted.messageIncludes("MEASURED_COMPACTION_OK");
   },
 });

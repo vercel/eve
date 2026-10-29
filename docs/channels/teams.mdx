@@ -4,7 +4,7 @@ description: "Reach your agent from Microsoft Teams via the Bot Framework Activi
 type: integration
 ---
 
-The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
+The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT and its `serviceurl` binding on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -77,21 +77,25 @@ export default teamsChannel({
 
 ### Delivery
 
-Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests.
+Native Bot Connector verification requires the activity's `serviceUrl` to match the verified token's `serviceurl` claim. A custom `webhookVerifier` replaces this verification and must authenticate the forwarded activity and its service URL. Proactive conversation references are trusted application input: load them from your own verified records, not a caller-supplied URL. Outbound Connector requests require HTTPS without URL credentials, query strings, or fragments, and do not follow redirects.
+
+HTTP service URLs used by Bot Framework Emulator are not supported, even with a custom verifier. Use an HTTPS endpoint or proxy for local Connector testing.
+
+Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests. `thread.mentionUser()` escapes the display name (or fallback user ID) as literal text inside the mention; the mention entity retains the original identity fields.
 
 ### Human-in-the-loop (HITL)
 
-A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Approval cards show the tool input in the card and fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. Teams may return a submission as a message or invoke; eve handles both before the normal message mention gate and resumes the thread recorded in the card.
+A human-in-the-loop (HITL) request, an `interaction.opened` fact, renders as an Adaptive Card. Approval cards show the tool input in the card and fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. Teams may return a submission as a message or invoke; eve handles both before the normal message mention gate and resumes the thread recorded in the card.
 
-By default, submissions use the Teams identity of the user who clicked the card. If you customize `onMessage` for an allowlist, configure the same policy in `onInputResponse`; eve otherwise rejects HITL submissions rather than bypassing the message gate.
+By default, submissions use the Teams identity of the user who clicked the card. If you customize `onMessage` for an allowlist, configure the same policy in `onAnswers`; eve otherwise rejects HITL submissions rather than bypassing the message gate.
 
-When a tool approval settles, eve replaces its Adaptive Card with the outcome and responder name. A response rejected by an approval policy leaves the shared card unchanged.
+When a tool approval settles, eve replaces its Adaptive Card with the outcome and responder name. A response rejected by an approval policy leaves the shared card unchanged. A submission to a card whose session is no longer active, for example because its run was cancelled outside eve, replaces the card with its prompt and `No longer active`, and the invoke response tells the person who submitted to send a new message.
 
 ### Connection sign-ins
 
-When a connection needs the person to sign in, eve's `authorization.required` handler posts an Adaptive Card. In a personal chat, the card includes the sign-in link and any confirmation code. In group chats and channels, the shared card only says who has to sign in and has a **Sign in** button (`Action.Execute`). When someone presses it, eve resolves who they are the same way it does for HITL submissions (`onInputResponse`). If that's the person who needs to sign in, eve sends back a card with the link and code, and Teams shows that card only to them. Anyone else is told they can't open it. That way another member can't finish the sign-in with their own account and have it saved under the requester's identity.
+When a connection needs the person to sign in, eve's `interaction.opened` handler posts an Adaptive Card for the sign-in. In a personal chat, the card includes the sign-in link and any confirmation code. In group chats and channels, the shared card only says who has to sign in and has a **Sign in** button (`Action.Execute`). When someone presses it, eve resolves who they are the same way it does for HITL answers (`onAnswers`). If that's the person who needs to sign in, eve sends back a card with the link and code, and Teams shows that card only to them. Anyone else is told they can't open it. That way another member can't finish the sign-in with their own account and have it saved under the requester's identity.
 
-If you customize `onMessage` without also setting `onInputResponse`, nobody can open a sign-in from a group chat or channel, because eve rejects every press.
+If you customize `onMessage` without also setting `onAnswers`, nobody can open a sign-in from a group chat or channel, because eve rejects every press.
 
 For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
 

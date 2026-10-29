@@ -16,7 +16,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 - `POST /eve/v1/session`
 - `POST /eve/v1/session/:sessionId`
-- `POST /eve/v1/session/:sessionId/{cancel,compact,clear,reset}`
+- `POST /eve/v1/session/:sessionId/{cancel,compact,clear,end}`
 - `GET /eve/v1/session/:sessionId/stream`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
@@ -104,6 +104,10 @@ Exercise caution for agents that process non-public, sensitive, regulated, or pr
 ### `localDev()`
 
 Authenticates a synthetic `local-dev` principal, but only while the process is a local development server: `eve dev` (which sets `EVE_DEV=1`) or `vercel dev` (detected by `VERCEL=1` and `VERCEL_ENV=development` together). This is a property of the deployment, not the request, so no request header can flip it. A production deployment (`eve start`, a Vercel deployment, or any container host) sets neither flag, so `localDev()` authenticates nothing there and every request falls through to the next entry.
+
+On a development server, `localDev()` also refuses requests that a browser sends for another website: the request host or its `Origin` is neither a loopback host nor one of this machine's own addresses. A web page that the developer opens cannot call the local agent, even through DNS rebinding. A frontend served from any loopback host and port, such as `http://localhost:3000` calling `http://127.0.0.1:2000`, still authenticates.
+
+On `eve dev`, `localDev()` also refuses callers whose connection comes from another machine. A server started with `eve dev --host 0.0.0.0` accepts LAN connections, but those callers do not get the `local-dev` principal. A tunnel or reverse proxy on the same machine, such as ngrok or a local nginx, connects from this machine, so the callers it forwards still get `local-dev`.
 
 Because it never opens a production deployment, `localDev()` is safe to leave in the walk. Still put a real authenticator ahead of it so production traffic has something to match.
 
@@ -294,6 +298,7 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 - `auth.current`: the caller on the active inbound turn.
 - `auth.initiator`: the caller that started the durable session.
 - A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
+- Within a turn the principal is fixed; only its claims may update. A message from the turn's own principal, including a typed answer to a pending `ctx.ask()` or `ask_question`, joins the turn and updates `auth.current` with its claims. A message from anyone else waits for the turn to end and runs as its own turn. Someone else can still answer a pending request with a button or structured response; that settles the request with them as its responder, and the turn keeps its `auth.current`.
 - `auth.current` is whatever the channel passed as `auth` when it dispatched the message. Route auth either accepts the request or returns `401`, but a route handler or channel hook can still dispatch with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`. On a continuation, `auth.current` is `null` while `auth.initiator` stays pinned to the session's original caller. Internal runtime paths, such as subagents, can also have no caller auth.
 
 Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.

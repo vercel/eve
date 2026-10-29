@@ -26,6 +26,8 @@
 
 import { connectionToolName } from "#connections/ownership.js";
 import { isObject } from "#shared/guards.js";
+import type { JsonObject } from "#shared/json.js";
+import { followRefs } from "#tools/schema.js";
 
 /** What the ranker reads from one catalog entry. */
 export interface RankCandidate {
@@ -155,9 +157,14 @@ function candidateFields(candidate: RankCandidate): Field[] {
   const properties = isObject(candidate.inputSchema?.properties)
     ? Object.entries(candidate.inputSchema.properties)
     : [];
-  const propertyDescriptions = properties.flatMap(([, schema]) =>
-    isObject(schema) && typeof schema.description === "string" ? [schema.description] : [],
-  );
+  const root = (candidate.inputSchema ?? {}) as JsonObject;
+  // A referenced property is described by the first schema in its `$ref` chain that has one.
+  const propertyDescriptions = properties.flatMap(([, schema]) => {
+    for (const node of followRefs(root, schema)) {
+      if (typeof node.description === "string") return [node.description];
+    }
+    return [];
+  });
   return [
     [tokenize(candidate.name), 6],
     [tokenize(candidate.connection?.name ?? ""), 4],

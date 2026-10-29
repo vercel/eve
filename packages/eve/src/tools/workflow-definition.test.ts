@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import * as tools from "#public/tools/index.js";
+import type { SlackChannel } from "#public/channels/slack/slackChannel.js";
 import { defineTool } from "#tools/definition.js";
 import {
   defineWorkflowTool,
@@ -26,20 +27,35 @@ describe("defineWorkflowTool", () => {
         const review = await ctx.agent("researcher").send("Review the deployment.", {
           outputSchema: z.object({ findings: z.array(z.string()), score: z.number().optional() }),
         });
-        expectTypeOf(await review.result()).toEqualTypeOf<
+        const reviewed = await review.result();
+        expectTypeOf(reviewed).toEqualTypeOf<
           AgentMessageResult<{ findings: string[]; score?: number | undefined }>
         >();
+        expectTypeOf(reviewed.status).toEqualTypeOf<"completed" | "cancelled" | "failed">();
+        if (reviewed.status === "failed") {
+          expectTypeOf(reviewed.error).toEqualTypeOf<{ readonly message: string }>();
+        } else {
+          expectTypeOf(reviewed.error).toEqualTypeOf<undefined>();
+        }
+        void ctx.agent("agent", {
+          model: {
+            model: "anthropic/claude-opus-5.5",
+            modelContextWindowTokens: 200_000,
+            reasoning: "high",
+          },
+        });
+        const sendFromStep = async (step: WorkflowStepToolContext, slack: SlackChannel) => {
+          await step.to(slack, { channelId: "C123" }).send("Continue here.", { auth: null });
+          // @ts-expect-error A Slack target needs a channelId.
+          step.to(slack, { userId: "U123" });
+        };
+        void sendFromStep;
         // @ts-expect-error The message is sent with send(), not passed to ctx.agent().
         void ctx.agent("researcher", { message: "Review the deployment." });
-        // Token capabilities are available when this context is passed into a step.
-        void ctx.getToken;
-        // @ts-expect-error Workflow bodies do not have a session sandbox.
-        void ctx.getSandbox;
+        // Token and sandbox capabilities are available when this context is passed into a step.
+        const useStepContext = async (stepCtx: WorkflowStepToolContext) => stepCtx;
+        void useStepContext(ctx);
         return { deployed: input.service };
-      },
-      approvalKey(input) {
-        expectTypeOf(input).toEqualTypeOf<Readonly<{ service: string }>>();
-        return `deploy:${input.service}`;
       },
       toModelOutput(output) {
         expectTypeOf(output).toEqualTypeOf<{ deployed: string }>();
@@ -97,6 +113,7 @@ describe("defineWorkflowTool", () => {
 
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
     const useStepContext = (ctx: WorkflowStepToolContext) => {
+      void ctx.getSandbox;
       void ctx.getToken;
       void ctx.requireAuth;
       void ctx.abortSignal;

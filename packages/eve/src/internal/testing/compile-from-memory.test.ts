@@ -80,7 +80,7 @@ describe("compileFromMemory", () => {
     expect(skill).toMatchObject({
       description: "Say hi",
       logicalPath: "skills/greetings.ts",
-      markdown: "# greet\n",
+      content: "# greet\n",
       name: "greetings",
       sourceKind: "module",
     });

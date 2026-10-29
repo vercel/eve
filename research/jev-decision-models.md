@@ -1,7 +1,7 @@
 ---
 issue: "TBD (maintainer-requested research; no matching issue found)"
 status: implemented
-last_updated: "2026-10-06"
+last_updated: "2026-10-17"
 ---
 
 # Decision model routing in eve
@@ -10,9 +10,9 @@ last_updated: "2026-10-06"
 
 Expose automatic model selection as `auto` from `eve/models` and standalone
 `decide` from `eve/ai`. Build both on AI SDK's `experimental_decide` API.
-`decide` accepts the SDK's state, typed questions, and request options, with an
-optional model defaulting to `typesafe-ai/jev`. It returns the SDK's typed answers
-and response metadata.
+`decide` accepts eve-owned state, typed questions, `maxRetries`, and `signal`, with an
+optional model defaulting to `typesafe-ai/jev`. It returns typed `answers` and normalized `usage`.
+The pre-1.0 cleanup owns these public shapes rather than exposing experimental SDK signatures.
 
 `auto` calls the shared `decide` wrapper. Model strings use the configured AI
 SDK default provider; without an override, the wrapper resolves eve's local
@@ -164,8 +164,9 @@ direct provider behavior.
 ## Scope boundaries
 
 eve owns the `decide` wrapper and its default model and authentication behavior.
-AI SDK owns decision schemas, validation, retries, errors, and result metadata.
-The integration adds no TypeSafe-specific `decide` function, direct HTTP client,
+AI SDK owns runtime validation, retries, errors, and provider result metadata. eve owns its
+public question, state, answer, options, and result types; eval diagnostics retain SDK metadata
+internally. The integration adds no TypeSafe-specific `decide` function, direct HTTP client,
 provider fallback, confidence threshold, or built-in agent-callable decision tool.
 
 No live Jev inference or independent quality, latency, or cost benchmark was run

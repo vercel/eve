@@ -3,23 +3,14 @@ import { describe, expect, it } from "vitest";
 import { createCompiledSandboxProviderPrunePlugin } from "./compiled-sandbox-provider-prune-plugin.js";
 
 describe("createCompiledSandboxProviderPrunePlugin", () => {
-  it("replaces framework default selection with the hosted Vercel provider", () => {
-    const plugin = createCompiledSandboxProviderPrunePlugin();
-    const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/default.ts");
-
-    expect(source).toContain('DefaultSandbox = { name: "default", environment }');
-    expect(source).toContain("options.vercel");
-    expect(source).toContain("prepare: options.prepare");
-  });
-
   it("replaces local provider constructors with hosted stubs", () => {
     const plugin = createCompiledSandboxProviderPrunePlugin();
-    const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/microsandbox.ts");
+    const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/docker.ts");
 
-    expect(source).toContain("MicrosandboxSandbox");
+    expect(source).toContain("DockerSandbox");
   });
 
-  it.each(["docker.ts", "just-bash.ts", "local.js", "local.ts", "microsandbox.ts"])(
+  it.each(["docker.ts", "just-bash.ts", "local.js", "local.ts"])(
     "keeps the hosted local-backend stub aligned for %s",
     (fileName) => {
       const plugin = createCompiledSandboxProviderPrunePlugin();

@@ -1,17 +1,17 @@
+import { createToolChannelTo } from "#execution/tools/channel-to.js";
+import { channelOf } from "#reactions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { HandleEventFn } from "#harness/types.js";
-import { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
-import { runStep } from "#context/run-step.js";
-import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
-import {
-  rebindMissingCompiledDynamicToolCallbacks,
-  refreshDynamicSessionToolsForRuntimeRevision,
-} from "#context/dynamic-tool-lifecycle.js";
+import { startSessionPrewarmers } from "#context/prewarm.js";
+import { runStep, withContextScope } from "#context/run-step.js";
+import { sessionProvider } from "#context/providers/session.js";
+import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
+import { sandboxProvider } from "#context/providers/sandbox.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -20,11 +20,14 @@ import {
   InitiatorAuthKey,
   SessionTitleKey,
   ParentSessionKey,
+  SandboxKey,
+  SessionPredecessorKey,
+  SessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
+  ChannelInstrumentationKey,
   HandleEventKey,
-  SessionDynamicSubagentRuntimeRevisionKey,
-  SessionDynamicToolRuntimeRevisionKey,
+  ToolChannelKey,
   StaticModelReferenceKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
@@ -32,53 +35,69 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { readPendingHistory, withoutPendingHistory } from "#execution/session/pending-history.js";
 import * as agentTraceState from "#tracing/eve/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import {
-  activeTurnId,
-  isBetweenTurns,
-  storedProjection,
-  turnPosition,
-} from "#harness/session-machine/view.js";
+import { isBetweenTurns, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import {
   currentProjection,
   enterSessionProjection,
+  enterSessionProjectionAt,
+  nextLinePosition,
+  recordAppliedSession,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
-import { matchSignIns } from "#harness/session-machine/transitions.js";
-import {
-  sessionStartedForResolvers,
-  turnStartedForResolvers,
-} from "#harness/session-machine/resolver-events.js";
+import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
+import { continueTurnAuth } from "#execution/session/principal.js";
 import type {
   DurableStepResult,
   TurnStepInput,
   TurnStepResult,
 } from "#execution/session/turn-step-types.js";
-import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
-import { withSessionStateDelta } from "#execution/session/state-delta.js";
-import { openSessionEventPublisher } from "#execution/publish-session-events.js";
+import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
+import {
+  checksSessionEvents,
+  foldOrphanedLines,
+  openSessionEventPublisher,
+  readOrphanedLines,
+} from "#execution/publish-session-events.js";
+import {
+  readInterruptedAttempt,
+  recoverInterruptedStep,
+} from "#execution/session/interrupted-step.js";
+import { stepDisagreement } from "#execution/session/step-decision-check.js";
+import { createLogger } from "#internal/logging.js";
+import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
+import { getAdapterKind } from "#channel/adapter.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { fact } from "#harness/facts.js";
+import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
-import { derivePendingState } from "#execution/session/pending-turn-state.js";
+import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
+import { bindMemoryInstrumentation } from "#reactions/kinds/memory.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   createDurableSessionValues,
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
+import {
+  resolveEffectiveAgentRuntime,
+  resolveSessionUsageLimit,
+} from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
-import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
@@ -88,15 +107,9 @@ import {
 } from "#execution/cancelled-model-call-batch.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 
-function channelDeliveryErrorCode(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { readonly code?: unknown }).code;
-    if (typeof code === "string" && code.length > 0) return code;
-  }
-  return "CHANNEL_DELIVERY_FAILED";
-}
-
 export type { TurnStepInput };
+
+const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
@@ -105,6 +118,18 @@ interface PendingStepAttributes {
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
+  if (input.handover !== undefined) {
+    traceSessionHandover(
+      "inbox_unblocked",
+      input.sessionState.sessionId,
+      input.handover.attemptKey,
+      {
+        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
+        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
+        "eve.handoff.applied_at_clock": "workflow",
+      },
+    );
+  }
   return await withSessionStateDelta(input, (state) =>
     runSessionStep({
       ...state,
@@ -132,12 +157,23 @@ async function runSessionStepBody(
   const runtimeResults = input.input?.runtimeResults;
 
   let durableSession = readDurableSession(input.sessionState);
-  // An `execute` run's delegated spend counts in the step that hands the model its result.
-  for (const usage of runtimeResults?.delegatedUsage ?? []) {
-    durableSession = countRunUsage(durableSession, usage);
-  }
   const ctx = await deserializeContext(input.serializedContext);
   enterSessionProjection(ctx, durableSession.state);
+  // An earlier attempt may have published past the checkpoint. The step recovers from what it
+  // wrote instead of running the model and tools again, so every position and id follows it.
+  const orphaned = await readOrphanedLines({
+    sessionId: durableSession.sessionId,
+    position: nextLinePosition(ctx),
+    sessionWritable: input.sessionWritable,
+    always: input.recover !== undefined,
+  });
+  const interrupted =
+    orphaned.length > 0 || input.recover !== undefined
+      ? readInterruptedAttempt(nextLinePosition(ctx), orphaned)
+      : undefined;
+  if (orphaned.length > 0) {
+    enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
+  }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
@@ -205,7 +241,7 @@ async function runSessionStepBody(
           .requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
-  const initialSession: HarnessSession = {
+  let initialSession: HarnessSession = {
     ...hydrateDurableSession({
       compactionOverrides: {
         thresholdPercent: effectiveAgent.thresholdPercent,
@@ -215,13 +251,13 @@ async function runSessionStepBody(
     }),
     history: validateHarnessModelMessages(input.history),
   };
-  const history = createExecutionHistoryView(initialSession);
   const instrumentation = bindSessionInstrumentation({
     agentName: effectiveAgent.turnAgent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
   });
+  bindMemoryInstrumentation(ctx, instrumentation?.memory);
   const initialEmissionState = turnPosition(currentProjection(ctx));
   const startedBetweenTurns = isBetweenTurns(currentProjection(ctx));
   if (
@@ -247,31 +283,9 @@ async function runSessionStepBody(
         sessionStarted: initialEmissionState.sessionStarted,
       }),
     );
-    await contextStorage.run(ctx, () =>
-      instrumentation?.instrumentChannelDelivery({
-        agentName: bundle.turnAgent.id,
-        ctx,
-        delivery: rawDelivery,
-        rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
-        sequence: initialEmissionState.sequence,
-        sessionId: initialSession.sessionId,
-        turnId: activeTurnId(initialEmissionState),
-      }),
-    );
+    instrumentation?.prepareDelivery(rawDelivery);
   }
 
-  const failChannelDeliveries = async (error: unknown): Promise<void> => {
-    await contextStorage.run(ctx, () =>
-      instrumentation?.instrumentChannelDelivery({
-        ctx,
-        error,
-        errorCode: channelDeliveryErrorCode(error),
-        includeTurn: false,
-        outcome: "failed",
-      }),
-    );
-    await instrumentation?.flush();
-  };
   const publisher = openSessionEventPublisher({
     ctx,
     origin: "own",
@@ -286,49 +300,74 @@ async function runSessionStepBody(
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
-    const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
+    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
-      bundle,
       canCancelTurn: input.input?.control === undefined,
+      conversation: initialSession.history,
       hookCancellation,
-      ctx,
-      dynamicConnections,
-      effectiveAgent,
-      effectiveNode,
-      instrumentation,
       publisher,
     });
-    const handleEvent: HandleEventFn = async (event, messages) => {
-      if (event.type === "compaction.completed") compacted = true;
-      await emitTurnEvent(event, messages);
+    const handleEvent: HandleEventFn = async (publication, messages) => {
+      const completesCompaction = eventsOf(publication).some(
+        (event) =>
+          event.type === "context.settled" &&
+          event.data.kind === "compaction" &&
+          event.data.outcome === "completed",
+      );
+      if (completesCompaction) compacted = true;
+      await emitTurnEvent(publication, messages);
     };
     const previousAdapterState =
       delivery !== undefined && !startedBetweenTurns
         ? structuredClone(adapterCtx.state)
         : undefined;
     // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting StepInput values; runtime results ride the same input.
-    let resolved: StepInput | undefined;
+    // the resulting HarnessStepInput values; runtime results ride the same input.
+    let resolved: HarnessStepInput | undefined;
+    let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
-      const results: StepInput[] = [];
+      const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
+      // History left by `create()` joins the first message's turn. It leaves state only once a
+      // deliver result carries it, so a dropped first message does not lose it.
+      const pendingHistory = delivery.payloads.some((payload) => payload.message !== undefined)
+        ? readPendingHistory(durableSession.state)
+        : [];
+      let accepted = 0;
       try {
         for (const payload of delivery.payloads) {
           const result = adapter.deliver
             ? await adapter.deliver(payload, adapterCtx)
             : defaultDeliverResult(payload);
-
-          if (result !== undefined && result !== null) {
-            results.push(result);
+          if (result === undefined || result === null) {
+            delivered.push({ input: undefined, payload });
+            continue;
           }
+          // `history` is framework-owned, so a channel's deliver hook cannot drop or rewrite it.
+          const history = [...(accepted === 0 ? pendingHistory : []), ...(payload.history ?? [])];
+          accepted += 1;
+          delivered.push({
+            input: history.length === 0 ? result : { ...result, history },
+            payload,
+          });
         }
       } catch (error) {
-        await failChannelDeliveries(error);
+        await instrumentation?.flush();
         throw error;
       }
-      resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+      admission = admitDeliveries({
+        channelKind: ctx.get(ChannelInstrumentationKey)?.kind ?? getAdapterKind(adapter),
+        delivery: rawDelivery ?? delivery,
+        status: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId]?.status,
+        payloads: delivered,
+      });
+      if (accepted > 0 && pendingHistory.length > 0) {
+        initialSession = { ...initialSession, state: withoutPendingHistory(initialSession.state) };
+      }
+      resolved =
+        admission.inputs.length === 0 ? undefined : admission.inputs.reduce(coalesceTurnInputs);
     }
     // A delivery without auth acts as the session's current identity, so
     // only a delivery that names its sender can be answered by someone else.
@@ -336,6 +375,7 @@ async function runSessionStepBody(
       delivery?.auth === undefined
         ? undefined
         : attributeAnswers({
+            owner: startedBetweenTurns ? undefined : (previousAuth ?? null),
             responder: delivery.auth,
             state: durableSession.state,
             stepInput: resolved,
@@ -345,17 +385,23 @@ async function runSessionStepBody(
       // initiator. Adapter state from the answer stays: channels record the
       // responder and their prompt cards there, not the reply destination.
       resolved = answers;
-      if (previousAuth === undefined) ctx.delete(AuthKey);
-      else ctx.set(AuthKey, previousAuth);
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
+    // The adapter saw the incoming caller. A responder's answers, an ignored
+    // correction and other input without a message keep a running turn's
+    // identity; a message joining it may update only its principal's claims.
+    let turnAuth = ctx.get(AuthKey);
+    if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
+    else if (delivery !== undefined && !startedBetweenTurns) {
+      turnAuth =
+        resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+    }
+    if (turnAuth === undefined) ctx.delete(AuthKey);
+    else ctx.set(AuthKey, turnAuth);
     if (ignoredActiveDelivery) {
-      // The adapter sees the incoming caller, but an ignored correction must
-      // not change the identity or reply destination of the interrupted work.
-      if (previousAuth === undefined) ctx.delete(AuthKey);
-      else ctx.set(AuthKey, previousAuth);
+      // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;
     } else {
       if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
@@ -377,7 +423,11 @@ async function runSessionStepBody(
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {
         ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
       }
-      resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
+      resolved = {
+        ...resolved,
+        delegatedUsage: runtimeResults.delegatedUsage,
+        runtimeActionResults: runtimeResults.results,
+      };
     }
 
     if (rawDelivery !== undefined) {
@@ -385,14 +435,91 @@ async function runSessionStepBody(
       setChannelContext(ctx, updatedAdapter);
     }
 
-    if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      await contextStorage.run(ctx, () =>
-        instrumentation?.instrumentChannelDelivery({
-          ctx,
-          includeTurn: false,
-          outcome: "completed",
-        }),
+    /** Whether the admission changed the session: its history or its sandbox. */
+    let admissionChangedSession = false;
+    /** The admission's facts: the session's start if it hasn't, then each delivery admitted. */
+    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): SessionEvent[] => {
+      if (admission === undefined || admission.facts.length === 0) return [];
+      const facts: SessionEvent[] = [];
+      if (!turnPosition(currentProjection(ctx)).sessionStarted) {
+        const parent = ctx.get(ParentSessionKey);
+        const predecessor = ctx.get(SessionPredecessorKey);
+        facts.push(
+          fact("session.started", {
+            parent:
+              parent === undefined
+                ? undefined
+                : { callId: parent.callId, sessionId: parent.sessionId },
+            predecessor,
+            runtime,
+          }),
+        );
+      }
+      return [...facts, ...admission.facts];
+    };
+    /** The admission commit, with the session's providers its hooks read. */
+    const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
+      const facts = admissionFacts(runtime);
+      if (facts.length === 0) return;
+      // The admission commits before the step's framework context exists, and its hooks read
+      // the session (`ctx.session`) like every other commit's. The session's start resolves
+      // its dynamic connections into a registry, which the step's own scope rebuilds and
+      // rehydrates, and its dynamic skills write their files to the sandbox, whose state the
+      // step's scope resumes.
+      const created = sessionProvider.create(ctx, initialSession);
+      ctx.setVirtualContext(SessionKey, created.value);
+      const registry = await connectionProvider.create(ctx, initialSession);
+      if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
+      const sandbox = await sandboxProvider.create(ctx, initialSession);
+      if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
+      // A user-role instruction the session's start resolves stays in its slot until the step
+      // builds the conversation, which takes it ahead of the turn's input.
+      // Instrumentation hears the admission like any commit, so providers see the session start.
+      const publish = instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent;
+      try {
+        await contextStorage.run(ctx, () => publish(facts));
+      } finally {
+        if (sandbox !== undefined) {
+          const sandboxState = await sandbox.value.captureState();
+          if (
+            JSON.stringify(sandboxState) !== JSON.stringify(initialSession.sandboxState ?? null)
+          ) {
+            admissionChangedSession = true;
+            initialSession = { ...initialSession, sandboxState };
+          }
+        }
+      }
+    };
+
+    /**
+     * A cancel stops the turn its input was selected for. Input it hadn't consumed yet joins that
+     * turn first, opening it if need be, so the cancel settles each delivery with the turn and the
+     * history that keeps the message agrees with the stream.
+     */
+    const consumeCancelledInput = async (): Promise<void> => {
+      const projection = currentProjection(ctx);
+      const waiting = (resolved?.deliveries ?? []).filter(
+        ({ deliveryId }) => projection.view.deliveries[deliveryId]?.status === "admitted",
       );
+      if (waiting.length === 0) return;
+      const { events } = receive(sessionView(projection, initialSession.state), {
+        deliveries: waiting,
+      });
+      // The turn is already stopping, so this commit's hooks have nothing left to cancel.
+      const emit = createTurnEventHandler({
+        abortSignal,
+        canCancelTurn: false,
+        conversation: initialSession.history,
+        hookCancellation: new AbortController(),
+        publisher,
+      });
+      const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+      await contextStorage.run(ctx, () => publish(events));
+    };
+
+    if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
+      // Nothing here starts a turn, so a cancel has nothing to stop.
+      await publishAdmission(buildRuntimeIdentity(effectiveNode)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -400,69 +527,88 @@ async function runSessionStepBody(
       );
       const nextSerializedContext = serializeContext(ctx);
       const nextValues =
-        aliased === initialSession
+        aliased === initialSession && !admissionChangedSession
           ? { history: input.history, sessionState: input.sessionState }
           : createDurableSessionValues(aliased);
 
-      return {
-        action: "park",
-        ...derivePendingState(aliased, currentProjection(ctx)),
+      return pausedOrParked(aliased, {
         serializedContext: nextSerializedContext,
         ...nextValues,
-      };
+      });
     }
 
-    const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
-    const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
-    try {
-      const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-      const dynamicRuntimeRevision = deploymentId
-        ? `deployment:${deploymentId}`
-        : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
-      const sessionStarted = initialEmissionState.sessionStarted;
-
+    let restoration: Promise<void> | undefined;
+    const prepareReactions = (session: HarnessSession): Promise<void> => {
       ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-      if (!sessionStarted) {
-        ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
-        ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
-      } else {
-        const refreshEvent = sessionStartedForResolvers(runtimeIdentity);
-        await Promise.all([
-          refreshDynamicSessionSubagentsForRuntimeRevision({
-            ctx,
-            resolvers: dynamicSubagentResolvers,
-            event: refreshEvent,
-            messages: history.initial.messages,
-            runtimeRevision: dynamicRuntimeRevision,
-          }),
-          contextStorage.run(
-            ctx,
-            async () =>
-              await refreshDynamicSessionToolsForRuntimeRevision({
-                ctx,
-                resolvers: dynamicToolResolvers,
-                event: refreshEvent,
-                messages: history.initial.messages,
-                runtimeRevision: dynamicRuntimeRevision,
-              }),
-          ),
-        ]);
-        if (!startedBetweenTurns) {
-          await rebindMissingCompiledDynamicToolCallbacks({
-            ctx,
-            event: turnStartedForResolvers({
-              sequence: initialEmissionState.sequence,
-              turnId: activeTurnId(initialEmissionState),
-            }),
-            messages: history.initial.messages,
-            resolvers: dynamicToolResolvers,
-          });
+      return (restoration ??= (async () => {
+        try {
+          const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+          const revision = deploymentId
+            ? `deployment:${deploymentId}`
+            : await resolveRuntimeCompiledArtifactsVersionedCacheKey(
+                bundle.compiledArtifactsSource,
+              );
+          await contextStorage.run(ctx, () =>
+            restoreReactions(ctx, { abortSignal, conversation: session.history, revision }),
+          );
+        } catch (error) {
+          await instrumentation?.flush();
+          throw error;
         }
+      })());
+    };
+    if (interrupted !== undefined) {
+      const recovered = await recoverInterruptedStep({
+        admission: admissionFacts(runtimeIdentity),
+        attempt: interrupted,
+        control:
+          input.input?.control === undefined
+            ? undefined
+            : { delivery: input.input.controlDelivery, kind: input.input.control },
+        ctx,
+        failed: input.recover,
+        publish: async (events, session) => {
+          const scoped = await withContextScope(ctx, session, async (current) => {
+            await prepareReactions(current);
+            const emit = createTurnEventHandler({
+              abortSignal,
+              canCancelTurn: false,
+              conversation: current.history,
+              hookCancellation: new AbortController(),
+              publisher,
+            });
+            const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+            await publish(events);
+            return { result: undefined, session: current };
+          });
+          return scoped.session;
+        },
+        session: initialSession,
+        stepInput: resolved,
+      }).catch(async (error: unknown) => {
+        await instrumentation?.flush();
+        throw error;
+      });
+      if ("result" in recovered) {
+        await instrumentation?.flush();
+        // The attempt that ended the session may have closed its stream already.
+        if (recovered.result.action === "done") await publisher.writer.close().catch(() => {});
+        return recovered.result;
       }
+      initialSession = recovered.session;
+      resolved = recovered.stepInput;
+    }
+    await prepareReactions(initialSession);
+
+    try {
+      await publishAdmission(runtimeIdentity);
     } catch (error) {
-      await failChannelDeliveries(error);
-      throw error;
+      // A hook's cancel on the admission stops the turn below, like a cancel that arrives now.
+      if (!isTurnCancellation(error)) {
+        await instrumentation?.flush();
+        throw error;
+      }
     }
 
     const modelCallsPerStep =
@@ -471,7 +617,7 @@ async function runSessionStepBody(
 
     const runHarnessStep = async (
       lifecycleSession: HarnessSession,
-      stepInput: StepInput | undefined,
+      stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const refreshedSession = refreshSessionFromTurnAgent({
@@ -489,18 +635,18 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,
-        prepareApprovalTurn: (event) => dynamicConnections.dispatch(turnStartedForResolvers(event)),
         signInCompletions,
-        historyProjector: history.projector,
-        historyView: history.prepare(modelSession),
+        typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
         instrumentation,
         modelResolutionScope: {
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
         },
         node: effectiveNode,
+        sessionUsageLimit,
         titleAttributeWrite: pendingAttributes.title,
       });
       return step(modelSession, stepInput);
@@ -520,52 +666,52 @@ async function runSessionStepBody(
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
           const result = await runStep(ctx, session, async (enrichedSession) => {
+            // Races session resources against the model call; their users wait for what remains.
+            if (firstCall && input.input?.control === undefined) {
+              startSessionPrewarmers(ctx, "turn");
+            }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-            let schemaSession =
+            ctx.setVirtualContext(ToolChannelKey, {
+              channel: channelOf(ctx),
+              to: createToolChannelTo({
+                delegated: hasDelegatedSessionContext(input.serializedContext),
+                loadBundle: () => ctx.require(BundleKey),
+              }),
+            });
+            const schemaSession =
               firstCall && resolved?.outputSchema !== undefined
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
-            const connectionState = turnPosition(currentProjection(ctx));
-            try {
-              await dynamicConnections.rehydrate(
-                connectionState,
-                runtimeIdentity,
-                isBetweenTurns(currentProjection(ctx))
-                  ? undefined
-                  : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
-              );
-            } catch (error) {
-              const recovered = await recoverDynamicConnectionRehydration({
-                emit: handleEvent,
-                error,
-                projection: currentProjection(ctx),
-                session: schemaSession,
-              });
-              if (recovered !== undefined) return recovered;
-              throw error;
-            }
+            // The scope's providers start empty; the slots fill what they own.
+            await applyReactionEffects(ctx);
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined
                 ? completedAuths.map(({ challenge }) => challenge)
                 : undefined;
-            return runHarnessStep(schemaSession, stepInput, completions);
+            const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
+            // Only the step knows whether it stopped for an interaction; the tables say which.
+            await publisher.finish({ announce: stoppedForPerson(harnessResult) });
+            return harnessResult;
           });
           // The waiting boundary may reach the client before this step returns.
           // Its settled result wins over a cancellation of that completed turn.
           if (result.settledTurn === undefined) throwIfTurnAborted(abortSignal);
           // The call's result carries the lifecycle it published, which batching reads.
           const saved = { ...result, session: saveSessionProjection(result.session, ctx) };
+          // A cut continuation starts from this completed call's private state.
+          recordAppliedSession(ctx, saved.session);
           completedModelCall = { result: saved, serializedContext: serializeContext(ctx) };
           return saved;
         },
       });
     } catch (error) {
       if (!isTurnCancellation(error) && !abortSignal.aborted) {
-        await failChannelDeliveries(error);
+        await instrumentation?.flush();
         throw error;
       }
+      if (completedModelCall === undefined) await consumeCancelledInput();
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
@@ -588,9 +734,28 @@ async function runSessionStepBody(
     stepResult = { ...stepResult, session: aliased };
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
+    if (checksSessionEvents()) {
+      const disagreement = stepDisagreement(durableResult, currentProjection(ctx).view);
+      if (disagreement !== undefined && disagreement !== "dispatch-deferred")
+        log.warn("a turn step's decision disagrees with the session's tables", { disagreement });
+    }
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
     publisher.writer.release();
   }
+}
+
+/**
+ * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
+ * and the tables say whether that's an interaction (`announceWaiting`).
+ */
+function stoppedForPerson(result: StepResult): boolean {
+  if (result.held !== undefined) return result.held.kind === "request";
+  return result.next === null && result.settledTurn === undefined;
+}
+
+/** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
+function ignoreTurnCancellation(error: unknown): void {
+  if (!isTurnCancellation(error)) throw error;
 }

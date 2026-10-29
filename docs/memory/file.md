@@ -5,7 +5,7 @@ description: "Configure the built-in fileMemory() provider: a bounded, model-mai
 
 `fileMemory()` from `eve/memory/file` is the memory provider built into eve.
 It keeps one small document per resolved scope, recalls that document before
-each turn and after compaction, and gives the model two tools to maintain it.
+each turn, and gives the model two tools to maintain it.
 Use it when a short list of durable facts and preferences is enough; use
 [another provider](/docs/memory#choose-a-provider) when you need semantic
 retrieval or automatic capture.
@@ -159,11 +159,13 @@ import { MemoryDocumentConflictError, type MemoryDocumentBackend } from "eve/mem
 
 export function kvBackend(store: KvStore): MemoryDocumentBackend {
   return {
-    async read({ key }) {
+    async read({ key, signal }) {
+      signal.throwIfAborted();
       const row = await store.get(key);
       return row ? { content: row.content, version: row.version } : null;
     },
-    async write({ key, content, expectedVersion }) {
+    async write({ key, content, expectedVersion, signal }) {
+      signal.throwIfAborted();
       const ok = await store.compareAndSet(key, content, expectedVersion);
       if (!ok) throw new MemoryDocumentConflictError(key);
       return { content, version: await store.version(key) };
@@ -175,6 +177,13 @@ export function kvBackend(store: KvStore): MemoryDocumentBackend {
 `write()` replaces the complete document and must throw
 `MemoryDocumentConflictError` when `expectedVersion` no longer matches. An
 `expectedVersion` of `null` means the document must not exist yet.
+
+Both methods receive a `signal: AbortSignal`. Check it before starting work and
+pass it to storage operations that support cancellation. When upgrading from
+`eve@0.84.x`, rename the backend input's `abortSignal` property to `signal`.
+Backends written for `0.83.x` or earlier already use `signal` and need no change.
+Memory and tool execution contexts still expose `ctx.abortSignal`; pass that
+value as the backend's `signal`.
 
 A backend changes only where the document is stored. It does not change file
 memory's recall format or tools. When you need different retrieval, capture, or

@@ -38,7 +38,8 @@ export default defineEval({
 
     // Replay the dispatched session's stream from durable storage and drive it
     // to a turn boundary.
-    const session = await t.target.attachSession(sessionId);
+    const session = t.target.attach(sessionId);
+    await session.nextTurn();
 
     session.succeeded();
     session.calledTool("record-heartbeat", {

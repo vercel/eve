@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { setChannelInstrumentationKind, type CompiledChannel } from "#channel/compiled-channel.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
-import { isChannel, type InstrumentationChannel } from "#public/instrumentation/index.js";
+import { isChannel, type InstrumentationChannel } from "#public/channels/index.js";
 
 type SupportMetadata = {
   readonly priority: "high";
@@ -61,7 +61,20 @@ describe("isChannel", () => {
     ).toBe(false);
   });
 
-  it("accepts the DynamicResolveContext.channel shape (optional kind)", () => {
+  it.each(["default", "empty"])("keeps nonmatching %s metadata projections readable", (mode) => {
+    const target =
+      mode === "default"
+        ? defineChannel({ routes: [] })
+        : defineChannel({ routes: [], metadata: () => ({}) });
+    setChannelInstrumentationKind(target as CompiledChannel, "channel:empty");
+    const inspect = (input: InstrumentationChannel) => {
+      if (isChannel(input, target)) return "matched";
+      return input.kind;
+    };
+    expect(inspect({ kind: "unknown", metadata: {} })).toBe("unknown");
+  });
+
+  it("accepts deliberately limited channel projections", () => {
     stampSupportChannel();
 
     const resolveCtxChannel: {
@@ -87,10 +100,14 @@ describe("isChannel", () => {
     ).toBe(true);
   });
 
-  it("returns false for DynamicResolveContext.channel with undefined kind", () => {
+  it("returns false for a kind-only projection without a kind", () => {
     stampSupportChannel();
 
     const noKind: { readonly kind?: string } = {};
     expect(isChannel(noKind, supportChannel)).toBe(false);
+    if (isChannel(noKind, supportChannel)) {
+      // @ts-expect-error A kind-only projection cannot acquire metadata through a guard.
+      void noKind.metadata;
+    }
   });
 });

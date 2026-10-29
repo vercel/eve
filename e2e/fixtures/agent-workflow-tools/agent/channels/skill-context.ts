@@ -25,7 +25,7 @@ export default defineChannel({
         },
       });
       return Response.json({
-        sessionId: session.id,
+        sessionId: session.sessionId,
         environment:
           process.env.EVE_DEV === "1" || process.env.VERCEL_ENV === "development"
             ? "development"

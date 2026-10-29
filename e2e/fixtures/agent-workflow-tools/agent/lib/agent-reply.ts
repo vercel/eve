@@ -9,5 +9,5 @@ export async function replyFrom(
   const response = await ctx.agent(name).send(message);
   const result = await response.result();
   if (result.status === "failed") throw new Error(`Agent "${name}" failed.`);
-  return result.message ?? null;
+  return result.reply ?? null;
 }

@@ -5,7 +5,6 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { buildConversationContext, toAudienceCaller } from "#channel/conversation-context.js";
 import {
-  type AudienceInput,
   ConversationContextKey,
   UNKNOWN_CONVERSATION_CONTEXT,
 } from "#shared/conversation-context.js";
@@ -84,7 +83,10 @@ describe("buildConversationContext", () => {
         adapter: {
           kind: "http",
           instrumentation: {
-            audience: ({ auth }) => (auth?.principalType === "user" ? "private" : "public"),
+            audience: ({ caller }) =>
+              caller.type === "principal" && caller.principal.kind === "user"
+                ? "private"
+                : "public",
           },
         },
         audienceAuth: auth,
@@ -94,20 +96,6 @@ describe("buildConversationContext", () => {
     );
 
     expect(context).toMatchObject({ audience: "private", principalType: "user" });
-  });
-
-  it("keeps callbacks using the deprecated auth input compatible", () => {
-    const audience = ({ auth }: AudienceInput<Record<string, unknown> | undefined>) =>
-      auth?.principalType === "user" ? "private" : "public";
-    const context = buildConversationContext(
-      run({
-        adapter: { instrumentation: { audience }, kind: "http" },
-        auth,
-      }),
-      "production",
-    );
-
-    expect(context.audience).toBe("private");
   });
 
   it("projects only audience-safe caller fields", () => {
@@ -145,7 +133,7 @@ describe("buildConversationContext", () => {
     expect(toAudienceCaller(input)).toEqual(expected);
   });
 
-  it("passes caller alongside auth to audience classifiers", () => {
+  it("passes caller to audience classifiers", () => {
     const context = buildConversationContext(
       run({
         adapter: {
@@ -170,7 +158,9 @@ describe("buildConversationContext", () => {
       run({
         adapter: {
           kind: "http",
-          instrumentation: { audience: ({ auth }) => (auth === null ? "public" : "private") },
+          instrumentation: {
+            audience: ({ caller }) => (caller.type === "anonymous" ? "public" : "private"),
+          },
         },
         audienceAuth: null,
         auth,

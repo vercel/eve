@@ -11,8 +11,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | ---------------------------------------------- | ------------------------------------------------------ |
 | `eve init [target]`                            | Create a new agent, or add one to an existing project  |
 | `eve dev`                                      | Start the local development server and terminal UI     |
-| `eve remote connect --url <url>`               | Open the terminal UI for an existing agent             |
-| `eve remote invoke --url <url> [prompt]`       | Invoke an existing agent without a terminal UI         |
+| `eve remote connect --url <url>`               | Open the terminal UI or print one remote response      |
 | `eve remote info --url <url>`                  | Inspect an existing agent                              |
 | `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
 | `eve info`                                     | Inspect the local application                          |
@@ -35,7 +34,7 @@ eve collects CLI telemetry by default to improve the command-line interface. Run
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--non-interactive]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--non-interactive]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -48,16 +47,17 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 | `eve init` or `eve init .` in an existing project                                                          | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files |
 | `eve init path/to/app`                                                                                     | Adds an agent to the existing package at `path/to/app`                                                                 |
 
-Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
+Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`. A new project path can be nested, such as `eve init apps/my-agent`; eve creates missing parent directories.
 
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                    | Type   | Default                                              | Description                                                                                                              |
-| ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
-| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
+| Flag                    | Type   | Default                                              | Description                                                                                                                   |
+| ----------------------- | ------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                     |
+| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored.      |
+| `--agents <names>`      | string | unset                                                | Create a new workspace with comma-separated agent names, such as `support,research`, or add members to an existing workspace. |
+| `-y, --yes`             | flag   | off                                                  | Accepted for compatibility; warns and has no effect.                                                                          |
+| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                               |
 
 ## `eve extension`
 
@@ -78,6 +78,7 @@ Creates a new extension package, installs dependencies, and initializes Git. Pri
 | No target                   | Same as `.` for humans; coding agents get a short setup guide |
 
 Create-only: cannot target an existing project that already has a `package.json`.
+`-y` and `--yes` are accepted for compatibility; they warn and have no effect.
 
 See [Extensions](/docs/extensions) for authoring and mount details.
 
@@ -199,7 +200,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 }
 ```
 
-`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here. To compute the same form for an input schema in your own code, such as in a test, call `serializeModelInputSchema(schema)` from `eve/tools`; it returns JSON Schema data and does not add `taskId`.
+`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here.
 
 ## `eve build`
 
@@ -210,8 +211,13 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
-`-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
-keeps a channel's `server-only` imports on the same export used during compilation.
+`-C`, or `NODE_OPTIONS`, so compilation and the bundle resolve each package to the same export.
+For example, `NODE_OPTIONS="--conditions=react-server" eve build` selects the `react-server`
+export of packages that publish one.
+
+eve loads `server-only` and `client-only` imports as empty modules in every bundle it builds. Code
+shared with a Next.js app can keep these imports without a resolution condition, and your app does
+not need to depend on either package.
 
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
@@ -224,7 +230,7 @@ Use a profile file to establish a repeatable baseline before changing the build 
 eve build --profile .eve/build-profiles/baseline.json
 ```
 
-The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
+The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. For self-hosted output it includes `deploymentId`, the content-derived build identity eve passes to the Workflow World as `WORKFLOW_DEPLOYMENT_ID` when that variable isn't already set. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
 
 Production builds do not write through the stable compiler, host, Nitro, or Workflow files owned by `eve dev`, so builds can run while a local dev server is active. A failed build leaves the last successful `.output/` and agent summary untouched. Concurrent completed builds serialize only the final publication window.
 
@@ -241,15 +247,20 @@ Useful stable artifacts written by inspection and development flows under `.eve/
 ## `eve start`
 
 ```bash
-eve start [--host <host>] [--port <port>]
+eve start [--host <host>] [--port <port>] [--no-schedules]
 ```
 
-| Flag            | Type   | Default            | Description            |
-| --------------- | ------ | ------------------ | ---------------------- |
-| `--host <host>` | string | all interfaces     | Host interface to bind |
-| `--port <port>` | number | `$PORT`, then 3000 | Port to listen on      |
+| Flag             | Type   | Default            | Description                                   |
+| ---------------- | ------ | ------------------ | --------------------------------------------- |
+| `--host <host>`  | string | all interfaces     | Host interface to bind                        |
+| `--port <port>`  | number | `$PORT`, then 3000 | Port to listen on                             |
+| `--no-schedules` | flag   | schedules on       | Start without running authored cron schedules |
 
-Serves the previously built output. Prints the listening URL.
+Serves the previously built output. Prints the listening URL, and a `schedules disabled` line when `--no-schedules` or `EVE_SCHEDULES_DISABLED` turns schedules off. HTTP requests and workflow jobs continue to run.
+
+Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime, including when you run `node .output/server/index.mjs` directly. Unset, empty, and other values leave schedules enabled. `--no-schedules` sets the variable to `1` only for the spawned server; omitting the flag preserves any value you already set. The same build can run with schedules enabled or disabled.
+
+Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosting#run-schedules). It also disables authored cron dispatch on Vercel if set there, but does not affect explicit schedule dispatch in `eve dev`.
 
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. The deployment directory can differ from the build directory. Preserve the relative layout of any workspace packages used by the app; startup resolves sandbox prewarm modules from the deployed source.
 
@@ -263,20 +274,22 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 
 | Flag                                | Type   | Default            | Description                                                     |
 | ----------------------------------- | ------ | ------------------ | --------------------------------------------------------------- |
-| `--host <host>`                     | string | all interfaces     | Host interface to bind                                          |
+| `--host <host>`                     | string | `127.0.0.1`        | Host interface to bind                                          |
 | `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                               |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                      |
 | `--resume`                          | flag   | off                | Attempt recovery of retained runs from previous dev invocations |
 | `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                     |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                  |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                             |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                             |
-| `--subagents <mode>`                | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
+| `--show-tools <mode>`               | enum   | `auto-collapsed`   | Tool-call rendering                                             |
+| `--show-reasoning <mode>`           | enum   | `auto-collapsed`   | Reasoning rendering                                             |
+| `--show-subagents <mode>`           | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
+| `--show-connection-auth <mode>`     | enum   | `full`             | Connection-authorization rendering                              |
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
+
+`localDev()` refuses callers whose connection comes from another machine. When `--host` binds another interface, such as `0.0.0.0`, those callers need another authenticator in the channel's `auth` list. A tunnel or reverse proxy on the same machine, such as ngrok, cloudflared, or a local nginx, connects from this machine, so every caller it forwards still gets `local-dev`. Put an authenticator in front of any dev server you expose that way.
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
@@ -316,7 +329,7 @@ Use `eve remote` only with an explicit existing agent URL:
 
 ```bash
 eve remote connect --url https://agent.example.com
-eve remote invoke --url https://agent.example.com "Summarize station telemetry"
+eve remote connect --url https://agent.example.com --print "Summarize station telemetry"
 eve remote info --url https://agent.example.com
 ```
 
@@ -325,28 +338,15 @@ eve remote info --url https://agent.example.com
 ### `eve remote connect`
 
 ```bash
-eve remote connect --url <url> [-H "Name: value"]
+eve remote connect --url <url> [--input <text>] [-H "Name: value"]
+eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
+
+Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. `--print` starts a new conversation each time and does not answer pending requests; to answer that session's pending request or script multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
+
+Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `--show-tools`, `--show-reasoning`, `--show-subagents`, `--show-connection-auth`, `--assistant-response-stats`, `--context-size`, and `--logs`. The `--show-*` flags control rendering, not model reasoning effort. Set effort with `eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
-
-### `eve remote invoke`
-
-```bash
-eve remote invoke --url <url> [prompt] [--resume] [-H "Name: value"] [--scope <team>]
-```
-
-Invokes an existing agent without opening the terminal UI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
-
-| Option                  | Type   | Default  | Description                                     |
-| ----------------------- | ------ | -------- | ----------------------------------------------- |
-| `<url>`                 | string | required | Existing eve agent URL                          |
-| `[prompt]`              | string | none     | Prompt, follow-up, or answer to a pending input |
-| `-H, --header <header>` | string | none     | Request header for the URL target; repeatable   |
-| `--resume`              | flag   | off      | Read a previous resumable result from stdin     |
-| `--scope <team>`        | string | current  | Vercel team that owns the URL target            |
-
-`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input. An `authorization-required` result lists every unresolved challenge; complete them, then resume without text. Pass headers and scope again when resuming. Paused invocations exit `3`; failures exit `1`. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
 
 ### `eve remote info`
 
@@ -372,7 +372,7 @@ A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.0
 
 `eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs list`; `eve logs list --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
 
-`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
+`eve logs --events` resolves session events (`session.started`, `turn.settled`, content deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 
@@ -449,19 +449,23 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
-| Flag                     | Type   | Default | Description                                                   |
-| ------------------------ | ------ | ------- | ------------------------------------------------------------- |
-| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                    |
-| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                 |
-| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                     |
-| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                |
-| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
-| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
-| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
-| `--json`                 | flag   | off     | Output results as JSON                                        |
-| `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
-| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
-| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
+Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends unless you pass `--keep-state`. A kept directory, including the server's Workflow data in `.workflow-data/`, stays until a later `eve eval` in the same app cleans it up. The local server runs beside an `eve dev` session for the same agent without attaching to it or changing it.
+
+| Flag                     | Type   | Default | Description                                                    |
+| ------------------------ | ------ | ------- | -------------------------------------------------------------- |
+| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                     |
+| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                  |
+| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                      |
+| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                 |
+| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them  |
+| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                               |
+| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                 |
+| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability                |
+| `--json`                 | flag   | off     | Output results as JSON                                         |
+| `--junit <path>`         | string | none    | Write JUnit XML results to a file                              |
+| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                  |
+| `--keep-state`           | flag   | off     | Keep the local eval server's state after the run (not `--url`) |
+| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout            |
 
 See [Evals](../evals/overview) for authoring evals.
 

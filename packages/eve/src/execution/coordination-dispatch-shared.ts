@@ -2,6 +2,7 @@
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
+import type { SandboxState } from "#sandbox/state.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -21,6 +22,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { HarnessSessionBase } from "#harness/types.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { assertUniqueCoordinationCallIds } from "#harness/coordination.js";
 import {
   activeTurnId,
@@ -28,6 +30,8 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
+import type { TaskCallStart } from "#harness/session-machine/transitions.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -38,14 +42,13 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { readDynamicSubagentSelections } from "#context/dynamic-subagent-lifecycle.js";
+import { readDynamicSubagentSelections } from "#reactions/kinds/subagent.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
-  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -55,6 +58,18 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
+  readonly pending: PendingDispatchFacts;
+}
+
+/** The calls a dispatch started or refused, recorded on the session but not yet published. */
+export interface PendingDispatchFacts {
+  /** Calls the turn waits on, each running from now in a run of its own. */
+  readonly executing: readonly FactOf<"call.started">[];
+  /** Tasks the dispatch started or sent a call to. */
+  readonly started: readonly TaskCallStart[];
+  /** Calls a dispatch admission refused before any run started. */
+  readonly refused: readonly FactOf<"call.settled">[];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */
@@ -76,6 +91,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
   readonly sandboxSessionId: string;
+  /** The state of that sandbox: this session's own, or else its owner's when it shares it. */
+  readonly sandboxState?: SandboxState;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
@@ -87,10 +104,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
 
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
- * deserialization, handle-store validation, and batch planning — before
- * the caller acquires the parent stream writer, so a preflight failure
- * never leaks the writer lock. Returns undefined when no actions are
- * pending.
+ * deserialization, handle-store validation, and batch planning — before any
+ * run starts. Returns undefined when no actions are pending.
  */
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
@@ -139,6 +154,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   assertUniqueCoordinationCallIds(batch.requests);
 
   const ctx = input.ctx;
+  enterSessionProjection(ctx, durableSession.state);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
@@ -158,6 +174,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  const sandboxState = session.sandboxState ?? resolveOwnerSandboxState(adapter.state);
 
   return {
     adapter,
@@ -174,6 +191,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     parentSession: ctx.get(ParentSessionKey),
     plan,
     sandboxSessionId,
+    sandboxState,
     serializedContext: input.serializedContext,
     session,
     traceRoot: childTraceRoot(ctx, session.sessionId),
@@ -189,6 +207,12 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot | undefined {
   if (ctx.get(TraceRootKey) === undefined) return undefined;
   return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
+}
+
+/** A child that shares its owner's sandbox uses the owner's state until it records its own. */
+function resolveOwnerSandboxState(adapterState: unknown): SandboxState | undefined {
+  if (typeof adapterState !== "object" || adapterState === null) return undefined;
+  return (adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined;
 }
 
 function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {

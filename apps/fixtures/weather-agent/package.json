@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "eve dev",
     "build": "eve build",
+    "build:analysis": "eve build --skip-sandbox-prewarm",
     "start": "eve start",
     "info": "eve info",
     "typecheck": "tsc --noEmit -p tsconfig.json"

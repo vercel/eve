@@ -10,12 +10,13 @@ export default defineEval({
     if (sessionId === undefined) throw new Error("Expected a started session.");
 
     // Attachment reads the first boundary, leaving the second turn behind its cursor.
-    const resumed = await t.target.attachSession(sessionId, { startIndex: 0 });
+    const resumed = t.target.attach(sessionId, { startIndex: 0 });
+    await resumed.nextTurn();
     const message = "Reply with current-report-ready.";
     const current = await resumed.send(message);
     current.expectOk();
-    current.event("message.received", { count: 1, data: { message } });
-    current.event("turn.started", { count: 1, data: { sequence: 2 } });
-    current.event("session.waiting", { count: 1 });
+    current.event("delivery.consumed", { count: 1, data: { parts: [{ text: message }] } });
+    current.event("turn.started", { count: 1, data: { turnId: "turn_2" } });
+    current.event("turn.settled", { count: 1, data: { outcome: "completed" } });
   },
 });

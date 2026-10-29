@@ -10,8 +10,8 @@ import { inspect } from "node:util";
 
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { currentCapture } from "#compiled/@eve/tracing/index.js";
-import { truncateTelemetryText } from "#compiled/@eve/tracing/otel.js";
+import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
+import { truncateTelemetryText } from "#compiled/@vercel/agent-runs/otel.js";
 
 const MAX_INSPECT_STRING_LENGTH = 8 * 1024;
 const MAX_DETAIL_BYTES = 16 * 1024;
@@ -171,22 +171,6 @@ function extractErrorMessage(error: unknown): string {
     return error.message;
   }
   return getErrorMessage(error);
-}
-
-/**
- * Pulls the correlated `errorId` off a `step.failed` / `turn.failed`
- * / `session.failed` event's `details` payload (or any other shape
- * produced by {@link formatError}). Returns `undefined` when the
- * sender did not attach one (older cascades, non-model-call error
- * paths that predate the shared format).
- *
- * The inverse-reader of {@link formatError}. Channels that surface
- * user-visible error text use it to embed a correlation id so a
- * support ticket quoting the id can be grepped back to one incident.
- */
-export function extractErrorId(details: unknown): string | undefined {
-  if (!isObject(details)) return undefined;
-  return isNonEmptyString(details.errorId) ? details.errorId : undefined;
 }
 
 /**

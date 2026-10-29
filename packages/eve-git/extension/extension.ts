@@ -1,10 +1,13 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-import type { GitHubConfig } from "./lib/github-shell.ts";
+import type { GitHubAttribution, GitHubAuthorize, GitHubConfig } from "./lib/github-shell.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
+export type { GitHubCoAuthor } from "./lib/github-shell.ts";
+export type { GitHubAuthorize, GitHubAuthorizeRequest } from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
+export type { GitHubAttribution } from "./lib/github-shell.ts";
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 
@@ -18,8 +21,25 @@ export default defineExtension({
     github: z
       .object({
         connector: z.string().min(1),
-        org: z.string().min(1),
         broker: fn<GitHubLeaseBroker>(),
+        /**
+         * Resolves the person each turn publishes for. Their
+         * `Co-authored-by` trailer ends signed commits and new pull requests.
+         */
+        attribution: fn<GitHubAttribution>().optional(),
+        /**
+         * The agent's only GitHub access control. Called before each `gh`
+         * command with the session's caller, the declared `owner/name`
+         * repository, and the minted token. Return `true` to run the command.
+         */
+        authorize: fn<GitHubAuthorize>(),
+        /**
+         * Whose token `connector` mints, as in `connect({ connector,
+         * principalType })`. `"app"` (default) uses the GitHub App
+         * installation. `"user"` uses the caller's own GitHub token: eve signs
+         * them in when needed and again when GitHub rejects the token.
+         */
+        principalType: z.enum(["app", "user"]).optional(),
       })
       .optional(),
   }),

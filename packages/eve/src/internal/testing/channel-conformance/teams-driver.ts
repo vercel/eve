@@ -50,6 +50,8 @@ interface PressHandle {
   /** The card's activity, which Teams names as `replyToId` on the press. */
   readonly activityId: string;
   readonly data: Record<string, unknown>;
+  /** Whether the button is an `Action.Execute`, which Teams sends as an invoke. */
+  readonly execute: boolean;
   /** The chosen ChoiceSet value; unset when each option is its own Submit action. */
   readonly value?: string;
 }
@@ -201,14 +203,25 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     },
     personShownAs: [PERSON.name],
     press: (option: RenderedOption, person: Person) => {
-      const { activityId: cardActivityId, data, value } = option.handle as PressHandle;
+      const { activityId: cardActivityId, data, execute, value } = option.handle as PressHandle;
+      const submitted = value === undefined ? data : { ...data, eve_option: value };
+      if (execute) {
+        return activity({
+          from: PEOPLE[person],
+          id: `INVOKE-${activityId + 1}`,
+          name: "adaptiveCard/action",
+          replyToId: cardActivityId,
+          type: "invoke",
+          value: { action: { data: submitted } },
+        });
+      }
+      // An Action.Submit button in a conversation posts a message activity whose value is the
+      // action's data merged with the card's inputs; only Action.Execute sends an invoke.
       return activity({
         from: PEOPLE[person],
-        id: `INVOKE-${activityId + 1}`,
-        name: "adaptiveCard/action",
         replyToId: cardActivityId,
-        type: "invoke",
-        value: { action: { data: value === undefined ? data : { ...data, eve_option: value } } },
+        type: "message",
+        value: submitted,
       });
     },
     postedText(call) {
@@ -248,15 +261,21 @@ function cardOptions(call: PlatformCall): RenderedOption[] {
   );
   // A select renders one ChoiceSet and a single Submit; other choices are one Submit each.
   if (choiceSet?.choices !== undefined) {
-    const data = submits[0]?.data;
-    if (data === undefined) return [];
+    const submit = submits[0];
+    if (submit?.data === undefined) return [];
+    const { data } = submit;
+    const execute = submit.type === "Action.Execute";
     return choiceSet.choices.map((choice) => ({
-      handle: { activityId, data, value: choice.value } satisfies PressHandle,
+      handle: { activityId, data, execute, value: choice.value } satisfies PressHandle,
       label: choice.title,
     }));
   }
   return submits.map((action) => ({
-    handle: { activityId, data: action.data! } satisfies PressHandle,
+    handle: {
+      activityId,
+      data: action.data!,
+      execute: action.type === "Action.Execute",
+    } satisfies PressHandle,
     label: action.title ?? "",
   }));
 }

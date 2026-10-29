@@ -1,3 +1,4 @@
+import { workflowToolChannel } from "#execution/tools/workflow/body.js";
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -7,7 +8,8 @@ import {
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { runSignIn } from "#harness/session-machine/transitions.js";
+import { signInInteractionId, signInOpened } from "#harness/interaction-facts.js";
+import type { RelayedInteractionEvent } from "#channel/types.js";
 import type {
   WorkflowStepAuthorizationResult,
   WorkflowStepContext,
@@ -74,6 +76,7 @@ async function executeAuthorizedStep(
           ctx,
           execute,
           receiver,
+          run,
         });
       } catch (error) {
         if (!ctx.abortSignal.aborted) {
@@ -116,8 +119,9 @@ async function invokeAuthorizedStep(input: {
   readonly ctx: ToolContext;
   readonly execute: (invocation: WorkflowStepInvocation) => Promise<unknown>;
   readonly receiver: unknown;
+  readonly run: WorkflowToolRunContext;
 }): Promise<WorkflowStepResult> {
-  const { args, authorizationResults, callbackToken, ctx, execute, receiver } = input;
+  const { args, authorizationResults, callbackToken, ctx, execute, receiver, run } = input;
   const context: WorkflowStepContext = {
     callId: ctx.callId,
     toolName: ctx.toolName,
@@ -126,6 +130,13 @@ async function invokeAuthorizedStep(input: {
     baseUrl: getWorkflowMetadata().url,
     token: callbackToken,
     authorizationResults,
+    delegated: run.agentContext.delegated === true,
+    channel: workflowToolChannel(run.agentContext),
+    sandbox: {
+      bundle: run.agentContext.bundle,
+      sessionId: run.agentContext.sandbox.sessionId,
+      state: run.agentContext.sandbox.state,
+    },
   };
   const invocation: WorkflowStepInvocation = {
     args: args.map((arg) => (arg === ctx ? null : arg)),
@@ -146,7 +157,7 @@ async function reconcileCompletedAuthorizations(
   for (const attemptId of authorized) {
     const challenge = pending.get(attemptId);
     if (challenge !== undefined) {
-      await reportAuthorization(run, signal, challenge, "authorized");
+      await reportAuthorization(run, signal, challenge, "accepted");
     }
     pending.delete(attemptId);
   }
@@ -215,7 +226,7 @@ async function reportAuthorization(
   run: WorkflowToolRunContext,
   signal: AbortSignal,
   challenge: IdentifiedAuthorizationChallenge,
-  outcome?: "authorized" | "failed",
+  outcome?: "accepted" | "failed",
 ): Promise<void> {
   const event = runSignIn(run.from, challenge, outcome);
   const acknowledged = createHook<void>();
@@ -230,13 +241,13 @@ async function reportAuthorization(
         from: run.from,
         replyTo: acknowledged.token,
         request: {
-          kind: "authorization-request",
+          kind: "relay",
           event: {
-            kind: "subagent-authorization-event",
+            kind: "subagent-interaction",
             callId: run.from.callId,
             childSessionId: run.from.runId,
             subagentName: run.from.toolName,
-            event,
+            events: [event],
           },
         },
       }),
@@ -321,4 +332,28 @@ function readCallback(
     return callback;
   }
   return undefined;
+}
+
+/**
+ * A workflow run's sign-in, reported to the session that owns the run, which mirrors it: opened
+ * while the run waits, then how it settled.
+ */
+function runSignIn(
+  from: { readonly taskId?: string; readonly turnId: string },
+  challenge: AuthorizationChallenge,
+  outcome?: "accepted" | "failed",
+): RelayedInteractionEvent {
+  if (outcome === undefined) {
+    return {
+      data: signInOpened(challenge, {
+        prompt: `Sign in to ${challenge.name} to continue.`,
+        subject: from.taskId === undefined ? { turnId: from.turnId } : { taskId: from.taskId },
+      }).data,
+      type: "interaction.opened",
+    };
+  }
+  return {
+    data: { interactionId: signInInteractionId(challenge), outcome },
+    type: "interaction.settled",
+  };
 }

@@ -1,17 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import {
-  positionState,
-  withPublished,
-  withQueuedInput,
-} from "#internal/testing/session-machine.js";
+import { positionState, withQueuedInput } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
-import { createAuthorizationRequiredEvent, createInputRequestedEvent } from "#protocol/message.js";
 
-// A session hands off only with nothing open, whatever kind of work it is: the projection
-// reports every open turn, request, and sign-in, and execution state holds queued input.
+// A session hands off only with nothing open: the projection reports every open turn, and
+// execution state holds queued input and retained requests.
 
 function checkpoint(session: Pick<HarnessSession, "state">) {
   const value = createTestSessionState();
@@ -24,18 +19,11 @@ function checkpoint(session: Pick<HarnessSession, "state">) {
   };
 }
 
-function betweenTurns(): HarnessSession {
+function betweenTurns(): Pick<HarnessSession, "state"> {
   return {
-    agent: { dynamicModel: true, system: "", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
-    continuationToken: "test-token",
-    history: [],
-    sessionId: "test-session",
     state: { ...positionState({ sequence: 1, turnId: "" }), authored: { values: [null, false] } },
   };
 }
-
-const at = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
 
 describe("handoff state inspection", () => {
   it("accepts a session between turns with opaque authored state", () => {
@@ -43,36 +31,27 @@ describe("handoff state inspection", () => {
   });
 
   it("refuses an open turn", () => {
-    expect(isSessionStateIdleForHandoff(checkpoint({ state: positionState(at) }))).toBe(false);
+    const open = { state: positionState({ sequence: 0, stepIndex: 0, turnId: "turn_0" }) };
+    expect(isSessionStateIdleForHandoff(checkpoint(open))).toBe(false);
   });
 
-  it("refuses an open request", () => {
-    const asked = withPublished(betweenTurns(), [
-      createInputRequestedEvent({
-        requests: [
-          {
-            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
-            kind: "tool-approval",
-            prompt: "Approve deploy?",
-            requestId: "approval-1",
-          },
-        ],
-        ...at,
-      }),
-    ]);
-    expect(isSessionStateIdleForHandoff(checkpoint(asked))).toBe(false);
-  });
+  it.each([{ signIns: false }, { relays: { request: {} } }, { relays: null }, [], "corrupt"])(
+    "refuses retained or malformed requests (%#)",
+    (requests) => {
+      const state = { ...betweenTurns().state, "eve.runtime.hitl.requests": requests };
+      expect(isSessionStateIdleForHandoff(checkpoint({ state }))).toBe(false);
+    },
+  );
 
-  it("refuses an open sign-in", () => {
-    const asked = withPublished(betweenTurns(), [
-      createAuthorizationRequiredEvent({
-        attemptId: "attempt-1",
-        description: "Sign in to Linear",
-        name: "linear",
-        ...at,
-      }),
-    ]);
-    expect(isSessionStateIdleForHandoff(checkpoint(asked))).toBe(false);
+  it("rejects corrupt running work before a retained-request shortcut", () => {
+    const state = {
+      ...betweenTurns().state,
+      "eve.runtime.hitl.requests": { signIns: [] },
+      "eve.work": "corrupt",
+    };
+    expect(() => isSessionStateIdleForHandoff(checkpoint({ state }))).toThrow(
+      "Corrupt running-work record",
+    );
   });
 
   it("refuses input the session holds until it can run", () => {

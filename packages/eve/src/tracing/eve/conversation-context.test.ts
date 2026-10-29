@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { ROOT_CONTEXT } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConversationIdKey } from "#context/keys.js";
 import { readConversationId, resolveConversationId } from "#shared/conversation-identity.js";
 import {
   readConversationBaggage,
+  traceSessionIdFromContext,
+  withOperationTraceContext,
   writeConversationBaggage,
 } from "#tracing/eve/conversation-context.js";
 
@@ -12,6 +15,16 @@ describe("conversation correlation", () => {
     const baggage = writeConversationBaggage("eve.audience=private;ceiling=i0o0", "root/session");
     expect(readConversationBaggage(baggage!)).toBe("root/session");
     expect(baggage).toContain("eve.audience=private;ceiling=i0o0");
+  });
+
+  it("carries the trace session independently of the current run", () => {
+    const context = withOperationTraceContext(ROOT_CONTEXT, {
+      rootSessionId: "root-session",
+      sessionId: "child-run",
+      traceSessionId: "trace-session",
+    });
+
+    expect(traceSessionIdFromContext(context)).toBe("trace-session");
   });
 
   it("rejects malformed, duplicate, oversized, and unsafe identifiers", () => {

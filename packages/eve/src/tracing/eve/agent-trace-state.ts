@@ -6,7 +6,7 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type { TraceSnapshot } from "#compiled/@eve/tracing/index.js";
+import type { TraceSnapshot } from "#compiled/@vercel/agent-runs/index.js";
 
 export interface AgentSessionTraceState {
   readonly traceSessionId: string;
@@ -24,15 +24,10 @@ export interface AgentSessionTraceState {
 
 export interface AgentTurnTraceState {
   readonly agentName?: string;
-  /** Recorded at the turn's terminal event; the span ends at the session transition. */
-  readonly terminal?: {
-    readonly outcome: "cancelled" | "completed" | "failed";
-    readonly errorName?: string;
-    readonly errorMessage?: string;
-  };
   readonly traceSessionId: string;
   readonly caller?: SpanContext;
   readonly channelDelivery?: AgentTurnChannelDeliveryTraceState;
+  readonly consumedDeliveryId?: string | null;
   readonly context: SpanContext;
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly initiatorPrincipal?: InstrumentationPrincipalSummary;

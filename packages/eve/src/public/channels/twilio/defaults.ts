@@ -1,8 +1,8 @@
-import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { renderTextInputRequest } from "#channel/resolve-text.js";
+import { postedIn, signInChallengeText, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
+import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -15,9 +15,7 @@ import type {
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
-import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
-import { displayProperName } from "#shared/display-name.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
 function defaultTwilioAuth(input: {
@@ -73,92 +71,36 @@ export function defaultOnVoiceTranscription(
   };
 }
 
-/** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
-export const defaultEvents: TwilioChannelEvents = {
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    await channel.twilio.sendMessage(event.message);
-  },
+function twilioSignIns(channel: TwilioEventContext): SignInSurface {
+  const send = async (text: string) => {
+    await channel.twilio.sendMessage(text);
+    return undefined;
+  };
+  return {
+    private: true,
+    postChallenge: (signIn) => send(signInChallengeText(signIn)),
+    post: send,
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
 
+export const defaultEvents: TwilioChannelEvents = surfaceEvents<TwilioEventContext>({
+  post: (channel, text) => channel.twilio.sendMessage(text),
+  restart: "message",
   // SMS has no buttons, so a reply can only answer the request it sees.
-  ...promptQueueEvents(showPrompt),
+  requests: { showOne: showPrompt },
+  signIns: twilioSignIns,
+});
 
-  // An SMS thread is one person's, so the link and code can go in the message.
-  async "authorization.required"(event, channel, _ctx) {
-    if (event.candidateId !== undefined) return;
-    const challenge = event.authorization;
-    await channel.twilio.sendMessage(
-      [
-        `Sign in to ${challenge?.displayName ?? displayProperName(event.name)} to continue.`,
-        challenge?.instructions,
-        challenge?.userCode ? `Code: ${challenge.userCode}` : undefined,
-        challenge?.url,
-      ]
-        .filter((part): part is string => part !== undefined && part.length > 0)
-        .join("\n\n"),
-    );
-  },
-
-  async "authorization.completed"(event, channel, _ctx) {
-    if (event.candidateId !== undefined) return;
-    await channel.twilio.sendMessage(
-      renderAuthorizationOutcome({
-        displayName: event.authorization?.displayName ?? displayProperName(event.name),
-        outcome: event.outcome,
-        reason: event.reason,
-      }),
-    );
-  },
-
-  async "turn.failed"(event, channel, _ctx) {
-    if (event.terminal) return;
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
-    await channel.twilio.sendMessage(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
-  },
-
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
-    await channel.twilio.sendMessage(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new message to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
-  },
-};
-
-async function showPrompt(channel: TwilioEventContext, request: InputRequest): Promise<void> {
-  const body = renderTextInputRequest(request);
-  if ((request.options ?? []).length === 0) {
+async function showPrompt(channel: TwilioEventContext, request: Interaction): Promise<void> {
+  const body = renderTextInteraction(request.request);
+  if ((request.request.options ?? []).length === 0) {
     await channel.twilio.sendMessage(body);
     return;
   }
   const instruction =
-    request.allowFreeform === true
+    request.request.allowFreeform === true
       ? "Reply with a number, or with your own answer."
       : "Reply with a number to choose.";
   await channel.twilio.sendMessage(`${body}\n\n${instruction}`);
-}
-
-function renderAuthorizationOutcome(input: {
-  readonly displayName: string;
-  readonly outcome: ConnectionAuthorizationOutcome;
-  readonly reason?: string;
-}): string {
-  if (input.outcome === "authorized") return `${input.displayName} connected.`;
-  if (input.outcome === "declined") return `${input.displayName} sign-in cancelled.`;
-  const outcome = input.outcome === "timed-out" ? "timed out" : input.outcome;
-  const reason = input.reason === undefined ? "" : ` (${input.reason})`;
-  return `${input.displayName} sign-in ${outcome}${reason}.`;
 }

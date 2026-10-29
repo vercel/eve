@@ -1,3 +1,5 @@
+import { isObject } from "#shared/guards.js";
+
 export function isVercelSnapshotUnavailableError(error: unknown): boolean {
   return errorChainContainsStatus(error, 410);
 }
@@ -8,9 +10,9 @@ export function isVercelSnapshotUnavailableError(error: unknown): boolean {
  */
 export function isVercelSnapshotNotFoundError(error: unknown): boolean {
   for (const candidate of walkErrorChain(error)) {
-    if (readErrorStatus(candidate) !== 410 || !isRecord(candidate)) continue;
+    if (readErrorStatus(candidate) !== 410 || !isObject(candidate)) continue;
     const body =
-      isRecord(candidate.json) && isRecord(candidate.json.error) ? candidate.json.error : undefined;
+      isObject(candidate.json) && isObject(candidate.json.error) ? candidate.json.error : undefined;
     if (body?.code === "snapshot_not_found") return true;
   }
   return false;
@@ -37,11 +39,11 @@ export function isVercelSandboxNameConflictError(error: unknown): boolean {
 
 // The API error's message, falling back to its parsed JSON body.
 function readErrorText(value: unknown): string {
-  if (!isRecord(value)) return "";
+  if (!isObject(value)) return "";
   const parts: string[] = [];
   if (typeof value.message === "string") parts.push(value.message);
   if (typeof value.text === "string") parts.push(value.text);
-  const body = isRecord(value.json) && isRecord(value.json.error) ? value.json.error : undefined;
+  const body = isObject(value.json) && isObject(value.json.error) ? value.json.error : undefined;
   if (body !== undefined && typeof body.message === "string") parts.push(body.message);
   return parts.join("\n");
 }
@@ -58,10 +60,10 @@ function errorChainContainsStatus(error: unknown, expectedStatus: number): boole
 }
 
 function readErrorStatus(value: unknown): number | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isObject(value)) return undefined;
   if (typeof value.status === "number") return value.status;
   if (typeof value.statusCode === "number") return value.statusCode;
-  return isRecord(value.response) && typeof value.response.status === "number"
+  return isObject(value.response) && typeof value.response.status === "number"
     ? value.response.status
     : undefined;
 }
@@ -72,10 +74,6 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
   while (current !== undefined && current !== null && !seen.has(current)) {
     seen.add(current);
     yield current;
-    current = isRecord(current) ? current.cause : undefined;
+    current = isObject(current) ? current.cause : undefined;
   }
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null;
 }

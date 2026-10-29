@@ -97,9 +97,10 @@ describe("runtime model resolution", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
+        'import { defineAgent } from "eve";',
         'import { weatherModel } from "./lib/model.js";',
         "",
-        "export default {",
+        "export default defineAgent({",
         "  model: weatherModel,",
         "  modelOptions: {",
         // contextWindowTokens removed — catalog supplies it at compile time
@@ -109,7 +110,7 @@ describe("runtime model resolution", () => {
         "      },",
         "    },",
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -175,9 +176,10 @@ describe("runtime model resolution", () => {
     await writeFile(
       join(agentRoot, "agent.ts"),
       [
+        'import { defineAgent } from "eve";',
         'import { weatherModel } from "./lib/model.js";',
         "",
-        "export default { model: weatherModel };",
+        "export default defineAgent({ model: weatherModel });",
         "",
       ].join("\n"),
     );
@@ -185,12 +187,13 @@ describe("runtime model resolution", () => {
     await writeFile(
       join(childRoot, "agent.ts"),
       [
+        'import { defineAgent } from "eve";',
         'import { weatherModel } from "./lib/model.js";',
         "",
-        "export default {",
+        "export default defineAgent({",
         '  description: "Research one topic.",',
         "  model: weatherModel,",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );

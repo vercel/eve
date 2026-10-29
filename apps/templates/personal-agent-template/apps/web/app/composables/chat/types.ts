@@ -1,12 +1,10 @@
 import type { ComputedRef, Ref } from "vue";
-import type { EveMessageData, UseEveAgentOptions } from "eve/vue";
+import type { UseEveAgentOptions } from "eve/vue";
 import type { EveSessionCursor } from "#eve/types/thread";
 import type { UIMessage } from "ai";
 import type { AgentInputResponse } from "~/components/AgentInputRequest.vue";
 
-export type EveStreamEvent = NonNullable<
-  UseEveAgentOptions<EveMessageData>["initialEvents"]
->[number];
+export type EveStreamEvent = NonNullable<UseEveAgentOptions["initialEvents"]>[number];
 
 export type ChatStatus = "ready" | "submitted" | "streaming" | "error";
 

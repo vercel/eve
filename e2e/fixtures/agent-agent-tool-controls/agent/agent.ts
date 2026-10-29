@@ -1,8 +1,8 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...e2eAgentConfig(),
   description: "Coordinate specialist work and delegate focused subtasks.",
   model: mockModel({
@@ -18,7 +18,14 @@ export default defineAgent({
       const inspectAgents = request.userMessages.some((message) =>
         message.includes("E2E_INSPECT_WORKFLOW_AGENTS"),
       );
-      const toolName = inspectAgents ? "inspect-agents" : "invoke-self";
+      const modelOverride = request.userMessages.some((message) =>
+        message.includes("E2E_MODEL_OVERRIDE_ROOT_COPY"),
+      );
+      const toolName = inspectAgents
+        ? "inspect-agents"
+        : modelOverride
+          ? "invoke-self-with-model"
+          : "invoke-self";
       const result = request.toolResults.find((entry) => entry.name === toolName);
       return result === undefined
         ? { toolCalls: [{ name: toolName, input: {} }] }
@@ -28,3 +35,5 @@ export default defineAgent({
   modelContextWindowTokens: 1_000_000,
   tool: false,
 });
+
+export default agent;

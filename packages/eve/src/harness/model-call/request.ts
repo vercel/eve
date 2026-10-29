@@ -1,17 +1,15 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
-import { DynamicSkillManifestKey, HistoryStateKey } from "#context/keys.js";
+import { HistoryStateKey } from "#context/keys.js";
+import { dynamicInstructionMessages } from "#reactions/kinds/instructions.js";
+import { memoryRecallContents } from "#reactions/kinds/memory.js";
+import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
-import {
-  createFrameworkUserMessage,
-  type HarnessModelMessage,
-  type UserModelMessage,
-} from "#harness/messages.js";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
@@ -22,16 +20,16 @@ export type RequestMessages = ReturnType<typeof createCurrentMessages>;
 /**
  * The messages one model call sends: the durable prompt, then the step's system instructions and
  * announcements. Announcements persist ahead of the new input, or after earlier tool results on a
- * continuation, so later requests keep the full prefix.
+ * continuation, or ahead of the turn's surviving input after a compaction, so later requests keep
+ * the full prefix.
  */
 export function requestMessages(
   step: Step,
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly projectedMessages: readonly HarnessModelMessage[];
-    readonly turnMessages: readonly UserModelMessage[];
+    readonly turnMessages: readonly HarnessModelMessage[];
     readonly catalog: StepCatalog;
-    readonly hidesHeldText: boolean;
     readonly pendingApprovalsNote: string | undefined;
   },
 ): RequestMessages {
@@ -41,18 +39,18 @@ export function requestMessages(
     currentTurnMessages: input.turnMessages,
     projectedMessages: input.projectedMessages,
   });
-  if (ctx !== undefined) messages.addSystem(buildDynamicInstructionMessages(ctx));
-  messages.addSystem(
-    taskSystemMessages(input.catalog.offersTasks, { finalReplyOnly: input.hidesHeldText }),
-  );
+  messages.addSystem(dynamicInstructionMessages(ctx));
+  messages.addSystem(taskSystemMessages(input.catalog.offersTasks, step.finalReplyOnly));
   const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
     ...catalogAnnouncements(input.catalog, announced),
-    ...dynamicSkillAnnouncements(ctx?.get(DynamicSkillManifestKey), announced),
+    ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
   });
   if (input.pendingApprovalsNote !== undefined) {
     messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
   }
+  // Last, so nothing lands between a turn's recall and that turn's input.
+  messages.addAnchored(memoryRecallContents(ctx), "memory.load");
   return messages;
 }
 

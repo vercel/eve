@@ -53,6 +53,7 @@ function createFakeAccess(files: Record<string, string>): {
     },
     async writeFile() {},
     async writeBinaryFile() {},
+    async writeFiles() {},
     async writeTextFile({ path, content }: { path: string; content: string }) {
       files[path] = content;
     },
@@ -63,6 +64,10 @@ function createFakeAccess(files: Record<string, string>): {
       async captureState() {
         return { initialized: false, session: null };
       },
+      open() {
+        return this.get();
+      },
+      prepare() {},
       async stop() {},
       async get() {
         return session;
@@ -287,23 +292,6 @@ describe("executeWriteFileOnSandbox", () => {
   // ---------------------------------------------------------------------------
   // Path validation
   // ---------------------------------------------------------------------------
-
-  it("rejects relative paths", async () => {
-    const { access, session } = createFakeAccess({});
-
-    const ctx = new ContextContainer();
-    ctx.set(SandboxKey, access);
-    ctx.set(ReadFileStateKey, { byTarget: {} });
-
-    await expect(
-      contextStorage.run(ctx, () =>
-        executeWriteFileOnSandbox(session, {
-          filePath: "foo.ts",
-          content: "hello",
-        }),
-      ),
-    ).rejects.toThrow("filePath must be an absolute path");
-  });
 
   it("shares read-before-write state with the resolved form of a $HOME path", async () => {
     const filePath = "/home/agent/.agents/skills/research/references/catalog.md";

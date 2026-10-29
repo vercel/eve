@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
+import { resolveDevelopmentStateDirectory } from "#internal/application/dev-environment.js";
 import { httpServerUrlSchema } from "#shared/network-address.js";
 
 const STATE_FILE_NAME = "dev-server-state.v1.json";
@@ -26,7 +27,7 @@ export class DevelopmentServerState {
 
   constructor(project: { readonly appRoot: string }) {
     this.appRoot = project.appRoot;
-    this.#stateDir = join(this.appRoot, ".eve");
+    this.#stateDir = resolveDevelopmentStateDirectory(this.appRoot);
     this.#statePath = join(this.#stateDir, STATE_FILE_NAME);
   }
 

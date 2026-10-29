@@ -217,6 +217,35 @@
       ]
     },
     {
+      "name": "extension/nimble",
+      "type": "registry:item",
+      "title": "Nimble",
+      "description": "Search the web, extract readable page content, and run multi-source research with Nimble.",
+      "meta": {
+        "eve": {
+          "requires": ">=0.82.0"
+        }
+      },
+      "dependencies": [
+        "@nimble-way/eve"
+      ],
+      "envVars": {
+        "NIMBLE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/nimble/extension.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/nimble/extension.ts"
+        },
+        {
+          "path": "registry/extensions/nimble/tools/agent_start.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/nimble/tools/agent_start.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/kernel",
       "type": "registry:item",
       "title": "KERNEL",
@@ -339,28 +368,52 @@
       ]
     },
     {
-      "name": "extension/hindsight",
+      "name": "memory/hindsight",
       "type": "registry:item",
       "title": "Hindsight",
       "description": "Recall relevant context before every turn and retain each exchange automatically.",
       "dependencies": [
-        "@vectorize-io/hindsight-eve"
+        "@vectorize-io/hindsight-eve@^0.3.1"
       ],
       "envVars": {
         "HINDSIGHT_API_KEY": "",
-        "HINDSIGHT_API_URL": "",
-        "HINDSIGHT_BANK_ID": ""
+        "HINDSIGHT_API_URL": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.45.1"
+        }
       },
       "files": [
         {
-          "path": "registry/extensions/hindsight-instructions.ts",
+          "path": "registry/memory/hindsight.ts",
           "type": "registry:file",
-          "target": "agent/instructions/hindsight.ts"
-        },
+          "target": "agent/memory/hindsight.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/memanto",
+      "type": "registry:item",
+      "title": "Memanto",
+      "description": "Recall relevant long-term context and let agents deliberately save durable user memories.",
+      "dependencies": [
+        "@moorcheh-ai/memanto@0.2.29"
+      ],
+      "envVars": {
+        "MOORCHEH_API_KEY": "",
+        "MEMANTO_BASE_URL": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.60.0"
+        }
+      },
+      "files": [
         {
-          "path": "registry/extensions/hindsight-hook.ts",
+          "path": "registry/memory/memanto.ts",
           "type": "registry:file",
-          "target": "agent/hooks/hindsight.ts"
+          "target": "agent/memory/memanto.ts"
         }
       ]
     },
@@ -541,6 +594,22 @@
       ]
     },
     {
+      "name": "connection/waydock",
+      "type": "registry:item",
+      "title": "Waydock",
+      "description": "Access mail, calendar, meetings, tasks, and follow-ups through Waydock's MCP server.",
+      "envVars": {
+        "WAYDOCK_MCP_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/waydock.ts",
+          "type": "registry:file",
+          "target": "agent/connections/waydock.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/vercel",
       "type": "registry:item",
       "title": "Vercel",
@@ -605,6 +674,39 @@
           "path": "registry/connections/linear.ts",
           "type": "registry:file",
           "target": "agent/connections/linear.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/sent",
+      "type": "registry:item",
+      "title": "Sent",
+      "description": "Send and track SMS, WhatsApp, and RCS through Sent's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "sent",
+              "mcp.sent.dm",
+              "sent"
+            ]
+          },
+          "requires": ">=0.51.1"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/sent.ts",
+          "type": "registry:file",
+          "target": "agent/connections/sent.ts"
         }
       ]
     },
@@ -1012,6 +1114,39 @@
       ]
     },
     {
+      "name": "connection/flora",
+      "type": "registry:item",
+      "title": "FLORA",
+      "description": "Generate image, video, audio, text, and 3D assets through FLORA's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "flora",
+              "agents.flora.ai/mcp",
+              "flora"
+            ]
+          },
+          "requires": ">=0.82.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/flora.ts",
+          "type": "registry:file",
+          "target": "agent/connections/flora.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/egnyte",
       "type": "registry:item",
       "title": "Egnyte",
@@ -1074,6 +1209,22 @@
           "path": "registry/connections/embat.ts",
           "type": "registry:file",
           "target": "agent/connections/embat.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/firecrawl",
+      "type": "registry:item",
+      "title": "Firecrawl",
+      "description": "Search, scrape, map, crawl, parse, and monitor web content.",
+      "envVars": {
+        "FIRECRAWL_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/firecrawl.ts",
+          "type": "registry:file",
+          "target": "agent/connections/firecrawl.ts"
         }
       ]
     },
@@ -2058,7 +2209,6 @@
         }
       },
       "dependencies": [
-        "@radix-ui/react-use-controllable-state@1.2.2",
         "@shadcn/react@0.3.1",
         "@shikijs/core@3.23.0",
         "@shikijs/engine-javascript@3.23.0",
@@ -2070,9 +2220,7 @@
         "@tailwindcss/postcss@4.3.0",
         "class-variance-authority@0.7.1",
         "clsx@2.1.1",
-        "cmdk@1.1.1",
         "lucide-react@1.16.0",
-        "motion@12.40.0",
         "nanoid@5.1.11",
         "next@16.3.6",
         "radix-ui@1.4.3",
@@ -2082,6 +2230,7 @@
         "streamdown@2.5.0",
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
+        "tw-animate-css@1.4.0",
         "use-stick-to-bottom@1.1.4",
         "zod@4.5.4"
       ],
@@ -2143,11 +2292,6 @@
           "target": "apps/web/components.json"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/chain-of-thought.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ai-elements/code-block.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ai-elements/code-block.tsx"
@@ -2168,24 +2312,9 @@
           "target": "apps/web/components/ai-elements/prompt-input.tsx"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/reasoning.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/shimmer.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ai-elements/tool.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ai-elements/tool.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/badge.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/badge.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/button-group.tsx",
@@ -2203,24 +2332,9 @@
           "target": "apps/web/components/ui/collapsible.tsx"
         },
         {
-          "path": "registry/channel/web/components/ui/command.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/command.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/dialog.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/dialog.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ui/dropdown-menu.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/dropdown-menu.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/hover-card.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/hover-card.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/input-group.tsx",
@@ -2248,14 +2362,14 @@
           "target": "apps/web/components/ui/separator.tsx"
         },
         {
-          "path": "registry/channel/web/components/ui/spinner.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/spinner.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ui/textarea.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/textarea.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/trace.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/trace.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/tooltip.tsx",
@@ -2325,7 +2439,6 @@
       "dependencies": [
         "@fontsource-variable/geist-mono@5.3.0",
         "@fontsource-variable/geist@5.3.0",
-        "@radix-ui/react-use-controllable-state@1.2.2",
         "@shadcn/react@0.3.1",
         "@shikijs/core@3.23.0",
         "@shikijs/engine-javascript@3.23.0",
@@ -2340,9 +2453,7 @@
         "@vitejs/plugin-react@6.1.1",
         "class-variance-authority@0.7.1",
         "clsx@2.1.1",
-        "cmdk@1.1.1",
         "lucide-react@1.16.0",
-        "motion@12.40.0",
         "nanoid@5.1.11",
         "nitro@3.0.260903-beta",
         "radix-ui@1.4.3",
@@ -2352,6 +2463,7 @@
         "streamdown@2.5.0",
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
+        "tw-animate-css@1.4.0",
         "use-stick-to-bottom@1.1.4",
         "vite@8.3.1",
         "zod@4.5.4"
@@ -2419,11 +2531,6 @@
           "target": "apps/web/components.json"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/chain-of-thought.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ai-elements/code-block.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ai-elements/code-block.tsx"
@@ -2444,24 +2551,9 @@
           "target": "apps/web/components/ai-elements/prompt-input.tsx"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/reasoning.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/shimmer.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ai-elements/tool.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ai-elements/tool.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/badge.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/badge.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/button-group.tsx",
@@ -2479,24 +2571,9 @@
           "target": "apps/web/components/ui/collapsible.tsx"
         },
         {
-          "path": "registry/channel/web/components/ui/command.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/command.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/dialog.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/dialog.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ui/dropdown-menu.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/dropdown-menu.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/hover-card.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/hover-card.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/input-group.tsx",
@@ -2524,14 +2601,14 @@
           "target": "apps/web/components/ui/separator.tsx"
         },
         {
-          "path": "registry/channel/web/components/ui/spinner.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/spinner.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ui/textarea.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/textarea.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/trace.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/trace.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/tooltip.tsx",
@@ -2788,7 +2865,9 @@
         }
       ],
       "envVars": {
-        "GOOGLE_CHAT_CREDENTIALS": ""
+        "GOOGLE_CHAT_CREDENTIALS": "",
+        "GOOGLE_CHAT_PROJECT_NUMBER": "",
+        "GOOGLE_CHAT_BOT_USER_ID": ""
       },
       "meta": {
         "eve": {
@@ -3431,6 +3510,27 @@
           "path": "registry/instrumentation/raindrop.ts",
           "type": "registry:file",
           "target": "agent/instrumentation/raindrop.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/oodle",
+      "type": "registry:item",
+      "title": "Oodle",
+      "description": "Send agent traces to Oodle over OpenTelemetry.",
+      "dependencies": [
+        "@vercel/otel"
+      ],
+      "envVars": {
+        "OODLE_OTLP_ENDPOINT": "",
+        "OODLE_API_KEY": "",
+        "OODLE_INSTANCE": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/oodle.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation/oodle.ts"
         }
       ]
     },

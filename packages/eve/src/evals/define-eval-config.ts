@@ -6,11 +6,12 @@ import type { EveEvalConfig, EveEvalConfigInput } from "#evals/types.js";
  *
  * Exactly one `evals.config.ts` is required. It supplies the optional default
  * `judge` model for `t.judge(...)` assertions (so individual evals need not
- * repeat it), run-level `reporters`, `maxConcurrency` and `timeoutMs` defaults,
- * and optional run-wide `setup` and `teardown`. CLI flags (`--max-concurrency`,
- * `--timeout`) and per-eval values take precedence over the config defaults.
+ * repeat it), run-level `reporters`, `maxConcurrency`, `timeoutMs`, and `repeat`
+ * defaults, and optional run-wide `setup` and `teardown`. CLI flags
+ * (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take
+ * precedence over the config defaults.
  *
- * Throws on invalid input: a non-positive or non-integer `maxConcurrency`,
+ * Throws on invalid input: a non-positive or non-integer `maxConcurrency` or `repeat`,
  * a negative or non-finite `timeoutMs`, non-array `reporters`, or a
  * non-function `setup` or `teardown`.
  */
@@ -43,6 +44,10 @@ function validateEvalConfigInput(input: EveEvalConfigInput): void {
 
   if (input.timeoutMs !== undefined && (input.timeoutMs < 0 || !Number.isFinite(input.timeoutMs))) {
     throw new Error("Eval config `timeoutMs` must be a non-negative finite number.");
+  }
+
+  if (input.repeat !== undefined && (!Number.isInteger(input.repeat) || input.repeat < 1)) {
+    throw new Error("Eval config `repeat` must be a positive integer.");
   }
 
   if (input.reporters !== undefined && !Array.isArray(input.reporters)) {

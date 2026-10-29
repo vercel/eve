@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { eachEvent } from "#internal/testing/session-machine.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
@@ -43,7 +44,7 @@ function toolCall(toolCallId: string, toolName: string, input: string): StreamPa
   return { input, toolCallId, toolName, type: "tool-call" };
 }
 
-function finish(unified: "length" | "stop" | "tool-calls"): StreamPart {
+function finish(unified: "length" | "other" | "stop" | "tool-calls"): StreamPart {
   return { finishReason: { raw: undefined, unified }, type: "finish", usage };
 }
 
@@ -121,18 +122,21 @@ describe("framework tool input validation (real AI SDK)", () => {
 
   it.each([
     {
-      name: "beside a truncated call",
+      name: "length beside a truncated call",
+      reason: "length" as const,
       truncated: [{ input: '{"path": "notes/bob', toolCallId: "read-truncated" }],
     },
-    { name: "alone", truncated: [] },
-  ])("answers complete tool calls cut short at the output limit $name", async ({ truncated }) => {
+    { name: "length alone", reason: "length" as const, truncated: [] },
+    { name: "other", reason: "other" as const, truncated: [] },
+    { name: "missing finish event", reason: undefined, truncated: [] },
+  ])("answers complete tool calls ended early: $name", async ({ reason, truncated }) => {
     const skippedCallId = "read-skipped";
     const model = new MockLanguageModelV4({
       doStream: scriptedStreams([
         [
           toolCall(skippedCallId, "read_note", JSON.stringify({ path: "notes/alice.md" })),
           ...truncated.map((call) => toolCall(call.toolCallId, "read_note", call.input)),
-          finish("length"),
+          ...(reason === undefined ? [] : [finish(reason)]),
         ],
         [
           { id: "reply", type: "text-start" },
@@ -179,14 +183,21 @@ describe("framework tool input validation (real AI SDK)", () => {
     if (typeof cutShortStep.next !== "function") {
       throw new TypeError("Expected the cut-short step to continue the tool loop.");
     }
+    const expectedResult = {
+      output: {
+        type: "error-text",
+        value: expect.stringContaining(`finish reason: ${reason ?? "other"}`),
+      },
+    };
+    expect(findToolResult(cutShortStep.session.history, skippedCallId)).toMatchObject(
+      expectedResult,
+    );
     const nextStep = await cutShortStep.next(cutShortStep.session);
 
     expect(execute).not.toHaveBeenCalled();
     expect(model.doStreamCalls).toHaveLength(2);
     const retryPrompt = model.doStreamCalls[1]?.prompt ?? [];
-    expect(findToolResult(retryPrompt, skippedCallId)).toMatchObject({
-      output: { type: "error-text", value: expect.stringContaining("finish reason: length") },
-    });
+    expect(findToolResult(retryPrompt, skippedCallId)).toMatchObject(expectedResult);
     for (const call of truncated) {
       expect(findToolResult(retryPrompt, call.toolCallId)).toBeDefined();
     }
@@ -211,15 +222,15 @@ describe("framework tool input validation (real AI SDK)", () => {
     });
     const events: string[] = [];
     const runStep = createToolLoopHarness({
-      handleEvent: async (event) => {
-        if (event.type === "action.result") {
-          events.push(
-            `action.result:${event.data.result.callId}:${String(event.data.result.isError)}`,
-          );
-        } else {
+      handleEvent: eachEvent((event) => {
+        if (event.type === "call.requested") events.push(`call.requested:${event.data.callId}`);
+        if (event.type === "call.settled") {
+          events.push(`call.settled:${event.data.callId}:${event.data.outcome}`);
+        }
+        if (event.type === "model.started" || event.type === "model.settled") {
           events.push(event.type);
         }
-      },
+      }),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [
@@ -249,12 +260,11 @@ describe("framework tool input validation (real AI SDK)", () => {
       { message: "Read Alice's note." },
     );
 
-    const stepEvents = events.slice(events.indexOf("step.started"));
-    expect(stepEvents.slice(0, 4)).toEqual([
-      "step.started",
-      "actions.requested",
-      "action.result:read-skipped:true",
-      "step.completed",
+    expect(events).toEqual([
+      "model.started",
+      "call.requested:read-skipped",
+      "call.settled:read-skipped:failed",
+      "model.settled",
     ]);
   });
 });

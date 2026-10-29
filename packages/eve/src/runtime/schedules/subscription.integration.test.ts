@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
-import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/definition.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalConfiguration,
+  type ApprovalPolicy,
+} from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
+import { dynamicEvaluate } from "#dynamic/definition.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
@@ -11,9 +16,9 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
+import { evaluateApproval } from "#approval/evaluation.js";
 import { serializeInputSchema } from "#tools/schema.js";
-import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
-import type { DynamicToolEntry } from "#tools/dynamic.js";
+import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
 
 const alice = {
@@ -88,12 +93,13 @@ describe("schedule creation and invocation", () => {
       )!;
       const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
         .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
-      const tools = (await dynamic.events["turn.started"]!(undefined, {
-        model: null,
-        session: { id: "alice", auth: { current: alice, initiator: null } },
-        channel: {},
-        messages: [],
-      })) as Record<string, DynamicToolEntry>;
+      const tools = (await dynamicEvaluate(dynamic)({} as never)) as Record<
+        string,
+        ToolDefinition<never, unknown> & {
+          execute(input: unknown, ctx: never): Promise<unknown>;
+          label: { start(input: unknown): string };
+        }
+      >;
       expect(Object.keys(tools).sort()).toEqual(
         ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
           (operation) => `schedule__requests__${operation}`,
@@ -110,11 +116,8 @@ describe("schedule creation and invocation", () => {
         required: ["name", "expression", "payload"],
       });
       expect(tools.schedule__requests__list!.approval).toBeUndefined();
-      const policyContext = (
-        callId: string,
-        toolInput: unknown,
-        approvedTools = new Set<string>(),
-      ) => ({ callId, toolInput, approvedTools, toolName: "schedule__requests__create" }) as never;
+      const policyContext = (callId: string, toolInput: unknown) =>
+        ({ callId, toolInput, toolName: "schedule__requests__create" }) as never;
       const request = resolveApprovalPolicy(create.approval!);
       await expect(
         request(policyContext("invalid", { ...input, payload: {} })),
@@ -133,13 +136,10 @@ describe("schedule creation and invocation", () => {
       );
       expect(write).not.toHaveBeenCalled();
       await expect(request(policyContext("accepted", input))).resolves.toBe("user-approval");
-      const callbacks = readDurableDynamicToolCallbacks(create)!;
-      expect(callbacks.label!.start!.callback({}, input as never)).toBe("Create schedule: joke");
-      const created = (await callbacks.execute!.callback(
-        {},
-        input as never,
-        { callId: "accepted" } as never,
-      )) as ScheduleRecord;
+      expect(create.label.start(input)).toBe("Create schedule: joke");
+      const created = (await create.execute(input, {
+        callId: "accepted",
+      } as never)) as ScheduleRecord;
       expect(write.mock.calls[0]![1].payload).toMatchObject({
         envelope: { payload: { task: "A joke", target: "C999" } },
       });
@@ -182,15 +182,24 @@ describe("schedule creation and invocation", () => {
       expect(updateWrite.mock.calls[1]![2].payload).toBeUndefined();
       const invoke = tools.schedule__requests__invoke!;
       const invoked = { name: created.name };
-      const invokeContext = {
-        toolName: "schedule__requests__invoke",
-        toolInput: invoked,
-        approvedTools: new Set(["schedule__requests__invoke"]),
-      } as never;
-      expect(await resolveApprovalPolicy(invoke.approval!)(invokeContext)).toBe("not-applicable");
+      const invokeContext = { toolName: "schedule__requests__invoke", toolInput: invoked } as never;
+      const invokePolicy = resolveApprovalPolicy(invoke.approval!) as ApprovalPolicy;
+      const asked = await evaluateApproval(invokePolicy, invokeContext);
+      const memory = {
+        pending: [],
+        remembered: { [asked.remember!.key]: { interactionId: "approval-1", outcome: "accepted" } },
+      } as const;
+      expect(await evaluateApproval(invokePolicy, invokeContext, { memory })).toEqual({
+        denied: false,
+        clearedBy: { policy: "approval" },
+      });
       expect(
-        await resolveApprovalPolicy(tools.schedule__requests__delete!.approval!)(invokeContext),
-      ).toBe("user-approval");
+        await evaluateApproval(
+          resolveApprovalPolicy(tools.schedule__requests__delete!.approval!) as ApprovalPolicy,
+          invokeContext,
+          { memory },
+        ),
+      ).toEqual({ denied: false, awaitsPerson: true });
       await invoke.execute(invoked, {} as never);
       expect(dispatched).toHaveBeenCalledOnce();
       await tools.schedule__requests__delete!.execute(invoked, {} as never);

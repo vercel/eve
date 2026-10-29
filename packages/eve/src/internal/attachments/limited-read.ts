@@ -7,12 +7,12 @@ export function maxBytesOf(policy: UploadPolicy): number {
 }
 
 /**
- * Reads a download's body, failing as soon as it passes `maxBytes`. Checks a
+ * Reads a download's or request's body, failing as soon as it passes `maxBytes`. Checks a
  * declared `content-length` first, then counts what streams in, so a body that
  * misstates or omits its length still stops at the limit.
  */
 export async function readLimitedBytes(
-  response: Response,
+  response: Pick<Response, "body" | "headers">,
   maxBytes: number,
   adapterKind: string,
 ): Promise<Buffer> {
@@ -79,7 +79,7 @@ export function assertWithinLimit(bytes: Uint8Array, maxBytes: number, adapterKi
   if (bytes.byteLength > maxBytes) throw overLimit(maxBytes, adapterKind);
 }
 
-function overLimit(maxBytes: number, adapterKind: string): EveAttachmentError {
+export function overLimit(maxBytes: number, adapterKind: string): EveAttachmentError {
   return new EveAttachmentError({
     adapterKind,
     kind: "resolver-threw",

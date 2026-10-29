@@ -27,7 +27,7 @@ export default defineTool({
           },
         },
       },
-      abortSignal: ctx.abortSignal,
+      signal: ctx.abortSignal,
     });
     return { choice: result.answers.route.choice, usage: result.usage };
   },
