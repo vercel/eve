@@ -121,6 +121,12 @@ async function contributionOf(
 }
 
 /** The model the next call uses: the dynamic agent's, or the static one. */
+/** The harness chose this step's model: the agent's own dynamic model doesn't run. */
+export function harnessChoseModel(ctx: Pick<ContextReader, "get">): boolean {
+  const slot = readReactionsState(ctx).slots[HARNESS_MODEL_ID];
+  return slot !== undefined && slot.value !== null;
+}
+
 export function getEffectiveModelSelection(
   ctx: Pick<ContextReader, "get">,
 ): LiveDynamicModelSelection | null {

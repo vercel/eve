@@ -77,6 +77,7 @@ import {
   type InlineCallResults,
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
+import { keptInstructions } from "#reactions/kinds/instructions.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
@@ -276,6 +277,7 @@ export class ModelCaller {
       extraSystemNote,
       session: this.step.session,
       systemMessages: this.request.systemMessages,
+      agentSystem: keptInstructions(this.step.ctx)?.has("agent") ?? true,
     });
   }
 

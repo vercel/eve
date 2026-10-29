@@ -24,6 +24,10 @@ import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHarness, type Harness } from "#public/definitions/harness.js";
 import { defineDynamic } from "#public/definitions/model.js";
+import {
+  defineDynamic as defineDynamicInstructions,
+  defineInstructions,
+} from "#public/definitions/instructions.js";
 import { defineTool } from "#tools/definition.js";
 
 // `agent/harness.ts`, compiled and run: what its `agent` fields add to a model call, and how its
@@ -233,6 +237,135 @@ describe.each([
 
     expect(runs).toEqual(["refund"]);
     expect(summarizeTurnEvents(stages[1]!).message).toBe("Refunded.");
+  });
+
+  it("offers only the tools it returns, from what the agent declares, and skips the agent's model when it picks one", async () => {
+    const offered: string[][] = [];
+    const agentModelRuns: string[] = [];
+    const scripted = model("gpt-5.5", (options) => {
+      offered.push((options.tools ?? []).map((tool) => tool.name));
+      return textStreamResult("Done.");
+    });
+    const tool = (description: string) =>
+      defineTool({ description, execute: async () => ({}), inputSchema: {} });
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => {
+            agentModelRuns.push("agent");
+            return { model: scripted, modelContextWindowTokens: 200_000 };
+          }),
+        }),
+        name: "harness-tools",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: tool("Search the docs.") }),
+          logicalPath: "tools/search.ts",
+        },
+        {
+          loadNamespace: async () => ({ default: tool("Delete Alice's account.") }),
+          logicalPath: "tools/delete_account.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHarness(() => ({
+              agent: {
+                model: { model: scripted, modelContextWindowTokens: 200_000 },
+                tools: ({ bash: _bash, delete_account: _deleted, ...declared }) => ({
+                  ...declared,
+                  plan_lookup: tool("Look up a plan."),
+                }),
+              },
+            })),
+          }),
+          logicalPath: "harness.ts",
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          input: { message: "What can you do?" },
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: `http:harness-tools-${cold}`,
+          }),
+        },
+      ]);
+      return await readFirstTurnReply(run);
+    });
+
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toEqual(expect.arrayContaining(["plan_lookup", "read_file", "search"]));
+    expect(offered[0]).not.toContain("delete_account");
+    expect(offered[0]).not.toContain("bash");
+    expect(agentModelRuns).toEqual([]);
+  });
+
+  it("reads only the declared instructions it keeps", async () => {
+    const systems: string[] = [];
+    const scripted = model("gpt-5.5", (options) => {
+      systems.push(systemOf(options));
+      return textStreamResult("Done.");
+    });
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({ model: scripted, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "harness-instructions",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineDynamicInstructions(() =>
+              defineInstructions({ content: "Write in house style." }),
+            ),
+          }),
+          logicalPath: "instructions/house-style.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineDynamicInstructions(() =>
+              defineInstructions({ content: "Mention the roadmap." }),
+            ),
+          }),
+          logicalPath: "instructions/roadmap.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHarness(() => ({
+              agent: {
+                instructions: (declared) => [declared["house-style"]!, "Answer billing questions."],
+              },
+            })),
+          }),
+          logicalPath: "harness.ts",
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          input: { message: "What can you do?" },
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: `http:harness-instructions-${cold}`,
+          }),
+        },
+      ]);
+      return await readFirstTurnReply(run);
+    });
+
+    expect(systems).toHaveLength(1);
+    expect(systems[0]).toContain("Write in house style.");
+    expect(systems[0]).toContain("Answer billing questions.");
+    expect(systems[0]).not.toContain("Mention the roadmap.");
   });
 
   it("runs the model it chooses in place of the agent's", async () => {

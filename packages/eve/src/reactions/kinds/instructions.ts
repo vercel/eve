@@ -45,14 +45,48 @@ export function instructionsReaction(resolver: ResolvedDynamicInstructionsResolv
   };
 }
 
-/** The system instructions the session's slots hold, in run order. */
+/**
+ * The system instructions the session's slots hold, in run order. Where the harness says which
+ * the model reads, the declared ones it keeps, then its own.
+ */
 export function dynamicInstructionMessages(
   ctx: Pick<ContextReader, "get"> | undefined,
 ): SystemModelMessage[] {
-  return slotsOf(ctx, "instructions").flatMap(({ slot }) => {
+  const kept = keptInstructions(ctx);
+  return slotsOf(ctx, "instructions").flatMap(({ id, slot }) => {
     const instruction = slot.value as Instruction | null;
-    return instruction?.role === "system" ? [{ content: instruction.content, role: "system" }] : [];
+    if (kept !== undefined && id !== HARNESS_INSTRUCTIONS && !kept.has(slugOf(id))) return [];
+    return instruction?.role === "system" && instruction.content !== ""
+      ? [{ content: instruction.content, role: "system" }]
+      : [];
   });
+}
+
+/** The harness's instructions: its own content, and the declared instructions it keeps. */
+export const HARNESS_INSTRUCTIONS = "instructions:@harness";
+
+/** The declared instructions the harness keeps, where it says which; `agent` is the agent's. */
+export function keptInstructions(
+  ctx: Pick<ContextReader, "get"> | undefined,
+): ReadonlySet<string> | undefined {
+  const slot = slotsOf(ctx, "instructions").find(({ id }) => id === HARNESS_INSTRUCTIONS)?.slot;
+  const keep = (slot?.value as { keep?: unknown } | null | undefined)?.keep;
+  if (!Array.isArray(keep)) return undefined;
+  return new Set(keep.filter((name): name is string => typeof name === "string"));
+}
+
+/** The slugs of the instructions the session's slots hold. */
+export function dynamicInstructionSlugs(
+  ctx: Pick<ContextReader, "get"> | undefined,
+  options: { readonly except?: string } = {},
+): readonly string[] {
+  return slotsOf(ctx, "instructions")
+    .filter(({ id }) => id !== options.except)
+    .map(({ id }) => slugOf(id));
+}
+
+function slugOf(id: string): string {
+  return id.slice("instructions:".length);
 }
 
 /**

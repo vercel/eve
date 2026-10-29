@@ -54,15 +54,64 @@ export type HarnessNext =
    */
   | { readonly settle: { readonly output: JsonValue | null } };
 
-/** What the agent is for its next model call, beyond what its files declare. */
+/** What the agent is for its next model call. A field it leaves out is what its files declare. */
 export interface HarnessAgent {
   /** The model, in place of the agent's. */
   readonly model?: Lazy<PublicAgentDynamicModelResult | null | undefined>;
-  /** System instructions, after the agent's. */
-  readonly instructions?: Lazy<string | readonly string[] | null | undefined>;
-  /** Tools, beside the agent's. */
-  // oxlint-disable-next-line typescript/no-explicit-any -- any tool, whatever its input and output.
-  readonly tools?: Lazy<Readonly<Record<string, ToolDefinition<any, any>>> | null | undefined>;
+  /**
+   * The system instructions the model reads: in place of the agent's, which `declared` holds.
+   * Without it, the agent's. `(declared) => [...Object.values(declared), "…"]` adds to them;
+   * `declared.agent` is the agent's own (with its list of skills), and each file in
+   * `agent/instructions/` is there by its slug. Declared instructions keep eve's order, and come
+   * before the harness's own.
+   */
+  readonly instructions?:
+    | HarnessInstructions
+    | ((
+        declared: HarnessDeclaredInstructions,
+      ) => HarnessInstructions | undefined | Promise<HarnessInstructions | undefined>);
+  /**
+   * The tools the model is offered, besides eve's own `eve__` tools: in place of the agent's,
+   * which `declared` holds. Without it, the agent's. `(declared) => ({ ...declared, mine })` adds a
+   * tool; leaving a declared one out removes it, including eve's `bash` and `read_file`.
+   */
+  readonly tools?:
+    | HarnessTools
+    | ((
+        declared: HarnessDeclaredTools,
+      ) => HarnessTools | undefined | Promise<HarnessTools | undefined>);
+}
+
+type HarnessInstructions = string | readonly (string | HarnessDeclared)[];
+
+// oxlint-disable-next-line typescript/no-explicit-any -- any tool, whatever its input and output.
+type HarnessTools = Readonly<Record<string, ToolDefinition<any, any> | HarnessDeclared>>;
+
+/** Something the agent's files declare, which a harness keeps by returning it. */
+export interface HarnessDeclared {
+  readonly [DECLARED]: string;
+}
+
+/** The tools the agent's files declare, by name. */
+export type HarnessDeclaredTools = Readonly<Record<string, HarnessDeclared>>;
+
+/** The instructions the agent declares: `agent`, and each `agent/instructions/` file's, by slug. */
+export type HarnessDeclaredInstructions = Readonly<Record<string, HarnessDeclared>> & {
+  readonly agent: HarnessDeclared;
+};
+
+const DECLARED: unique symbol = Symbol.for("eve.harness.declared") as never;
+
+/** The declared tool or instructions named `name`, for a harness to keep. */
+export function declaredTool(name: string): HarnessDeclared {
+  return { [DECLARED]: name };
+}
+
+/** The name of the declared tool `value` keeps, if it is one. */
+export function declaredToolName(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !(DECLARED in value)) return undefined;
+  const name = (value as HarnessDeclared)[DECLARED];
+  return typeof name === "string" ? name : undefined;
 }
 
 /** What a harness says should be true. A field it leaves out, or returns `undefined` for, is eve's. */

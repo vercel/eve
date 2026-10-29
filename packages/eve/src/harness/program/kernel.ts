@@ -10,8 +10,6 @@ import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
 import type { ContextContainer } from "#context/container.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
-import { manifestValues } from "#reactions/bundle.js";
-import type { ValueReaction } from "#reactions/reaction.js";
 import { authoredProgram } from "./authored.js";
 import { checkHistory } from "./check.js";
 import { nativeNext, nativeProgram } from "./native.js";
@@ -59,11 +57,9 @@ interface Decision {
 function programContext(step: Step, decision: Decision, memo: Memo): ProgramContext {
   const turnId = activeTurnIdOf(step.view().projection);
   const history = decision.history ?? step.session.history;
-  const container = step.ctx as ContextContainer | undefined;
   return {
     ...(decision.compaction !== undefined && { compaction: decision.compaction }),
     history,
-    manifest: async () => (container === undefined ? [] : await manifestValues(container)),
     memo,
     signal: step.config.abortSignal,
     tasks: { working: workingTaskIds(step.session) },
@@ -86,7 +82,7 @@ function programContext(step: Step, decision: Decision, memo: Memo): ProgramCont
 async function evaluate<T>(
   step: Step,
   input: {
-    readonly decision: "agent" | "history" | "next";
+    readonly decision: "history" | "next";
     readonly context: Decision;
     readonly field: (plan: Plan, ctx: ProgramContext) => Lazy<T> | undefined;
   },
@@ -183,28 +179,6 @@ async function applyNext(
     return await settle(step, next.settle.output);
   }
   return await invalid(step, "returned a next step eve doesn't know");
-}
-
-/**
- * The dynamic values the session's program makes the agent from, before a model call that reads
- * `conversation`. Throws {@link ProgramFailedError} when the program throws.
- */
-export async function programValues(
-  step: Step,
-  conversation: readonly HarnessModelMessage[],
-): Promise<readonly ValueReaction[]> {
-  try {
-    const { value } = await evaluate(step, {
-      context: { history: conversation },
-      decision: "agent",
-      field: (plan, ctx) => plan.agent ?? ctx.manifest,
-    });
-    return value ?? [];
-  } catch (error) {
-    throwIfTurnAborted(step.config.abortSignal);
-    log.error("the session program's agent threw", { error, turnId: step.position().turnId });
-    throw new ProgramFailedError(error);
-  }
 }
 
 /** A program threw where eve can't fail the turn itself; the cause stays out of the message. */

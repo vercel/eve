@@ -7,14 +7,15 @@ import type {
   HarnessModelStep,
   HarnessPlan,
 } from "#public/definitions/harness.js";
-import { defineInstructions } from "#public/definitions/instructions.js";
+import { declaredTool, declaredToolName } from "#public/definitions/harness.js";
 import { sessionFrameOf } from "#reactions/frame.js";
-import { instructionsReaction } from "#reactions/kinds/instructions.js";
+import { dynamicInstructionSlugs, HARNESS_INSTRUCTIONS } from "#reactions/kinds/instructions.js";
 import { harnessModelReaction } from "#reactions/kinds/model.js";
-import { toolReaction } from "#reactions/kinds/tool.js";
+import { dynamicToolNames, HARNESS_TOOLS, toolReaction } from "#reactions/kinds/tool.js";
 import type { InternalContext, ValueReaction } from "#reactions/reaction.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { HistoryMessage } from "#shared/history-message.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import { nativeNext } from "./native.js";
 import { type Compaction, continuationsOf, force, type Program } from "./program.js";
 
@@ -58,7 +59,14 @@ export function harnessProgram(harness: Harness, frame: () => SessionFrame): Pro
   };
 }
 
-/** The dynamic values the harness's `agent` fields make: a model, instructions, and tools. */
+/** The agent's own instructions, as a harness's `declared.agent`. */
+const AGENT_INSTRUCTIONS = "agent";
+
+/**
+ * The dynamic values the harness's `agent` fields make: a model, instructions, and tools. Its
+ * tools and instructions are all the model gets, besides eve's own, so their slots also name the
+ * declared ones they keep: the step's catalog and system prompt read them in any process.
+ */
 export function harnessValues(
   authored: AuthoredHarness,
   bundle: CompiledBundle,
@@ -69,31 +77,72 @@ export function harnessValues(
   const source = { logicalPath: authored.logicalPath, sourceId: authored.logicalPath };
   const agent = (ctx: InternalContext): HarnessPlan["agent"] =>
     authored.harness(fromValue(ctx)).agent;
-  const instructions = instructionsReaction({
+  const declared = (names: readonly string[]) =>
+    Object.fromEntries(names.map((name) => [name, declaredTool(name)]));
+  const ownTools = toolReaction({
     ...source,
-    evaluate: async (ctx: InternalContext) => {
-      const value = await force(agent(ctx)?.instructions);
-      const content = (typeof value === "string" ? [value] : (value ?? [])).join("\n\n");
-      return content.trim() === "" ? null : defineInstructions({ content });
+    evaluate: ((result: unknown) => result) as never,
+    framework: true,
+    slug: "harness",
+  } as never);
+  const tools: ValueReaction = {
+    ...ownTools,
+    contribute: async (result, ctx) => {
+      if (result === null) return { value: null };
+      const own: Record<string, unknown> = {};
+      const kept: JsonObject[] = [];
+      for (const [key, value] of Object.entries(result as Record<string, unknown>)) {
+        const name = declaredToolName(value);
+        if (name === undefined) own[key] = value;
+        else kept.push({ declared: true, name });
+      }
+      const contributed = await ownTools.contribute(own, ctx);
+      const mine = Array.isArray(contributed.value) ? contributed.value : [];
+      return { live: contributed.live ?? [], value: [...mine, ...kept] };
     },
-    framework: true,
-    slug: "harness",
-  } as never);
-  const tools = toolReaction({
-    ...source,
-    evaluate: ((ctx: InternalContext) => force(agent(ctx)?.tools)) as never,
-    framework: true,
-    slug: "harness",
-  } as never);
+    evaluate: async (ctx) => {
+      const field = agent(ctx)?.tools;
+      if (field === undefined) return null;
+      if (typeof field !== "function") return field;
+      const names = [
+        ...bundle.turnAgent.tools.map((tool) => tool.name),
+        ...dynamicToolNames(ctx.ctx, { except: HARNESS_TOOLS }),
+      ];
+      return (await field(declared(names) as never)) ?? null;
+    },
+    id: HARNESS_TOOLS,
+  };
+  const instructions: ValueReaction = {
+    contribute: (result) => ({ value: result as JsonValue }),
+    evaluate: async (ctx) => {
+      const field = agent(ctx)?.instructions;
+      if (field === undefined) return null;
+      const names = [
+        AGENT_INSTRUCTIONS,
+        ...dynamicInstructionSlugs(ctx.ctx, { except: HARNESS_INSTRUCTIONS }),
+      ];
+      const value = typeof field === "function" ? await field(declared(names) as never) : field;
+      if (value === undefined) return null;
+      const parts: readonly unknown[] = typeof value === "string" ? [value] : value;
+      return {
+        content: parts
+          .filter((part) => typeof part === "string")
+          .join("\n\n")
+          .trim(),
+        keep: parts.flatMap((part) => declaredToolName(part) ?? []),
+        role: "system",
+      };
+    },
+    id: HARNESS_INSTRUCTIONS,
+    kind: "instructions",
+    label: authored.logicalPath,
+  };
   return {
     model: harnessModelReaction(bundle, {
       evaluate: (ctx) => force(agent(ctx)?.model),
       label: `${authored.logicalPath}#model`,
     }),
-    rest: [
-      { ...tools, id: "tool:@harness" },
-      { ...instructions, id: "instructions:@harness" },
-    ],
+    rest: [tools, instructions],
   };
 }
 

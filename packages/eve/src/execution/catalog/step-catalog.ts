@@ -11,7 +11,7 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import { connectionToolName } from "#connections/ownership.js";
 import { dynamicConnectionVersions } from "#reactions/kinds/connection.js";
 import { buildDynamicSubagentTools } from "#reactions/kinds/subagent.js";
-import { dynamicTools } from "#reactions/kinds/tool.js";
+import { dynamicTools, harnessOffers } from "#reactions/kinds/tool.js";
 import type { ContextAccessor, ContextReader } from "#context/key.js";
 import { OfferedCatalogToolsKey, type OfferedCatalogTools } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -274,6 +274,12 @@ function stepEntries(
   }
   // Dynamic tools override a same-named authored tool.
   for (const tool of dynamicTools(input.ctx).filter(visible)) entries.set(tool.name, tool);
+  // A harness says which tools the model is offered; eve's own `eve__` tools stay.
+  const offers = harnessOffers(input.ctx);
+  if (offers === undefined) return entries;
+  for (const name of entries.keys()) {
+    if (!offers.has(name) && !name.startsWith("eve__")) entries.delete(name);
+  }
   return entries;
 }
 

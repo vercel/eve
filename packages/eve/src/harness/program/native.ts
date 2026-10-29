@@ -14,7 +14,6 @@ export function nativeNext({ turn }: Pick<ProgramContext, "turn">): Next {
 }
 
 export const nativeProgram: Program = (ctx) => ({
-  agent: ctx.manifest,
   history: () => (ctx.compaction === undefined ? ctx.history : ctx.compaction.native(ctx.history)),
   next: () => nativeNext(ctx),
 });

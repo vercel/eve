@@ -5,7 +5,7 @@ import { connectionReaction, installDynamicConnections } from "./kinds/connectio
 import { hookReaction } from "./kinds/hook.js";
 import { instructionsReaction } from "./kinds/instructions.js";
 import { memoryReactions } from "./kinds/memory.js";
-import { loadModelReaction } from "./kinds/model.js";
+import { harnessChoseModel, loadModelReaction } from "./kinds/model.js";
 import { skillReaction, syncDynamicSkillFiles } from "./kinds/skill.js";
 import { subagentReaction } from "./kinds/subagent.js";
 import { toolReaction } from "./kinds/tool.js";
@@ -14,14 +14,6 @@ import type { BundleReactions, Reaction, ValueReaction } from "./reaction.js";
 
 const cache = new WeakMap<CompiledBundle, Promise<BundleReactions>>();
 const EMPTY: BundleReactions = { effects: {}, reactions: [] };
-
-/** The dynamic values the agent's files declare, in run order. */
-export async function manifestValues(
-  ctx: Pick<ContextReader, "get" | "has">,
-): Promise<readonly ValueReaction[]> {
-  const { reactions } = await bundleReactions(ctx);
-  return reactions.filter((reaction): reaction is ValueReaction => reaction.timing !== "commit");
-}
 
 /**
  * The reactions the session's agent declares, in run order: hooks after each commit; then the
@@ -47,6 +39,17 @@ export async function bundleReactions(
   return { ...all, reactions: all.reactions.filter((reaction) => reaction.kind !== "model") };
 }
 
+/** The agent's model, which waits for the harness's: when the harness chooses, it doesn't run. */
+function unlessHarnessChose(model: ValueReaction): ValueReaction {
+  const skipped = Symbol("skipped");
+  return {
+    ...model,
+    contribute: (result, ctx) =>
+      result === skipped ? { value: null } : model.contribute(result, ctx),
+    evaluate: (ctx) => (harnessChoseModel(ctx.ctx) ? skipped : model.evaluate(ctx)),
+  };
+}
+
 async function buildReactions(bundle: CompiledBundle): Promise<BundleReactions> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelReaction(bundle);
@@ -55,7 +58,7 @@ async function buildReactions(bundle: CompiledBundle): Promise<BundleReactions> 
     ...agent.hooks.map(hookReaction),
     ...agent.memories.flatMap(memoryReactions),
     ...(harness === undefined ? [] : [harness.model]),
-    ...(model === undefined ? [] : [model]),
+    ...(model === undefined ? [] : [harness === undefined ? model : unlessHarnessChose(model)]),
     ...(agent.dynamicConnectionResolvers ?? []).map(connectionReaction),
     ...bundle.subagentRegistry.dynamicResolvers.map(subagentReaction),
     ...agent.dynamicToolResolvers.map(toolReaction),

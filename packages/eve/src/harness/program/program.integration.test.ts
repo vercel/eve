@@ -10,8 +10,6 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { reactionSession } from "#internal/testing/reaction-session.js";
-import { defineInstructions } from "#public/definitions/instructions.js";
-import { instructionsReaction } from "#reactions/kinds/instructions.js";
 import { nativeNext, nativeProgram } from "./native.js";
 import { harnessProgram } from "./authored.js";
 import type { SessionFrame } from "#dynamic/definition.js";
@@ -77,13 +75,6 @@ function deliver(value: unknown): StreamResult {
       },
     }),
   };
-}
-
-function systemText(prompt: Prompt): string {
-  return prompt
-    .filter((entry) => entry.role === "system")
-    .map((entry) => entry.content)
-    .join("\n");
 }
 
 function lastUserText(prompt: Prompt): string {
@@ -409,89 +400,6 @@ describe("a harness's history", () => {
 });
 
 /** An instructions value a program declares itself, the way a file under `instructions/` would. */
-function programInstructions(slug: string, content: string) {
-  return instructionsReaction({
-    evaluate: () => defineInstructions({ content }),
-    logicalPath: `program/${slug}`,
-    slug,
-    sourceId: `program/${slug}`,
-    sourceKind: "module",
-  } as never);
-}
-
-describe("a session program's agent", () => {
-  const houseStyle = {
-    evaluate: () => defineInstructions({ content: "Write in the house style." }),
-    slug: "house-style",
-  };
-
-  it("adds a dynamic value of its own beside the agent's files", async () => {
-    const { ctx } = reactionSession({ instructions: [houseStyle] });
-    const { fullPrompts, result } = await runTurn(
-      (ctx) => ({
-        ...nativeProgram(ctx),
-        agent: async () => [
-          ...(await ctx.manifest()),
-          programInstructions("tenant", "Alice's team answers in French."),
-        ],
-      }),
-      ["Deux décisions la soutiennent."],
-      { ctx },
-    );
-
-    expect(systemText(fullPrompts[0]!)).toContain("Write in the house style.");
-    expect(systemText(fullPrompts[0]!)).toContain("Alice's team answers in French.");
-    expect(result.settledTurn).toEqual({ output: "Deux décisions la soutiennent." });
-  });
-
-  it("leaves out a value the agent's files declare", async () => {
-    const { ctx } = reactionSession({ instructions: [houseStyle] });
-    const { fullPrompts } = await runTurn(
-      (ctx) => ({
-        ...nativeProgram(ctx),
-        agent: async () =>
-          (await ctx.manifest()).filter(({ id }) => id !== "instructions:house-style"),
-      }),
-      ["Two court cases back it."],
-      { ctx },
-    );
-
-    expect(systemText(fullPrompts[0]!)).not.toContain("house style");
-  });
-
-  it("keeps the agent's files' values when the program says nothing about the agent", async () => {
-    const { ctx } = reactionSession({ instructions: [houseStyle] });
-    const { fullPrompts } = await runTurn(
-      (ctx) => ({ next: () => nativeNext(ctx) }),
-      ["Two court cases back it."],
-      { ctx },
-    );
-
-    expect(systemText(fullPrompts[0]!)).toContain("Write in the house style.");
-  });
-
-  it("fails the turn with a generic error when the program's agent throws", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const { ctx } = reactionSession({ instructions: [houseStyle] });
-
-    const { events, prompts, result } = await runTurn(
-      (ctx) => ({
-        ...nativeProgram(ctx),
-        agent: () => {
-          throw new Error("config service at 10.0.0.7 is down");
-        },
-      }),
-      ["Two court cases back it."],
-      { ctx },
-    );
-
-    expect(prompts).toEqual([]);
-    expect(result.settledTurn).toMatchObject({ isError: true });
-    expect(JSON.stringify(result.settledTurn)).toContain("The agent's program failed.");
-    expect(JSON.stringify(events)).not.toContain("10.0.0.7");
-  });
-});
-
 describe("a session program's memos", () => {
   it("keep what one decision learned for its next evaluation in the turn", async () => {
     const { ctx } = reactionSession();

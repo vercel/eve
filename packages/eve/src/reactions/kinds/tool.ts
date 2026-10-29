@@ -72,10 +72,30 @@ export function dynamicTools(ctx: Pick<ContextReader, "get"> | undefined): Harne
 }
 
 /** The names of the dynamic tools the session's slots hold, live or not. */
-export function dynamicToolNames(ctx: Pick<ContextReader, "get"> | undefined): readonly string[] {
-  return slotsOf(ctx, "tool").flatMap(({ slot }) =>
-    Array.isArray(slot.value) ? slot.value.map((tool) => (tool as { name: string }).name) : [],
-  );
+export function dynamicToolNames(
+  ctx: Pick<ContextReader, "get"> | undefined,
+  options: { readonly except?: string } = {},
+): readonly string[] {
+  return slotsOf(ctx, "tool")
+    .filter(({ id }) => id !== options.except)
+    .flatMap(({ slot }) =>
+      Array.isArray(slot.value) ? slot.value.map((tool) => (tool as { name: string }).name) : [],
+    );
+}
+
+/** The harness's tools: its own, then `{ name, declared: true }` for each declared tool it offers. */
+export const HARNESS_TOOLS = "tool:@harness";
+
+/**
+ * Every tool name the harness offers the model, its own and the declared tools it keeps, where
+ * it says which; the step's catalog offers those and eve's `eve__` tools.
+ */
+export function harnessOffers(
+  ctx: Pick<ContextReader, "get"> | undefined,
+): ReadonlySet<string> | undefined {
+  const slot = slotsOf(ctx, "tool").find(({ id }) => id === HARNESS_TOOLS)?.slot;
+  if (slot === undefined || !Array.isArray(slot.value)) return undefined;
+  return new Set(slot.value.map((tool) => (tool as { name: string }).name));
 }
 
 function namedTools(

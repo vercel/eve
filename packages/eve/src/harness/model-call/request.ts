@@ -60,8 +60,13 @@ export function modelInstructions(input: {
   readonly systemMessages: readonly SystemModelMessage[];
   readonly anthropicCache: ModelProfile["anthropicCache"];
   readonly extraSystemNote?: string;
+  /** Whether the agent's own instructions lead: not when a harness leaves them out. */
+  readonly agentSystem?: boolean;
 }): SystemModelMessage | string | undefined {
-  const { session } = input;
+  const session =
+    input.agentSystem === false
+      ? { ...input.session, agent: { ...input.session.agent, system: "" } }
+      : input.session;
   const extra: SystemModelMessage[] = input.extraSystemNote
     ? [{ role: "system", content: input.extraSystemNote }]
     : [];
