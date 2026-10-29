@@ -264,8 +264,8 @@ paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`,
 allowed for all types except `docs`, where the scope selects the feature or bug
 fix section. CI checks the PR title because GitHub uses it as the squash-merge
 subject. Keep the prefix in the squash commit; its subject determines the
-release section independently of the version bump. Internal changes are omitted
-from both public sections. Run `pnpm guard:invariants` to validate changeset summaries. See
+release section. A `minor` or `major` changeset always appears under Breaking
+Changes, and other internal changes are omitted from the release notes. Run `pnpm guard:invariants` to validate changeset summaries. See
 [Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When

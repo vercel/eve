@@ -3,45 +3,54 @@ import { pullRequestFor } from "../scripts/changeset-github.mjs";
 
 const pulls = new Map();
 const headings = {
-  feature: "🚀 Features",
-  bugfix: "🐛 Bug Fixes",
+  breaking: "Breaking Changes",
+  feature: "Features",
+  bugfix: "Bug Fixes",
   internal: "Internal",
   other: "Other Changes",
 };
+const blockLine = /^(?:\s*(?:[-*+]|\d+[.)])\s|\s{4}|#|>|```|~~~|\|)/u;
+
+// A single prose paragraph of details joins the summary so each entry reads as
+// one paragraph; anything richer follows the summary as indented blocks.
+function renderEntry(summary, details, link) {
+  const prose =
+    details && !/\n\s*\n/u.test(details) && !details.split("\n").some((l) => blockLine.test(l));
+  const body = prose
+    ? `${summary}\n${details} ${link}`
+    : `${summary} ${link}${details ? `\n\n${details}` : ""}`;
+  return `- ${body
+    .split("\n")
+    .map((line, index) => (index && line ? `  ${line}` : line))
+    .join("\n")}`;
+}
 
 export default {
-  async getReleaseLine(changeset) {
+  async getReleaseLine(changeset, type) {
     const { summary, details, contributors } = parseSummary(changeset.summary, changeset.id);
     if (!pulls.has(changeset.commit))
       pulls.set(changeset.commit, pullRequestFor(changeset.commit, changeset.id));
     const pull = await pulls.get(changeset.commit);
-    let category;
-    try {
-      category = classifyTitle(pull.subject);
-    } catch {
-      category = "other";
-      console.warn(
-        `Changeset ${changeset.id}: commit subject has no release category; review the full list of changes.`,
-      );
+    // Pre-1.0, a minor bump is how a changeset declares a breaking change.
+    let category = type === "major" || type === "minor" ? "breaking" : undefined;
+    if (!category) {
+      try {
+        category = classifyTitle(pull.subject);
+      } catch {
+        category = "other";
+        console.warn(
+          `Changeset ${changeset.id}: commit subject has no release category; review the compare link.`,
+        );
+      }
     }
-    const heading = headings[category];
-    const note =
-      details &&
-      `\n\n${details
-        .split("\n")
-        .map((line) => (line ? `  ${line}` : ""))
-        .join("\n")}`;
-    const line = `- ${summary} [#${pull.number}](https://github.com/vercel/eve/pull/${pull.number})${note || ""}`;
+    const link = `([#${pull.number}](https://github.com/vercel/eve/pull/${pull.number}))`;
     const logins = new Map();
     for (const login of [pull.author, ...pull.coauthors, ...contributors]) {
       if (login && !login.endsWith("[bot]")) logins.set(login.toLowerCase(), login);
     }
-    const credits = [...logins.values()].map(
-      (login) => `- [@${login}](https://github.com/${login})`,
-    );
     return [
-      `#### ${heading}\n\n${line}`,
-      credits.length && `#### Contributors\n\n${credits.join("\n")}`,
+      `#### ${headings[category]}\n\n${renderEntry(summary, details, link)}`,
+      logins.size && `#### Contributors\n\n${[...logins.values()].join("\n")}`,
     ]
       .filter(Boolean)
       .join("\n\n");

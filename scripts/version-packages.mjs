@@ -3,8 +3,10 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getPackages } from "@manypkg/get-packages";
 
-function renderRelease({ name, version, date, bump, body, changesUrl }) {
-  const sections = [`### Release ${name}@${version} | ${date} | ${bump}`];
+const sections = ["Breaking Changes", "Features", "Bug Fixes", "Dependencies"];
+const conjunction = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
+function renderRelease({ date, body, changes }) {
   const groups = new Map();
   const headings = [...body.matchAll(/^#{3,4} (.+)$/gmu)];
   for (let i = 0; i < headings.length; i++) {
@@ -15,28 +17,17 @@ function renderRelease({ name, version, date, bump, body, changesUrl }) {
     if (block) group.push(block);
     groups.set(match[1], group);
   }
-  for (const title of [
-    "🚀 Features",
-    "🐛 Bug Fixes",
-    "Other Changes",
-    "Dependencies",
-    "Contributors",
-  ]) {
-    if (title === "Other Changes") {
-      sections.push(`### Other Changes\n\nSee the [full list of changes](${changesUrl}).`);
-      continue;
-    }
-    let lines = groups.get(title) ?? [];
-    if (title === "Contributors") {
-      lines = lines.flatMap((block) => block.split("\n"));
-      lines = [...new Map(lines.map((line) => [line.toLowerCase(), line])).values()].sort((a, b) =>
-        a.localeCompare(b, "en", { sensitivity: "base" }),
-      );
-    }
-    if (lines.length)
-      sections.push(`### ${title}\n\n${lines.join(title === "Contributors" ? "\n" : "\n\n")}`);
+  const parts = [`Released ${date} · [${changes.label}](${changes.url})`];
+  for (const title of sections) {
+    const entries = groups.get(title) ?? [];
+    if (entries.length) parts.push(`### ${title}\n\n${entries.join("\n")}`);
   }
-  return sections.join("\n\n");
+  const logins = (groups.get("Contributors") ?? []).flatMap((block) => block.split("\n"));
+  const contributors = [...new Map(logins.map((login) => [login.toLowerCase(), login])).values()]
+    .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+    .map((login) => `[@${login}](https://github.com/${login})`);
+  if (contributors.length) parts.push(`Thanks to ${conjunction.format(contributors)}.`);
+  return parts.join("\n\n");
 }
 
 async function formatChangelog(
@@ -64,27 +55,30 @@ async function formatChangelog(
   if (
     recovery &&
     (!/^### (?:Major|Minor|Patch) Changes$/mu.test(body) ||
-      !/^#### (?:🚀 Features|🐛 Bug Fixes|Other Changes|Internal|Dependencies)$/mu.test(body))
+      !/^#### (?:Breaking Changes|Features|Bug Fixes|Other Changes|Internal|Dependencies)$/mu.test(
+        body,
+      ))
   )
     return false;
-  const bump =
-    ["major", "minor", "patch"].find((type) =>
-      body.includes(`### ${type[0].toUpperCase()}${type.slice(1)} Changes`),
-    ) ?? "patch";
-  const previousHeading =
-    next < 0 ? undefined : /^\n## (\S+)[ \t]*$/mu.exec(content.slice(next))?.[1];
-  const previousTag = `${name}@${previousVersion ?? previousHeading}`;
+  // A version that never got a tag, such as one whose publish failed, falls
+  // back to the newest older release that did.
+  const olderVersions = [...content.slice(end).matchAll(/^## (\S+)[ \t]*$/gmu)].map(
+    (match) => match[1],
+  );
+  const previous = [previousVersion, ...olderVersions].find(
+    (candidate) => candidate && tags.has(`${name}@${candidate}`),
+  );
   const currentTag = encodeURIComponent(`${name}@${version}`);
-  const changesUrl = tags.has(previousTag)
-    ? `https://github.com/vercel/eve/compare/${encodeURIComponent(previousTag)}...${currentTag}`
-    : `https://github.com/vercel/eve/commits/${currentTag}`;
+  const changes = previous
+    ? {
+        label: `Compare with ${previous}`,
+        url: `https://github.com/vercel/eve/compare/${encodeURIComponent(`${name}@${previous}`)}...${currentTag}`,
+      }
+    : { label: "View commits", url: `https://github.com/vercel/eve/commits/${currentTag}` };
   const rendered = renderRelease({
-    name,
-    version,
     date: new Date().toISOString().slice(0, 10),
-    bump,
     body,
-    changesUrl,
+    changes,
   });
   await writeFile(path, `${content.slice(0, bodyStart)}\n${rendered}\n${content.slice(end)}`);
   return true;

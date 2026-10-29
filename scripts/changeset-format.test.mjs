@@ -117,9 +117,9 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   const line = await formatter.getReleaseLine({ id: "example", summary: "Add a tool.", commit });
   assert.match(
     line,
-    /#### 🐛 Bug Fixes\n\n- Add a tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
+    /#### Bug Fixes\n\n- Add a tool\. \(\[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)\)/u,
   );
-  assert.match(line, /#### Contributors\n\n- \[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
+  assert.match(line, /#### Contributors\n\nAlice$/u);
   assert.doesNotMatch(line, /<!--/u);
   git("commit", "--allow-empty", "-qm", "fix: Update a tool");
   const fallbackCommit = git("rev-parse", "HEAD");
@@ -131,7 +131,7 @@ test("the Changesets formatter produces readable Markdown without encoded metada
     summary: "Update a tool.",
     commit: fallbackCommit,
   });
-  assert.match(fallback, /- Update a tool\. \[#11\]/u);
+  assert.match(fallback, /- Update a tool\. \(\[#11\]/u);
   git("commit", "--allow-empty", "-qm", "fix: Repair a tool");
   const ambiguousCommit = git("rev-parse", "HEAD");
   pulls.push({
@@ -220,7 +220,10 @@ test("version-packages assembles changesets across bump types and preserves old 
     "feat: Add a tool\n\nCo-authored-by: Bob <123+Bob@users.noreply.github.com>\nCo-authored-by: Carol <Carol@users.noreply.github.com>",
   );
   const first = git("rev-parse", "HEAD");
-  await write(".changeset/b.md", '---\n"eve": patch\n---\n\nCorrect the setup guide.\n');
+  await write(
+    ".changeset/b.md",
+    '---\n"eve": patch\n---\n\nCorrect the setup guide.\n\nThe guide now lists the required token.\n',
+  );
   await write(".changeset/c.md", '---\n"eve": patch\n---\n\nUpdate the release tooling.\n');
   git("add", ".changeset/b.md");
   git("commit", "-qm", "docs(bugfix): Correct the guide");
@@ -230,6 +233,9 @@ test("version-packages assembles changesets across bump types and preserves old 
   await write(".changeset/e.md", '---\n"eve": patch\n---\n\nKeep the legacy change visible.\n');
   git("add", ".changeset/e.md");
   git("commit", "-qm", "Legacy change");
+  await write(".changeset/f.md", '---\n"eve": minor\n---\n\nRemove the legacy helper.\n');
+  git("add", ".changeset/f.md");
+  git("commit", "-qm", "refactor!: Remove the legacy helper");
   await write(
     "mock-github.mjs",
     `globalThis.fetch = async (url) => {
@@ -279,37 +285,52 @@ test("version-packages assembles changesets across bump types and preserves old 
     },
   });
   const changelog = await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8");
-  assert.match(changelog, /## 1\.1\.0\n\n### Release eve@1\.1\.0 \| \d{4}-\d\d-\d\d \| minor/u);
+  const date = String.raw`\d{4}-\d\d-\d\d`;
+  const pull = (number) =>
+    String.raw`\(\[#${number}\]\(https://github\.com/vercel/eve/pull/${number}\)\)`;
+  const user = (login) => String.raw`\[@${login}\]\(https://github\.com/${login}\)`;
+  assert.match(
+    changelog,
+    new RegExp(
+      [
+        String.raw`## 1\.1\.0`,
+        String.raw`Released ${date} · \[Compare with 1\.0\.0\]\(https://github\.com/vercel/eve/compare/eve%401\.0\.0\.\.\.eve%401\.1\.0\)`,
+        String.raw`### Breaking Changes`,
+        String.raw`- Add a new tool\. ${pull(10)}`,
+        String.raw`  Migrate old callers to the new tool\.`,
+        String.raw`  Thanks @Alice\.
+- Remove the legacy helper\. ${pull(12)}`,
+        String.raw`### Features`,
+        String.raw`- Improve the new tool\. ${pull(10)}`,
+        String.raw`### Bug Fixes`,
+        String.raw`- Correct the setup guide\.
+  The guide now lists the required token\. ${pull(11)}`,
+        String.raw`Thanks to ${user("Alice")}, ${user("Author")}, ${user("Bob")}, and ${user("Carol")}\.`,
+        String.raw`## 1\.0\.0`,
+      ].join("\n\n"),
+      "u",
+    ),
+  );
   const agentRunsChangelog = await readFile(join(root, "packages/agent-runs/CHANGELOG.md"), "utf8");
   assert.match(
     agentRunsChangelog,
-    /## 1\.0\.1\n\n### Release @vercel\/agent-runs@1\.0\.1 \| \d{4}-\d\d-\d\d \| patch/u,
-  );
-  assert.match(
-    changelog,
-    /### 🚀 Features\n\n- Add a new tool\. \[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)/u,
-  );
-  assert.match(changelog, /- Improve the new tool\. \[#10\]/u);
-  assert.equal([...changelog.matchAll(/^### 🚀 Features$/gmu)].length, 1);
-  assert.match(changelog, /### 🐛 Bug Fixes\n\n- Correct the setup guide\. \[#11\]/u);
-  assert.match(
-    changelog,
-    /### Other Changes\n\nSee the \[full list of changes\]\(https:\/\/github\.com\/vercel\/eve\/compare\/eve%401\.0\.0\.\.\.eve%401\.1\.0\)\./u,
-  );
-  assert.match(
-    agentRunsChangelog,
-    /### Other Changes\n\nSee the \[full list of changes\]\(https:\/\/github\.com\/vercel\/eve\/compare\/%40vercel%2Fagent-runs%401\.0\.0\.\.\.%40vercel%2Fagent-runs%401\.0\.1\)\./u,
+    new RegExp(
+      [
+        String.raw`## 1\.0\.1`,
+        String.raw`Released ${date} · \[Compare with 1\.0\.0\]\(https://github\.com/vercel/eve/compare/%40vercel%2Fagent-runs%401\.0\.0\.\.\.%40vercel%2Fagent-runs%401\.0\.1\)`,
+        String.raw`### Features`,
+        String.raw`- Improve the new tool\. ${pull(10)}`,
+        String.raw`Thanks to ${user("Author")}, ${user("Bob")}, and ${user("Carol")}\.`,
+      ].join("\n\n"),
+      "u",
+    ),
   );
   assert.doesNotMatch(changelog, /Keep the legacy change visible/u);
-  assert.match(changelog, /\[@Alice\]\(https:\/\/github\.com\/Alice\)/u);
-  assert.match(changelog, /\[@Bob\]\(https:\/\/github\.com\/Bob\)/u);
-  assert.match(changelog, /\[@Carol\]\(https:\/\/github\.com\/Carol\)/u);
-  assert.match(changelog, /\n\n  Migrate old callers to the new tool\./u);
   assert.doesNotMatch(changelog, /Update the release tooling|eve-changeset:/u);
   assert.match(changelog, /## 1\.0\.0\n\nOld release\./u);
   await write(
     "packages/eve/CHANGELOG.md",
-    "# eve\n\n## 1.1.0\n\n### Minor Changes\n\n#### 🐛 Bug Fixes\n\n- Recover the release. [#10](https://github.com/vercel/eve/pull/10)\n\n## 1.0.0\n\nOld release.\n",
+    "# eve\n\n## 1.1.0\n\n### Minor Changes\n\n#### Bug Fixes\n\n- Recover the release. ([#10](https://github.com/vercel/eve/pull/10))\n\n## 1.0.1\n\nNever published.\n\n## 1.0.0\n\nOld release.\n",
   );
   execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
     cwd: root,
@@ -318,16 +339,15 @@ test("version-packages assembles changesets across bump types and preserves old 
   });
   assert.match(
     await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8"),
-    /### 🐛 Bug Fixes\n\n- Recover the release\./u,
-  );
-  assert.match(
-    await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8"),
-    /compare\/eve%401\.0\.0\.\.\.eve%401\.1\.0/u,
+    new RegExp(
+      String.raw`## 1\.1\.0\n\nReleased ${date} · \[Compare with 1\.0\.0\]\(https://github\.com/vercel/eve/compare/eve%401\.0\.0\.\.\.eve%401\.1\.0\)\n\n### Bug Fixes\n\n- Recover the release\.`,
+      "u",
+    ),
   );
   git("tag", "-d", "@vercel/agent-runs@1.0.0");
   await write(
     "packages/agent-runs/CHANGELOG.md",
-    "# @vercel/agent-runs\n\n## 1.0.1\n\n### Patch Changes\n\n#### 🚀 Features\n\n- Recover a release. [#10](https://github.com/vercel/eve/pull/10)\n",
+    "# @vercel/agent-runs\n\n## 1.0.1\n\n### Patch Changes\n\n#### Features\n\n- Recover a release. ([#10](https://github.com/vercel/eve/pull/10))\n",
   );
   execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
     cwd: root,
@@ -336,6 +356,6 @@ test("version-packages assembles changesets across bump types and preserves old 
   });
   assert.match(
     await readFile(join(root, "packages/agent-runs/CHANGELOG.md"), "utf8"),
-    /commits\/%40vercel%2Fagent-runs%401\.0\.1/u,
+    /· \[View commits\]\(https:\/\/github\.com\/vercel\/eve\/commits\/%40vercel%2Fagent-runs%401\.0\.1\)/u,
   );
 });
