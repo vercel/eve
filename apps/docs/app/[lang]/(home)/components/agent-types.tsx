@@ -292,7 +292,13 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
 
   return (
     <div
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none]"
+      // Contain scrolling only while there is something to scroll: Chrome 144+ applies
+      // overscroll-behavior to non-overflowing scroll containers, which would trap the page's
+      // wheel scroll over a conversation that fits.
+      className={cn(
+        "min-h-0 flex-1 overflow-y-auto [scrollbar-width:none]",
+        (overflow.above || overflow.below) && "overscroll-contain",
+      )}
       data-conversation
       onScroll={measure}
       ref={list}

@@ -747,7 +747,13 @@ export function SessionTimeline(): JSX.Element {
             it. In full it opens at its start; a replay fills from the bottom like a chat. */}
         <div className="relative overflow-hidden" ref={bodyRef}>
           <div
-            className="h-[26rem] overflow-y-auto overscroll-contain px-4 [scrollbar-width:none]"
+            // Contain scrolling only while there is something to scroll: Chrome 144+ applies
+            // overscroll-behavior to non-overflowing scroll containers, which would trap the
+            // page's wheel scroll over a conversation that fits.
+            className={cn(
+              "h-[26rem] overflow-y-auto px-4 [scrollbar-width:none]",
+              (overflow.above || overflow.below) && "overscroll-contain",
+            )}
             key={platform}
             onScroll={(event) => measure(event.currentTarget)}
             ref={listRef}
