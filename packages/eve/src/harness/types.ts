@@ -17,6 +17,7 @@ import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { Program } from "#harness/program/program.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
@@ -317,6 +318,8 @@ export interface ToolLoopHarnessConfig {
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
+  /** What decides the turn's next step. Absent, eve's own loop: production installs no other. */
+  readonly program?: Program;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
