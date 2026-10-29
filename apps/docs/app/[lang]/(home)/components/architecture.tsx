@@ -220,8 +220,8 @@ export function ArchitectureDiagram() {
         </>
       }
     >
-      <div>
-        <LogoEveSvg className="ml-5 text-gray-1000" height={13} />
+      <div className="flex flex-col">
+        <LogoEveSvg className="ml-5 self-start text-gray-1000" height={13} />
         <div className="mt-4 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
@@ -294,58 +294,61 @@ export function ArchitectureDiagram() {
             </Link>
           </div>
         </div>
-        {/* Below the diagram: the managed vs. self-hosted toggle drives the backend shown in
-            each card, and its caption explains the selected mode. */}
-        <div className="mt-10 flex items-center justify-center gap-4 text-copy-14">
-          <button
-            type="button"
-            onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
-            aria-pressed={!selfHosted}
-            className={cn(
-              "cursor-pointer transition-colors",
-              selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
-            )}
-          >
-            Vercel Managed
-          </button>
-          <Toggle
-            checked={selfHosted}
-            onChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
-            className="cursor-pointer gap-0"
-            size="medium"
-          >
-            <span className="sr-only">Toggle deployment target</span>
-          </Toggle>
-          <span className="text-copy-14">
+        {/* The managed vs. self-hosted toggle drives the backend shown in each card, and its
+            caption explains the selected mode. Below the diagram, or above it below md, so the
+            choice comes before the cards it changes. */}
+        <div className="order-first mb-10 md:order-none md:mt-10 md:mb-0">
+          <div className="flex items-center justify-center gap-4 text-copy-14">
             <button
               type="button"
               onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
-              aria-pressed={selfHosted}
+              aria-pressed={!selfHosted}
               className={cn(
                 "cursor-pointer transition-colors",
-                selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+                selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
               )}
             >
-              Self-hosted
+              Vercel Managed
             </button>
-          </span>
-        </div>
-
-        <p className="mx-auto mt-3 max-w-xl text-balance text-center text-gray-900 text-copy-14">
-          {CAPTIONS[mode]}
-          {selfHosted ? (
-            <>
-              {" "}
-              <Link
-                href="https://github.com/vercel-labs/steve"
-                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
+            <Toggle
+              checked={selfHosted}
+              onChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
+              className="cursor-pointer gap-0"
+              size="medium"
+            >
+              <span className="sr-only">Toggle deployment target</span>
+            </Toggle>
+            <span className="text-copy-14">
+              <button
+                type="button"
+                onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
+                aria-pressed={selfHosted}
+                className={cn(
+                  "cursor-pointer transition-colors",
+                  selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+                )}
               >
-                See the example
-                <IconArrowUpRightSmall className="text-gray-900" size={16} />
-              </Link>
-            </>
-          ) : null}
-        </p>
+                Self-hosted
+              </button>
+            </span>
+          </div>
+
+          <p className="mx-auto mt-3 max-w-xl text-balance text-center text-gray-900 text-copy-14">
+            {CAPTIONS[mode]}
+            {selfHosted ? (
+              <>
+                {" "}
+                <Link
+                  href="https://github.com/vercel-labs/steve"
+                  className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
+                >
+                  See the example
+                  <IconArrowUpRightSmall className="text-gray-900" size={16} />
+                </Link>
+              </>
+            ) : null}
+          </p>
+        </div>
       </div>
     </HomeSection>
   );
