@@ -548,9 +548,9 @@ function WebAppClient() {
         {/* An orders dashboard in the skeleton style of "Own your agent UI": real heading and
             figures, gray bars for everything else. The KPI cards only show once the window is
             wide enough to keep them clear of the chat. */}
-        <div aria-hidden className="hidden select-none flex-col gap-2 sm:flex">
+        <div aria-hidden className="flex select-none flex-col gap-2">
           <span className="font-medium text-copy-14 text-gray-1000">Past orders</span>
-          <span className="mt-1 hidden grid-cols-3 gap-2 @[20rem]:grid">
+          <span className="mt-1 hidden grid-cols-3 gap-2 @[19rem]:grid">
             {["1,284", "$48.2k", "96%"].map((metric) => (
               <span
                 className="flex flex-col gap-2 rounded-md border border-gray-alpha-400 p-2.5"
@@ -564,7 +564,7 @@ function WebAppClient() {
             ))}
           </span>
           {/* Fades out downward, and to the right before the chat's 14rem plus a 1rem gap. */}
-          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[20rem]:block" />
+          <span className="hidden h-24 rounded-md border border-gray-alpha-400 [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black,transparent),linear-gradient(to_right,black_calc(100%_-_21rem),transparent_calc(100%_-_15rem))] @[19rem]:block" />
         </div>
         <div className="absolute inset-x-3 bottom-3 flex flex-col gap-3.5 rounded-lg p-1.5 material-menu sm:left-auto sm:w-56 sm:max-w-[calc(100%-1.5rem)]">
           <span className="text-label-12 text-gray-900">Acme support</span>
@@ -795,7 +795,10 @@ const IMESSAGE_THREAD: { sent: boolean; text: string }[] = [
   { sent: false, text: "Booked and added to your calendar." },
 ];
 
-/** A personal planning thread in an iMessage-style app; the demo adds a follow-up. */
+/**
+ * A personal planning thread in an iMessage-style app; the demo adds a follow-up. Left out on
+ * phones, where its column would be too narrow to read.
+ */
 function IMessageClient({ stage = 0 }: { stage?: number }) {
   // The follow-up's bubbles grow from their tail's corner.
   const thread = [
@@ -803,34 +806,15 @@ function IMessageClient({ stage = 0 }: { stage?: number }) {
     ...(stage >= AGENTIC_ASKED ? [{ ...IMESSAGE_QUESTION, entering: true }] : []),
     ...(stage >= AGENTIC_ANSWERED ? [{ ...IMESSAGE_ANSWER, entering: true }] : []),
   ];
-  const list = useRef<HTMLDivElement>(null);
-  // Whether earlier messages have scrolled up out of view, so only then the top edge fades.
-  const [scrolled, setScrolled] = useState(false);
-
-  // Where the follow-up doesn't fit, the thread follows it down like a chat, and the demo's
-  // reset scrolls back to the start.
-  useLayoutEffect(() => {
-    const node = list.current;
-    if (!node) return;
-    node.scrollTo({ top: stage ? node.scrollHeight : 0, behavior: stage ? "smooth" : "instant" });
-  }, [stage]);
-
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden material-large">
+    <div className="hidden min-h-0 flex-col overflow-hidden material-large md:flex">
       <div className="flex shrink-0 flex-col items-center gap-1 border-gray-alpha-400 border-b py-2.5">
         <span className="flex size-8 items-center justify-center rounded-full bg-gradient-to-b from-[#A5A9B4] to-[#858994] font-medium text-[13px] text-white dark:from-[#636366] dark:to-[#48484A]">
           P
         </span>
         <span className="text-label-12 text-gray-1000">Planner</span>
       </div>
-      <div
-        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-3 text-copy-13"
-        onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 1)}
-        ref={list}
-        style={{
-          maskImage: scrolled ? "linear-gradient(to bottom, transparent, black 32px)" : undefined,
-        }}
-      >
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-3 text-copy-13">
         {thread.map((message) => {
           const colors = message.sent ? sentBubble : receivedBubble;
           return (
@@ -890,7 +874,7 @@ function IMessageClient({ stage = 0 }: { stage?: number }) {
 
 function AgenticAppsPreview({ stage }: { stage?: number }) {
   return (
-    <figure className="grid h-full grid-cols-[minmax(0,1fr)_9.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
+    <figure className="grid h-full grid-cols-1 gap-3 sm:gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
       <figcaption className="sr-only">
         The same kind of agent in three clients: customer support chat in a web app, a voice call to
         a clinic's front desk, and a personal planner in iMessage.
