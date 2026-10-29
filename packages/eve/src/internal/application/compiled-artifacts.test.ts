@@ -6,7 +6,7 @@ import {
 } from "#internal/application/compiled-artifacts.js";
 
 describe("createWorkflowWorldPluginSource", () => {
-  it("imports a configured world package and delegates its construction to Workflow", () => {
+  it("imports a configured world package, delegates its construction to Workflow, and authenticates its deliveries", () => {
     const source = createWorkflowWorldPluginSource({
       compiledArtifactsBootstrapPath: "/app/.eve/compile/compiled-artifacts-bootstrap.mjs",
       configuredWorld: "@acme/eve-world",
@@ -17,7 +17,13 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
     expect(source).toContain("import { installWorkflowWorld } from ");
     expect(source).toContain(
-      "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
+      'const workflowDeliverySecrets = readWorkflowDeliverySecrets("@acme/eve-world");',
+    );
+    expect(source).toContain(
+      "authenticateWorkflowDeliveries(\n  await createWorldFromModule(workflowWorldModule),\n  workflowDeliverySecrets,\n)",
+    );
+    expect(source.indexOf("readWorkflowDeliverySecrets(")).toBeLessThan(
+      source.indexOf("await createWorldFromModule("),
     );
     expect(source).toContain(
       'await installWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
@@ -39,7 +45,8 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("/compiled/@workflow/world-local/index.js");
     expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
     expect(source).toContain("applyLocalWorkflowWorldDeliveryTimeoutDefaults");
-    expect(source).toContain("authenticateLocalWorkflowDeliveries(");
+    expect(source).toContain("authenticateWorkflowDeliveries(");
+    expect(source).not.toContain("readWorkflowDeliverySecrets");
     expect(source).toContain("recoverActiveRuns: false");
     expect(source.indexOf("applyLocalWorkflowWorldDeliveryTimeoutDefaults();")).toBeLessThan(
       source.indexOf("workflowWorldModule.createWorld"),
@@ -61,7 +68,7 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
     expect(source).toContain("applyVercelWorkflowWorldDefaults(workflowWorld);");
-    expect(source).not.toContain("authenticateLocalWorkflowDeliveries");
+    expect(source).not.toContain("authenticateWorkflowDeliveries");
     expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
     expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
       source.indexOf("await workflowWorldModule.createWorld("),

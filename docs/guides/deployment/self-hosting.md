@@ -57,6 +57,22 @@ export default defineSandbox(() => environment.open());
 
 You can instead run `eve build` where Docker is reachable and copy the output into the image. See [Run the sandbox](#run-the-sandbox) for the other providers.
 
+## Authenticate workflow deliveries
+
+Postgres and other custom Workflow worlds require `EVE_WORKFLOW_DELIVERY_SECRET`. Generate one random value of at least 32 characters, for example with `openssl rand -hex 32`, and set it on every producer and execution server through your secret manager. `eve start` fails at startup when the variable is unset. The built-in local world uses its own per-process secret; Vercel Workflow uses platform delivery authentication.
+
+eve adds the secret to each queued job's delivery headers and checks it before processing a delivery. The same check applies to in-process and HTTP delivery, so workers and execution servers can run in separate processes or on separate hosts. Workers must preserve the job's `x-eve-workflow-delivery` header. Use HTTPS when those deliveries cross hosts. Processes that create jobs, including startup recovery jobs, must use eve's authenticated World wiring; a standalone upstream World does not add the proof itself.
+
+To rotate the secret without interrupting deliveries:
+
+1. Configure every process with `old_secret,new_secret`. New jobs still carry the old secret, while receivers accept both.
+2. Once every receiver accepts both, switch producers to `new_secret,old_secret` so new jobs carry the new secret.
+3. Remove the old secret only after every producer has switched and jobs carrying the old secret have finished.
+
+A queued job whose secret is no longer accepted receives HTTP 401 on each delivery attempt. eve re-enqueues active runs with the current secret at startup; this does not override the [eve-version requirements for resuming sessions](./self-hosted-operations#upgrade-a-self-hosted-agent).
+
+Postgres stores the delivery headers with each queued job, so protect database access and backups as you would the secret itself. `eve dev` and local `eve eval` generate a session secret when none is set; configure a stable value in `.env.local` if the development database outlives the session.
+
 ## Configure proxy routes
 
 Forward both runtime route prefixes through your reverse proxy or ingress without rewriting their paths:
@@ -65,6 +81,8 @@ Forward both runtime route prefixes through your reverse proxy or ingress withou
 - `/.well-known/workflow/` receives workflow callbacks
 
 If the proxy forwards only `/eve/`, a session starts but the run stalls because its workflow callback can’t reach eve.
+
+eve rejects queue deliveries without a valid [delivery proof](#authenticate-workflow-deliveries), independently of channel route auth. Public Workflow webhook routes keep their own authorization.
 
 ## Verify the service
 
@@ -113,7 +131,7 @@ Connection sign-in links and the callback URLs a parent passes to [remote agents
 WORKFLOW_LOCAL_BASE_URL=https://support.example.com eve start --host 0.0.0.0
 ```
 
-With the local world, queued work is also delivered to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world). The Postgres world delivers queued work inside each process, so its deliveries don't use this origin.
+With the local world, queued work is also delivered to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world). The Postgres world usually delivers queued work inside each process; deliveries it sends over HTTP also use this origin and carry the shared [delivery secret](#authenticate-workflow-deliveries).
 
 For an agent mounted under a path prefix, also set `EVE_PUBLIC_ROUTE_PREFIX`; see [Run workspace members](./self-hosted-operations#run-workspace-members).
 

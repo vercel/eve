@@ -19,6 +19,8 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 eve fails closed: production traffic is rejected unless an authenticator accepts it, and anonymous access requires an explicit `none()`.
 
+Workflow execution routes use separate queue-delivery protection, not the channel's auth policy. The local world uses a per-process delivery secret, and Postgres and other custom worlds require a shared `EVE_WORKFLOW_DELIVERY_SECRET`. Vercel Workflow uses its platform delivery authentication. See [Authenticate workflow deliveries](./deployment/self-hosting#authenticate-workflow-deliveries) for configuration and rotation.
+
 The health route created by `eveChannel()` is public and skips the walk, so load balancers and uptime monitors can probe it without credentials. Replacing `agent/channels/eve.ts` with a custom `defineChannel(...)` or disabling that slot also replaces or removes the health route.
 
 ```ts title="agent/channels/eve.ts"
