@@ -38,6 +38,8 @@ describe("production deployment identity", () => {
           "  const world = {",
           "    specVersion: 8, events: {},",
           '    createQueueHandler: () => async () => new Response("ok"),',
+          '    queue: async () => ({ messageId: "msg_1" }),',
+          "    runs: { list: async () => ({ cursor: null, data: [], hasMore: false }) },",
           "    getDeploymentId: async () => process.env.WORKFLOW_DEPLOYMENT_ID,",
           "    start: async () => writeFileSync(process.env.EVE_TEST_DEPLOYMENT_LOG, JSON.stringify({ constructed, started: await world.getDeploymentId() })),",
           "  };",
@@ -60,6 +62,7 @@ describe("production deployment identity", () => {
     expect(changedId).not.toBe(firstId);
     const logPath = join(app.appRoot, "world-deployment.json");
     vi.stubEnv("EVE_TEST_DEPLOYMENT_LOG", logPath);
+    vi.stubEnv("EVE_WORKFLOW_DELIVERY_SECRET", "build-deployment-id-scenario-delivery-secret");
     // startProductionServer launches node .output/server/index.mjs, without a CLI bootstrap.
     for (let replica = 0; replica < 2; replica++) {
       const server = await startProductionServer(app.appRoot, { host: "127.0.0.1", port: 0 });

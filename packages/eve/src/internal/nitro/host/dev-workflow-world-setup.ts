@@ -12,6 +12,10 @@ import {
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
   usesParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-protocol.js";
+import {
+  createWorkflowDeliverySecret,
+  WORKFLOW_DELIVERY_SECRET_ENV,
+} from "#internal/workflow/world-delivery-auth.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 const PORT_ENV = "PORT";
@@ -50,12 +54,27 @@ export function createDevelopmentWorkflowWorld(input: {
   });
 }
 
+/**
+ * Publishes the worker transport settings. A configured non-local World runs
+ * inside the workers and requires a shared delivery secret; when the developer
+ * set none, the session gets its own, so jobs queued by an earlier session
+ * are refused and their runs recover through startup re-enqueue instead.
+ */
 export function installWorkflowTransportEnvironment(appRoot: string, secret: string): () => void {
   const previousSecret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   const previousAppRoot = process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
+  const previousDeliverySecret = process.env[WORKFLOW_DELIVERY_SECRET_ENV];
   process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
   process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
+  if (!previousDeliverySecret?.trim()) {
+    process.env[WORKFLOW_DELIVERY_SECRET_ENV] = createWorkflowDeliverySecret();
+  }
   return () => {
+    if (previousDeliverySecret === undefined) {
+      delete process.env[WORKFLOW_DELIVERY_SECRET_ENV];
+    } else {
+      process.env[WORKFLOW_DELIVERY_SECRET_ENV] = previousDeliverySecret;
+    }
     if (previousSecret === undefined) {
       delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
     } else {

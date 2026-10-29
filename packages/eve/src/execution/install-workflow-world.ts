@@ -1,5 +1,4 @@
 import { getWorld, setWorld } from "#internal/workflow/runtime.js";
-import { authenticatePostgresWorkflowDeliveries } from "#internal/workflow/postgres-world-delivery-auth.js";
 import { guardStrandedSessionReplay } from "#execution/session-inbox/stranded-replay-guard.js";
 import {
   validateWorkflowWorld,
@@ -13,9 +12,6 @@ import {
  */
 export async function installWorkflowWorld(input: ValidateWorkflowWorldInput): Promise<void> {
   validateWorkflowWorld(input);
-  if (input.packageName === "@workflow/world-postgres") {
-    authenticatePostgresWorkflowDeliveries(input.world);
-  }
   const world = guardStrandedSessionReplay(input.world);
   setWorld(world);
   await getWorld();

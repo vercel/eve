@@ -3,7 +3,7 @@ import { equals } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Alice checks her Postgres-backed deployment: health is public, while the workflow queue route is reserved for the server's own worker.",
+    "Alice checks her Postgres-backed deployment: health is public, while workflow queue deliveries require separate authentication.",
   tags: ["regression"],
   async test(t) {
     if (process.env.EVE_E2E_WORKFLOW_WORLD !== "@workflow/world-postgres") {

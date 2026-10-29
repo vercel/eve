@@ -300,6 +300,9 @@ jobs:
       AI_GATEWAY_API_KEY: invalid-e2e-world-suite-key
       EVE_E2E_MODEL: mock
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
+      # Required by non-local, non-Vercel worlds; a fixed CI-only value is fine
+      # because the database and server live only for this job.
+      EVE_WORKFLOW_DELIVERY_SECRET: eve-ci-workflow-delivery-secret-not-for-production
       WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
       WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
       WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"

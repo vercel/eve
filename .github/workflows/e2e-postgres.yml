@@ -92,6 +92,8 @@ jobs:
       # The world package comes from this world's e2e/matrix.json entry.
       EVE_E2E_WORKFLOW_WORLD: ${{ matrix.world_package }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      # Shared only by the database and servers created for this CI job.
+      EVE_WORKFLOW_DELIVERY_SECRET: eve-ci-workflow-delivery-secret-not-for-production
       WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
       WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
       WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"
