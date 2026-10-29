@@ -26,7 +26,8 @@ import {
 } from "#harness/action-result-helpers.js";
 import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
 import { hasQueuedTurnInput, park } from "#harness/step/park.js";
-import { chooseNext, type TurnNext } from "#harness/step/next.js";
+import { decideAfterModel } from "#harness/program/kernel.js";
+import type { ModelStep } from "#harness/program/program.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -176,33 +177,29 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       : responseTail;
   step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
-  const next = chooseNext({
-    delivered: calledFinalOutput && !finalOutputRejected,
-    endsOnToolResults: responseTail.at(-1)?.role === "tool",
+  // Two continues are eve's own, before any program decides: a provider-run call's outcome the
+  // model hasn't answered, and input that joined the turn while the model ran.
+  const delivered = calledFinalOutput && !finalOutputRejected;
+  if (
+    !delivered &&
+    (normalizedProviderHistory.outcomeEndsResponse || hasQueuedTurnInput(step.view()))
+  ) {
+    return { next: step.runStep, session: step.session };
+  }
+  const lastStep: ModelStep = {
     endsTurn: await stepEndsTurn(result, responseMessages, input.endsTurnTools),
-    providerOutcomeEndsResponse: normalizedProviderHistory.outcomeEndsResponse,
-    queuedInput: hasQueuedTurnInput(step.view()),
     text: stepOutput,
-    workingTaskIds: workingTasks,
-  });
-  return applyNext(step, next, result);
+    ...(delivered && { output: finalOutput }),
+  };
+  return decideAfterModel(
+    step,
+    { lastStep, unread: responseTail.at(-1)?.role === "tool" },
+    (settling, output) => settleTurn(settling, { result, stepOutput: toText(output) }),
+  );
 }
 
-/** Applies the loop's choice for the turn. */
-async function applyNext(
-  step: Step,
-  next: TurnNext,
-  result: HarnessStepResult,
-): Promise<StepResult> {
-  switch (next.kind) {
-    case "continue":
-      return { next: step.runStep, session: step.session };
-    case "wait":
-      // The session waits for a task to settle, then calls the model again in the same turn.
-      return { held: { kind: "tasks", taskIds: next.taskIds }, next: null, session: step.session };
-    case "settle":
-      return settleTurn(step, { result, stepOutput: next.output });
-  }
+function toText(output: JsonValue | null): string | null {
+  return output === null || typeof output === "string" ? output : JSON.stringify(output);
 }
 
 /**
