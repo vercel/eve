@@ -10,11 +10,13 @@ runner and cases, and the PR's `pkg.eve.dev` package (or `main`'s when the PR do
 eve package). The label only runs a benchmark when the PR body has a line naming what to run:
 
 ```text
-authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-010-ops-agent runs=3
+authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-010-ops-agent runs=3 baseline=true
 ```
 
 `models` is required, and `models=all` selects every supported model. `cases` defaults to the
-published cases (`cases=all` selects every single-prompt case) and `runs` to 1. Each model runs as its own job
+published cases (`cases=all` selects every single-prompt case) and `runs` to 1. Add `baseline=true`
+to also run every model with the `baseline` treatment, which removes the `eve init` guidance files;
+it defaults to `false`, so runs use only `guided`. Each model and treatment runs as its own job
 with its own summary and results artifact. Remove and re-add the label to run again. The workflow
 can also be dispatched from the Actions tab on a branch with the same options as inputs.
 
@@ -32,11 +34,12 @@ set `pull_request` to the PR number (it is `null` for `main`). Dispatches on oth
 published.
 
 A dispatch on `main` with `models=all`, the default (published) cases, and `runs=3` is a full run.
-Every supported model then also runs the `baseline` treatment, and a final job refreshes
-[eve.dev/benchmarks](https://eve.dev/benchmarks): it exports both treatments onto the newest
-`main`'s `apps/docs/lib/evals/benchmark-results.json` with `scripts/export-results.mjs` and commits
-the file to `main`. A model and treatment that did not produce a result for every published case
-keeps its previous row. Blob publication still covers only the `guided` treatment.
+Every supported model then always runs the `baseline` treatment too, and a final job opens a PR that
+refreshes [eve.dev/benchmarks](https://eve.dev/benchmarks): it exports both treatments onto the
+newest `main`'s `apps/docs/lib/evals/benchmark-results.json` with `scripts/export-results.mjs`. A
+model and treatment that did not produce a result for every published case keeps its previous row.
+PRs opened by the workflow token do not trigger CI, so close and reopen the PR before merging. Blob
+publication still covers only the `guided` treatment; baseline results stay in workflow artifacts.
 
 Locally, pass several cases as separate or comma-separated arguments:
 `pnpm benchmark author-001-weather-tool,author-005-conditional-approval`.

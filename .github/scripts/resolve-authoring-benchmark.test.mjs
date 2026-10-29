@@ -16,6 +16,7 @@ import {
   isSiteRun,
   parseDirective,
   requestOptions,
+  resolveBaseline,
   resolveSelection,
 } from "./resolve-authoring-benchmark.mjs";
 
@@ -107,8 +108,9 @@ test("reads dispatch inputs, or the PR body for label runs", () => {
       INPUT_MODELS: "kimi-k3",
       INPUT_CASES: "",
       INPUT_RUNS: "2",
+      INPUT_BASELINE: "true",
     }),
-    { models: "kimi-k3", cases: "", runs: "2" },
+    { models: "kimi-k3", cases: "", runs: "2", baseline: "true" },
   );
   assert.equal(
     requestOptions({ GITHUB_EVENT_NAME: "pull_request", PR_BODY: "Fixes a bug." }),
@@ -164,7 +166,19 @@ test("partial runs, other branches, and other events do not refresh the site", (
   );
 });
 
-test("only site runs add the baseline treatment to the matrix", () => {
+test("baseline is opt-in from the PR body or dispatch input", () => {
+  assert.deepEqual(parseDirective("authoring-benchmark: models=kimi-k3 baseline=true"), {
+    models: "kimi-k3",
+    baseline: "true",
+  });
+  assert.equal(resolveBaseline(undefined), false);
+  assert.equal(resolveBaseline(""), false);
+  assert.equal(resolveBaseline("false"), false);
+  assert.equal(resolveBaseline("true"), true);
+  assert.throws(() => resolveBaseline("yes"), /baseline must be/u);
+});
+
+test("baseline adds the baseline treatment to the matrix", () => {
   const selection = { models: ["kimi-k3", "gpt-6-sol-high"] };
   assert.deepEqual(benchmarkMatrix(selection, false), [
     { model: "kimi-k3", treatment: "guided" },

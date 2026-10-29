@@ -11,7 +11,7 @@ import {
 const DIRECTIVE = /^\s*(?:<!--\s*)?authoring-benchmark:(.*?)(?:-->)?\s*$/mu;
 
 /**
- * Reads `authoring-benchmark: models=a,b|all cases=x,y runs=N` from a PR body.
+ * Reads `authoring-benchmark: models=a,b|all cases=x,y runs=N baseline=true` from a PR body.
  * Returns null when the body has no such line, which means nothing runs.
  */
 export function parseDirective(body) {
@@ -19,7 +19,7 @@ export function parseDirective(body) {
   if (line === undefined) return null;
   const options = {};
   for (const token of line.trim().split(/\s+/u).filter(Boolean)) {
-    const match = /^(models|cases|runs)=(\S+)$/u.exec(token);
+    const match = /^(models|cases|runs|baseline)=(\S+)$/u.exec(token);
     if (!match)
       throw new Error(`Unrecognized authoring-benchmark option ${JSON.stringify(token)}.`);
     options[match[1]] = match[2];
@@ -86,15 +86,27 @@ export function requestOptions(env) {
     return { models: "claude-haiku-5-5", cases: "all", runs: "3" };
   }
   if (env.GITHUB_EVENT_NAME === "workflow_dispatch") {
-    return { models: env.INPUT_MODELS, cases: env.INPUT_CASES, runs: env.INPUT_RUNS };
+    return {
+      models: env.INPUT_MODELS,
+      cases: env.INPUT_CASES,
+      runs: env.INPUT_RUNS,
+      baseline: env.INPUT_BASELINE,
+    };
   }
   return parseDirective(env.PR_BODY);
 }
 
+/** `baseline=true` also runs every model without the `eve init` guidance; it defaults to false. */
+export function resolveBaseline(value) {
+  if (value === undefined || value === "" || value === "false") return false;
+  if (value === "true") return true;
+  throw new Error(`baseline must be true or false, got ${JSON.stringify(value)}.`);
+}
+
 /**
  * A dispatch on main that covers every supported model on the published cases
- * at the published run count is a full run: it also runs the baseline
- * treatment so the site job can refresh eve.dev/benchmarks.
+ * at the published run count is a full run: it always runs the baseline
+ * treatment too, so the site job can refresh eve.dev/benchmarks.
  */
 export function isSiteRun(selection, env) {
   if (env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_REF !== "refs/heads/main") {
@@ -110,9 +122,9 @@ export function isSiteRun(selection, env) {
   );
 }
 
-/** One benchmark job per model and treatment. Only full runs add the baseline. */
-export function benchmarkMatrix(selection, site) {
-  const treatments = site ? ["guided", "baseline"] : ["guided"];
+/** One benchmark job per model and treatment; `baseline` adds the baseline treatment. */
+export function benchmarkMatrix(selection, baseline) {
+  const treatments = baseline ? ["guided", "baseline"] : ["guided"];
   return treatments.flatMap((treatment) => selection.models.map((model) => ({ model, treatment })));
 }
 
@@ -143,8 +155,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     allCases: () => allCases,
   });
   const site = isSiteRun(selection, process.env);
-  const matrix = benchmarkMatrix(selection, site);
-  console.log(JSON.stringify({ ...selection, site }, null, 2));
+  const baseline = site || resolveBaseline(options.baseline);
+  const matrix = benchmarkMatrix(selection, baseline);
+  console.log(JSON.stringify({ ...selection, baseline, site }, null, 2));
   if (site) {
     console.log(
       "::notice::Full run: every supported model also runs the baseline treatment, and eve.dev/benchmarks is refreshed.",
