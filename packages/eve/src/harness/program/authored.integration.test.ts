@@ -29,6 +29,8 @@ import {
   defineInstructions,
 } from "#public/definitions/instructions.js";
 import { defineTool } from "#tools/definition.js";
+import { recordUsage } from "#harness/usage-sink.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 // `agent/harness.ts`, compiled and run: what its `agent` fields add to a model call, and how its
 // `next` continues a turn.
@@ -53,11 +55,15 @@ function model(modelId: string, respond: Respond) {
   );
 }
 
-async function firstReply(input: {
+async function firstReply(input: Parameters<typeof firstTurn>[0]): Promise<string | null> {
+  return (await firstTurn(input)).reply;
+}
+
+async function firstTurn(input: {
   readonly harness: Harness | { readonly invalid: true };
   readonly model: ReturnType<typeof model>;
   readonly message: string;
-}): Promise<string | null> {
+}): Promise<{ readonly reply: string | null; readonly events: readonly SessionEvent[] }> {
   const runtime = await createTestRuntime({
     agent: {
       // Tests replace a static model with eve's mock; a dynamic one keeps the scripted model.
@@ -87,7 +93,14 @@ async function firstReply(input: {
         }),
       },
     ]);
-    return await readFirstTurnReply(run);
+    const stream = captureTurnEvents(run);
+    try {
+      const events = await withTimeout(stream.nextTurn(), "turn");
+      return { events, reply: summarizeTurnEvents(events).message ?? null };
+    } finally {
+      stream.dispose();
+      await run.cancel();
+    }
   });
 }
 
@@ -117,8 +130,10 @@ describe.each([
   it("adds its instructions and tools to the model call, and continues the turn with a note", async () => {
     const lookups: string[] = [];
     const fetches: string[] = [];
+    const seen: unknown[] = [];
     const calls: { readonly system: string; readonly tools: readonly string[] }[] = [];
-    const reply = await firstReply({
+    const lastMessages: string[] = [];
+    const { reply, events } = await firstTurn({
       harness: (ctx) => ({
         agent: {
           instructions: "Alice's account is on the Pro plan.",
@@ -130,16 +145,22 @@ describe.each([
               }),
               execute: async () => {
                 lookups.push("plan_lookup");
+                await recordUsage({ inputTokens: 40, outputTokens: 8 });
                 return { seats: 10 };
               },
               inputSchema: {},
             }),
           }),
         },
-        next: () =>
-          ctx.continuations === 0 && ctx.lastStep?.text?.includes("[1]") === false
+        next: () => {
+          seen.push({
+            calls: ctx.calls.map((call) => `${call.tool}:${call.status}`),
+            steps: ctx.steps,
+          });
+          return ctx.continuations === 0 && ctx.lastStep?.text?.includes("[1]") === false
             ? { model: { note: "Cite the lookup as [1]." } }
-            : undefined,
+            : undefined;
+        },
       }),
       message: "How many seats does Alice have?",
       model: model("gpt-5.5", (options) => {
@@ -147,6 +168,7 @@ describe.each([
           system: systemOf(options),
           tools: (options.tools ?? []).map((tool) => tool.name),
         });
+        lastMessages.push(lastText(options));
         if (options.prompt.at(-1)?.role !== "tool" && lastText(options).includes("Cite")) {
           return textStreamResult("Alice has 10 seats [1].");
         }
@@ -157,9 +179,25 @@ describe.each([
 
     expect(reply).toBe("Alice has 10 seats [1].");
     expect(lookups).toEqual(["plan_lookup"]);
+    // What the tool's own model use spent counts, against its call.
+    expect(
+      events.filter((event) => event.type === "usage.recorded" && event.data.kind === "auxiliary"),
+    ).toMatchObject([
+      { data: { owner: { callId: "call-1" }, usage: { inputTokens: 40, outputTokens: 8 } } },
+    ]);
     // Three model calls, one lookup: the memo keeps it, in a fresh process too.
     expect(fetches).toEqual(["plan"]);
+    // At the start, before the model reads the lookup, and after each answer.
+    expect(seen).toEqual([
+      { calls: [], steps: 0 },
+      { calls: ["plan_lookup:settled"], steps: 1 },
+      { calls: ["plan_lookup:settled"], steps: 2 },
+      { calls: ["plan_lookup:settled"], steps: 3 },
+    ]);
     expect(calls).toHaveLength(3);
+    // The turn's input joined history before the harness decided; eve's context still goes ahead
+    // of it, so the model reads Alice's message last.
+    expect(lastMessages[0]).toBe("How many seats does Alice have?");
     expect(calls[0]!.system).toContain("Alice's account is on the Pro plan.");
     expect(calls[0]!.tools).toContain("plan_lookup");
   });

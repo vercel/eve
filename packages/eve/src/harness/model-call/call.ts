@@ -77,6 +77,7 @@ import {
   type InlineCallResults,
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
+import { programDecides } from "#harness/program/kernel.js";
 import { keptInstructions } from "#reactions/kinds/instructions.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
 
@@ -457,6 +458,7 @@ export class ModelCaller {
       {
         excludedActionToolNames,
         held: step.finalReplyOnly && workingTaskIds(step.session).length > 0,
+        draft: programDecides(step),
         finalReplyOnly: step.finalReplyOnly,
         tools: catalog,
         interruptSignal: generation.signal,
@@ -477,7 +479,9 @@ export class ModelCaller {
       telemetry,
     });
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
-    await emitStepActions(step.publish, step.position(), stepResult, notRun);
+    await emitStepActions(step.publish, step.position(), stepResult, notRun, {
+      draft: programDecides(step),
+    });
     return withCallResults({
       answers: [...trailingInlineToolResultParts, ...notRun],
       calls,

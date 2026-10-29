@@ -26,6 +26,19 @@ export interface HarnessCompaction {
   native(history: readonly HistoryMessage[]): Promise<HistoryMessage[]>;
 }
 
+/** A call the running turn made, as the session's view has it. */
+export interface HarnessCall {
+  readonly callId: string;
+  readonly tool: string;
+  readonly status: "requested" | "running" | "settled";
+  readonly input?: JsonValue;
+  /** How it settled: `completed`, `failed`, `rejected`, …. */
+  readonly outcome?: string;
+  /** Absent for output too large for the view. */
+  readonly output?: JsonValue;
+  readonly error?: { readonly message: string };
+}
+
 /** What a harness reads: the session as of its latest commit, and where eve is deciding. */
 export interface HarnessContext extends SessionFrame {
   /**
@@ -37,7 +50,11 @@ export interface HarnessContext extends SessionFrame {
   readonly history: readonly HistoryMessage[];
   /** Notes this harness added to the running turn that are still in its history. */
   readonly continuations: number;
-  /** The model step that just ended, where eve decides after one. */
+  /** Model calls the running turn has made. */
+  readonly steps: number;
+  /** Calls the running turn made, oldest first. */
+  readonly calls: readonly HarnessCall[];
+  /** The model step that just ended, where eve decides after one. Absent at the turn's start. */
   readonly lastStep?: HarnessModelStep;
   /** Present where eve has to shrink the history. */
   readonly compaction?: HarnessCompaction;
@@ -52,7 +69,9 @@ export type HarnessNext =
    * calls the model with their results. Under an output schema the turn ends with the value the
    * model delivered.
    */
-  | { readonly settle: { readonly output: JsonValue | null } };
+  | { readonly settle: { readonly output: JsonValue | null } }
+  /** End the turn as failed, with `message` for the person. */
+  | { readonly fail: { readonly message: string } };
 
 /** What the agent is for its next model call. A field it leaves out is what its files declare. */
 export interface HarnessAgent {
@@ -122,7 +141,10 @@ export interface HarnessPlan {
    * checks what it gets unless it's what `ctx.compaction.native` returned.
    */
   readonly history?: Lazy<readonly HistoryMessage[] | undefined>;
-  /** What the turn does after a model step. */
+  /**
+   * What the turn does: at its start, before the model has run, and after each model step. At
+   * the start, `{ settle }` ends the turn without calling the model, and its output is the reply.
+   */
   readonly next?: Lazy<HarnessNext | undefined>;
 }
 

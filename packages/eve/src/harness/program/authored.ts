@@ -1,21 +1,25 @@
 import type { ContextReader } from "#context/key.js";
 import type { Memo, SessionFrame } from "#dynamic/definition.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { callPlace } from "#protocol/session-projection/reader.js";
 import type {
   Harness,
+  HarnessCall,
   HarnessContext,
   HarnessModelStep,
   HarnessPlan,
 } from "#public/definitions/harness.js";
-import { declaredTool, declaredToolName } from "#public/definitions/harness.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import { sessionFrameOf } from "#reactions/frame.js";
 import { dynamicInstructionSlugs, HARNESS_INSTRUCTIONS } from "#reactions/kinds/instructions.js";
 import { harnessModelReaction } from "#reactions/kinds/model.js";
 import { dynamicToolNames, HARNESS_TOOLS, toolReaction } from "#reactions/kinds/tool.js";
+import { declaredTool, declaredToolName } from "#public/definitions/harness.js";
 import type { InternalContext, ValueReaction } from "#reactions/reaction.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { HistoryMessage } from "#shared/history-message.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
 import { nativeNext } from "./native.js";
 import { type Compaction, continuationsOf, force, type Program } from "./program.js";
 
@@ -164,7 +168,12 @@ function harnessContext(input: {
   readonly compaction?: Compaction;
 }): HarnessContext {
   const frame = input.frame();
+  const turn = turnFacts(
+    frame.view === undefined ? undefined : sessionTables(frame.view),
+    input.turnId,
+  );
   return {
+    ...turn,
     channel: frame.channel,
     ...(frame.conversation !== undefined && { conversation: frame.conversation }),
     now: frame.now,
@@ -185,4 +194,27 @@ function harnessContext(input: {
     ...(input.lastStep !== undefined && { lastStep: input.lastStep }),
     memo: input.memo,
   };
+}
+
+function turnFacts(
+  view: SessionView | undefined,
+  turnId: string | undefined,
+): Pick<HarnessContext, "calls" | "steps"> {
+  if (view === undefined || turnId === undefined) return { calls: [], steps: 0 };
+  const steps = Object.values(view.runs).filter(
+    (run) => "turnId" in run.owner && run.owner.turnId === turnId,
+  ).length;
+  const calls = Object.values(view.calls)
+    .filter((row) => callPlace(view, row.callId)?.turnId === turnId)
+    .sort((a, b) => a.introducedAt - b.introducedAt)
+    .map((row): HarnessCall => ({
+      callId: row.callId,
+      status: row.status,
+      tool: row.capability.name,
+      ...(row.input !== undefined && { input: row.input }),
+      ...(row.outcome !== undefined && { outcome: row.outcome }),
+      ...(row.output !== undefined && { output: row.output }),
+      ...(row.error !== undefined && { error: { message: row.error.message } }),
+    }));
+  return { calls, steps };
 }

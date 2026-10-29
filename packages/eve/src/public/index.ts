@@ -35,6 +35,7 @@ export type {
 export {
   type Harness,
   type HarnessAgent,
+  type HarnessCall,
   type HarnessDeclared,
   type HarnessDeclaredInstructions,
   type HarnessDeclaredTools,

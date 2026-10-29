@@ -487,7 +487,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { channel } = ctx;
     if (data.kind === "reasoning") {
       const stream = streamByState.get(channel.state);
-      if (stream?.runId !== data.runId || typeof data.value !== "string") return;
+      if (stream === undefined || stream.runId !== data.runId || typeof data.value !== "string")
+        return;
       stream.reasoning = data.value;
       await showReasoning(channel, stream, { complete: true });
       stream.reasoning = "";

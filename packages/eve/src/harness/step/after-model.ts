@@ -14,11 +14,9 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import { failTurnForReaction, type Step } from "#harness/step/context.js";
-import { turnSettled } from "#harness/facts.js";
-import { fail, suspendStep } from "#harness/session-machine/transitions.js";
+import type { Step } from "#harness/step/context.js";
+import { suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
-import { clearTurnClientContextState } from "#harness/turn-client-context.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
@@ -191,13 +189,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     text: stepOutput,
     ...(delivered && { output: finalOutput }),
   };
-  return decideAfterModel(step, lastStep, (settling, output) =>
-    settleTurn(settling, { result, stepOutput: toText(output) }),
-  );
-}
-
-function toText(output: JsonValue | null): string | null {
-  return output === null || typeof output === "string" ? output : JSON.stringify(output);
+  return decideAfterModel(step, lastStep);
 }
 
 /**
@@ -297,11 +289,6 @@ function rejectFinalOutput(
   return [...responseMessages, { content: [rejection], role: "tool" }];
 }
 
-const OUTPUT_SCHEMA_NOT_FULFILLED = {
-  code: "OUTPUT_SCHEMA_NOT_FULFILLED",
-  message: "The agent could not produce a result matching the requested schema.",
-} as const;
-
 /**
  * The structured value the model delivered by calling the framework
  * `eve__reply` tool, or `undefined` when the terminal turn ended in prose.
@@ -310,52 +297,4 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
   return (result.toolCalls ?? []).find(
     (call) => call.toolName === REPLY_TOOL_NAME && !isInvalidToolCall(call),
   )?.input as JsonValue | undefined;
-}
-
-/**
- * Closes a terminal turn. An unmet output schema fails the turn recoverably;
- * otherwise the structured value (or prose) ends the turn and the session
- * waits for the next message, and the schema, scoped to the turn, clears.
- */
-async function settleTurn(
-  step: Step,
-  input: {
-    readonly result: HarnessStepResult;
-    readonly stepOutput: string | null;
-  },
-): Promise<StepResult> {
-  const { result, stepOutput } = input;
-  // A hook that failed after the turn's last model call fails it rather than let it complete.
-  const hookFailure = await failTurnForReaction(step);
-  if (hookFailure !== undefined) return hookFailure;
-  const schema = step.session.outputSchema;
-  step.session = clearTurnClientContextState(step.session);
-
-  if (schema === undefined) {
-    await step.apply(
-      turnSettled(step.view().projection, { outcome: "completed" }),
-      step.session.history,
-    );
-    return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
-  }
-
-  const structured = extractFinalOutput(result);
-  // The schema belongs to the settled turn. A later conversation turn that
-  // omits outputSchema must not inherit its contract.
-  if (structured === undefined) {
-    step.session = { ...step.session, outputSchema: undefined };
-    await step.apply(fail(step.view(), OUTPUT_SCHEMA_NOT_FULFILLED));
-    return {
-      next: null,
-      session: step.session,
-      settledTurn: { isError: true, output: OUTPUT_SCHEMA_NOT_FULFILLED.message },
-    };
-  }
-
-  step.session = { ...step.session, outputSchema: undefined };
-  await step.apply(
-    turnSettled(step.view().projection, { outcome: "completed" }),
-    step.session.history,
-  );
-  return { next: null, session: step.session, settledTurn: { output: structured } };
 }

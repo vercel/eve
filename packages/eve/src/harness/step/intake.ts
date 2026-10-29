@@ -95,6 +95,11 @@ export interface TurnInput {
   readonly messages: readonly HarnessModelMessage[];
   /** The input carries a user's message, which follows tool results across a boundary. */
   readonly hasUserMessage: boolean;
+  /**
+   * The input already joined history, ahead of the session's program's decision: the step reads
+   * it there, and `messages` only say where it is.
+   */
+  readonly committed?: true;
   /** The message with its attachments staged, so input queued again isn't staged twice. */
   readonly message: HarnessStepInput["message"];
 }

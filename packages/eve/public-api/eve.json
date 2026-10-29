@@ -25,6 +25,7 @@
   "EveLanguageModel",
   "Harness",
   "HarnessAgent",
+  "HarnessCall",
   "HarnessCompaction",
   "HarnessContext",
   "HarnessDeclared",

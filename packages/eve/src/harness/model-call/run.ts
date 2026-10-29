@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
+import { decideBeforeModel } from "#harness/program/kernel.js";
 
 import { HistoryStateKey } from "#context/keys.js";
 import {
@@ -65,8 +66,13 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
-  if (failed !== undefined) return failed;
+  const start = await decideBeforeModel(step, input.turn);
+  if ("ended" in start) return start.ended;
+  input = { ...input, turn: start.turn };
+  if (start.prepared !== true) {
+    const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+    if (failed !== undefined) return failed;
+  }
   const prompt = await buildPrompt(step, input.turn);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);

@@ -112,6 +112,7 @@ function withTurnInput(
   messages: readonly HarnessModelMessage[],
   turn: TurnInput,
 ): HarnessModelMessage[] {
+  if (turn.committed === true) return [...messages];
   return [
     ...messages,
     ...(followsToolResults(messages) ? followingToolResults(turn) : turn.messages),

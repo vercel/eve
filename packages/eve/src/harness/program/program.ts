@@ -52,7 +52,7 @@ export interface ProgramContext {
   readonly compaction?: Compaction;
   /**
    * Keeps what the program learns from outside, as a dynamic value's `ctx.memo` does. Each
-   * decision (`history`, `next`) keeps what its latest evaluation used. A cache, not a
+   * decision (`history`, `next`, `prompt`) keeps what its latest evaluation used. A cache, not a
    * record of effects: a deployment change or a crash can run it again.
    */
   readonly memo: Memo;
@@ -69,7 +69,9 @@ export type Next =
    * calls the model with their results. Under an output schema the turn ends with the value the
    * model delivered.
    */
-  | { readonly settle: { readonly output: JsonValue | null } };
+  | { readonly settle: { readonly output: JsonValue | null } }
+  /** End the turn as failed, with `message` for the person. */
+  | { readonly fail: { readonly message: string } };
 
 /** What a program says should be true. A field it leaves out is eve's own. */
 export interface Plan {

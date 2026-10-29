@@ -3,8 +3,8 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 // A playground for `agent/harness.ts`. It adds an account preamble and a tool to every model call,
-// offers the agent's `remove_seat` only on the enterprise plan, and asks the model once per turn to
-// cite its lookups before the turn ends.
+// answers `/plans` without the model, refuses `/refund`, offers the agent's `remove_seat` only on
+// the enterprise plan, and asks the model once per turn to cite its lookups.
 
 const PLANS: Record<string, { readonly seats: number; readonly support: string }> = {
   free: { seats: 1, support: "community" },
@@ -14,6 +14,9 @@ const PLANS: Record<string, { readonly seats: number; readonly support: string }
 
 export default defineHarness((ctx) => {
   const plan = String(ctx.session.auth.current?.attributes.plan ?? "pro");
+  const input = ctx.turn?.input
+    .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+    .join(" ");
   return {
     agent: {
       // The agent's instructions, then the account's.
@@ -33,21 +36,27 @@ export default defineHarness((ctx) => {
       }),
     },
     next: () => {
-      const text = ctx.lastStep?.text;
+      if (ctx.lastStep === undefined) {
+        // Commands, before the model runs.
+        if (input?.trim() === "/plans") {
+          const lines = Object.entries(PLANS).map(
+            ([name, { seats, support }]) => `- ${name}: ${seats} seats, ${support} support`,
+          );
+          return { settle: { output: lines.join("\n") } };
+        }
+        if (input?.trim().startsWith("/refund")) {
+          return { fail: { message: "Refunds go through billing@example.com." } };
+        }
+        return undefined;
+      }
       // Once per turn: an answer that used a lookup cites it.
-      if (text == null || ctx.continuations > 0 || /\[\d+\]/.test(text)) return undefined;
-      const looked = ctx.history.some(
-        (message) =>
-          message.role === "tool" &&
-          message.content.some(
-            (part) => part.type === "tool-result" && part.toolName === "plan_lookup",
-          ),
-      );
-      return looked
-        ? {
-            model: { note: "Cite each plan_lookup result you used as [1], [2], … in your answer." },
-          }
-        : undefined;
+      const text = ctx.lastStep.text;
+      const looked = ctx.calls.some((call) => call.tool === "plan_lookup");
+      if (text == null || !looked || ctx.continuations > 0 || /\[\d+\]/.test(text))
+        return undefined;
+      return {
+        model: { note: "Cite each plan_lookup result you used as [1], [2], … in your answer." },
+      };
     },
   };
 });
