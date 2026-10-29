@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { getPackages } from "@manypkg/get-packages";
 
 const sections = ["Breaking Changes", "Features", "Bug Fixes", "Dependencies"];
-const conjunction = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
 function renderRelease({ date, body, changes }) {
   const groups = new Map();
@@ -22,11 +21,6 @@ function renderRelease({ date, body, changes }) {
     const entries = groups.get(title) ?? [];
     if (entries.length) parts.push(`### ${title}\n\n${entries.join("\n")}`);
   }
-  const logins = (groups.get("Contributors") ?? []).flatMap((block) => block.split("\n"));
-  const contributors = [...new Map(logins.map((login) => [login.toLowerCase(), login])).values()]
-    .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
-    .map((login) => `[@${login}](https://github.com/${login})`);
-  if (contributors.length) parts.push(`Thanks to ${conjunction.format(contributors)}.`);
   return parts.join("\n\n");
 }
 

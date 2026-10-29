@@ -27,7 +27,7 @@ function renderEntry(summary, details, link) {
 
 export default {
   async getReleaseLine(changeset, type) {
-    const { summary, details, contributors } = parseSummary(changeset.summary, changeset.id);
+    const { summary, details } = parseSummary(changeset.summary, changeset.id);
     if (!pulls.has(changeset.commit))
       pulls.set(changeset.commit, pullRequestFor(changeset.commit, changeset.id));
     const pull = await pulls.get(changeset.commit);
@@ -44,16 +44,7 @@ export default {
       }
     }
     const link = `([#${pull.number}](https://github.com/vercel/eve/pull/${pull.number}))`;
-    const logins = new Map();
-    for (const login of [pull.author, ...pull.coauthors, ...contributors]) {
-      if (login && !login.endsWith("[bot]")) logins.set(login.toLowerCase(), login);
-    }
-    return [
-      `#### ${headings[category]}\n\n${renderEntry(summary, details, link)}`,
-      logins.size && `#### Contributors\n\n${[...logins.values()].join("\n")}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    return `#### ${headings[category]}\n\n${renderEntry(summary, details, link)}`;
   },
   getDependencyReleaseLine(_changesets, dependencies) {
     if (!dependencies.length) return "";

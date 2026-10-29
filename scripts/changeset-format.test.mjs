@@ -7,7 +7,7 @@ import test from "node:test";
 import { classifyTitle, parseSummary } from "./changeset-format.mjs";
 import formatter from "../.changeset/changelog.mjs";
 
-test("changeset summaries preserve details and credit only thanked handles", () => {
+test("changeset summaries keep their details after one opening sentence", () => {
   assert.deepEqual(
     parseSummary(
       "Clarify the setup.\n\nUpgrade @ai-sdk/provider and visit https://example.com/@user/page.\n\nThanks @Alice and @Bob for `@vercel/blob` and @ai-sdk/provider.",
@@ -17,7 +17,6 @@ test("changeset summaries preserve details and credit only thanked handles", () 
       summary: "Clarify the setup.",
       details:
         "Upgrade @ai-sdk/provider and visit https://example.com/@user/page.\n\nThanks @Alice and @Bob for `@vercel/blob` and @ai-sdk/provider.",
-      contributors: ["Alice", "Bob"],
     },
   );
   for (const text of ["Missing punctuation", "First sentence. Second sentence."]) {
@@ -115,12 +114,10 @@ test("the Changesets formatter produces readable Markdown without encoded metada
   ];
   t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(pulls)));
   const line = await formatter.getReleaseLine({ id: "example", summary: "Add a tool.", commit });
-  assert.match(
+  assert.equal(
     line,
-    /#### Bug Fixes\n\n- Add a tool\. \(\[#10\]\(https:\/\/github\.com\/vercel\/eve\/pull\/10\)\)/u,
+    "#### Bug Fixes\n\n- Add a tool. ([#10](https://github.com/vercel/eve/pull/10))",
   );
-  assert.match(line, /#### Contributors\n\nAlice$/u);
-  assert.doesNotMatch(line, /<!--/u);
   git("commit", "--allow-empty", "-qm", "fix: Update a tool");
   const fallbackCommit = git("rev-parse", "HEAD");
   pulls = [
@@ -214,11 +211,7 @@ test("version-packages assembles changesets across bump types and preserves old 
     '---\n"eve": patch\n"@vercel/agent-runs": patch\n---\n\nImprove the new tool.\n',
   );
   git("add", ".changeset/a.md", ".changeset/d.md");
-  git(
-    "commit",
-    "-qm",
-    "feat: Add a tool\n\nCo-authored-by: Bob <123+Bob@users.noreply.github.com>\nCo-authored-by: Carol <Carol@users.noreply.github.com>",
-  );
+  git("commit", "-qm", "feat: Add a tool");
   const first = git("rev-parse", "HEAD");
   await write(
     ".changeset/b.md",
@@ -288,7 +281,6 @@ test("version-packages assembles changesets across bump types and preserves old 
   const date = String.raw`\d{4}-\d\d-\d\d`;
   const pull = (number) =>
     String.raw`\(\[#${number}\]\(https://github\.com/vercel/eve/pull/${number}\)\)`;
-  const user = (login) => String.raw`\[@${login}\]\(https://github\.com/${login}\)`;
   assert.match(
     changelog,
     new RegExp(
@@ -305,7 +297,6 @@ test("version-packages assembles changesets across bump types and preserves old 
         String.raw`### Bug Fixes`,
         String.raw`- Correct the setup guide\.
   The guide now lists the required token\. ${pull(11)}`,
-        String.raw`Thanks to ${user("Alice")}, ${user("Author")}, ${user("Bob")}, and ${user("Carol")}\.`,
         String.raw`## 1\.0\.0`,
       ].join("\n\n"),
       "u",
@@ -320,7 +311,6 @@ test("version-packages assembles changesets across bump types and preserves old 
         String.raw`Released ${date} · \[Compare with 1\.0\.0\]\(https://github\.com/vercel/eve/compare/%40vercel%2Fagent-runs%401\.0\.0\.\.\.%40vercel%2Fagent-runs%401\.0\.1\)`,
         String.raw`### Features`,
         String.raw`- Improve the new tool\. ${pull(10)}`,
-        String.raw`Thanks to ${user("Author")}, ${user("Bob")}, and ${user("Carol")}\.`,
       ].join("\n\n"),
       "u",
     ),

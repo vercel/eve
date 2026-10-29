@@ -39,8 +39,6 @@ Released 2026-10-28 · [Compare with 0.86.0](https://github.com/vercel/eve/compa
 
 - Clarify that Next.js `servicePrefix` supports manually configured Vercel services and production proxying; it is not a legacy option. ([#5479](https://github.com/vercel/eve/pull/5479))
 
-Thanks to [@OwenKephart](https://github.com/OwenKephart).
-
 ## 0.86.1
 
 Not published; these changes shipped in 0.87.0.
@@ -49,8 +47,6 @@ Not published; these changes shipped in 0.87.0.
 
 - Resolve catalog dependencies in staged packages so npm can install them. ([#5554](https://github.com/vercel/eve/pull/5554))
 - Restore current release notes to `CHANGELOG.md` at the package root. ([#5552](https://github.com/vercel/eve/pull/5552))
-
-Thanks to [@chadhietala](https://github.com/chadhietala).
 
 ## 0.86.0
 
@@ -75,8 +71,6 @@ Released 2026-10-28 · [Compare with 0.85.0](https://github.com/vercel/eve/compa
 - A file returned by a tool now becomes a "could not be stored" note when the session's sandbox rejects the write, instead of failing the step and replaying its model call and tools. ([#4843](https://github.com/vercel/eve/pull/4843))
 - A turn's principal no longer changes while it runs.
   Only the turn's own principal can answer a pending `ctx.ask()` or `ask_question` by typing, whether a workflow tool, a subagent or a remote agent asked; another person's text waits and runs as their own turn instead of answering the question under the asker's auth. A typed answer updates the claims on `ctx.session.auth.current`, so its `delivery.consumed` hook and the rest of the turn see the request that sent it. Someone else's button answer still settles the request as its responder. ([#4925](https://github.com/vercel/eve/pull/4925))
-
-Thanks to [@benpankow](https://github.com/benpankow), [@chadhietala](https://github.com/chadhietala), [@cmpadden](https://github.com/cmpadden), [@elliotdauber](https://github.com/elliotdauber), [@OwenKephart](https://github.com/OwenKephart), and [@ruiconti](https://github.com/ruiconti).
 
 ## 0.85.0
 
