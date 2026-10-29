@@ -10,11 +10,6 @@ export default defineOpenAPIConnection({
     getToken: async () => ({ token: process.env.INVENTORY_API_TOKEN! }),
   },
   operations: { allow: ["getStock", "createOrder"] },
-  approval: ({ toolName, toolInput }) => {
-    if (toolName !== "inventory__createOrder") return "not-applicable";
-    const body = toolInput?.body as { quantity?: number; unitCost?: number } | undefined;
-    return (body?.quantity ?? 0) * (body?.unitCost ?? 0) >= 1000
-      ? "user-approval"
-      : "not-applicable";
-  },
+  approval: ({ toolName }) =>
+    toolName === "inventory__createOrder" ? "user-approval" : "not-applicable",
 });

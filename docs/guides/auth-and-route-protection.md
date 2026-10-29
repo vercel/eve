@@ -149,7 +149,6 @@ import { type AuthFn, localDev, oidc } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 
 const sso = oidc({ issuer: "https://sso.example.com", audiences: ["my-agent"] });
-const dev = localDev();
 
 // Only tokens that name a person become users. Machine tokens from the same
 // issuer have no email claim and stay "service" principals.
@@ -161,13 +160,7 @@ const employee: AuthFn<Request> = async (request) => {
     : caller;
 };
 
-// Local `eve dev` only. allowToolStubs lets `eve eval` stub tools.
-const localWithStubs: AuthFn<Request> = async (request) => {
-  const caller = await dev(request);
-  return caller ? { ...caller, allowToolStubs: true } : null;
-};
-
-export default eveChannel({ auth: [employee, localWithStubs] });
+export default eveChannel({ auth: [employee, localDev()] });
 ```
 
 In production this channel admits only tokens from that issuer and audience, as users when they name a person and as services otherwise, because `localDev()` never accepts a request outside a development server.
