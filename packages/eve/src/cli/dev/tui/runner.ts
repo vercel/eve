@@ -874,6 +874,9 @@ export class EveTUIRunner {
       this.#finishCommand({ kind: "result", summary: `/${command.name} needs an active session` });
       return;
     }
+    // A command can cancel the open turn, as /escalate does. That cancel is this person's own, so
+    // the turn's message must not come back to the composer as if someone else had cancelled it.
+    if (hasOpenTurn(this.#store.snapshot)) this.#cancelRequested = true;
     let result: Awaited<ReturnType<Client["runCommand"]>>;
     try {
       result = await this.#client.runCommand(command.name, {
