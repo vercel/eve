@@ -9,7 +9,7 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: vercel-sandbox-public
 
     steps:
       - name: Checkout code
@@ -52,7 +52,7 @@ jobs:
         run: pnpm docs:check
 
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: vercel-sandbox-public
 
     steps:
       - name: Checkout code
@@ -76,7 +76,7 @@ jobs:
         run: pnpm typecheck
 
   test-unit:
-    runs-on: vercel
+    runs-on: vercel-sandbox-public
 
     steps:
       - name: Checkout code
