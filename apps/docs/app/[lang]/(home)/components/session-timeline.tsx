@@ -601,9 +601,6 @@ function Bubble({
 export function SessionTimeline(): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLOListElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  // The outgoing conversation while a channel switch slides it out, and which way it goes.
-  const leaving = useRef<{ node: HTMLElement; direction: 1 | -1 } | null>(null);
   const [platform, setPlatform] = useState<Platform>("slack");
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
@@ -700,52 +697,13 @@ export function SessionTimeline(): JSX.Element {
     setEnded(false);
   };
 
-  // Switching channels pushes the current conversation out and the next one in, like moving
-  // between screens: toward the left when the channel is further down the picker, else right.
-  // The next one comes in playing from its start, since picking a channel asks to see it.
+  // Picking a channel swaps its conversation in and plays it from its start, since picking a
+  // channel asks to see it.
   const pick = (id: string) => {
     if (id === platform) return;
-    const list = listRef.current;
-    const body = bodyRef.current;
-    if (list && body && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      leaving.current?.node.remove();
-      const node = list.cloneNode(true) as HTMLElement;
-      node.setAttribute("aria-hidden", "true");
-      node.style.position = "absolute";
-      node.style.inset = "0";
-      node.style.pointerEvents = "none";
-      body.append(node);
-      node.scrollTop = list.scrollTop;
-      const order = CONVERSATIONS.map((c) => c.id);
-      leaving.current = {
-        node,
-        direction: order.indexOf(id as Platform) > order.indexOf(platform) ? 1 : -1,
-      };
-    }
     setPlatform(id as Platform);
     play();
   };
-
-  useLayoutEffect(() => {
-    const out = leaving.current;
-    const list = listRef.current;
-    if (!out || !list) return;
-    leaving.current = null;
-    const timing = { duration: 300, easing: "ease-in-out" };
-    out.node
-      .animate(
-        [{ transform: "none" }, { transform: `translateX(${-100 * out.direction}%)` }],
-        timing,
-      )
-      .finished.then(
-        () => out.node.remove(),
-        () => out.node.remove(),
-      );
-    list.animate(
-      [{ transform: `translateX(${100 * out.direction}%)` }, { transform: "none" }],
-      timing,
-    );
-  }, [platform]);
 
   return (
     // Laid out like vercel.com/sandbox's hero: the conversation in a browser window, the channel
@@ -759,7 +717,7 @@ export function SessionTimeline(): JSX.Element {
       <AppWindow className="select-none" title={conversation.label}>
         {/* The conversation fades out over the outer 40px of an edge with messages scrolled past
             it. In full it opens at its start; a replay fills from the bottom like a chat. */}
-        <div className="relative overflow-hidden" ref={bodyRef}>
+        <div className="relative overflow-hidden">
           <div
             // Contain scrolling only while there is something to scroll: Chrome 144+ applies
             // overscroll-behavior to non-overflowing scroll containers, which would trap the
