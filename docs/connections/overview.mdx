@@ -215,7 +215,7 @@ For connection tools that can create, modify, delete, transmit, purchase, messag
 
 ### Send the approver to the server
 
-An approved connection call runs as the requester: its `auth` token and `ctx.session.auth.current` stay the requester's. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, so the server can act for the approver where you choose to:
+An approved connection call runs as the requester: its `auth` token and `ctx.session.auth.current` stay the requester's. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, with access to their credentials, so the server can act for the approver where you choose to:
 
 ```ts title="agent/connections/gateway.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -231,14 +231,15 @@ export default defineMcpClientConnection({
         ? { status: "allowed" }
         : { status: "rejected", reason: "Only admins can approve gateway calls." },
   },
+  auth: gatewayAuth,
   headers: async (ctx) => {
-    const approver = ctx.approval?.responder;
-    return {
-      Authorization: `Bearer ${await gatewayToken(approver ?? ctx.session.auth.current)}`,
-    };
+    const approver = await ctx.approval?.responder.getToken(gatewayApproverAuth);
+    return approver === undefined ? {} : { "X-Approver-Token": approver.token };
   },
 });
 ```
+
+`ctx.approval.responder.getToken(provider)` resolves the approver's token as it does in a [`defineTool` tool](/docs/human-in-the-loop): it never starts a sign-in, and throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"` when the approver has no token. `headers` can't set `Authorization` when the connection also sets `auth`, so send the approver's token in another header, or omit `auth` and set `Authorization` yourself.
 
 `ctx.approval` is absent for calls that needed no approval, and while eve connects to the server and lists its tools. The approver's identity reaches only the requests of the call they approved. Pair it with an `approval.response` policy so only people whose access the call may use can approve it.
 

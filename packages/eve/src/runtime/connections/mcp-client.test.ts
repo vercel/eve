@@ -236,7 +236,7 @@ describe("McpConnectionClient", () => {
         await new McpConnectionClient(connection).connect();
         const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
         const send = (responder?: SessionAuthContext) =>
-          withConnectionApproval(responder, () => fetch("https://mcp.example.com", {}));
+          withConnectionApproval("test", responder, () => fetch("https://mcp.example.com", {}));
         await Promise.all([send(userAuth("bob")), send(userAuth("carol")), send()]);
       });
       expect(

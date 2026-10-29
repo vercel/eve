@@ -7,8 +7,8 @@ import type { ConnectionEventsBackend } from "#shared/connection-events.js";
  */
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
-import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
+import type { ApprovedCall } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 
 /**
@@ -51,10 +51,11 @@ export interface ConnectionCallbackContext extends SessionContext {
    * Who approved the tool call these values are for. Present only while a
    * connection tool call runs after a person approved it. The call still runs
    * as the requester, `session.auth.current`, and its `auth` token is still
-   * the requester's; a callback can send the approver's identity or
-   * credentials where the server should act for them.
+   * the requester's. `approval.responder.getToken(provider)` resolves the
+   * approver's token as it does in a `defineTool` tool, so a callback can send
+   * the approver's credentials where the server should act for them.
    */
-  readonly approval?: { readonly responder: SessionAuthContext };
+  readonly approval?: ApprovedCall;
 }
 
 /** A single header value, supporting static strings and per-caller resolution. */

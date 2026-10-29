@@ -8,7 +8,11 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import { once } from "#tools/approval/policies.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
+import type {
+  ConnectionClient,
+  ConnectionPrincipal,
+  ConnectionToolMetadata,
+} from "#shared/connection-types.js";
 
 import { connectionEntry } from "./connection-entry.js";
 
@@ -115,7 +119,14 @@ describe("connection tool call", () => {
     principalType: "user",
   });
 
-  /** Alice's tracker call, whose provided `approvedBy` reads who approved it. */
+  const gateway = {
+    getToken: async ({ principal }: { principal: ConnectionPrincipal }) => ({
+      token: `token-for-${principal.type === "user" ? principal.id : "app"}`,
+    }),
+    principalType: "user" as const,
+  };
+
+  /** Alice's tracker call, whose provided arguments read who approved it and their token. */
   function call(responder?: SessionAuthContext) {
     const connection = {
       connectionName: "tracker",
@@ -127,6 +138,8 @@ describe("connection tool call", () => {
       toolCall: {
         providedArguments: {
           approvedBy: ({ approval }) => approval?.responder.principalId ?? null,
+          approverToken: async ({ approval }) =>
+            (await approval?.responder.getToken(gateway))?.token ?? null,
           requestedBy: ({ session }) => session.auth.current?.principalId ?? null,
         },
       },
@@ -170,14 +183,19 @@ describe("connection tool call", () => {
     );
   }
 
-  it("gives an approved call's provided arguments its approver, still as the requester", async () => {
+  it("gives an approved call's provided arguments its approver and their token", async () => {
     await expect(call(user("bob"))).resolves.toEqual({
       approvedBy: "bob",
+      approverToken: "token-for-bob",
       requestedBy: "alice",
     });
   });
 
   it("gives a call that needed no approval no approver", async () => {
-    await expect(call()).resolves.toEqual({ approvedBy: null, requestedBy: "alice" });
+    await expect(call()).resolves.toEqual({
+      approvedBy: null,
+      approverToken: null,
+      requestedBy: "alice",
+    });
   });
 });

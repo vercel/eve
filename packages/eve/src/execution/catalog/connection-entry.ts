@@ -166,7 +166,7 @@ async function callConnectionTool(
         callId: options.toolCallId,
       });
     // Only the call itself sees the approver; the listing above stays the requester's.
-    raw = await withConnectionApproval(options.approval?.responder, () =>
+    raw = await withConnectionApproval(connection.connectionName, options.approval?.responder, () =>
       executeWithDeadline(connection.connectionName, client, tool.name, input, options),
     );
   } catch (error) {
