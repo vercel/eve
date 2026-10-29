@@ -36,7 +36,7 @@ Rerun `eve add channel/web --skip-install` with the other choice to switch modes
 
 Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
 
-The chat has the same URL-addressed durable sessions as the [Next.js Web Chat](./nextjs#use-the-generated-web-chat-routes): `/`, `/s`, and `/s/$sessionId`. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
+The chat has the same URL-addressed durable sessions as the [Next.js Web Chat](./nextjs#give-each-conversation-a-url): `/`, `/s`, and `/s/$sessionId`. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 
 The installer doesn't support selecting a workspace agent for single-app hosting: a workspace agent always deploys as a separate Vercel service. If you already have a TanStack Start app, skip the installer and follow the steps below.
 
@@ -100,7 +100,7 @@ export default defineConfig({
 
 ## Call the hook
 
-With the plugin in `vite.config.ts`, components call [`useEveAgent`](./overview) from `eve/react` and don't pass a host:
+With the plugin in `vite.config.ts`, components call [`useEveAgent`](./overview) from `eve/react` and don't pass `baseUrl`:
 
 ```tsx title="src/routes/index.tsx"
 import { createFileRoute } from "@tanstack/react-router";
@@ -114,7 +114,7 @@ export const Route = createFileRoute("/")({
 function Chat() {
   const agent = useEveAgent();
   const [draft, setDraft] = useState("");
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isBusy = agent.status === "busy";
   const isInputDisabled = isBusy || agent.status === "resuming";
 
   return (
@@ -127,7 +127,7 @@ function Chat() {
         void agent.send(text);
       }}
     >
-      {agent.data.messages.map((message) => (
+      {agent.messages.map((message) => (
         <article key={message.id}>
           <header>{message.role}</header>
           {message.parts.map((part, index) =>
@@ -170,11 +170,11 @@ eve ships hook bindings for React, Vue, and Svelte. A TanStack Start app that us
   });
   ```
 
-- **Other hosts.** `vite preview` and a self-hosted `node .output/server/index.mjs` don't mount the eve routes. Run the eve service on its own origin and pass `host` directly to `useEveAgent`:
+- **Other hosts.** `vite preview` and a self-hosted `node .output/server/index.mjs` don't mount the eve routes. Run the eve service on its own origin and pass `baseUrl` directly to `useEveAgent`:
 
   ```ts
   const agent = useEveAgent({
-    host: "https://agent.example.com",
+    baseUrl: "https://agent.example.com",
   });
   ```
 

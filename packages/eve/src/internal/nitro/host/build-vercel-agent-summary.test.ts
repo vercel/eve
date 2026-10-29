@@ -34,7 +34,7 @@ describe("buildVercelAgentSummary", () => {
         },
         {
           loadNamespace: async () => ({
-            default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the digest." }),
+            default: defineSchedule({ cron: "0 9 * * *", content: "Run the digest." }),
           }),
           logicalPath: "schedules/digest.ts",
         },

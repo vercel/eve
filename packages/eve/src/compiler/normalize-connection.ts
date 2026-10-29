@@ -12,14 +12,9 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import {
-  ALLOWED_DYNAMIC_CONNECTION_EVENTS,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
@@ -40,7 +35,7 @@ type CompiledConnectionEntry =
  * during `eve build`.
  *
  * The wire protocol is read from the marker stamped by the `define*`
- * factory, defaulting to MCP, and selects which normalizer validates
+ * factory and selects which normalizer validates
  * the authored shape. `url` carries the MCP server endpoint for MCP
  * connections and the API base URL for OpenAPI connections, so the rest
  * of the connection pipeline (auth context, tool-result narrowing,
@@ -60,20 +55,10 @@ export async function compileConnectionDefinition(
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 
   if (isDynamicSentinel(loaded)) {
-    assertResolverOnlyDynamicSentinel(loaded, message);
-    const eventNames = Object.keys(loaded.events);
-    const unsupportedEvent = eventNames.find(
-      (eventName) => !ALLOWED_DYNAMIC_CONNECTION_EVENTS.has(eventName),
-    );
-    if (unsupportedEvent !== undefined) {
-      throw new Error(
-        `${message} Dynamic connections support only "session.started" and "turn.started" handlers. Unsupported event: "${unsupportedEvent}".`,
-      );
-    }
+    assertDynamicSentinelKeys(loaded, message);
     return {
       kind: "dynamic-connection",
       definition: {
-        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug: source.connectionName,
@@ -91,7 +76,12 @@ export async function compileConnectionDefinition(
     );
   }
 
-  const protocol = readConnectionProtocol(loaded);
+  const protocol = readStampedConnectionProtocol(loaded);
+  if (protocol === undefined) {
+    throw new Error(
+      `Connection "${source.logicalPath}" exports a plain object. Wrap it in defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "eve/connections"; plain objects no longer default to MCP.`,
+    );
+  }
 
   const shared = {
     connectionName: source.connectionName,
@@ -119,6 +109,9 @@ export async function compileConnectionDefinition(
       ...shared,
       description: normalized.description,
       protocol: "mcp",
+      ...(normalized.experimental?.events === undefined
+        ? {}
+        : { experimental_events: true as const }),
       url: normalized.url,
     };
     auth = normalized.auth;

@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 export default defineEval({
   description:
-    "A principal-owned subscription derives an email destination from creator identity and executes its task through an authored channel.",
+    "A principal-owned subscription derives an email destination from creator identity, executes its task through an authored channel, and conditionally disables itself.",
   async test(t) {
     if (!t.target.capabilities.devRoutes)
       t.skip("Schedule collection invocation requires dev routes.");
@@ -9,12 +9,12 @@ export default defineEval({
       "Alice is setting up a one-time email reminder for January 1, 2030. Create the schedule named collection-email with a payload task to send a fixture email with subject Scheduled note and body A fixture note., and destination creator-email. Confirm the schedule is saved and do not send the email now.",
     );
     turn.expectOk();
-    const approval = turn.session.requireInputRequest({
+    const approval = turn.session.requireInteraction({
       display: "confirmation",
       toolName: "schedule__requests__create",
     });
     const created = await turn.session.respond([
-      { optionId: "approve", requestId: approval.requestId },
+      { optionId: "approve", interactionId: approval.interactionId },
     ]);
     created.expectOk();
     created.session.calledTool("schedule__requests__create", {
@@ -33,15 +33,15 @@ export default defineEval({
     const managementName = Reflect.get(Object(record), "name");
     if (typeof managementName !== "string") throw new Error("The schedule has no management name.");
     const edit = await t.send(
-      `Alice wants to revise her saved reminder. Update the schedule using management name ${managementName}. Set its one-time timing to January 2, 2030 at 09:00 UTC and replace its complete payload with a task to send a fixture email with subject Updated note and body A revised fixture note., and destination creator-email. Save the change without sending the email now.`,
+      `Alice wants to revise her saved reminder. Update the schedule using management name ${managementName}. Set its one-time timing to January 2, 2030 at 09:00 UTC and its destination to creator-email. Replace its complete task with these instructions: Send a fixture email with subject Updated note and body A revised fixture note. If record-email returns accepted: true, disable this schedule with schedule__requests__disable. Save the change without sending the email now.`,
     );
     edit.expectOk();
-    const updateApproval = edit.session.requireInputRequest({
+    const updateApproval = edit.session.requireInteraction({
       display: "confirmation",
       toolName: "schedule__requests__update",
     });
     const updated = await edit.session.respond([
-      { optionId: "approve", requestId: updateApproval.requestId },
+      { optionId: "approve", interactionId: updateApproval.interactionId },
     ]);
     updated.expectOk();
     updated.session.calledTool("schedule__requests__update", {
@@ -76,11 +76,17 @@ export default defineEval({
         : undefined;
     if (typeof sessionId !== "string")
       throw new Error("Dynamic invocation did not return its dispatched session.");
-    const scheduled = await t.target.attachSession(sessionId);
+    const scheduled = t.target.attach(sessionId);
+    await scheduled.nextTurn();
     scheduled.succeeded();
     scheduled.calledTool("record-email", {
       input: { to: "alice@example.test", subject: "Updated note" },
       output: { recipient: "alice@example.test", accepted: true },
+    });
+    scheduled.calledTool("schedule__requests__disable", {
+      input: { name: managementName },
+      output: { name: managementName, state: "inactive" },
+      status: "completed",
     });
     // The authored outbox channel records the scheduled session's reply.
     const delivered = await t.send("Use share-schedule to read what collection-email delivered.");

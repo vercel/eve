@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-10-01"
+last_updated: "2026-10-20"
 ---
 
 # eve tasks
@@ -475,9 +475,9 @@ turn can continue an idle task by `taskId` with its own caller's auth. Anonymous
 principal. Queued messages from one principal share a turn even when their claims differ, and the
 turn runs with the latest claims.
 
-**No task time limits.** `defineAgent`'s `limits.sessionTimeoutMs` keeps its meaning, the
-session lifetime (default 30 days), and bounds all work in the session; with `false`, tasks are
-unbounded. A body that needs a limit races `sleep` against its work. A person who wants an update asks, and the model decides whether to keep
+**No task time limits.** `defineAgent`'s `limits.sessionTimeoutMs` is an idle timeout (default 30
+days) and does not bound tasks: a turn held open while its tasks work keeps the session open, and
+the window counts from when that turn settles. A body that needs a limit races `sleep` against its work. A person who wants an update asks, and the model decides whether to keep
 waiting or cancel.
 
 **Cap.** At most 32 working tasks per session (`TOO_MANY_TASKS`), a worst-case backstop normal use

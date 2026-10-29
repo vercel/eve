@@ -9,11 +9,12 @@ import {
 } from "#execution/durable-session-store.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { createSession } from "#execution/session.js";
-import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
-import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
+import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { withPendingHistory } from "#execution/session/pending-history.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -33,10 +34,12 @@ export interface CreateSessionStepResult {
  * the root agent.
  */
 export async function createSessionStep(input: {
+  readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
-  readonly inheritedLimits?: RunSessionLimits;
+  /** History from `create()`, held until the first message's turn adds it. */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly outputSchema?: JsonObject;
   readonly nodeId?: string;
   readonly rootSessionId?: string;
@@ -51,39 +54,23 @@ export async function createSessionStep(input: {
   const effectiveAgent = resolveEffectiveAgentRuntimeFromConfig(
     bundle,
     input.dynamicSubagentAgentConfig,
+    input.agentSessionRuntimeOverrides,
   );
 
-  // Both token axes resolve tighter-wins against the cap inherited from the
-  // delegating parent: a child may narrow what its parent granted, never widen
-  // it. Root runs have no inherited limits, so their configured values apply.
   const session = createSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
     continuationToken: input.continuationToken,
-    limits: {
-      // Inherited token limits are the parent's remaining quota share at
-      // dispatch time; an authored `false` uncaps only when there is nothing
-      // to inherit.
-      maxInputTokensPerSession: resolveInheritedTokenLimit({
-        configured: effectiveAgent.limits?.maxInputTokensPerSession,
-        inherited: input.inheritedLimits?.maxInputTokensPerSession,
-      }),
-      maxOutputTokensPerSession: resolveInheritedTokenLimit({
-        configured: effectiveAgent.limits?.maxOutputTokensPerSession,
-        inherited: input.inheritedLimits?.maxOutputTokensPerSession,
-      }),
-      maxTokenCostUsdPerSession: resolveInheritedTokenLimit({
-        configured: effectiveAgent.limits?.maxTokenCostUsdPerSession,
-        inherited: input.inheritedLimits?.maxTokenCostUsdPerSession,
-      }),
-    },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     turnAgent: effectiveAgent.turnAgent,
   });
 
-  const { history, sessionState } = createDurableSessionValues(session);
+  const state = withPendingHistory(session.state, input.history);
+  const { history, sessionState } = createDurableSessionValues(
+    state === session.state ? session : { ...session, state },
+  );
   return { history, state: sessionState };
 }

@@ -1,3 +1,5 @@
+import { EveError } from "#shared/eve-error.js";
+
 /**
  * Error thrown when the agent info route returns an authorized response whose
  * body is not a recognized agent-info payload.
@@ -10,14 +12,18 @@
  * can treat this as "connected, no inspection data". The carried {@link issues}
  * let diagnostics name the offending fields instead of an opaque string.
  */
-export class AgentInfoResponseError extends Error {
+export class AgentInfoResponseError extends EveError {
+  static override readonly errorName = "AgentInfoResponseError";
+  declare readonly code: "invalid_agent_info_response";
   /** Schema issue summaries, e.g. `"agent.model.id: Required"`. Empty when the body was not JSON. */
   readonly issues: readonly string[];
 
   constructor(issues: readonly string[] = []) {
     const detail = issues.length === 0 ? "" : ` (${issues.join("; ")})`;
-    super(`The server returned an unrecognized response from the eve agent info route.${detail}`);
-    this.name = "AgentInfoResponseError";
+    super(
+      "invalid_agent_info_response",
+      `The server returned an unrecognized response from the eve agent info route.${detail}`,
+    );
     this.issues = issues;
   }
 }

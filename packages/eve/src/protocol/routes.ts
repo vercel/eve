@@ -22,7 +22,7 @@ export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 
-/** Stable route pattern for sending a message to one exact session ID. */
+/** Stable route pattern for preparing or delivering input to one exact session ID. */
 export const EVE_SESSION_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId`;
 
 /** Stable route pattern for cancelling one exact session ID. */
@@ -34,7 +34,13 @@ export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:ses
 /** Stable route pattern for clearing one exact session ID. */
 export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
 
-/** Stable route pattern for resetting one exact session ID. */
+/** Stable route pattern for ending one exact session ID. */
+export const EVE_SESSION_END_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/end`;
+
+/**
+ * Legacy alias of `/end`. Still called by remote-agent parent cleanup and older clients;
+ * keep until parents switch to `/end`.
+ */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
 /** Stable route pattern for eval tool-stub verification. */
@@ -42,6 +48,13 @@ export const EVE_SESSION_STUBS_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 
 /** Stable event-stream route pattern for one exact session ID. */
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
+
+/** Reads a recorded descendant path through its root's authorized reader. */
+export const EVE_DESCENDANT_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/descendants/stream`;
+
+export function createEveDescendantStreamRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/descendants/stream`;
+}
 
 /**
  * Parent-origin proxy route for one remotely executed child session stream.
@@ -118,7 +131,7 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
-/** Builds the ID-addressed message route for one session. */
+/** Builds the ID-addressed preparation and input route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
 }
@@ -147,7 +160,12 @@ export function createEveSessionClearRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
 }
 
-/** Builds the ID-addressed reset route for one session. */
+/** Builds the ID-addressed end route for one session. */
+export function createEveSessionEndRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/end`;
+}
+
+/** Compatibility path used when ending a remote child on an older deployment. */
 export function createEveSessionResetRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
 }
@@ -180,11 +198,6 @@ export function createEveConnectionCallbackRoutePath(
  */
 export function createEveCallbackRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/callback/${encodeURIComponent(token)}`;
-}
-
-/** Builds the capability path used to answer one remote child turn. */
-export function createEveTaskInputRoutePath(token: string): string {
-  return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
 }
 
 /** Builds the tool-stub verification route for one session. */

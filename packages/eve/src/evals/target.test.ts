@@ -30,7 +30,7 @@ describe("resolveEvalTargetHandle", () => {
       return Response.json({ error: "not found" }, { status: 404 });
     });
 
-    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const client = new Client({ baseUrl: "http://127.0.0.1:3000" });
     const target = await resolveEvalTargetHandle({
       client,
       expectedAgentName: "agent-basic-runtime",
@@ -74,7 +74,7 @@ describe("resolveEvalTargetHandle", () => {
 
     await expect(
       resolveEvalTargetHandle({
-        client: new Client({ host: "http://127.0.0.1:3000" }),
+        client: new Client({ baseUrl: "http://127.0.0.1:3000" }),
         expectedAgentName: "agent-basic-runtime",
         kind: "remote",
         url: "http://127.0.0.1:3000",
@@ -93,7 +93,7 @@ describe("resolveEvalTargetHandle", () => {
 
     await expect(
       resolveEvalTargetHandle({
-        client: new Client({ host: "http://127.0.0.1:4275" }),
+        client: new Client({ baseUrl: "http://127.0.0.1:4275" }),
         expectedAgentName: "@acme/agent",
         kind: "remote",
         url: "http://127.0.0.1:4275",
@@ -115,7 +115,7 @@ describe("resolveEvalTargetHandle", () => {
 
     await expect(
       resolveEvalTargetHandle({
-        client: new Client({ host: "http://127.0.0.1:4275" }),
+        client: new Client({ baseUrl: "http://127.0.0.1:4275" }),
         expectedAgentName: "@acme/agent",
         kind: "remote",
         url: "http://127.0.0.1:4275",

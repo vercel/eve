@@ -26,7 +26,7 @@ export default defineChannel({
           },
           turnPolicy: body.turnPolicy,
         });
-      return Response.json({ ok: true, sessionId: session.id });
+      return Response.json({ ok: true, sessionId: session.sessionId });
     }),
   ],
 });

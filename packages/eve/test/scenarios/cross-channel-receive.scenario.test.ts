@@ -48,7 +48,7 @@ export default {
         const session = await args
           .to(target, { sessionId: body.sessionId })
           .send(body.message, { auth: body.auth });
-        return Response.json({ ok: true, sessionId: session.id });
+        return Response.json({ ok: true, sessionId: session.sessionId });
       },
     },
   ],
@@ -99,6 +99,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async dispatchSession() {
       throw new Error("dispatchSession should not be called in this scenario");
     },
+    async getLineStream() {
+      return new ReadableStream();
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -119,7 +122,10 @@ describe("cross-channel receive end-to-end", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "test agent\n");
     await writeFile(join(agentRoot, "channels", "webhook.mjs"), WEBHOOK_CHANNEL);
     await writeFile(join(agentRoot, "channels", "target.mjs"), TARGET_CHANNEL);
@@ -155,7 +161,7 @@ describe("cross-channel receive end-to-end", () => {
         { auth },
       );
 
-      expect(session.id).toBe("sess_scenario");
+      expect(session.sessionId).toBe("sess_scenario");
       expect(captured).toHaveLength(1);
       // Target's raw token "target:scenario-123" is namespaced by the
       // target channel name → "target:target:scenario-123".
@@ -201,7 +207,10 @@ describe("cross-channel receive end-to-end", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "test agent\n");
     await writeFile(join(agentRoot, "channels", "target.mjs"), TARGET_CHANNEL);
 

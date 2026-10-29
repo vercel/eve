@@ -35,7 +35,7 @@ Before your first message, the empty composer may suggest asking your local agen
 | `/help`     | List available commands.                                                                                                                                     |
 | `/exit`     | Quit the UI.                                                                                                                                                 |
 
-When a message or stream reconnection reaches a [stranded session](../concepts/execution-model-and-durability#stranded-sessions), the TUI says why and which eve version built it, when known. New messages and approvals are not delivered. Run `/new` to end the stranded session; your next message starts a fresh one. `/clear` is refused, because it would keep the stranded session. A session from a previous `eve dev` invocation that the same eve version built is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery). A message accepted before the upgrade is not redelivered.
+When a message or stream reconnection reaches a [stranded session](./deployment/self-hosting#recover-a-stranded-session), the TUI says why and which eve version built it, when known. New messages and approvals are not delivered. Run `/new` to end the stranded session; your next message starts a fresh one. `/clear` is refused, because it would keep the stranded session. A session from a previous `eve dev` invocation that the same eve version built is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery). A message accepted before the upgrade is not redelivered.
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
 
@@ -133,10 +133,10 @@ Use `/traces` to inspect traces recorded during local development. See [Local tr
 Use `eve dev` flags to control tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs:
 
 ```bash
-eve dev --tools full --reasoning collapsed --logs all
+eve dev --show-tools full --show-reasoning collapsed --logs all
 ```
 
-`--subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
+`--show-subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 

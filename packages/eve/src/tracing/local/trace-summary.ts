@@ -1,5 +1,5 @@
 import type { LocalTraceSpan } from "#tracing/local/trace-reader.js";
-import { USAGE_FIELDS as AGENT_USAGE_ATTRIBUTES } from "#compiled/@eve/tracing/otel.js";
+import { USAGE_FIELDS as AGENT_USAGE_ATTRIBUTES } from "#compiled/@vercel/agent-runs/otel.js";
 import {
   localTraceOperations,
   traceModelName,

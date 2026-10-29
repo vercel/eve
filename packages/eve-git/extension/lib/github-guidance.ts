@@ -6,12 +6,26 @@ const SHELL_INSTRUCTIONS = `# GitHub
 Use the \`gh\` and \`git\` CLIs in \`bash\` for GitHub operations: cloning, fetching, pushing, issues, pull requests, reviews, and CI. They authenticate with the credentials already configured in the shell. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
 `;
 
+const TOKEN_SCOPE = {
+  repository: {
+    token:
+      "Connect mints the real token for only the declared repository. The sandbox process receives only a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. GitHub rejects access outside the token's server-side repository scope.",
+    context:
+      "Commands without an explicit repository may use normal `gh` context, but their token remains scoped to the declared repository.",
+  },
+  caller: {
+    token:
+      "Connect resolves the caller's own GitHub token for each command. The sandbox process receives only a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. The token carries the caller's GitHub permissions, so access is limited to what the caller can reach on GitHub.",
+    context: "Commands without an explicit repository may use normal `gh` context.",
+  },
+} as const;
+
 /** Holds only when the Connect-brokered `gh` tool can authenticate, which requires `github` config. */
-const CONNECT_INSTRUCTIONS = `# GitHub
+const connectInstructions = (scope: (typeof TOKEN_SCOPE)[keyof typeof TOKEN_SCOPE]) => `# GitHub
 
-GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation. The full \`gh\` CLI surface is available. Declare exactly one repository in the configured organization with write-capable access. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. Connect mints the real token for only the declared repository. The sandbox process receives only a placeholder \`GH_TOKEN\`, and the firewall exchanges it on matching GitHub requests. GitHub rejects access outside the token's server-side repository scope. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
+GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation. The full \`gh\` CLI surface is available. Declare exactly one \`owner/name\` repository with write-capable access; the agent's access policy decides which repositories commands may use. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. ${scope.token} Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
 
-Pass commands as simple argv with ordinary quoting. Do not use environment assignments, pipes, redirects, substitutions, or other shell syntax. Commands without an explicit repository may use normal \`gh\` context, but their token remains scoped to the declared repository. An explicit \`-R\`, \`--repo\`, \`--repo=\`, or repository argument to \`gh repo clone\`, \`view\`, or \`fork\` must match the declaration.
+Pass commands as simple argv with ordinary quoting. Do not use environment assignments, pipes, redirects, substitutions, or other shell syntax. ${scope.context} An explicit \`-R\`, \`--repo\`, \`--repo=\`, or repository argument to \`gh repo clone\`, \`view\`, or \`fork\` must match the declaration.
 
 Determine the repositories needed to complete the task through source discovery and investigation, even when the requester does not name them. Do not ask the requester to enumerate repositories that can be discovered, and never default to the current agent's repository. The agent may select additional repositories as the work reveals them. Each authenticated command declares exactly one target repository and mints a credential lease for that repository at the moment it is needed, so cross-repository work uses separate scoped commands and leases.
 
@@ -22,8 +36,12 @@ Use GitHub CLI commands through the \`gh\` tool for issues, pull requests, revie
 Repositories that require verified signatures reject ordinary sandbox commits. Stage the intended changes explicitly, run \`gh-signed-commit --repo owner/name --branch <branch> -m <headline>\` through the \`gh\` tool, then create the draft pull request through the same tool.
 `;
 
-export function githubInstructions(github: boolean): string {
-  return `${github ? CONNECT_INSTRUCTIONS : SHELL_INSTRUCTIONS}\n${PUBLISHING}\n`;
+/** `callerScoped` describes user tokens (`principalType: "user"`) instead of repository-scoped app tokens. */
+export function githubInstructions(github: boolean, callerScoped = false): string {
+  const guidance = github
+    ? connectInstructions(TOKEN_SCOPE[callerScoped ? "caller" : "repository"])
+    : SHELL_INSTRUCTIONS;
+  return `${guidance}\n${PUBLISHING}\n`;
 }
 
 /** `gh-signed-commit` authenticates through the `gh` tool's credential lease. */

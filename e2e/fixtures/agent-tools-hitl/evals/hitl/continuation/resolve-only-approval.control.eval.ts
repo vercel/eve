@@ -12,11 +12,16 @@ export default defineEval({
 
     // When the user approves B.
     const live = await parked.session.startRespond([
-      { requestId: approval.requestId, optionId: "approve" },
+      { interactionId: approval.interactionId, optionId: "approve" },
     ]);
 
     // Then B executes once, the draft is read, and the reply completes.
-    const reply = await expectResponseReply(t, live, "Draft status: ready.", approval.requestId);
+    const reply = await expectResponseReply(
+      t,
+      live,
+      "Draft status: ready.",
+      approval.interactionId,
+    );
     reply.calledTool("change-b", { status: "completed", output: { executions: 1 }, count: 1 });
     reply.calledTool("read-draft", { status: "completed", count: 1 });
   },

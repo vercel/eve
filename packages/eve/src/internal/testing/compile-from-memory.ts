@@ -6,6 +6,8 @@ import { defineAgent, type AgentDefinition } from "#public/definitions/agent.js"
 import { defineSkill } from "#public/definitions/skill.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
   createProgrammaticCompiledModuleMap,
   type CompiledModuleMap,
@@ -24,12 +26,7 @@ export interface CompileFromMemoryInput {
   readonly appRoot?: string;
   readonly agentRoot?: string;
   readonly model: string;
-  readonly limits?: {
-    readonly maxInputTokensPerSession?: number | false;
-    readonly maxOutputTokensPerSession?: number | false;
-    readonly maxTokenCostUsdPerSession?: number | false;
-    readonly sessionTimeoutMs?: number | false;
-  };
+  readonly limits?: import("#shared/agent-definition.js").AgentLimitsDefinition;
   readonly revision?: string;
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly tools?: readonly CompileFromMemoryToolInput[];
@@ -55,6 +52,7 @@ export interface CompileFromMemorySkillInput {
 
 interface CompileFromMemoryResult {
   readonly manifest: CompiledAgentManifest;
+  readonly modelMetadata: ModelMetadata;
   readonly moduleMap: CompiledModuleMap;
 }
 
@@ -85,7 +83,7 @@ export async function compileFromMemory(
       loadNamespace: async () => ({
         default: defineSkill({
           description: skill.description,
-          markdown: skill.markdown ?? `# ${skill.name}\n`,
+          content: skill.markdown ?? `# ${skill.name}\n`,
         }),
       }),
       logicalPath: `skills/${skill.name}.ts`,
@@ -106,12 +104,16 @@ export async function compileFromMemory(
     agentRoot,
     appRoot,
   });
-  const manifest = await compileAgentManifest(discovered, { sourceRegistries: [registry] });
+  const modelCatalog = createCompiledRuntimeModelCatalogLoader(appRoot);
+  const manifest = await compileAgentManifest(discovered, {
+    modelCatalog,
+    sourceRegistries: [registry],
+  });
   const moduleMap = await createProgrammaticCompiledModuleMap(manifest, [
     frameworkAgentSourceRegistry,
     registry,
   ]);
-  return { manifest, moduleMap };
+  return { manifest, modelMetadata: await modelCatalog.loadModelMetadata(), moduleMap };
 }
 
 function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefinition {

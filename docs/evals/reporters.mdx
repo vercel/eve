@@ -9,17 +9,38 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 Reporters attach in two places. Declare them in `evals.config.ts` to observe **every** eval in the run, the usual choice for a shared destination like one Braintrust experiment, so you don't repeat the reporter in each file. Or list them on an individual eval's `reporters` to scope a destination to that eval (or to a group of evals that share one instance).
 
-## Braintrust
+## Console
 
-`Braintrust(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
+The CLI adds `consoleReporter()` from `eve/evals/reporters` unless you pass
+`--json`. There is no public runner API, so reporters compose only through
+`evals.config.ts` and per-eval `reporters`. A custom console reporter mostly
+makes sense with `--json`, for example logging to stderr so stdout stays valid
+JSON:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { consoleReporter } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  reporters: [consoleReporter({ color: false, log: (line) => console.error(line) })],
+});
+```
+
+Both options are optional; the default logger is `console.log` and color
+follows whether stdout is a terminal. Without `--json`, another console reporter
+duplicates the CLI's output.
+
+## Braintrust
+
+`braintrustReporter(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
   judge: { model: "typesafe-ai/jev" },
-  reporters: [Braintrust({ projectName: "weather-agent" })],
+  reporters: [braintrustReporter({ projectName: "weather-agent" })],
 });
 ```
 
@@ -27,10 +48,10 @@ Need a destination for only some evals? Attach it per eval instead:
 
 ```ts title="evals/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEval({
-  reporters: [Braintrust({ projectName: "weather-agent" })],
+  reporters: [braintrustReporter({ projectName: "weather-agent" })],
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
     t.succeeded();
@@ -38,7 +59,7 @@ export default defineEval({
 });
 ```
 
-The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Assertions that share a name, such as several unlabeled judges, log one score: the lowest. The console warns under the eval when merged soft scores differ; use `.label(name)` to group or separate them. Errored assertions log no score. Each assertion's score is stored in the Braintrust metadata under `eveAssertionScores` and failed assertion details under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
+The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Assertions that share a name, such as several unlabeled judges, log one score: the lowest. The console warns under the eval when merged soft scores differ; use `.label(name)` to group or separate them. Errored assertions log no score. Each assertion's score is stored in the Braintrust metadata under `eveAssertionScores` and failed assertion details under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`. In a [repeated run](./running#repeat-evals), each attempt logs its own row with the id `<id>#<attempt>` and the attempt number under `eveAttempt`.
 
 A reporter instance observes the evals that reference it. Share one instance across several evals (the config, a `shared.ts` export, or every entry of a dataset array) and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
 
@@ -46,14 +67,14 @@ Braintrust needs its SDK installed in the app and credentials in the environment
 
 ## Datadog
 
-`Datadog(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
+`datadogReporter(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Datadog } from "eve/evals/reporters";
+import { datadogReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
-  reporters: [Datadog({ projectName: "weather-agent" })],
+  reporters: [datadogReporter({ projectName: "weather-agent" })],
 });
 ```
 
@@ -61,7 +82,7 @@ The reporter creates one Datadog Experiment, submits one synthetic experiment sp
 
 `dd-trace` generates dataset record, experiment trace, and experiment span identifiers. For sampled eve sessions, the reporter also adds identifier-only `experimentRuntimeTraceLinks` metadata, holding the IDs Datadog assigns when it indexes the runtime traces, so an Experiment row can link to the agent trace that produced it. Runtime spans keep their stored IDs and parentage.
 
-Every run reuses the dataset named by `datasetName` (default `<projectName> evals`), so Datadog can compare experiments across runs. Records are matched by eval description, with `#2`, `#3` suffixes for duplicates, so give each case a unique description.
+Every run reuses the dataset named by `datasetName` (default `<projectName> evals`), so Datadog can compare experiments across runs. Records are matched by eval description, with `#2`, `#3` suffixes for duplicates, so give each case a unique description. In a [repeated run](./running#repeat-evals), every attempt of an eval links to that eval's single dataset record, and each experiment span's `runIteration` is the attempt number.
 
 Assertion metrics use descriptive assertion names by default: characters outside letters, numbers, underscores, and hyphens are normalized to underscores, gate labels receive a `gate_` prefix, assertions that share a label report one metric with the lowest score, and labels that collide with built-in metrics receive a numeric suffix. For example, `succeeded` becomes `gate_succeeded` and `calledTool(get_stock_quote)` becomes `gate_calledTool_get_stock_quote`. Authors can use `.label("stable name")` on an assertion handle to choose a stable metric name. Because assertion names can contain authored expectations, review them before exporting sensitive evals. Each assertion's name and score are kept in row metadata under `eveAssertionScores`; pass `recordAssertionDetails: false` to omit them and failed assertion messages.
 
@@ -69,13 +90,13 @@ Datadog needs `dd-trace` installed in the app and Datadog credentials in the env
 
 ## JUnit
 
-`JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
+`junitReporter({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
 
 ```bash
 eve eval --strict --junit .eve/junit.xml
 ```
 
-Each eval becomes one `<testcase>` named by its path-derived id; failed gates and execution errors become failures, while `t.skip(reason)` produces a JUnit `<skipped>` result.
+Each eval becomes one `<testcase>` named by its path-derived id (one per attempt, named `<id>#<attempt>`, in a repeated run); failed gates and execution errors become failures, while `t.skip(reason)` produces a JUnit `<skipped>` result.
 
 ## Custom reporters
 
@@ -93,7 +114,7 @@ interface EvalReporter {
 
 `onRunStart` fires once before any eval runs, and `onRunComplete` fires once with the aggregated summary. Within that run:
 
-- `onEvalStart` fires when an eval is scheduled. It includes the eval definition, target, and start time.
+- `onEvalStart` fires when an eval is scheduled. It includes the eval definition, target, and start time. In a [repeated run](./running#repeat-evals), it fires once per attempt, and the event and each `onSessionStart` event carry the 1-based `attempt`, which matches `result.attempt` on completion.
 - `onSessionStart` fires once for each session after eve receives its first trace context. It includes `sessionId`, `primary`, and `traceContext` with `traceId`, `spanId`, and `traceFlags`.
 - `onEvalComplete` fires with the checks, scores, and verdict. The runner also supplies `context`, including every distinct trace context collected across the eval's sessions. The same list is available as `result.result.traceContexts`.
 
@@ -101,9 +122,13 @@ Each entry in `result.assertions` is an `AssertionResult`. `name` is the display
 
 An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onSessionStart` does not fire and the completed trace list is empty.
 
-`result.result.derived` holds the facts the runner derived from the eval's sessions, such as tool calls and `models`: the distinct ids of the models the steps started with, in session order. Each entry in `result.result.sessions` holds the same facts for one session, in first-use order, so a reporter can tell the primary session's models from those of the other sessions the eval created or attached. A delegated subagent runs in its own session, so its models appear only when the eval attaches that session with `t.target.attachSession`. Compaction and `auto` routing calls are not included.
+`result.result.derived` holds the facts the runner derived from the eval's sessions, such as tool calls and `models`: the distinct ids of the models the steps started with, in session order. Each entry in `result.result.sessions` holds the same facts for one session, in first-use order, so a reporter can tell the primary session's models from those of the other sessions the eval created or attached. A delegated subagent runs in its own session, so its models appear only when the eval attaches and reads that session with `t.target.attach(...).nextTurn()` or `watch()`. Compaction summaries are included; provider-internal routing without an eve model lifecycle is not.
 
-`derived.usage` is the token usage and cost from each session's latest `session.waiting`, `turn.waiting`, `session.failed`, or `session.completed`, including what its delegated agents spent; on a turn, it is the session's total so far. The eval's `usage` counts each captured session once, by its latest usage, and leaves out sessions another captured session opened, because that session already counts their spend. It is absent when a counted session reported no usage. It leaves out compaction calls, the turns an eval sends directly to a child session it attached, and delegated spend counted after a session's last such event.
+`result.result.reply` is the last observed turn's text; `data` is its structured output, without a text fallback. Its `status` describes the request, while `sessionEnded` and the optional `view` describe that turn's session. The top-level `sessionId` still identifies the primary captured session; inspect `sessions` for each session's events and view. When selecting one value for a reporter, fall back to `reply` only when `data === undefined`, so structured `null` remains an output.
+
+Braintrust and Datadog metadata use `eveStatus`, `eveAwaitingInput`, and `eveSessionEnded`. Update saved filters that used `eveParked` to use `eveAwaitingInput`, and use `eveSessionEnded` to distinguish request completion from session retirement. Existing records are not rewritten.
+
+`derived.usage` is the token usage and cost a session recorded, summed from its `usage.recorded` facts, including what its delegated agents spent; on a turn, it is the session's total so far. The eval's `usage` counts each captured session once, using the snapshot with the latest recorded session activity rather than the last capture order, and leaves out sessions another captured session opened, because that session already counts their spend. It is absent when a counted session recorded no usage. It includes compaction summaries.
 
 Reporter callbacks for an eval stay ordered—eval start, traced session starts, then completion—even when several evals run concurrently. Reach for a custom reporter only when a destination isn't covered. The per-run artifacts under `.eve/evals/` retain the trace contexts alongside the result for ad-hoc inspection.
 

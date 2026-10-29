@@ -8,7 +8,8 @@ import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import { encodeLine } from "#protocol/session-events/envelope.js";
 
 const AGENT_INFO = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
@@ -33,6 +34,23 @@ function testBinding(
   };
 }
 
+/** A stream whose one line ends the session. */
+function endedStream(): Response {
+  return new Response(
+    encodeLine({
+      at: "2026-10-20T00:00:00.000Z",
+      facts: [
+        { type: "delivery.admitted", data: { deliveryId: "delivery_1" } },
+        { type: "delivery.settled", data: { deliveryId: "delivery_1", outcome: "ignored" } },
+        { type: "session.ended", data: { outcome: "completed" } },
+      ],
+    }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -44,7 +62,7 @@ describe("Client request policy", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(AGENT_INFO));
     const controller = new AbortController();
-    const client = new Client({ host: "https://eve.test", auth: { bearer: "test-token" } });
+    const client = new Client({ baseUrl: "https://eve.test", auth: { bearer: "test-token" } });
     await client.info({ signal: controller.signal });
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.signal).toBe(controller.signal);
@@ -56,33 +74,41 @@ describe("Client request policy", () => {
       Response.json({ ok: true, status: "ready", workflowId: "wf", extra: true }),
     );
 
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.health()).rejects.toThrow(HealthResponseError);
   });
 
-  it("includes host query parameters on every agent request", async () => {
+  it("requires a base URL and sends an empty one to same-origin routes", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
+    // @ts-expect-error A direct client names its base URL; pass "" for same-origin routes.
+    void (() => new Client({}));
+
+    await new Client({ baseUrl: "" }).health();
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/eve/v1/health");
+  });
+
+  it("includes base URL query parameters on every agent request", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(AGENT_INFO))
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({
-      host: "https://eve.test?x-vercel-protection-bypass=secret",
+      baseUrl: "https://eve.test?x-vercel-protection-bypass=secret",
     });
 
     await client.info();
     await client.health();
     await client.fetch("/custom");
-    await (await client.sessions.create({ message: "hello" })).response.result();
+    await (await client.sessions.create({ message: "hello" })).delivery.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [request] of fetchMock.mock.calls) {
@@ -92,30 +118,60 @@ describe("Client request policy", () => {
     }
   });
 
-  it("enforces its redirect policy for info, health, raw fetch, and sessions", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json(AGENT_INFO))
-      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
-    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+  it.each([undefined, "manual", "error"] as const)(
+    "enforces redirect policy %s for info, health, raw fetch, and sessions",
+    async (redirect) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json(AGENT_INFO))
+        .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(
+          Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
+        )
+        .mockResolvedValueOnce(endedStream());
+      const client = new Client({
+        baseUrl: "https://eve.test",
+        headers: { "x-client-credential": "test-only-credential" },
+        redirect,
+      });
 
-    await client.info();
-    await client.health();
-    await client.fetch("/custom", { redirect: "follow" });
-    await (await client.sessions.create({ message: "hello" })).response.result();
+      await client.info();
+      await client.health();
+      await client.fetch("/custom", { redirect: "follow" });
+      await (await client.sessions.create({ message: "hello" })).delivery.result();
 
-    expect(fetchMock.mock.calls).toHaveLength(5);
-    for (const [, init] of fetchMock.mock.calls) {
-      expect(init?.redirect).toBe("manual");
+      expect(fetchMock.mock.calls).toHaveLength(5);
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(init?.redirect).toBe(redirect ?? "error");
+        expect(new Headers(init?.headers).get("x-client-credential")).toBe("test-only-credential");
+      }
+    },
+  );
+
+  it("fails fast when a stream redirect is rejected by policy", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(
+          new TypeError("fetch failed", { cause: new Error("unexpected redirect") }),
+        );
+      const client = new Client({ baseUrl: "https://eve.test" });
+      const failed = client.sessions
+        .attach("session-1")
+        .stream({ follow: false })
+        [Symbol.asyncIterator]()
+        .next()
+        .catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+
+      expect(await failed).toMatchObject({
+        message: expect.stringContaining("refused a redirect"),
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
     }
   });
 
@@ -124,7 +180,7 @@ describe("Client request policy", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(AGENT_INFO));
     const client = new Client({
-      host: "https://eve.test",
+      baseUrl: "https://eve.test",
       auth: { vercelOidc: { token: () => Promise.resolve("oidc-tok") } },
     });
 
@@ -139,15 +195,11 @@ describe("Client request policy", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({
-      host: "https://eve.test",
+      baseUrl: "https://eve.test",
       auth: { vercelOidc: { token: "oidc-tok" } },
     });
 
@@ -156,7 +208,7 @@ describe("Client request policy", () => {
         headers: { authorization: "Bearer application-user" },
         message: "hello",
       })
-    ).response.result();
+    ).delivery.result();
 
     expect(fetchMock.mock.calls).toHaveLength(2);
     for (const [, init] of fetchMock.mock.calls) {
@@ -166,6 +218,41 @@ describe("Client request policy", () => {
     }
   });
 
+  it("sends a file part's bytes as a data: URL", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(endedStream());
+    const client = new Client({ baseUrl: "https://eve.test" });
+    const hello = new TextEncoder().encode("hello");
+
+    await (
+      await client.sessions.create({
+        message: [
+          { text: "Two copies of a note.", type: "text" },
+          { data: hello, mediaType: "text/plain", type: "file" },
+          { data: hello.buffer, filename: "note.txt", mediaType: "text/plain", type: "file" },
+          { data: new URL("https://files.test/note.txt"), mediaType: "text/plain", type: "file" },
+        ],
+      })
+    ).delivery.result();
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.message).toEqual([
+      { text: "Two copies of a note.", type: "text" },
+      { data: "data:text/plain;base64,aGVsbG8=", mediaType: "text/plain", type: "file" },
+      {
+        data: "data:text/plain;base64,aGVsbG8=",
+        filename: "note.txt",
+        mediaType: "text/plain",
+        type: "file",
+      },
+      { data: "https://files.test/note.txt", mediaType: "text/plain", type: "file" },
+    ]);
+  });
+
   it("includes response headers in info request errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("Redirecting...", {
@@ -173,7 +260,7 @@ describe("Client request policy", () => {
         headers: { location: "https://vercel.com/sso-api?url=https://eve.test" },
       }),
     );
-    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+    const client = new Client({ baseUrl: "https://eve.test", redirect: "manual" });
 
     const error = await client.info().catch((cause: unknown) => cause);
 
@@ -233,7 +320,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const info = await client.info();
 
@@ -268,7 +355,7 @@ describe("Client request policy", () => {
           instructions: { ...AGENT_INFO.instructions, static: [instructions] },
         }),
       );
-      const client = new Client({ host: "https://eve.test" });
+      const client = new Client({ baseUrl: "https://eve.test" });
 
       if (mountId === "") {
         await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
@@ -312,7 +399,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, tools: { ...AGENT_INFO.tools, static: tools } }),
     );
-    const info = await new Client({ host: "https://eve.test" }).info();
+    const info = await new Client({ baseUrl: "https://eve.test" }).info();
     expect(info.tools.static.map((tool) => tool.binding?.backing)).toEqual(
       tools.map((tool) => tool.binding.backing),
     );
@@ -332,7 +419,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const info = await client.info();
 
@@ -353,7 +440,7 @@ describe("Client request policy", () => {
         ],
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const info = await client.info();
 
@@ -371,7 +458,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, ignoredByClient: true }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -410,7 +497,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -446,7 +533,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -461,7 +548,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -470,7 +557,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, subagents: { local: [], total: 1 } }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -479,7 +566,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ kind: "eve-agent-info", version: 1 }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -498,7 +585,7 @@ describe("Client request policy", () => {
         version: 1,
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -517,7 +604,7 @@ describe("Client request policy", () => {
         version: 1,
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const error = await client.info().catch((cause: unknown) => cause);
 
@@ -530,7 +617,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("<!doctype html>", { headers: { "content-type": "text/html" } }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -547,7 +634,7 @@ describe("Client request policy", () => {
           },
         }),
       );
-      const client = new Client({ host: "https://eve.test" });
+      const client = new Client({ baseUrl: "https://eve.test" });
 
       await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
     },

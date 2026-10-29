@@ -1,5 +1,5 @@
-import type { ConversationTask } from "#client/conversation-state.js";
-import type { EveDynamicToolPart } from "#client/message-reducer-types.js";
+import type { TaskRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { EveToolPart } from "#client/message-types.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { agentDisplayName, presentTool } from "./tool-presentation.js";
 import { agentTaskSummary, labelContext, type TaskRecord } from "./transcript-parts.js";
@@ -31,18 +31,19 @@ export class TaskRecords {
 
   /** The record a task call belongs to, joining its task's working record or starting one. */
   record(
-    part: EveDynamicToolPart,
-    task: ConversationTask,
+    part: EveToolPart,
+    task: TaskRow,
     label: string | undefined,
     now: number,
+    view: SessionView,
   ): TaskRecord {
-    const callId = part.toolCallId;
-    const known = this.#byCall.get(callId) ?? this.#join(callId, task);
+    const callId = part.callId;
+    const known = this.#byCall.get(callId) ?? this.#join(callId, task, view);
     if (known !== undefined) return known;
     let summary = agentTaskSummary(part.input);
-    let baseName = agentDisplayName(stripTerminalControls(part.toolName));
+    let baseName = agentDisplayName(stripTerminalControls(part.name));
     if (task.kind === "tool") {
-      const presentation = presentTool(part.toolName, part.input, labelContext(label));
+      const presentation = presentTool(part.name, part.input, labelContext(label));
       baseName = stripTerminalControls(presentation.title);
       summary = stripTerminalControls(presentation.subtitle);
     }
@@ -50,9 +51,9 @@ export class TaskRecords {
       callId,
       taskId: task.taskId,
       callIds: [callId],
-      kind: task.kind,
+      kind: task.kind === "agent" ? "agent" : "tool",
       name: this.#uniqueName(baseName),
-      toolName: part.toolName,
+      toolName: part.name,
       input: part.input,
       label,
       purpose: summary || label,
@@ -64,10 +65,15 @@ export class TaskRecords {
     return record;
   }
 
-  #join(callId: string, task: ConversationTask): TaskRecord | undefined {
+  #join(callId: string, task: TaskRow, view: SessionView): TaskRecord | undefined {
     for (const record of this.#started.values()) {
       if (record.ended || record.taskId !== task.taskId) continue;
-      if (!record.callIds.some((id) => task.calls[id]?.status === "working")) continue;
+      const started = view.calls[callId]?.introducedAt;
+      if (
+        started === undefined ||
+        !record.callIds.some((id) => (view.calls[id]?.closedAt ?? Infinity) >= started)
+      )
+        continue;
       record.callIds.push(callId);
       this.#byCall.set(callId, record);
       return record;

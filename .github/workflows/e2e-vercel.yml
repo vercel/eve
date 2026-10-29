@@ -36,13 +36,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          # PRs confined to packages/eve-code (its lockfile entries included) never
-          # exercise the framework e2e fixtures; skip the whole matrix for them.
-          if ! git diff --name-only HEAD^1 HEAD | grep -qvE '^(packages/eve-code/|pnpm-lock\.yaml$)'; then
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|scripts/workflow-stress-report\.(mjs|test\.mjs)$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|scripts/sandbox-image-tag\.mjs$|scripts/workflow-stress-report\.(mjs|test\.mjs)$|\.github/actions/sandbox-image/|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -83,7 +77,6 @@ jobs:
     env:
       EVE_E2E_MODEL: mock
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
-      EVE_SANDBOX_IMAGE_TAG: latest
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -111,26 +104,21 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         run: pnpm add --global vercel@latest && vercel --version
 
+      - name: Resolve eve sandbox image
+        if: needs.changes.outputs.relevant == 'true'
+        uses: ./.github/actions/sandbox-image
+
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Build eve package
+      - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'
-        # Full build, not build:js: the deployed/runtime bundles must carry the
-        # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
-        run: pnpm --filter eve run build
-
-      - name: Build extension fixtures
-        if: needs.changes.outputs.relevant == 'true'
-        # Extension fixtures ship no committed `dist/`; produce it here so
-        # consuming fixtures resolve the built artifacts. `--if-present` skips
-        # extension fixtures without a build script. The update re-packs the
-        # `file:`-protocol store copies so they pick up the fresh dist —
-        # a plain reinstall short-circuits and leaves them stale.
-        run: |
-          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
-          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+        # Turbo resolves the selected fixture's workspace build graph. The
+        # dist-extensions task also builds and re-packs its file dependencies.
+        env:
+          FIXTURE_PACKAGE: ${{ matrix.package }}
+        run: pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
 
       - name: Test Workflow stress reporting
         if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
@@ -164,6 +152,11 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
             scope_args=(--scope "$VERCEL_ORG_ID")
           fi
+          # Set only when the pinned image is unpublished; see .github/actions/sandbox-image.
+          image_env_args=()
+          if [ -n "${EVE_SANDBOX_IMAGE_TAG:-}" ]; then
+            image_env_args=(--env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG")
+          fi
 
           vercel link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           vercel env pull --yes --environment=preview "${token_args[@]}"
@@ -178,7 +171,7 @@ jobs:
             pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
           DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
-            --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
+            "${image_env_args[@]}" \
             "${token_args[@]}" | tail -n 1)"
 
           wait_for_target() {

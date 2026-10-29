@@ -326,6 +326,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "nimble",
+    name: "Nimble",
+    kind: "extension",
+    tagline: "Search the web, extract page content, and run multi-source research with Nimble.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "kernel",
     name: "KERNEL",
     kind: "extension",
@@ -368,8 +375,16 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
     slug: "hindsight",
     name: "Hindsight",
-    kind: "extension",
+    kind: "memory",
     tagline: "Recall relevant context before every turn and retain each exchange automatically.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "memanto",
+    name: "Memanto",
+    kind: "memory",
+    tagline:
+      "Recall relevant long-term context and let agents deliberately save durable user memories.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -397,6 +412,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "waydock",
+    name: "Waydock",
+    kind: "connection",
+    tagline: "Access mail, calendar, meetings, tasks, and follow-ups through Waydock's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Waydock: access the user's mail, calendar, meetings, tasks, and follow-ups through its MCP server.",
+      mcp: { url: "https://mcp.waydock.ai/mcp" },
+    },
+  },
+  {
     slug: "vercel",
     name: "Vercel",
     kind: "connection",
@@ -417,6 +444,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Linear workspace: issues, projects, cycles, and comments.",
       mcp: { url: "https://mcp.linear.app/mcp" },
+    },
+  },
+  {
+    slug: "sent",
+    name: "Sent",
+    kind: "connection",
+    tagline: "Send and track SMS, WhatsApp, and RCS through Sent's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Sent business messaging: send and track SMS, WhatsApp, and RCS; manage contacts and templates; inspect analytics, balance, and account readiness.",
+      mcp: { url: "https://mcp.sent.dm/mcp" },
     },
   },
   {
@@ -559,6 +598,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "flora",
+    name: "FLORA",
+    kind: "connection",
+    tagline: "Generate image, video, audio, text, and 3D assets through FLORA's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+      mcp: { url: "https://agents.flora.ai/mcp" },
+    },
+  },
+  {
     slug: "egnyte",
     name: "Egnyte",
     kind: "connection",
@@ -578,6 +628,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Embat: cash, debt, payments, and accounting.",
       mcp: { url: "https://tellme.embat.io/mcp" },
+    },
+  },
+  {
+    slug: "firecrawl",
+    name: "Firecrawl",
+    kind: "connection",
+    tagline: "Search, scrape, map, crawl, parse, and monitor web content.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Firecrawl: search, scrape, map, crawl, parse, and monitor web content.",
+      mcp: { url: "https://mcp.firecrawl.dev/v2/mcp" },
     },
   },
   {
@@ -952,6 +1013,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Raindrop",
     kind: "instrumentation",
     tagline: "Send agent traces to Raindrop to detect and debug AI product issues.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "oodle",
+    name: "Oodle",
+    kind: "instrumentation",
+    tagline: "Send agent traces to Oodle over OpenTelemetry.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {

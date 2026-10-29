@@ -28,12 +28,17 @@ Don’t rely on `vercelOidc()` as the only production authenticator outside Verc
 
 The default local Workflow world stores run state under `.eve/.workflow-data`. Mount that directory on persistent storage so runs survive process and container replacement.
 
+With the default local world, each `eve start` process accepts workflow queue deliveries only from its own queue. Keep deliveries on the process that enqueued them. Do not point `WORKFLOW_LOCAL_BASE_URL` at a load balancer that can forward deliveries to another replica; that replica rejects them with HTTP 401. Use a custom world designed for shared queue delivery when scaling across replicas.
+
+On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
+
 You can instead select an installed Workflow world package in the root `agent.ts`:
 
 ```typescript
 import { defineAgent } from "eve";
 
 export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       world: "@acme/eve-workflow-world",
@@ -46,11 +51,21 @@ The package must export a default factory or `createWorld()` function. Read cred
 
 See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workflow software development kit (SDK) abstraction.
 
+## Recover a stranded session
+
+A session is **stranded** when another eve version built the workflow run that owns it, so the current deployment cannot replay it. Its recorded history stays readable, but it cannot process new work. A new message to its channel address starts a replacement session whose `ctx.session.predecessor` names the stranded one.
+
+See [Stranded sessions](../../concepts/execution-model-and-durability#stranded-sessions) for when a session is stranded in each world, how it ends, and how a replacement session can read the earlier conversation.
+
 ## Select a sandbox provider
 
-The default sandbox environment selects Docker, microsandbox, or just-bash according to local availability. You can select one explicitly or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+The default sandbox environment selects Docker when `eve build` can reach a Docker daemon and records that choice in the build. A production build never falls back to just-bash: when Docker is unreachable during the build, the build succeeds, but each session fails when it opens the sandbox. Run `eve build` where Docker is reachable, select a provider explicitly, or implement a [custom provider](../../sandbox/custom-providers) with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+
+A `RUN eve build` step in a Dockerfile usually has no Docker daemon, so the build records no provider even when the running container later mounts `/var/run/docker.sock`. In that setup, select `DockerSandbox.environment()` from `eve/sandbox/docker` explicitly in your sandbox module, or run `eve build` in an environment where Docker is reachable and copy the output into the image.
 
 Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
+
+Self-hosted deployments don’t support deployed self-modification. The [`eve/extensions/self-modification/remote`](../self-modification#propose-changes-from-a-deployed-agent) subagent requires deploying on Vercel, where Vercel Sandbox provides its runtime credential transforms. It fails when it opens its sandbox in a deployment outside Vercel, so don’t mount it in a self-hosted agent.
 
 ## Configure proxy routes
 
@@ -91,19 +106,21 @@ research.example.com {
 }
 ```
 
-Apply the authentication, persistent storage, and sandbox configuration above to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory. If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials; the default transport requires Vercel. Ensure callback URLs are reachable from the services that call them.
+Apply the authentication, persistent storage, and sandbox configuration above to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory. If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials; the default transport requires Vercel. Ensure callback URLs are reachable from the services that call them. Remote agent callbacks must reach a public address: outside `eve dev`, eve refuses callback hosts that are loopback, private, link-local, or reserved addresses, or that resolve to one. Callbacks between services over a private network or `127.0.0.1` don't work. See [How remote dispatch and callbacks work](../remote-agents#how-remote-dispatch-and-callbacks-work).
 
 ### Add a peer frontend
 
-A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ host: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
+A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ baseUrl: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
 
 For path-based mounts, strip the public prefix before forwarding requests to the agent and set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
 
-You can instead use [`eve/next`](../frontend/nextjs#dev-vs-deploy-topology) if you want Next.js to start built agent processes and provide the browser-facing proxy routes. That integration is optional; `eve/vercel` configuration is not used by a self-hosted process manager.
+You can instead use [`eve/next`](../frontend/nextjs#self-host) if you want Next.js to start built agent processes and provide the browser-facing proxy routes. That integration is optional; `eve/vercel` configuration is not used by a self-hosted process manager.
 
 ## Run schedules
 
 The standard `eve build && eve start` path starts Nitro’s schedule runner. If you adapt the output to a custom HTTP-only host or preset, run Nitro scheduled tasks or invoke the same work from your scheduler.
+
+Each `eve start` process runs every authored schedule. When you run several replicas, start one normally and start the others with `eve start --no-schedules`, or set `EVE_SCHEDULES_DISABLED=1` in their environment. See [`eve start`](../../reference/cli#eve-start).
 
 ## Verify the service
 

@@ -11,7 +11,6 @@ import { MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
 const DEFAULT_GLOB_LIMIT = 100;
 const MAX_GLOB_LIMIT = 1000;
-const DEFAULT_PATH = "/workspace";
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -47,9 +46,7 @@ export async function executeGlobOnSandbox(
   sandbox: SandboxSession,
   args: GlobInput,
 ): Promise<GlobResult> {
-  const effectivePath = args.path ?? DEFAULT_PATH;
-
-  const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
+  const resolvedPath = await resolveAbsoluteFilePath(sandbox, args.path ?? ".");
   const normalizedPath = normalizeModelPath(resolvedPath);
   const effectiveLimit = Math.min(Math.max(1, args.limit ?? DEFAULT_GLOB_LIMIT), MAX_GLOB_LIMIT);
 

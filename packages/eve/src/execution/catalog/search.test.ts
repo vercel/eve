@@ -200,6 +200,23 @@ describe("search", () => {
       ]);
     });
 
+    it("finds a connection tool by the description of a referenced property", async () => {
+      const billing = fakeConnection({
+        description: "Payments",
+        name: "billing",
+        tools: [
+          connectionTool("create", {
+            type: "object",
+            properties: { body: { $ref: "#/$defs/Invoice" } },
+            $defs: { Invoice: { type: "object", description: "Invoice to bill a customer." } },
+          }),
+        ],
+      });
+      const output = await searchFor(tools, { connections: [billing] })({ query: "customer" });
+
+      expect(output.results.map((result) => result.tool)).toEqual(["billing__create"]);
+    });
+
     it("lists a connection whose tools need sign-in as one result named after it, and never prompts", async () => {
       const notion = fakeConnection({
         description: "Notion pages and databases",

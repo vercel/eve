@@ -22,10 +22,8 @@ const isIndexableHtmlPath = (pathname: string): boolean =>
   pathname === "/" ||
   pathname === "/benchmarks" ||
   pathname === "/integrations" ||
-  pathname === "/templates" ||
   /^\/docs\/.+/.test(pathname) ||
-  /^\/integrations\/[^/]+$/.test(pathname) ||
-  /^\/templates\/[^/]+$/.test(pathname);
+  /^\/integrations\/[^/]+$/.test(pathname);
 
 const trustedLastModified = (value: Date | undefined): Date | undefined =>
   value instanceof Date && Number.isFinite(value.getTime()) ? new Date(value.getTime()) : undefined;

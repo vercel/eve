@@ -6,11 +6,14 @@ import type {
   AgentSourceRegistry,
 } from "#compiler/source-graph.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
+import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 
 export interface CompileAgentManifestOptions {
   readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly diagnostics?: CompilerDiagnostic[];
+  /** Shared with the caller that also writes this build's model metadata snapshot. */
+  readonly modelCatalog?: CompiledRuntimeModelCatalogLoader;
   readonly sourceRegistries?: readonly AgentSourceRegistry[];
 }
 

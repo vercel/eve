@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatgpt, experimental_chatgpt, openai } from "./index.js";
+import { chatgpt, openai } from "./index.js";
 
 it.each([
   ["chatgpt", chatgpt],
@@ -39,7 +39,7 @@ describe("chatgpt", () => {
   });
 
   it("keeps the deprecated alias working", () => {
-    const model = experimental_chatgpt("gpt-5.5");
+    const model = chatgpt("gpt-5.5");
     if (typeof model === "string") throw new Error("expected a model instance");
     expect(model.modelId).toBe("gpt-5.5");
   });

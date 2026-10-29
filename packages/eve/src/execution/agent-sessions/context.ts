@@ -1,11 +1,11 @@
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type {
   ChannelInstrumentationProjection,
-  RunSessionLimits,
   SessionCapabilities,
   SessionParent,
   SessionTraceRoot,
 } from "#channel/types.js";
-import type { LocalDevRequestProvenance } from "#context/keys.js";
+import { ContinuationTokenKey, type LocalDevRequestProvenance } from "#context/keys.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
@@ -15,9 +15,7 @@ import {
   type DurableCompiledArtifactsSource,
 } from "#runtime/durable-compiled-artifacts-source.js";
 import type { SandboxState } from "#sandbox/state.js";
-import { findTask, readTaskTable } from "#execution/tasks/table.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 import {
   resolveToolCallAgentTrace,
@@ -43,11 +41,13 @@ export interface AgentSessionContext {
   readonly capabilities?: SessionCapabilities;
   readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** The calling session's address on its channel, which `ctx.channel.continuationToken` reads. */
+  readonly continuationToken?: string;
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
-  /** The token budget each session inherits: its share of the caller's remaining quota. */
-  readonly limits: RunSessionLimits;
+  /** Whether a parent, local or remote, delegated the calling session. */
+  readonly delegated?: boolean;
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** The calling session, turn, and tool call, recorded as each session's lineage. */
   readonly parent: SessionParent;
@@ -79,35 +79,17 @@ type CallerDispatch = Pick<
   | "inheritedConversation"
   | "localDevRequest"
   | "sandboxSessionId"
+  | "sandboxState"
   | "serializedContext"
   | "session"
   | "traceRoot"
   | "workflowAgents"
 >;
 
-/**
- * The token budget every session a model step's calls open inherits: the
- * caller's remaining quota split evenly across the agent tasks the step
- * starts, local or remote, so those tasks are bounded by the remainder
- * together. Sessions a workflow tool opens with `ctx.agent` get the same
- * share without dividing it further. A call to a running task starts none,
- * so it takes no share.
- */
-export function resolveStepAgentLimits(
-  caller: Pick<PreparedCoordinationDispatch, "plan" | "session">,
-): RunSessionLimits {
-  const table = readTaskTable(caller.session.state);
-  const agentTasksStarted = caller.plan.filter(
-    ({ entry }) => entry.entryPoint === "serve" && findTask(table, entry.taskId)?.kind === "agent",
-  ).length;
-  return resolveRemainingSessionTokenLimits(caller.session, agentTasksStarted);
-}
-
 /** Captures the agent session context for one workflow tool call, in the step that admits it. */
 export function captureAgentSessionContext(
   caller: CallerDispatch,
   callId: string,
-  limits: RunSessionLimits,
 ): AgentSessionContext {
   const { batch, session } = caller;
   return {
@@ -120,9 +102,10 @@ export function captureAgentSessionContext(
     capabilities: caller.capabilities,
     schedule: readSerializedSessionSchedule(caller.serializedContext),
     channelMetadata: caller.channelMetadata,
+    continuationToken: caller.serializedContext[ContinuationTokenKey.name] as string | undefined,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
-    limits,
+    delegated: hasDelegatedSessionContext(caller.serializedContext),
     localDevRequest: caller.localDevRequest,
     parent: {
       callId,
@@ -130,7 +113,7 @@ export function captureAgentSessionContext(
       sessionId: session.sessionId,
       turn: { id: batch.event.turnId, sequence: batch.event.sequence },
     },
-    sandbox: { sessionId: caller.sandboxSessionId, state: session.sandboxState },
+    sandbox: { sessionId: caller.sandboxSessionId, state: caller.sandboxState },
     traceRoot: caller.traceRoot,
     trace: resolveToolCallAgentTrace({
       callId,

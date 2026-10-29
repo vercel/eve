@@ -42,7 +42,7 @@ The plugin accepts only two options, `eveRoot` and `eveBuildCommand`.
 
 ## Call the binding
 
-With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass a host:
+With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass `baseUrl`:
 
 ```svelte
 <script lang="ts">
@@ -50,7 +50,7 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
 
   const agent = useEveAgent();
   let message = $state("");
-  let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isBusy = $derived(agent.status === "busy");
   let isInputDisabled = $derived(isBusy || agent.status === "resuming");
 
   async function handleSubmit() {
@@ -88,11 +88,11 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** When the eve service runs on a separate origin, pass `host` directly to `useEveAgent`:
+- **Non-Vercel hosts.** When the eve service runs on a separate origin, pass `baseUrl` directly to `useEveAgent`:
 
   ```ts
   const agent = useEveAgent({
-    host: "https://agent.example.com",
+    baseUrl: "https://agent.example.com",
   });
   ```
 

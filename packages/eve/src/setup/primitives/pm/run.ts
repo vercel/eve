@@ -33,9 +33,6 @@ export interface RunPackageManagerOptions {
   nonInteractive?: boolean;
 }
 
-/** @deprecated Use {@link RunPackageManagerOptions}. */
-export type RunPnpmOptions = RunPackageManagerOptions;
-
 function abortedTermination(signal: AbortSignal | undefined): PackageManagerProcessTermination {
   const reason = signal?.reason;
   return reason === undefined

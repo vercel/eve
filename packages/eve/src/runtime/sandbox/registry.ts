@@ -25,6 +25,13 @@ export interface RuntimeRegisteredSandbox {
   };
 }
 
+/** The definition that opens `sandbox`: its owner's for a subagent that shares its parent's sandbox. */
+export function owningSandboxDefinition(
+  sandbox: RuntimeRegisteredSandbox,
+): ResolvedSandboxDefinition {
+  return sandbox.inheritance?.definition ?? sandbox.definition;
+}
+
 /**
  * Runtime-owned registry that exposes the resolved sandbox to the harness
  * startup path.

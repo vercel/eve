@@ -1,6 +1,7 @@
-import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import { TurnSegment } from "#client/session-utils.js";
-import { createSessionContract } from "#internal/testing/session-contract.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
+import { ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
+import { createEventReader, linesOf } from "#protocol/session-lines.js";
+import { isStoredLine } from "#protocol/session-events/envelope.js";
 
 /**
  * Minimal, duck-typed handle to one workflow `Run`'s readable stream.
@@ -24,17 +25,16 @@ export interface WorkflowRunHandle {
  */
 export interface CapturedTurnStream {
   /**
-   * Reads stream lines until the next turn boundary (`session.waiting`,
-   * `session.completed`, `session.failed`, or a `turn.waiting` while an input
-   * request is unanswered) and returns every event observed in that segment.
+   * Reads stream lines until the next turn boundary (`turn.settled`,
+   * `session.ended`, or a `turn.paused` while an input request is unanswered) and returns every event observed in that segment.
    */
-  nextTurn(): Promise<MessageStreamEvent[]>;
+  nextTurn(): Promise<SessionStreamEvent[]>;
   /**
    * Reads stream lines until `matches` accepts an event, such as the
-   * `turn.waiting` an open turn emits while it parks, and returns every event
+   * `turn.paused` an open turn emits while it parks, and returns every event
    * read through that one.
    */
-  nextUntil(matches: (event: MessageStreamEvent) => boolean): Promise<MessageStreamEvent[]>;
+  nextUntil(matches: (event: SessionStreamEvent) => boolean): Promise<SessionStreamEvent[]>;
   /** Releases the reader lock on the underlying `ReadableStream`. */
   dispose(): void;
 }
@@ -52,33 +52,25 @@ export function captureTurnEvents(
   options: CaptureTurnEventsOptions = {},
 ): CapturedTurnStream {
   const reader = run.readable.getReader();
-  const state: StreamState = { buffer: "" };
+  const state: StreamState = {
+    buffer: "",
+    lines: createEventReader(),
+    pending: [],
+    position: 0,
+  };
   const decoder = options.decoder ?? new TextDecoder();
   let disposed = false;
-  // Every stream a test reads is held to the session contract readers rely on.
-  const contract = createSessionContract();
-  let index = 0;
-
-  const readUntil = async (matches: (event: MessageStreamEvent) => boolean) => {
+  const readUntil = async (matches: (event: SessionStreamEvent) => boolean) => {
     if (disposed) {
       throw new Error("CapturedTurnStream: stream already disposed.");
     }
 
-    return await readUntilMatch(reader, state, decoder, (event) => {
-      const [violation] = contract.observe(event);
-      if (violation !== undefined) {
-        throw new Error(
-          `Session stream contract (${violation.rule}) at event ${index}: ${violation.message}`,
-        );
-      }
-      index += 1;
-      return matches(event);
-    });
+    return await readUntilMatch(reader, state, decoder, matches);
   };
 
   return {
     async nextTurn() {
-      const segment = new TurnSegment();
+      const segment = new ResponseSegment();
       return await readUntil((event) => segment.observe(event));
     },
     async nextUntil(matches) {
@@ -103,7 +95,7 @@ export async function readFirstTurnReply(run: WorkflowRunHandle): Promise<string
   const stream = captureTurnEvents(run);
   try {
     const turn = await stream.nextTurn();
-    return filterEventsByType(turn, "message.completed").at(-1)?.data.message ?? null;
+    return summarizeTurnEvents(turn).message ?? null;
   } finally {
     stream.dispose();
     await run.cancel();
@@ -119,8 +111,8 @@ export async function readFirstTurnReply(run: WorkflowRunHandle): Promise<string
  * timing or retries involved.
  */
 export function containsEventSequence(
-  events: readonly UnstampedMessageStreamEvent[],
-  types: readonly UnstampedMessageStreamEvent["type"][],
+  events: readonly SessionEvent[],
+  types: readonly SessionEvent["type"][],
 ): boolean {
   if (types.length === 0) {
     return true;
@@ -146,13 +138,11 @@ export function containsEventSequence(
  * discriminants. Handy for assertion blocks that only care about a
  * subset of the full turn envelope.
  */
-export function filterEventsByType<T extends UnstampedMessageStreamEvent["type"]>(
-  events: readonly UnstampedMessageStreamEvent[],
+export function filterEventsByType<T extends SessionEvent["type"]>(
+  events: readonly SessionEvent[],
   type: T,
-): Array<Extract<UnstampedMessageStreamEvent, { type: T }>> {
-  return events.filter(
-    (event): event is Extract<UnstampedMessageStreamEvent, { type: T }> => event.type === type,
-  );
+): Array<Extract<SessionEvent, { type: T }>> {
+  return events.filter((event): event is Extract<SessionEvent, { type: T }> => event.type === type);
 }
 
 /**
@@ -169,35 +159,37 @@ interface CaptureTurnEventsOptions {
 
 interface StreamState {
   buffer: string;
+  /** The position of the next stored line. */
+  position: number;
+  /** Events of a line already read that the last call stopped before. */
+  pending: SessionStreamEvent[];
+  readonly lines: ReturnType<typeof createEventReader>;
 }
 
 async function readUntilMatch(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState,
   decoder: InstanceType<typeof TextDecoder>,
-  matches: (event: MessageStreamEvent) => boolean,
-): Promise<MessageStreamEvent[]> {
-  const events: MessageStreamEvent[] = [];
+  matches: (event: SessionStreamEvent) => boolean,
+): Promise<SessionStreamEvent[]> {
+  const events: SessionStreamEvent[] = [];
 
   while (true) {
-    for (
-      let newlineIndex = state.buffer.indexOf("\n");
-      newlineIndex !== -1;
-      newlineIndex = state.buffer.indexOf("\n")
-    ) {
+    while (state.pending.length > 0) {
+      const event = state.pending.shift() as SessionStreamEvent;
+      events.push(event);
+      if (matches(event)) return events;
+    }
+    const newlineIndex = state.buffer.indexOf("\n");
+    if (newlineIndex !== -1) {
       const line = state.buffer.slice(0, newlineIndex).trim();
       state.buffer = state.buffer.slice(newlineIndex + 1);
-
-      if (line.length === 0) {
-        continue;
-      }
-
-      const event = JSON.parse(line) as MessageStreamEvent;
-      events.push(event);
-
-      if (matches(event)) {
-        return events;
-      }
+      if (line.length === 0) continue;
+      const value: unknown = JSON.parse(line);
+      const position = state.position;
+      state.position += 1;
+      if (isStoredLine(value)) state.pending.push(...state.lines.read(value, position));
+      continue;
     }
 
     const { done, value } = await reader.read();
@@ -209,24 +201,21 @@ async function readUntilMatch(
 }
 
 /**
- * Stamps a constructed event so a fixture satisfies the stamped stream
- * contract without a real emit seam. Ids are sequential and readable; use
- * `stampMessageStreamEvent` when a test asserts on real id format.
+ * Materializes one fixture event with its line position, without a real writer.
  */
-export function stampTestEvent(event: UnstampedMessageStreamEvent, index = 0): MessageStreamEvent {
+export function stampTestEvent(event: SessionEvent, index = 0): SessionStreamEvent {
   return {
     ...event,
     meta: {
       at: new Date(Date.UTC(2026, 0, 1) + index).toISOString(),
-      id: `evt_test_${String(index).padStart(4, "0")}`,
+      position: { line: index, index: 0 },
+      endOfLine: true,
     },
   };
 }
 
 /** Stamps every event in a fixture list. See {@link stampTestEvent}. */
-export function stampTestEvents(
-  events: readonly UnstampedMessageStreamEvent[],
-): MessageStreamEvent[] {
+export function stampTestEvents(events: readonly SessionEvent[]): SessionStreamEvent[] {
   return events.map((event, index) => stampTestEvent(event, index));
 }
 
@@ -238,3 +227,60 @@ export const TEST_USAGE = {
   inputTokens: 1200,
   outputTokens: 150,
 };
+
+/**
+ * Encodes events as the stored lines a stream route serves: each event on its own line, so a
+ * fixture's event indexes are its positions. Delivery attribution is in the facts themselves.
+ */
+export function encodeTestLine(event: SessionEvent): string {
+  return linesOf([event], new Date(Date.UTC(2026, 0, 1)).toISOString())
+    .map((line) => `${JSON.stringify(line)}\n`)
+    .join("");
+}
+
+/**
+ * One turn's facts as a session writes them: its deliveries admitted, consumed, answered with
+ * `message` in one model run, and settled. For client tests that read a stream.
+ */
+export function testTurnFacts(
+  sequence: number,
+  message: string,
+  deliveryIds: readonly string[],
+): SessionEvent[] {
+  const turnId = `turn_${sequence}`;
+  const runId = `run_${sequence}`;
+  const partId = `part_${sequence}`;
+  const scope = { turnId };
+  return [
+    ...deliveryIds.map((deliveryId): SessionEvent => ({
+      data: { deliveryId },
+      type: "delivery.admitted",
+    })),
+    {
+      data: {
+        cause: { deliveryId: deliveryIds[0] ?? "none" },
+        follows: sequence === 0 ? null : `turn_${sequence - 1}`,
+        turnId,
+      },
+      scope,
+      type: "turn.started",
+    },
+    ...deliveryIds.map((deliveryId): SessionEvent => ({
+      data: { deliveryId, parts: [{ kind: "text", text: message.toLowerCase() }], turnId },
+      scope,
+      type: "delivery.consumed",
+    })),
+    { data: { owner: { turnId }, runId }, scope: { runId, turnId }, type: "model.requested" },
+    {
+      data: { kind: "text", partId, phase: "reply", runId, value: message },
+      scope: { runId, turnId },
+      type: "content.completed",
+    },
+    { data: { outcome: "completed", runId }, scope: { runId, turnId }, type: "model.settled" },
+    { data: { outcome: "completed", reply: [partId], turnId }, scope, type: "turn.settled" },
+    ...deliveryIds.map((deliveryId): SessionEvent => ({
+      data: { deliveryId, outcome: "handled", turnId },
+      type: "delivery.settled",
+    })),
+  ];
+}

@@ -5,6 +5,7 @@ import type {
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,
+  SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
@@ -43,6 +44,10 @@ export function createLoggingSandboxSession(input: {
     async writeTextFile(options: SandboxWriteTextFileOptions) {
       log?.(`preparation write text file: ${options.path} (${options.content.length} chars)`);
       return await session.writeTextFile(options);
+    },
+    async writeFiles(options: SandboxWriteFilesOptions) {
+      log?.(`preparation write files: ${options.files.length} files`);
+      return await session.writeFiles(options);
     },
     async removePath(options: SandboxRemovePathOptions) {
       log?.(`preparation remove path: ${options.path}`);

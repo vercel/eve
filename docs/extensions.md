@@ -340,6 +340,18 @@ Hooks and instruction fragments are additive, so they cannot be replaced. To rep
 
 You can also place an override in the corresponding agent-root slot by using the final qualified name. For example, `agent/tools/crm__search.ts` replaces `tools/search.ts` from the extension package or its directory override. Application sources have the highest precedence, so an agent-root override wins when both forms exist.
 
+### Computer-use overrides
+
+The bundled `eve/extensions/computer-use` extension exports `computer_use` from
+`eve/extensions/computer-use/tools`. Reuse that tool definition in a same-named
+override, as with the [code extension's tools](/docs/code-extension#override-bundled-tools).
+
+For a custom sandbox, `eve/extensions/computer-use/sandbox` exports
+`installComputerUse(sandbox)` and `startComputerUse(sandbox)`. Run the installer
+in the environment's preparation callback to install desktop packages and the
+driver; it requires an apt-based image with root or passwordless sudo. Start
+the managed display and driver after opening each session sandbox.
+
 ### Use an extension tool result in a hook
 
 To retain an extension tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/docs/guides/hooks#narrowing-tool-results):
@@ -347,12 +359,13 @@ To retain an extension tool's result type in a consumer hook, import its definit
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
+import { call } from "eve/events";
 import { search } from "@acme/crm/tools";
 
 export default defineHook({
   events: {
-    "action.result"(event) {
-      const match = toolResultFrom(event.data.result, search);
+    "call.settled"(event, ctx) {
+      const match = toolResultFrom(call(ctx.view, event.data.callId), search);
       if (match) console.log(match.output);
     },
   },
@@ -367,7 +380,9 @@ Local `eve dev` also mounts bundled development extensions without creating a pr
 
 ### Compatibility
 
-At build time, eve checks the extension's generated capability metadata. If the extension needs an unsupported capability contract, upgrade eve or install a compatible extension release.
+`eve extension build` records the eve version used to build the extension. When you mount a package, eve checks its distribution before loading extension code. A distribution built with a newer eve release needs that release or later; build with the oldest eve release you want to support and test the same distribution with newer consumers. An unsupported distribution generation needs a rebuilt extension or a compatible release. npm peer ranges do not replace this check.
+
+**Extensions built with the old epoch-based manifest need a rebuild** when you upgrade to the first eve release that uses the new format. Upgrade to a compatible extension release, or rebuild a source-backed workspace extension with that eve release. An installed, source-free extension cannot be rebuilt by the consuming app.
 
 ## What to read next
 

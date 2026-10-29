@@ -44,8 +44,8 @@ export default defineEval({
       const first = firstTurns[index]!.result.expectOk();
       const second = secondTurns[index]!.result.expectOk();
 
-      await t.require(first.message, equals(`stress-ack:1:${markerFor(index, 1)}`));
-      await t.require(second.message, equals(`stress-ack:2:${markerFor(index, 2)}`));
+      await t.require(first.reply, equals(`stress-ack:1:${markerFor(index, 1)}`));
+      await t.require(second.reply, equals(`stress-ack:2:${markerFor(index, 2)}`));
       await t.require(second.sessionId, equals(first.sessionId));
     }
 
@@ -84,8 +84,8 @@ export default defineEval({
     t.succeeded();
     t.event("session.started", { count: SESSION_COUNT });
     t.event("turn.started", { count: TURN_COUNT });
-    t.event("turn.completed", { count: TURN_COUNT });
-    t.notEvent("turn.failed");
+    t.event("turn.settled", { count: TURN_COUNT, data: { outcome: "completed" } });
+    t.notEvent("turn.settled", { data: { outcome: "failed" } });
   },
 });
 

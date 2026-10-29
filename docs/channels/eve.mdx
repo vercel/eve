@@ -35,10 +35,6 @@ eve link
 eve add channel/web
 ```
 
-`eve init --channel-web-nextjs` keeps its existing scaffolding behavior and does
-not provision authentication. Sign-in setup runs through `eve add channel/web`
-or the terminal UI's channel picker.
-
 The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
 channel verifies the same session, while retaining Vercel OIDC and local
 development access. In an agent workspace, setup configures only the selected
@@ -91,16 +87,55 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `GET /eve/v1/health` (check whether the application is reachable)
 - `GET /eve/v1/info` (inspect the agent)
 - `POST /eve/v1/session` (create a session, optionally sending its first message)
-- `POST /eve/v1/session/:sessionId` (send a follow-up)
+- `POST /eve/v1/session/:sessionId` (send a follow-up, respond to an input request, or prepare an idle session with an empty body)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
-- `POST /eve/v1/session/:sessionId/reset` (retire the session)
+- `POST /eve/v1/session/:sessionId/end` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
+`POST /eve/v1/session/:sessionId` with no body or `{}` prepares an existing session using
+the channel's auth policy, without calling `onMessage` or creating a delivery. Non-empty bodies
+keep the message and answer behavior, including unknown-field validation; empty or invalid
+messages, an empty `answers` array, and payloads with neither input are rejected. Preparation
+returns `{ ok: true, status }`: `ready` when the owner already uses the serving
+deployment, `accepted` (HTTP 202) when a background preparation hint has been queued,
+`unsupported` when the World or owner cannot prepare, or `no_active_session` when no live
+owner exists. Other successful statuses use HTTP 200. Acceptance does not mean the handoff
+has completed. Idle preparation preserves the session ID, stream, history, and expiry;
+active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
+for client usage and deployment routing.
+
 `GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
+
+### Request validation
+
+Session creation, follow-up message and input-response requests, and session controls reject
+unknown top-level JSON fields with `400 Bad Request`. The error names the unknown fields and
+lists the accepted fields for that route. Field names are case-sensitive: `outputschema` is
+not `outputSchema`. Invalid requests do not create sessions, dispatch messages, or apply controls.
+
+Fields accepted on one route are not automatically valid on another. For example, `operationId`
+is accepted on session creation but rejected on follow-up messages.
+
+Follow-up message and input-response requests accept an `idempotencyKey` of 1 to 256 characters,
+for a retry that can't tell whether the first request was accepted. The key names the delivery:
+repeating the request with the same key returns the same `deliveryId`, and the input doesn't run
+again. Unlike a channel's [retried deliveries](./custom#retried-deliveries), whose duplicates get a
+new receipt settled `ignored`, the repeat's receipt is the original's. The session remembers its
+last 1,024 keys, so use a new key for new input. The compact and clear routes
+accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; end accepts `reason`.
+
+Open payload objects such as `clientContext` keep their existing contracts. Delegated requests
+with a `callback` accept, and ignore, the retired `activityObserver` field so older senders keep
+working. No other unknown fields are accepted. Authentication and existing value validation still
+apply, including permission checks for forwarded principals and tool stubs.
+
+A newer client sending an unsupported field to an older server with strict validation fails
+rather than silently losing the requested behavior. Correct the field or upgrade the server;
+do not automatically remove behavior-changing options and retry.
 
 ### Start and continue a session
 
@@ -108,7 +143,7 @@ Create a conversation session before its first message with a bodyless request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A"}
 ```
 
 See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
@@ -124,7 +159,7 @@ Include an initial message to create the session and start its first turn in one
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","deliveryId":"delivery_A"}
 ```
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
@@ -141,21 +176,21 @@ curl -X POST https://<deployment>/eve/v1/session \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","deliveryId":"delivery_A"}
 ```
 
 When the create request includes a message, a follow-up request accepts exactly one of
-`message` or `inputResponses`; use the latter to answer a pending HITL request:
+`message` or `answers`; use the latter to answer a pending HITL request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -H "Content-Type: application/json" \
-  -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
+  -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
 Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again. The turn ID stays the same.
 
-Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
+Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `answers` answer their addressed requests.
 
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
@@ -172,6 +207,8 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -H "Content-Type: application/json" \
   -d '{"message":[{"type":"text","text":"Summarize this report."},{"type":"file","mediaType":"application/pdf","filename":"report.pdf","data":"data:application/pdf;base64,JVBERi0xLjQK..."}]}'
 ```
+
+Framework-generated attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`) are not accepted in HTTP request bodies; they return `400 Bad Request`.
 
 `uploadPolicy` sets the size cap and allowed media types, 25 MB and every type by default. A request whose inline file breaks the policy returns `413` for size or `415` for type. Inline bytes also count toward the request body limit of the platform that serves the channel. On Vercel Functions that limit is 4.5 MB, so a base64 file stops at about 3.3 MB.
 
@@ -201,27 +238,33 @@ export default eveChannel({
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
-Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append `session.failed` with code `session_stranded` and close the stream. Existing readers finish when they receive that terminal event.
+Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before ending the session. End attempts to append its control delivery's `delivery.admitted` (`source: { control: "reset" }`) and `delivery.settled`, then `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ deliveryId }` naming that delivery, then close the stream. Existing readers finish when the stream ends.
+
+A session started by an eve version before v27 stores v26 events. Its stream route serves them as the v27 lines they record, so v27 clients render that history: messages, reasoning, tool calls and results, approvals, questions, sign-ins, subagents, clears, and compactions. Streamed text previews aren't translated, so a v26 session that is still running shows each part once it completes.
+
+Cursors still count stored lines. A stored event with nothing for a v27 reader to fold, such as a streamed delta, is sent as a `position` marker. The route reads these streams from their first line on every request, whatever the cursor. Once no running owner can add to the stream, a follow ends at the tail with `stream.ended`, so clients stop reconnecting.
 
 After a session ends, the World keeps its stream only for its retention period. Reading a stream past that point returns `410 session_expired`. The history is gone, so the TypeScript client fails on the first response with a `ClientError` whose `code` is `"session_expired"`, without retrying.
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.settled` with `outcome: "cancelled"`.
 
-See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
+See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for delivery receipts, HTTP status codes, subagent cancellation, and race behavior.
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `reset` route to end it instead. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ### Compact context
 
-Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
-### Reset a session
+<a id="reset-a-session" />
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. Reset also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+### End a session
+
+Post to `/eve/v1/session/:sessionId/end` to terminally retire that session. End never replaces the ID automatically; create a new session explicitly for a fresh conversation. End also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ## Replace or disable the defaults
 
@@ -255,7 +298,7 @@ export default eveChannel({
   cors: {
     origin: "https://app.example.com",
     methods: ["GET", "POST"],
-    allowedHeaders: ["authorization", "content-type"],
+    allowHeaders: ["authorization", "content-type"],
   },
 });
 ```
@@ -299,6 +342,10 @@ export default eveChannel({
 });
 ```
 
+Audience also selects the default [run-data retention](../agent-config#run-data-retention).
+Outside development, private and unknown-audience sessions request deletion when
+they end. The Workflow World must support deletion to enforce it.
+
 `audience` controls observability content capture; it does not change who may
 call the endpoint. `auth` still controls access. For a classification that
 depends on channel state or application-specific verified data, use a [custom
@@ -330,8 +377,9 @@ export default eveChannel({
     };
   },
   events: {
-    "message.completed"(eventData, _channel, ctx) {
-      console.log("eve response completed", {
+    "turn.settled"(event, ctx) {
+      console.log("eve turn settled", {
+        outcome: event.data.outcome,
         sessionId: ctx.session.id,
       });
     },
@@ -340,6 +388,79 @@ export default eveChannel({
 ```
 
 `onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+
+### Turn context
+
+`context` strings become user messages in durable session history. For context that applies to one turn only, return `clientContext` instead. It replaces the request's [`clientContext`](../guides/client/messages) for that turn: it reaches every model call in the turn and is not kept in session history.
+
+`ctx.eve.clientContext` holds the request's `clientContext` exactly as the client sent it, or `undefined` when it sent none. Use it to check or correct client-supplied state before the model sees it:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, defaultEveAuth } from "eve/channels/eve";
+import { vercelOidc } from "eve/channels/auth";
+
+import { getVerifiedPlan } from "../lib/billing";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  async onMessage(ctx) {
+    const auth = defaultEveAuth(ctx);
+    const plan = await getVerifiedPlan(auth);
+    return { auth, clientContext: [`The user's plan is ${plan}.`] };
+  },
+});
+```
+
+- Omit `clientContext` to keep the request's context. Return `[]` to drop it.
+- The returned value takes the same shape as request `clientContext` (`ClientContextValue`, exported from `eve/channels/eve`): a string, an array of strings, or a JSON object. eve turns it into model messages the same way.
+- eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
+- `onMessage` runs only for requests with a message. An input response keeps the context its request sent.
+
+### Start from prior history
+
+Pass `history` to bring in conversation eve did not produce, such as a transcript your app stored, a conversation moving from another system, or a branch of an earlier exchange. The model sees each entry as a real user or assistant turn, not as a transcript inside one message.
+
+Create a session that starts from stored history and waits for its first message with `create()` on a channel address. No turn runs until a message arrives:
+
+```ts title="agent/channels/app.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/conversations/:id/session", async (req, { from, params }) => {
+      const auth = await authenticate(req);
+      // Load only conversations this caller may read.
+      const conversation = await db.conversations.findForUser(params.id!, auth);
+      const { created, session } = await from(`conversation:${conversation.id}`).create({
+        auth,
+        history: conversation.messages.map((message) => ({
+          id: message.id,
+          role: message.role, // "user" | "assistant"
+          text: message.body,
+        })),
+      });
+      if (!created) {
+        return Response.json({ error: "Conversation already has a session." }, { status: 409 });
+      }
+      return Response.json({ sessionId: session.id });
+    }),
+  ],
+});
+```
+
+The client then resumes that session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when a session already owned the address, or another `create()` or `send()` claimed it first. That session comes back unchanged and your `history` was not added, so check `created` before treating the session as seeded. Use a new address for each new conversation or branch.
+
+When the session at the address is [stranded](../guides/deployment/self-hosting#recover-a-stranded-session), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `end()` on the address, then `create()` again.
+
+`create()` returns once the new session claims its address, so a `send()` right after it reaches that session. It throws if no session claims the address within 15 seconds.
+
+`send()` accepts the same `history` option. The entries are added right before that message and its `context`, whether the send creates the session or continues it. The eve channel's `onMessage` can return `history` the same way. It applies to every message it is returned for, so return it only when the message should carry those turns.
+
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, that names the entry and the rule it broke. eve doesn't cap how many entries or how much text one call carries. Your route decides how much stored conversation to load, so trim long conversations there, for example to the newest messages. Tool calls, files, and reasoning are not supported.
+
+eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
+
+The stream records the entries on the `delivery.consumed` of the message that brought them, in `data.history`, with the same `role`, `text`, and `id` you passed. History from `create()` is recorded with the first message the channel accepts. When one turn takes in several messages at once, the model reads all of their history before what they sent. `transcriptOf()` from `eve/client` reads the entries in that order, so its `{ role, text }` messages can be passed straight back as `history` to branch a session. Frontend `messages` show them ahead of their message with `metadata.imported` set and your `id` in `metadata.historyId`, so you can rejoin your own annotations. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one, and their message ids stay unique even when a later call reuses an `id`. After that, the entries are ordinary history: compaction, `clear()`, and handoffs treat them like any other turn.
 
 ## Clients
 

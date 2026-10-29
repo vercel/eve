@@ -158,7 +158,7 @@ export default defineTool({
           },
         },
       },
-      abortSignal: ctx.abortSignal,
+      signal: ctx.abortSignal,
     });
     return { team: result.answers.team.choice };
   },
@@ -166,12 +166,17 @@ export default defineTool({
 ```
 
 The choice above is typed as `"billing" | "support"`. Each question appears under
-its authored key in `result.answers`. Results also include token usage, warnings,
-provider metadata, and response metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
+its authored key in `result.answers`. Results also include normalized token usage in `usage`.
+To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
-`decide` accepts AI SDK decision options, including `maxRetries`, `headers`,
-and `providerOptions`. Pass an `abortSignal` to cancel the request. Input and
-answer validation, retries, and provider errors follow AI SDK semantics.
+`decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`.
+Pass `signal: ctx.abortSignal` to cancel the request. Import `DecisionModel`, `DecisionState`,
+`DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`,
+and `DecisionResult` from `eve/ai` to annotate reusable configs and handlers.
+Model instances must implement decision model specification `v4`, the version AI SDK 7 supports;
+a matching `provider`, `modelId`, and `specificationVersion` alone is not an implementation.
+If the installed `ai` package does not export a decision API, `decide` throws an error naming the
+missing export. Input and answer validation, retries, and provider errors follow AI SDK semantics.
 
 You can also call `decide` outside a tool; it does not require an active eve
 session. Each call performs its own decision. `auto` uses this function
@@ -210,9 +215,10 @@ guide for an end-to-end walkthrough.
 
 ## Runtime behavior
 
-`auto` decides at the first `step.started` event, after the incoming prompt
-is available and before the selected language model runs. It reuses that choice
-for later tool-loop steps in the same turn. A new turn makes a new choice, and
+`auto` decides before the first model call of each turn, after the incoming
+prompt is available and before the selected language model runs. eve keeps the
+choice in the session and reuses it for the turn's later model calls, including
+in a fresh process, without deciding again. A new turn makes a new choice, and
 child sessions route from their own prompts.
 
 The decider receives up to eight recent user and assistant text messages,

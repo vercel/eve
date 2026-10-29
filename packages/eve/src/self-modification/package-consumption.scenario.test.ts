@@ -77,7 +77,6 @@ describe("packed package consumption", () => {
 
   it("builds a fresh app using only installed tarball contents", async () => {
     await access(join(packageRoot, "dist/src/index.js"));
-    await access(join(packageRoot, "dist/src/self-modification/agent.js"));
     await access(join(packageRoot, "dist/src/self-modification/config.js"));
     await access(join(packageRoot, "dist/src/self-modification/sandbox.js"));
     await access(join(packageRoot, "dist/src/self-modification/setup.js"));
@@ -144,7 +143,6 @@ describe("packed package consumption", () => {
             "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
             "just-bash": "3.1.0",
-            microsandbox: "0.5.5",
           },
         },
         null,
@@ -171,7 +169,6 @@ describe("packed package consumption", () => {
         connector: "github/selfmod-acme-agent",
         directory: ".",
         repository: "github.com/acme/agent",
-        vercelBackend: true,
       }),
     );
 
@@ -180,7 +177,6 @@ describe("packed package consumption", () => {
       ["install", "--ignore-scripts", "--no-frozen-lockfile", "--prefer-offline"],
       appRoot,
     );
-    await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
     await run(
       "node",
       ["--input-type=module", "-e", 'await import("eve/extensions/code/sandbox")'],

@@ -1,7 +1,7 @@
 import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
 
 export const DEPLOYED_OPTION_MOVED_MESSAGE =
-  "The `deployed` option moved to the separate `eve/self-modification/remote` mount. Remove it from this local self-modification mount and mount `eve/self-modification/remote` instead.";
+  "The `deployed` option moved to the separate `eve/extensions/self-modification/remote` mount. Remove it from this local self-modification mount and mount `eve/extensions/self-modification/remote` instead.";
 
 /** Local self-modification settings shared by its bundled child and sandbox. */
 export interface SelfModificationConfig {

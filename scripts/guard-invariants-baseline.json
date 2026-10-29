@@ -1,8 +1,6 @@
 {
   "_description": "Baselines for framework mechanical lints. Each rule guard refuses to let new violations slip in beyond what is recorded here. Lower a count by removing offenders, never raise it. Empty allowlists/maps mean the rule is fully enforced.",
-  "rule13_spreadTernaryByFile": {
-    "packages/eve/src/public/channels/auth.ts": 7
-  },
+  "rule13_spreadTernaryByFile": {},
   "rule19_asyncLocalStorageAllowlist": [
     "packages/eve/src/context/container.ts",
     "packages/eve/src/public/channels/slack/slackChannel.ts",

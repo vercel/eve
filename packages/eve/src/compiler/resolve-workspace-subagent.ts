@@ -2,6 +2,7 @@ import { discoverAgent } from "#discover/discover-agent.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
 import { findEveProjectContext } from "#internal/project-context.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { isDefinedAgent } from "#public/definitions/agent.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 import { loadModuleBackedDefinition } from "#compiler/normalize-helpers.js";
 import type { NormalizedSubagentConfig } from "#compiler/normalize-subagent.js";
@@ -44,17 +45,21 @@ export async function resolveWorkspaceSubagentDefinition(input: {
     logicalPath: configSource.logicalPath,
     owner: { kind: "application" as const },
   };
-  const definition = normalizeAgentDefinition(
-    await loadModuleBackedDefinition({
-      binding,
-      kind: "agent config",
-      loadNamespace: createCompiledBindingNamespaceLoader({
-        appRoot: project.appRoot,
-        bindings: { [configSource.sourceId]: binding },
-        registries: input.registries,
-      }),
-      source: configSource,
+  const authored = await loadModuleBackedDefinition({
+    binding,
+    kind: "agent config",
+    loadNamespace: createCompiledBindingNamespaceLoader({
+      appRoot: project.appRoot,
+      bindings: { [configSource.sourceId]: binding },
+      registries: input.registries,
     }),
+    source: configSource,
+  });
+  if (!isDefinedAgent(authored)) {
+    throw new Error(`Export defineAgent({...}) from "${binding.backing.sourcePath}".`);
+  }
+  const definition = normalizeAgentDefinition(
+    authored,
     `Expected workspace member ${JSON.stringify(input.name)} agent config to match the public eve shape.`,
   );
   if (definition.description === undefined || definition.description.trim().length === 0) {
