@@ -567,11 +567,12 @@ function SupportBubble({
 
 /**
  * Grows a message in from nothing, so whatever holds it eases its height up. It takes back the
- * stack's gap and grows it inside, and leaves room for the bubble's tail.
+ * stack's gap and grows it inside, and leaves room for the bubble's tail. Only on phones: from
+ * md up, iMessage carries the demo's follow-up.
  */
 function GrowIn({ children }: { children: ReactNode }) {
   return (
-    <div className="-mt-2 grid motion-safe:animate-grow-in">
+    <div className="-mt-2 grid motion-safe:animate-grow-in md:hidden">
       <div className="-mx-2 -mb-1 flex min-h-0 flex-col overflow-hidden px-2 pt-2 pb-1">
         {children}
       </div>
@@ -582,8 +583,8 @@ function GrowIn({ children }: { children: ReactNode }) {
 /** Customer support chat docked in a product, shown inside a browser window. */
 function WebAppClient({ stage = 0 }: { stage?: number }) {
   const followUp = [
-    ...(stage >= AGENTIC_WEB_ASKED ? [WEB_QUESTION] : []),
-    ...(stage >= AGENTIC_WEB_ANSWERED ? [WEB_ANSWER] : []),
+    ...(stage >= AGENTIC_ASKED ? [WEB_QUESTION] : []),
+    ...(stage >= AGENTIC_ANSWERED ? [WEB_ANSWER] : []),
   ];
   const list = useRef<HTMLDivElement>(null);
   const messages = useRef<HTMLDivElement>(null);
@@ -851,17 +852,16 @@ const receivedBubble = {
 
 /**
  * How long each stage of the agentic apps demo waits before it shows: the call starting to
- * record, the support chat's follow-up and its answer, your iMessage question, the planner
- * typing, its answer, then the call hanging up.
+ * record, the follow-up question, the planner typing, the answer, then the call hanging up.
+ * The follow-up plays in iMessage on wider screens and in the support chat on phones, where
+ * iMessage is left out, so each layout has one at the same moments.
  */
-const AGENTIC_DEMO = [400, 1100, 1300, 1100, 700, 1400, 1500];
+const AGENTIC_DEMO = [400, 1600, 700, 1400, 1800];
 const AGENTIC_RECORDING = 1;
-const AGENTIC_WEB_ASKED = 2;
-const AGENTIC_WEB_ANSWERED = 3;
-const AGENTIC_ASKED = 4;
-const AGENTIC_TYPING = 5;
-const AGENTIC_ANSWERED = 6;
-const AGENTIC_HUNG_UP = 7;
+const AGENTIC_ASKED = 2;
+const AGENTIC_TYPING = 3;
+const AGENTIC_ANSWERED = 4;
+const AGENTIC_HUNG_UP = 5;
 
 // The demo's follow-up in the planner thread, entering like the hero's bubbles.
 const imessageIn = "motion-safe:animate-bubble-in motion-reduce:animate-fade-in";
