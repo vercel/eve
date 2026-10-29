@@ -6,6 +6,7 @@ import {
 } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
@@ -52,6 +53,42 @@ describe("resolveConnectionDefinition", () => {
     expect(resolved.authorization).toBe(auth);
     expect(resolved.headers).toBe(headers);
     expect(resolved.toolCall).toBe(toolCall);
+  });
+
+  // #5630
+  it.fails("keeps an object-form approval with its response policy", async () => {
+    const approval = {
+      request: () => "user-approval" as const,
+      response: () => ({ status: "allowed" as const }),
+    };
+    const definition: CompiledConnectionDefinition = {
+      connectionName: "crm",
+      description: "CRM",
+      logicalPath: "connections/crm.ts",
+      protocol: "mcp",
+      sourceId: "connections/crm",
+      sourceKind: "module",
+      url: "https://crm.example.com/mcp",
+    };
+    const moduleMap: CompiledModuleMap = {
+      nodes: {
+        [ROOT_COMPILED_AGENT_NODE_ID]: {
+          modules: {
+            [definition.sourceId]: {
+              default: defineMcpClientConnection({
+                approval,
+                description: definition.description,
+                url: definition.url,
+              }),
+            },
+          },
+        },
+      },
+    };
+
+    const resolved = await resolveConnectionDefinition(definition, moduleMap, undefined);
+
+    expect(resolved.approval).toEqual(approval);
   });
 });
 
