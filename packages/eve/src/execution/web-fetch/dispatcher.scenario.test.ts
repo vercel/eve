@@ -81,7 +81,7 @@ describe("undici dispatcher compatibility", () => {
 
   // GHSA-qrxm-fqhp-jwvm: a TLS 1.2 server that renegotiates to a certificate
   // for another host must fail the request, not crash the process.
-  it.fails("rejects a renegotiated certificate for another host without crashing", async () => {
+  it("rejects a renegotiated certificate for another host without crashing", async () => {
     const defaultCertificates = getCACertificates("default");
     setDefaultCACertificates([...defaultCertificates, LOCALHOST.cert, WRONG_HOST.cert]);
     const uncaught: unknown[] = [];
