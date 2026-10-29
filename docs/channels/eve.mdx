@@ -165,11 +165,12 @@ curl -X POST https://<deployment>/eve/v1/session \
 Authenticated callers that may retry a create request can pass their own `operationId` for
 create-once semantics. Once the operation owner is active, the same operation under the same
 authenticated principal returns that session instead of dispatching the input again. The create
-route does not wait for a concurrently starting request to publish ownership: simultaneous
-requests can receive different accepted candidate IDs, while only the candidate that claims the
-operation runs its first turn. Retry the operation after startup when you need its canonical
-session ID. Anonymous callers cannot use `operationId`, and operation ownership expires when the
-session is no longer resumable.
+route does not wait for another request creating the same operation. When two requests create a
+session for the same operation at once, they can get different session IDs, but only one session
+runs. Messages accepted by the other session are forwarded to the running session instead of
+being dropped. Retry the operation after startup when you need the running session's ID. Anonymous callers
+cannot use `operationId`, and operation ownership expires when the session is no longer
+resumable.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \

@@ -32,7 +32,10 @@ import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/run
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
-import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import {
+  type ContinuationConflictPayload,
+  settleContinuationConflictStep,
+} from "#execution/continuation-conflict-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   sessionCommandHookToken,
@@ -201,13 +204,21 @@ export async function bootInitialOwner(
     const created = unwrapSettled(sessionCreation);
     const prepared = unwrapSettled(ownerPreparation);
     if (prepared.kind === "alias-conflict") {
-      if (input.continuationConflictCommand !== undefined) {
-        await settleContinuationConflictStep({
-          command: input.continuationConflictCommand,
-          continuationToken,
-        });
+      // Until its hooks are gone, a follow-up sent to this run's own id is accepted here; the
+      // owner takes those too, after the command this run was created with.
+      const caught = (await inbox.release()).filter(
+        (payload): payload is ContinuationConflictPayload =>
+          payload.kind === "send" || payload.kind === "deliver",
+      );
+      const payloads = [
+        ...(input.continuationConflictCommand === undefined
+          ? []
+          : [input.continuationConflictCommand]),
+        ...caught,
+      ];
+      for (const payload of payloads) {
+        await settleContinuationConflictStep({ payload, continuationToken });
       }
-      await inbox.dispose();
       // This run never becomes the session, so nothing else would end its stream.
       await closeSessionStreamStep({ sessionWritable });
       return undefined;
