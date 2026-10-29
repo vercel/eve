@@ -1,3 +1,4 @@
+import type { BeforeSettle } from "#shared/loop-stage.js";
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type {
   CompiledAgentNodeManifest,
@@ -146,11 +147,12 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
 
 /** The functions an agent config authors, which the manifest can only mark. */
 interface AuthoredFunctions {
+  readonly beforeSettle?: BeforeSettle;
   readonly compact?: CompactionStrategy;
   readonly sessionUsage?: SessionUsageLimit | false;
 }
 
-/** Loads `limits.sessionUsage` and `compaction.compact` from the agent config module. */
+/** Loads the functions the manifest marks from the agent config module. */
 async function loadAuthoredFunctions(
   manifest: CompiledAgentNodeManifest,
   moduleMap: CompiledModuleMap,
@@ -161,7 +163,9 @@ async function loadAuthoredFunctions(
   const source = config.source;
   if (
     source === undefined ||
-    (config.limits?.sessionUsage !== true && config.compaction?.compact !== true)
+    (config.limits?.sessionUsage !== true &&
+      config.compaction?.compact !== true &&
+      config.experimental?.loop?.beforeSettle !== true)
   ) {
     return { sessionUsage };
   }
@@ -175,6 +179,10 @@ async function loadAuthoredFunctions(
     `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
   return {
+    beforeSettle:
+      config.experimental?.loop?.beforeSettle === true
+        ? definition.experimental?.loop?.beforeSettle
+        : undefined,
     compact: config.compaction?.compact === true ? definition.compaction?.compact : undefined,
     sessionUsage:
       config.limits?.sessionUsage === true ? definition.limits?.sessionUsage : sessionUsage,
@@ -221,7 +229,7 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  { compact, sessionUsage }: AuthoredFunctions,
+  { beforeSettle, compact, sessionUsage }: AuthoredFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
@@ -282,7 +290,10 @@ function createResolvedAgentConfig(
   }
 
   if (manifest.config.experimental !== undefined) {
+    const loop = manifest.config.experimental.loop;
     config.experimental = {
+      loop:
+        loop === undefined ? undefined : { beforeSettle, maxContinuations: loop.maxContinuations },
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

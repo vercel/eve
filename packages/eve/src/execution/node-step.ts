@@ -75,6 +75,7 @@ interface CreateExecutionNodeStepInput {
   readonly node: ResolvedRuntimeAgentNode;
   readonly sessionUsageLimit?: ToolLoopHarnessConfig["sessionUsageLimit"];
   readonly compactionStrategy?: ToolLoopHarnessConfig["compactionStrategy"];
+  readonly loop?: ToolLoopHarnessConfig["loop"];
 }
 
 /**
@@ -93,6 +94,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
     compactionStrategy: input.compactionStrategy,
+    loop: input.loop,
     controlDelivery: input.controlDelivery,
     handleEvent: input.handleEvent,
     instrumentation: sessionInstrumentation,

@@ -1,3 +1,4 @@
+import type { AgentExperimentalDefinition } from "#shared/agent-definition.js";
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
@@ -338,8 +339,9 @@ export type ResolvedDynamicSubagentDefinition = ResolvedReactionSource;
  */
 type ResolvedAgentDefinitionBase = Omit<
   InternalAgentDefinition,
-  "build" | "compaction" | "limits" | "model" | "source"
+  "build" | "compaction" | "experimental" | "limits" | "model" | "source"
 > & {
+  experimental?: AgentExperimentalDefinition;
   compaction?: Omit<NonNullable<InternalAgentDefinition["compaction"]>, "compact"> & {
     readonly compact?: CompactionStrategy;
   };

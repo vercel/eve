@@ -1,3 +1,4 @@
+import type { AgentExperimentalDefinition } from "#shared/agent-definition.js";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
@@ -190,7 +191,7 @@ export async function compileAgentConfig(
 }
 
 function normalizeExperimentalDefinition(
-  experimental: CompiledAgentDefinition["experimental"] | undefined,
+  experimental: AgentExperimentalDefinition | undefined,
 ): CompiledAgentDefinition["experimental"] | undefined {
   if (experimental === undefined) {
     return undefined;
@@ -204,6 +205,16 @@ function normalizeExperimentalDefinition(
       retention: experimental.workflow.retention,
       world: experimental.workflow.world,
     };
+  }
+
+  if (experimental.loop !== undefined) {
+    // The runtime loads `beforeSettle` from the agent config module.
+    const loop: { beforeSettle?: boolean; maxContinuations?: number } = {};
+    if (experimental.loop.beforeSettle !== undefined) loop.beforeSettle = true;
+    if (experimental.loop.maxContinuations !== undefined) {
+      loop.maxContinuations = experimental.loop.maxContinuations;
+    }
+    compiledExperimental.loop = loop;
   }
 
   return compiledExperimental;

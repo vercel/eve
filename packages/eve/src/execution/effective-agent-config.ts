@@ -1,3 +1,4 @@
+import type { AgentLoopDefinition } from "#shared/loop-stage.js";
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { ContextReader } from "#context/key.js";
 import { AgentSessionRuntimeOverridesKey, DynamicSubagentAgentConfigKey } from "#context/keys.js";
@@ -36,6 +37,13 @@ export function resolveSessionUsageLimit(
     bundle.resolvedAgent.config?.limits?.sessionUsage ??
     bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage;
   return limit === false ? () => false : limit;
+}
+
+/** The agent's own `experimental.loop` stages. A subagent without them uses eve's native loop. */
+export function resolveLoopStages(
+  bundle: Pick<CompiledBundle, "resolvedAgent">,
+): AgentLoopDefinition | undefined {
+  return bundle.resolvedAgent.config?.experimental?.loop;
 }
 
 /** The agent's own `compaction.compact`. A subagent without one uses eve's default strategy. */

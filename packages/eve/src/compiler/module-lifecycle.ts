@@ -57,8 +57,10 @@ export function markConfigRuntimeEntries(
     config.dynamicModel,
     config.model?.source,
     config.compaction?.model?.source,
-    // The runtime loads `limits.sessionUsage` and `compaction.compact` from the agent config module.
-    config.limits?.sessionUsage === true || config.compaction?.compact === true
+    // The runtime loads the functions the manifest marks from the agent config module.
+    config.limits?.sessionUsage === true ||
+    config.compaction?.compact === true ||
+    config.experimental?.loop?.beforeSettle === true
       ? config.source
       : undefined,
   ];

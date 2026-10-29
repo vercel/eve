@@ -560,18 +560,61 @@ keeps the data. Confirm support with your World provider. See
 
 > ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. Depending on the World, reading deleted session history returns either an empty stream or `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or set `retention: "default"` to preserve completed-session reads independently of tracing.
 
+## Check a reply before the turn settles
+
+`experimental.loop.beforeSettle` runs when a turn is about to settle with a reply. Return
+`undefined` to let it settle, or `{ continue: { note } }` to show the model your note and run it
+again in the same turn. Use it for a critic, a citation check, or a test gate the model must pass
+before the person sees an answer:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  experimental: {
+    loop: {
+      beforeSettle(turn) {
+        if (typeof turn.output === "string" && !/\[\d+\]/.test(turn.output)) {
+          return { continue: { note: "Cite a source for each claim, as [1], [2], …" } };
+        }
+        return undefined;
+      },
+    },
+  },
+});
+```
+
+- `turn.output` is the reply: the model's text, or the value it delivered for an output schema.
+  `turn.history` is the session's history, including this turn's response, and
+  `turn.continuations` counts how many times the stage continued this turn.
+- eve calls the stage only when the turn would complete. A turn that fails, waits on tasks, or
+  waits for approval doesn't reach it, and a turn with an output schema reaches it only once the
+  model delivered a value.
+- The note joins history as an `execution.continuation` message. Clients see more model runs and
+  one `turn.settled` with the last reply.
+- After `maxContinuations` continuations (default `3`, at most `10`), eve settles without calling
+  the stage. eve counts the notes in history, so a compaction during the turn can restart the
+  count.
+- A stage that throws, or returns a continue without a note, fails the turn. Clients see a generic
+  error; the server log has the cause.
+- Model calls the stage makes itself, such as `decide` from `eve/ai`, aren't billed to the
+  session's usage.
+
+This option is experimental and may change in a patch release.
+
 ## Other defineAgent fields
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                                                                                                          |
-| -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                        |
-| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                |
-| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 idle days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                     |
-| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data.                                                                            |
-| `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                             |
-| `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` keeps it out of the model's tool list; the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`. |
+| Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                                                   |
+| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                                           |
+| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 idle days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                                                |
+| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data; `loop.beforeSettle` [checks a reply before the turn settles](#check-a-reply-before-the-turn-settles). |
+| `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                                                        |
+| `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` keeps it out of the model's tool list; the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`.                            |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

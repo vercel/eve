@@ -27,6 +27,7 @@ import {
 import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
 import { hasQueuedTurnInput, park } from "#harness/step/park.js";
 import { chooseNext, type TurnNext } from "#harness/step/next.js";
+import { runBeforeSettle } from "#harness/step/before-settle.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -334,21 +335,11 @@ async function settleTurn(
   const hookFailure = await failTurnForReaction(step);
   if (hookFailure !== undefined) return hookFailure;
   const schema = step.session.outputSchema;
-  step.session = clearTurnClientContextState(step.session);
-
-  if (schema === undefined) {
-    await step.apply(
-      turnSettled(step.view().projection, { outcome: "completed" }),
-      step.session.history,
-    );
-    return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
-  }
-
-  const structured = extractFinalOutput(result);
+  const structured = schema === undefined ? undefined : extractFinalOutput(result);
   // The schema belongs to the settled turn. A later conversation turn that
   // omits outputSchema must not inherit its contract.
-  if (structured === undefined) {
-    step.session = { ...step.session, outputSchema: undefined };
+  if (schema !== undefined && structured === undefined) {
+    step.session = { ...clearTurnClientContextState(step.session), outputSchema: undefined };
     await step.apply(fail(step.view(), OUTPUT_SCHEMA_NOT_FULFILLED));
     return {
       next: null,
@@ -357,10 +348,14 @@ async function settleTurn(
     };
   }
 
-  step.session = { ...step.session, outputSchema: undefined };
+  const output = structured ?? stepOutput ?? "";
+  const stage = await runBeforeSettle(step, output);
+  if (stage !== undefined) return stage;
+
+  step.session = { ...clearTurnClientContextState(step.session), outputSchema: undefined };
   await step.apply(
     turnSettled(step.view().projection, { outcome: "completed" }),
     step.session.history,
   );
-  return { next: null, session: step.session, settledTurn: { output: structured } };
+  return { next: null, session: step.session, settledTurn: { output } };
 }

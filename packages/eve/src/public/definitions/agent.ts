@@ -2,6 +2,13 @@ import type {
   PublicAgentDefinition,
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
+export type {
+  AgentLoopDefinition,
+  BeforeSettle,
+  BeforeSettleContinue,
+  LoopStageContext,
+  SettlingTurn,
+} from "#shared/loop-stage.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";

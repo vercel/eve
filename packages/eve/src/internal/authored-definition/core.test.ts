@@ -148,6 +148,28 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('Rename "compaction.thresholdPercent" to "compaction.threshold"');
   });
 
+  it("keeps experimental.loop's stage and checks its continuation cap", () => {
+    const beforeSettle = () => undefined;
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", experimental: { loop: { beforeSettle, maxContinuations: 5 } } },
+        FAILURE_MESSAGE,
+      ).experimental,
+    ).toEqual({ loop: { beforeSettle, maxContinuations: 5 } });
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", experimental: { loop: { beforeSettle, maxContinuations: 11 } } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.loop.maxContinuations" must be an integer from 1 to 10');
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", experimental: { loop: { beforeSettle: "critic" } } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.loop.beforeSettle" must be a function');
+  });
+
   it("keeps a custom compaction strategy and rejects the default's settings beside it", () => {
     const compact = () => undefined;
     expect(

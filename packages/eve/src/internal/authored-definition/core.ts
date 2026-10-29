@@ -1,4 +1,9 @@
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
+import {
+  type AgentLoopDefinition,
+  type BeforeSettle,
+  MAX_CONTINUATIONS_LIMIT,
+} from "#shared/loop-stage.js";
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
@@ -261,14 +266,45 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["workflow"], message);
+  expectOnlyKnownKeys(record, ["loop", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.loop !== undefined) {
+    normalizedDefinition.loop = normalizeAgentLoopDefinition(record.loop, message);
+  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);
   }
 
   return normalizedDefinition;
+}
+
+function normalizeAgentLoopDefinition(value: unknown, message: string): AgentLoopDefinition {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["beforeSettle", "maxContinuations"], message);
+  const loop: Mutable<AgentLoopDefinition> = {};
+  if (record.beforeSettle !== undefined) {
+    if (typeof record.beforeSettle !== "function") {
+      throw new Error(`${message} "experimental.loop.beforeSettle" must be a function.`);
+    }
+    loop.beforeSettle = record.beforeSettle as BeforeSettle;
+  }
+  if (record.maxContinuations !== undefined) {
+    const max = record.maxContinuations;
+    if (
+      typeof max !== "number" ||
+      !Number.isInteger(max) ||
+      max < 1 ||
+      max > MAX_CONTINUATIONS_LIMIT
+    ) {
+      throw new Error(
+        `${message} "experimental.loop.maxContinuations" must be an integer from 1 to ${MAX_CONTINUATIONS_LIMIT}.`,
+      );
+    }
+    loop.maxContinuations = max;
+  }
+  return loop;
 }
 
 function normalizeAgentModelOptions(

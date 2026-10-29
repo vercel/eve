@@ -1,3 +1,4 @@
+import { MAX_CONTINUATIONS_LIMIT } from "#shared/loop-stage.js";
 import { z } from "#compiled/zod/index.js";
 import { mountIdSchema } from "#shared/extension-mount.js";
 
@@ -623,6 +624,13 @@ const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
+      loop: z
+        .object({
+          beforeSettle: z.boolean().optional(),
+          maxContinuations: z.number().int().min(1).max(MAX_CONTINUATIONS_LIMIT).optional(),
+        })
+        .strict()
+        .optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()
@@ -1221,6 +1229,8 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
       config.experimental === undefined
         ? undefined
         : {
+            loop:
+              config.experimental.loop === undefined ? undefined : { ...config.experimental.loop },
             workflow:
               config.experimental.workflow === undefined
                 ? undefined

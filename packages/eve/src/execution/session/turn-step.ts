@@ -95,6 +95,7 @@ import { hasDelegatedSessionContext } from "#execution/delegated-session-context
 import {
   resolveEffectiveAgentRuntime,
   resolveCompactionStrategy,
+  resolveLoopStages,
   resolveSessionUsageLimit,
 } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -304,6 +305,7 @@ async function runSessionStepBody(
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
     const sessionUsageLimit = resolveSessionUsageLimit(bundle);
     const compactionStrategy = resolveCompactionStrategy(bundle);
+    const loop = resolveLoopStages(bundle);
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
@@ -649,6 +651,7 @@ async function runSessionStepBody(
         },
         node: effectiveNode,
         compactionStrategy,
+        loop,
         sessionUsageLimit,
         titleAttributeWrite: pendingAttributes.title,
       });

@@ -1,3 +1,4 @@
+import type { AgentLoopDefinition } from "#shared/loop-stage.js";
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
@@ -317,6 +318,8 @@ export interface ToolLoopHarnessConfig {
   readonly compactOnly?: boolean;
   /** The agent's `compaction.compact`, which replaces eve's default rewrite. */
   readonly compactionStrategy?: CompactionStrategy;
+  /** The agent's `experimental.loop` stages, which change decisions of the native loop. */
+  readonly loop?: AgentLoopDefinition;
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;

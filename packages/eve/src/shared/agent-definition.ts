@@ -1,4 +1,5 @@
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
+import type { AgentLoopDefinition, CompiledAgentLoopDefinition } from "#shared/loop-stage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -268,7 +269,16 @@ export interface AgentExperimentalDefinition {
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
+  /**
+   * Stages that change one decision of eve's native loop.
+   */
+  readonly loop?: AgentLoopDefinition;
 }
+
+/** Compiled `experimental`, where functions become markers the runtime loads. */
+export type CompiledAgentExperimentalDefinition = Omit<AgentExperimentalDefinition, "loop"> & {
+  readonly loop?: CompiledAgentLoopDefinition;
+};
 
 /**
  * Advanced hosted-build controls authored in `agent.ts`.
@@ -382,7 +392,7 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
-  experimental?: AgentExperimentalDefinition;
+  experimental?: CompiledAgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
