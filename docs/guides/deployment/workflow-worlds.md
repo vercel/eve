@@ -7,15 +7,15 @@ A Workflow world is the backend that makes eve sessions durable. eve runs every 
 
 ## Compare worlds
 
-| World                               | Storage                           | Processes              | Upgrades                                         |
-| ----------------------------------- | --------------------------------- | ---------------------- | ------------------------------------------------ |
-| [Local](#use-the-local-world)       | Files under `.eve/.workflow-data` | One                    | One eve version at a time                        |
-| [Postgres](#use-the-postgres-world) | A PostgreSQL database             | Any number of replicas | One eve version at a time                        |
-| [Vercel Workflow](./vercel)         | Managed by Vercel                 | Managed by Vercel      | Each run stays on the deployment that started it |
+| World                               | Storage                           | Processes              | After an eve version upgrade                                                                       |
+| ----------------------------------- | --------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
+| [Local](#use-the-local-world)       | Files under `.eve/.workflow-data` | One                    | Existing sessions cannot resume                                                                    |
+| [Postgres](#use-the-postgres-world) | A PostgreSQL database             | Any number of replicas | Existing sessions cannot resume                                                                    |
+| [Vercel Workflow](./vercel)         | Managed by Vercel                 | Managed by Vercel      | Runs continue on their original deployments; eligible idle sessions can move to the new deployment |
 
-All three support session and compaction handoff, which moves a session to a fresh run while keeping its ID, event stream, and addresses; the Postgres world needs `@workflow/world-postgres` 5.0.4 or later. See [Execution model and durability](../../concepts/execution-model-and-durability#compaction-handoff).
+On the local and Postgres worlds, a new build on the same eve version resumes existing sessions. See [Upgrade a self-hosted agent](./self-hosted-operations#upgrade-a-self-hosted-agent) for what happens when the eve version changes.
 
-The Upgrades column describes sessions that are parked when you deploy a new eve release. See [Upgrade a self-hosted agent](./self-hosted-operations#upgrade-a-self-hosted-agent).
+All three support compaction handoff, which moves a session to a fresh run while keeping its ID, event stream, and addresses; the Postgres world needs `@workflow/world-postgres` 5.0.4 or later. Vercel Workflow also supports moving eligible idle sessions between deployments. See [Execution model and durability](../../concepts/execution-model-and-durability#compaction-handoff).
 
 ## Use the local world
 
@@ -23,7 +23,7 @@ The local world is the default for `eve start` and needs no configuration. It st
 
 Each `eve start` process accepts workflow queue deliveries only from its own queue. Keep deliveries on the process that enqueued them: don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer that can forward deliveries to another replica, because that replica rejects them with HTTP 401. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
 
-On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof, so runs that were active when the previous process stopped continue. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
+On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof. Runs that were active when the previous process stopped continue when the eve version is unchanged. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
 
 ## Use the Postgres world
 

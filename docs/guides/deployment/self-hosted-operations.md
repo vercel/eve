@@ -7,7 +7,7 @@ Use this guide after your agent runs with [`eve start`](./self-hosting). It cove
 
 ## Upgrade a self-hosted agent
 
-A self-hosted Workflow world serves one eve version at a time. Deploying a new build of your agent on the same eve release keeps existing sessions running. After an upgrade that changes the eve version, sessions whose workflow runs the earlier version started are stranded, as described below.
+A self-hosted Workflow world serves one eve version at a time. Deploying a new build of your agent on the same eve release keeps existing sessions running. Upgrading eve strands sessions started by the previous version: their recorded history remains readable, but they cannot resume. See [Recover a stranded session](#recover-a-stranded-session) for how a new channel message starts a replacement.
 
 To deploy a new build:
 
@@ -15,7 +15,7 @@ To deploy a new build:
 2. With the Postgres world, run `bootstrap` if the build upgrades `@workflow/world-postgres`; see [Use the Postgres world](./workflow-worlds#use-the-postgres-world).
 3. Start the new build with `eve start`.
 
-On startup, the new build resumes runs that were active when the previous processes stopped.
+When the eve version is unchanged, the new build resumes runs that were active when the previous processes stopped.
 
 ### Recover a stranded session
 

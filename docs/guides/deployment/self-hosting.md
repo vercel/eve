@@ -3,9 +3,34 @@ title: "Self-Host eve"
 description: "Run an eve agent as a Node service on your own infrastructure, and choose the Workflow world and sandbox it uses."
 ---
 
-Self-host eve by running the Node server that `eve build` produces on your own servers, container platform, or behind your own reverse proxy. The server runs every session as a durable workflow, so sessions, human approvals, subagents, and schedules survive process restarts. eve backs that durability with a [Workflow world](./workflow-worlds) and runs shell and file tools in a [sandbox](../../sandbox). Both have self-hosted defaults, and you can replace either one without changing your agent.
+Self-host eve by running the Node server that `eve build` produces on your own servers, container platform, or behind your own reverse proxy. The server runs every session as a durable workflow, so conversations, human approvals, and subagent work survive process restarts. eve backs that durability with a [Workflow world](./workflow-worlds) and runs shell and file tools in a [sandbox](../../sandbox). Both have self-hosted defaults, and you can replace either one without changing your agent's behavior.
+
+## What a self-hosted deployment needs
+
+Every self-hosted deployment needs:
+
+- A model credential and a production route policy; see [Configure model access and route auth](#configure-model-access-and-route-auth)
+- Durable storage for the Workflow world; see [Choose a Workflow world](#choose-a-workflow-world)
+- A Node process serving the build; see [Build and start the server](#build-and-start-the-server)
+- A reverse proxy that forwards both runtime route prefixes; see [Configure proxy routes](#configure-proxy-routes)
+
+The sections below follow that order and end by verifying a real turn. Configure [additional features](#configure-additional-features) as your agent needs them.
+
+## Configure model access and route auth
+
+Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
+
+Outside Vercel, use an authenticator your host can validate as the production route policy, such as Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier, rather than `vercelOidc()` alone. See [Authentication](../auth-and-route-protection).
+
+## Choose a Workflow world
+
+For one process, use the default local world. It needs no configuration and stores session state under `.eve/.workflow-data`; mount that directory on persistent storage so sessions survive process and container replacement. For replicas or hosts without persistent disk, configure the [Postgres world](./workflow-worlds#use-the-postgres-world). To use your own world implementation, see [Use another world](./workflow-worlds#use-another-world).
+
+See [Workflow worlds](./workflow-worlds) to compare and configure the available worlds.
 
 ## Build and start the server
+
+If your agent uses sandbox tools or file attachments, make Docker available during the build and at runtime, or [select a sandbox provider explicitly](#run-the-sandbox). For Dockerfile builds, see [Build inside a container image](#build-inside-a-container-image) below.
 
 Build the agent, then start the generated server:
 
@@ -14,50 +39,11 @@ eve build
 PORT=3000 eve start --host 0.0.0.0
 ```
 
-The build writes a standard Nitro server under `.output/`. `eve start` serves that output and accepts either `PORT` or the `--port` flag. To run the server from another directory, copy the app source, `.output/`, and installed dependencies together.
+The build writes the eve server under `.output/`. `eve start` serves that output and accepts either `PORT` or the `--port` flag. To run the server from another directory, copy the app source, `.output/`, and installed dependencies together.
 
-This is a complete deployment. The default local Workflow world stores session state under `.eve/.workflow-data`, and the default sandbox runs in Docker when `eve build` can reach a Docker daemon. Mount `.eve/.workflow-data` on persistent storage so sessions survive process and container replacement.
+The output is a standard [Nitro](https://nitro.build) Node server. If you adapt it to a host or preset instead of running `eve start`, see [Run schedules](./self-hosted-operations#run-schedules).
 
 Run the process under the same process manager or container platform you use for other Node web services, and configure Transport Layer Security (TLS), restarts, and log collection there.
-
-## What a self-hosted deployment needs
-
-Every self-hosted deployment needs a Node process, a model credential, a production route authentication policy, and durable storage for its Workflow world. Other infrastructure depends on the features your agent uses:
-
-| Feature                                                                                       | What your host provides                                                               |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Durable sessions, human approvals, subagents, and tasks                                       | Storage for the Workflow world: a persistent directory or a Postgres database         |
-| The `bash`, `read_file`, and `write_file` tools, file attachments, and skill supporting files | A sandbox provider; Docker by default                                                 |
-| [Schedules](../../schedules)                                                                  | One `eve start` process with schedules enabled                                        |
-| Slack, Microsoft Teams, and other [channels](../../channels/overview)                         | Public HTTPS access to `/eve/`                                                        |
-| Connection sign-in and [remote agents](../remote-agents)                                      | A [public callback origin](#set-the-public-callback-origin)                           |
-| More than one replica                                                                         | A shared Workflow world, such as [Postgres](./workflow-worlds#use-the-postgres-world) |
-| Agents in a workspace that call each other                                                    | A [workspace-peer transport](../../subagents#vercel-workspace-peers)                  |
-| Traces                                                                                        | An [OpenTelemetry](../../observability/otel) destination                              |
-
-## Choose a Workflow world
-
-The Workflow world stores each session's event log, step results, pending input, and streams, and queues the work that resumes it. Choose it by how many processes serve the agent:
-
-| World                                                | Storage                           | Use it when                                                             |
-| ---------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------- |
-| [Local](./workflow-worlds#use-the-local-world)       | Files under `.eve/.workflow-data` | One process serves the agent from a persistent directory                |
-| [Postgres](./workflow-worlds#use-the-postgres-world) | A PostgreSQL database             | Several replicas serve the agent, or containers have no persistent disk |
-| [Another world](./workflow-worlds#use-another-world) | Defined by the world package      | You run your own Workflow world implementation                          |
-
-The local world is the default and needs no configuration. See [Workflow worlds](./workflow-worlds) to configure each one.
-
-## Run the sandbox
-
-eve runs the sandbox in Docker when `eve build` can reach a Docker daemon, and records that choice in the build.
-
-A session starts its sandbox when a tool, a file attachment, or a skill's supporting files need it, and early when a client [prewarms](../frontend/use-eve-agent#prewarming) the session. Sessions, approvals, subagents, schedules, and authored tools that don't call `ctx.getSandbox()` work without a sandbox. Without one, a file attachment reaches the model as a text note instead of a file.
-
-To run sandboxes elsewhere, select a provider in your sandbox module:
-
-- `VercelSandbox.environment()` creates hosted [Vercel Sandbox](../../sandbox/vercel) sessions from any host. Outside Vercel and without a linked project, set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`.
-- `DockerSandbox.environment()` from `eve/sandbox/docker` selects [Docker](../../sandbox/docker) regardless of what the build can reach.
-- `defineSandboxProvider()` connects a [custom provider](../../sandbox/custom-providers), such as your own container, virtual machine, or isolation service.
 
 ### Build inside a container image
 
@@ -71,13 +57,7 @@ export const environment = DockerSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-You can instead run `eve build` where Docker is reachable and copy the output into the image. See [Sandbox](../../sandbox) for provider configuration and selection order.
-
-## Configure model access and route auth
-
-Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
-
-Outside Vercel, use an authenticator your host can validate as the production route policy, such as Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier, rather than `vercelOidc()` alone. See [Authentication](../auth-and-route-protection).
+You can instead run `eve build` where Docker is reachable and copy the output into the image. See [Run the sandbox](#run-the-sandbox) for the other providers.
 
 ## Configure proxy routes
 
@@ -87,18 +67,6 @@ Forward both runtime route prefixes through your reverse proxy or ingress:
 - `/.well-known/workflow/` receives workflow callbacks
 
 A proxy restricted to `/eve/` lets a session start, but the run stalls when its callback can’t reach eve. Preserve both prefixes without rewriting their paths.
-
-## Set the public callback origin
-
-Connection sign-in links and the callback URLs a parent passes to [remote agents](../remote-agents) start from the server's own address, which is `http://localhost:<port>` outside Vercel. Set `WORKFLOW_LOCAL_BASE_URL` to the agent's public origin, such as `https://support.example.com`, when your agent uses either feature:
-
-```bash
-WORKFLOW_LOCAL_BASE_URL=https://support.example.com eve start --host 0.0.0.0
-```
-
-The Workflow world also delivers its queued work to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes). With the local world, keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world).
-
-For an agent mounted under a path prefix, also set `EVE_PUBLIC_ROUTE_PREFIX`; see [Run workspace members](./self-hosted-operations#run-workspace-members).
 
 ## Verify the service
 
@@ -113,6 +81,43 @@ Then connect the development TUI and complete a real turn:
 ```bash
 eve remote connect --url https://your_agent.example.com
 ```
+
+## Configure additional features
+
+| Feature                                                               | Configuration                                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Sandbox tools, file attachments, and skill supporting files           | [Run the sandbox](#run-the-sandbox) with Docker or another provider                         |
+| [Schedules](../../schedules)                                          | Keep schedules enabled on [one `eve start` process](./self-hosted-operations#run-schedules) |
+| Slack, Microsoft Teams, and other [channels](../../channels/overview) | Expose `/eve/` over public HTTPS through your [proxy](#configure-proxy-routes)              |
+| Connection sign-in and [remote agents](../remote-agents)              | Set a [public callback origin](#set-the-public-callback-origin)                             |
+| Agents in a workspace that call each other                            | Configure a [workspace-peer transport](../../subagents#vercel-workspace-peers)              |
+| Traces                                                                | Configure an [OpenTelemetry](../../observability/otel) destination                          |
+
+## Run the sandbox
+
+eve runs the sandbox in Docker when `eve build` can reach a Docker daemon, and records that choice in the build.
+
+A session starts its sandbox when a tool, a file attachment, or a skill's supporting files need it, and early when a client [prewarms](../frontend/use-eve-agent#prewarming) the session. Sessions, approvals, subagents, schedules, and authored tools that don't call `ctx.getSandbox()` work without a sandbox. Without one, a file attachment reaches the model as a text note instead of a file.
+
+To run sandboxes elsewhere, or when the build cannot reach Docker, select a provider in your sandbox module:
+
+- `VercelSandbox.environment()` creates hosted [Vercel Sandbox](../../sandbox/vercel) sessions from any host. Outside Vercel and without a linked project, set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`.
+- `DockerSandbox.environment()` from `eve/sandbox/docker` selects [Docker](../../sandbox/docker) regardless of what the build can reach.
+- `defineSandboxProvider()` connects a [custom provider](../../sandbox/custom-providers), such as your own container, virtual machine, or isolation service.
+
+See [Sandbox](../../sandbox) for provider configuration and selection order.
+
+## Set the public callback origin
+
+Connection sign-in links and the callback URLs a parent passes to [remote agents](../remote-agents) start from the server's own address, which is `http://localhost:<port>` outside Vercel. Set `WORKFLOW_LOCAL_BASE_URL` to the agent's public origin, such as `https://support.example.com`, when your agent uses either feature:
+
+```bash
+WORKFLOW_LOCAL_BASE_URL=https://support.example.com eve start --host 0.0.0.0
+```
+
+The Workflow world also delivers its queued work to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes). With the local world, keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world).
+
+For an agent mounted under a path prefix, also set `EVE_PUBLIC_ROUTE_PREFIX`; see [Run workspace members](./self-hosted-operations#run-workspace-members).
 
 ## Continue configuring production
 
