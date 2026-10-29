@@ -1182,7 +1182,8 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("preserve that file unless the user asks to change the model");
     expect(agentsMd).toContain("`agent/instructions.ts` or files under `agent/instructions/`");
     expect(agentsMd).toContain("ls node_modules/eve/docs");
-    expect(agentsMd).toContain("Start with `docs/README.md`: it maps each task");
+    expect(agentsMd).toContain("Start with `docs/quick-reference.md`");
+    expect(agentsMd).toContain("`docs/README.md` maps each task");
     expect(agentsMd).toContain("Use a bounded authoring loop");
     expect(agentsMd).toContain("Stop discovery once the file location");
     expect(agentsMd).toContain("Follow links or inspect public types only");
