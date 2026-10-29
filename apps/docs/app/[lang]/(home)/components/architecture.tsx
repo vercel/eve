@@ -298,7 +298,7 @@ export function ArchitectureDiagram() {
             caption explains the selected mode. Below the diagram, or above it below md, so the
             choice comes before the cards it changes. */}
         <div className="order-first mb-10 md:order-none md:mt-10 md:mb-0">
-          <div className="flex items-center justify-center gap-4 text-copy-14">
+          <div className="flex items-center gap-4 text-copy-14 md:justify-center">
             <button
               type="button"
               onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
@@ -333,7 +333,7 @@ export function ArchitectureDiagram() {
             </span>
           </div>
 
-          <p className="mx-auto mt-3 max-w-xl text-balance text-center text-gray-900 text-copy-14">
+          <p className="mt-3 max-w-xl text-pretty text-gray-900 text-copy-14 md:mx-auto md:text-balance md:text-center">
             {CAPTIONS[mode]}
             {selfHosted ? (
               <>
