@@ -1,5 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
-import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
+import { pendingContinuation } from "#reactions/continuation.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -11,7 +12,7 @@ import type {
   SessionInputQueue,
   TurnSelection,
 } from "#execution/session/input-queue.js";
-import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import type { SessionInboxHandle, SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
@@ -31,7 +32,8 @@ export type NextTurnInstruction =
  * descendant deliveries leave nothing for the parent, so the wait continues.
  */
 export async function nextTurnDelivery(input: {
-  readonly inbox: SessionInboxReader;
+  readonly inbox: SessionInboxReader &
+    Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -55,6 +57,24 @@ export async function nextTurnDelivery(input: {
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;
+    }
+
+    // A hook continues the turn that settled only once nothing else waits; input that starts
+    // another turn first discards it. Its idempotency key admits it once.
+    if (queue.pendingCount === 0 && !inbox.hasPending()) {
+      const continuation = pendingContinuation(
+        cursor.serializedContext,
+        latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
+      );
+      if (continuation !== undefined) {
+        // Behind an awaited handover, older input is queued but unreadable: wait for it, so the
+        // continuation yields to it as it would to anything readable.
+        if (inbox.awaitingHandover) {
+          await inbox.whenHandoverSettled();
+          continue;
+        }
+        if (queue.enqueueDelivery(continuation) !== undefined) continue;
+      }
     }
 
     if (!inbox.hasPending()) {
