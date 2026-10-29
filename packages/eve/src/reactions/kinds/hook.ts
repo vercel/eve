@@ -27,7 +27,13 @@ import { queueCommands, reportReactionFailure, type Command } from "../intents.j
 import { sessionFrameOf } from "../frame.js";
 import type { CommitContext, CommitReaction } from "../reaction.js";
 import { openMemos } from "../records.js";
-import { discardedByDeployment, keepMemos, mergeMemos, readReactionsState } from "../state.js";
+import {
+  discardedByDeployment,
+  keepMemos,
+  mergeMemos,
+  readReactionsState,
+  writeReactionsState,
+} from "../state.js";
 
 /**
  * An authored hook as a reaction: its handlers run after every commit, once for each fact of
@@ -180,11 +186,14 @@ async function runHandler(call: {
     if (beforeTurn === undefined) queueCommands(ctx, call.reaction, idempotencyKey, requested);
     else
       for (const command of requested)
-        if (command.type === "cancel")
+        if (command.type === "cancel") {
+          // The turn opens after this commit; it's the hook's to continue once it settles.
+          writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledOpeningBy: id });
           beforeTurn({
             hook: label,
             ...(command.reason !== undefined && { reason: command.reason }),
           });
+        }
   } catch (error) {
     mergeMemos(ctx, memoScope, memos.used());
     reportReactionFailure(ctx, call.reaction, error, idempotencyKey);

@@ -11,7 +11,7 @@ import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
+import { defineHook, type HookContext, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 
 // A hook's ctx.continue() from a settled turn, read from what the model receives and what the
@@ -337,47 +337,51 @@ describe("hook ctx.continue()", () => {
     expect(prompts[1]?.split("not by a person")).toHaveLength(2);
   }, 90_000);
 
-  it("lets the hook that cancelled a turn redirect it, and no other hook", async () => {
-    let started = 0;
-    const results: Record<string, unknown[]> = { guard: [], other: [] };
-    const { inputs, log } = await runSession({
-      drive: async ({ log }) => {
-        await until(log, "turn:completed", 1);
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      },
-      hooks: {
-        guard: defineHook({
-          events: {
-            "turn.started": (_event, ctx) => {
-              started += 1;
-              if (started === 1) ctx.cancel("The agent was about to edit test files.");
+  it.each(["turn.started", "delivery.admitted"] as const)(
+    "lets the hook that cancelled a turn on %s redirect it, and no other hook",
+    async (cancelOn) => {
+      let started = 0;
+      const results: Record<string, unknown[]> = { guard: [], other: [] };
+      const { inputs, log } = await runSession({
+        drive: async ({ log }) => {
+          await until(log, "turn:completed", 1);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        },
+        hooks: {
+          guard: defineHook({
+            events: {
+              [cancelOn]: (_event: unknown, ctx: HookContext) => {
+                started += 1;
+                if (started === 1) ctx.cancel("The agent was about to edit test files.");
+              },
+              "turn.settled": (event, ctx) => {
+                if (event.data.outcome !== "cancelled") return;
+                results.guard!.push(ctx.continue("Fix the code without editing test files."));
+              },
             },
-            "turn.settled": (event, ctx) => {
-              if (event.data.outcome !== "cancelled") return;
-              results.guard!.push(ctx.continue("Fix the code without editing test files."));
+          }),
+          other: defineHook({
+            events: {
+              "turn.settled": (event, ctx) => {
+                if (event.data.outcome !== "cancelled") return;
+                results.other!.push(ctx.continue("Keep going."));
+              },
             },
-          },
-        }),
-        other: defineHook({
-          events: {
-            "turn.settled": (event, ctx) => {
-              if (event.data.outcome !== "cancelled") return;
-              results.other!.push(ctx.continue("Keep going."));
-            },
-          },
-        }),
-      },
-      name: "hook-continue-redirects",
-    });
+          }),
+        },
+        name: `hook-continue-redirects-${cancelOn.replace(".", "-")}`,
+      });
 
-    expect(results).toEqual({
-      guard: [{ queued: true }],
-      other: [{ queued: false, reason: "not-completed" }],
-    });
-    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual([
-      "turn:cancelled",
-      "turn:completed",
-    ]);
-    expect(inputs).toEqual(["Fix the code without editing test files."]);
-  }, 90_000);
+      expect(results).toEqual({
+        guard: [{ queued: true }],
+        other: [{ queued: false, reason: "not-completed" }],
+      });
+      expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual([
+        "turn:cancelled",
+        "turn:completed",
+      ]);
+      expect(inputs).toEqual(["Fix the code without editing test files."]);
+    },
+    90_000,
+  );
 });

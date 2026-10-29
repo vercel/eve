@@ -62,7 +62,10 @@ export interface RunReactionsInput {
 /** Runs after every commit: hooks' handlers for the commit's facts, then eve's own effects. */
 export async function runReactions(ctx: ContextContainer, input: RunReactionsInput): Promise<void> {
   const { reactions } = await bundleReactions(ctx);
-  writeReactionsState(ctx, withLatest(readReactionsState(ctx), input.written));
+  writeReactionsState(
+    ctx,
+    bindOpeningCancel(withLatest(readReactionsState(ctx), input.written), input.written),
+  );
   const onCommit = reactions.filter(
     (reaction): reaction is CommitReaction => reaction.timing === "commit",
   );
@@ -432,6 +435,21 @@ function stopsContinuations(event: WrittenEvent["event"]): boolean {
     "control" in source &&
     (source.control === "cancel" || source.control === "reset")
   );
+}
+
+/**
+ * A cancel from a hook before its turn opened stops the turn the input opens: once that turn
+ * starts, it's the turn the hook cancelled, before the commit's hooks see it settle.
+ */
+function bindOpeningCancel(
+  state: ReactionsState,
+  written: readonly WrittenEvent[],
+): ReactionsState {
+  const { cancelledOpeningBy, ...rest } = state;
+  if (cancelledOpeningBy === undefined) return state;
+  const started = written.find(({ event }) => event.type === "turn.started")?.event;
+  if (started?.type !== "turn.started") return state;
+  return { ...rest, cancelledBy: cancelledOpeningBy, cancelledTurnId: started.data.turnId };
 }
 
 function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): ReactionsState {
