@@ -1518,7 +1518,8 @@ export const result = true;
         .concat("\n");
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/lib/look.ts": 'export const lookSchema = { type: "object" };\n',
         "agent/lib/index.ts": 'export * from "./look";\n',
         "agent/lib/loader.ts": [
