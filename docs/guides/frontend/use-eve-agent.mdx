@@ -260,7 +260,7 @@ async function submit(text: string) {
 - When the command ended the session, such as `/new`, the store calls `newSession()`. `result.controls` lists the session controls the command applied, for UI that also reflects them, such as resetting a session route.
 - `message` is for the caller only. The store doesn't add it to `messages`, so show it yourself.
 
-A command with `session: "required"` rejects with a `ClientError` before the first message. Show its `message` the same way. The [Web Chat](./nextjs) template does all of this, plus a `/` typeahead in its composer. A store created from an existing `session` has no client of its own, so it can't list or run commands.
+A command with `session: "required"` rejects with a `ClientError` before the first message. Show its `message` the same way. The [Web Chat](./nextjs) template does all of this, plus a `/` typeahead in its composer, when you pass `commands` to its `AgentChat`: `<AgentChat commands />`. It's off by default, so a deployed chat only offers commands you chose to. A store created from an existing `session` has no client of its own, so it can't list or run commands.
 
 ## Resume a saved session
 
