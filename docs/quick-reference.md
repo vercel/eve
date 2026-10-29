@@ -3,7 +3,7 @@ title: "Quick Reference"
 description: "Copy-ready snippets for the requirements most agents need: tools, approvals, Slack, SSO, connections, per-user tools, subagents, skills, schedules, webhooks, memory, and evals."
 ---
 
-Each snippet is the smallest complete version of one requirement, and CI typechecks every one against the current API. Copy the ones you need, then follow the link only when you need an option the snippet doesn't show. For end-to-end designs that combine several features, such as multi-tenant credentials, see [Patterns](./patterns/multi-tenant-auth.md). Every capability is a file: its path under `agent/` gives its name, so `agent/tools/get_order.ts` is the tool `get_order`.
+Each snippet is the smallest complete version of one requirement, and CI typechecks every one against the current API. Copy the ones you need, then follow the link only when you need an option the snippet doesn't show. For end-to-end designs that combine several features, such as multi-tenant credentials, see [Patterns](./patterns/multi-tenant-auth.md). Every capability is a file: its path under `agent/` gives its name, so `agent/tools/get_project.ts` is the tool `get_project`.
 
 ## Start a project
 
@@ -30,19 +30,22 @@ export default defineAgent({
 
 ## Call an HTTP API from a tool
 
-```ts title="agent/tools/get_order.ts"
+```ts title="agent/tools/get_project.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
-  description: "Look up an order by ID.",
-  inputSchema: z.object({ orderId: z.string() }),
-  async execute({ orderId }, ctx) {
-    const response = await fetch(`https://api.example.com/orders/${encodeURIComponent(orderId)}`, {
-      headers: { authorization: `Bearer ${process.env.ORDERS_TOKEN}` },
-      signal: ctx.abortSignal,
-    });
-    if (!response.ok) throw new Error(`Orders API returned ${response.status}`);
+  description: "Look up a project by ID.",
+  inputSchema: z.object({ projectId: z.string() }),
+  async execute({ projectId }, ctx) {
+    const response = await fetch(
+      `https://api.example.com/projects/${encodeURIComponent(projectId)}`,
+      {
+        headers: { authorization: `Bearer ${process.env.PROJECTS_API_TOKEN}` },
+        signal: ctx.abortSignal,
+      },
+    );
+    if (!response.ok) throw new Error(`Projects API returned ${response.status}`);
     return response.json();
   },
 });
@@ -52,18 +55,20 @@ Validate input in the schema or in `execute` before any side effect. A thrown er
 
 ## Require approval for some calls
 
-```ts title="agent/tools/refund.ts"
+```ts title="agent/tools/send_email.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
-  description: "Refund an order.",
-  inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
+  description: "Send an email.",
+  inputSchema: z.object({ to: z.string().email(), subject: z.string(), body: z.string() }),
   // toolInput is undefined when the model's input doesn't parse, so ask a person.
   approval: ({ toolInput }) =>
-    toolInput === undefined || toolInput.amount >= 500 ? "user-approval" : "not-applicable",
-  async execute({ orderId, amount }) {
-    return { orderId, refunded: amount };
+    toolInput === undefined || !toolInput.to.endsWith("@example.com")
+      ? "user-approval"
+      : "not-applicable",
+  async execute({ to, subject }) {
+    return { sent: true, to, subject };
   },
 });
 ```
@@ -117,37 +122,37 @@ See [Authentication](./guides/auth-and-route-protection.md). To pick credentials
 
 ## Connect an MCP server as each user
 
-```ts title="agent/connections/notion.ts"
+```ts title="agent/connections/tracker.ts"
 import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.notion.com/mcp",
-  description: "Search and read Notion pages as the signed-in user.",
-  auth: connect({ connector: "mcp.notion.com/my-agent", principalType: "user" }),
-  tools: { allow: ["notion-search", "notion-fetch"] },
+  url: "https://mcp.tracker.example/mcp",
+  description: "Read issues in the tracker as the signed-in user.",
+  auth: connect({ connector: "mcp.tracker.example/my-agent", principalType: "user" }),
+  tools: { allow: ["list_issues", "get_issue"] },
 });
 ```
 
-`tools.allow` takes the server's own tool names; the model sees them as `notion__notion-search` and `notion__notion-fetch`. `principalType: "user"` uses the caller's own grant and asks them to sign in on first use; `"app"` acts as the agent. For a static token, use `auth: { getToken: async () => ({ token: process.env.API_TOKEN! }) }`. Use `tools: { block: [...] }` to hide specific tools instead. See [Connections](./connections/overview.mdx) and [MCP](./connections/mcp.mdx).
+`tools.allow` takes the server's own tool names; the model sees them as `tracker__list_issues` and `tracker__get_issue`. `principalType: "user"` uses the caller's own grant and asks them to sign in on first use; `"app"` acts as the agent. For a static token, use `auth: { getToken: async () => ({ token: process.env.API_TOKEN! }) }`. Use `tools: { block: [...] }` to hide specific tools instead. See [Connections](./connections/overview.mdx) and [MCP](./connections/mcp.mdx).
 
 ## Turn an OpenAPI contract into tools
 
-```ts title="agent/connections/inventory.ts"
+```ts title="agent/connections/calendar.ts"
 import { defineOpenAPIConnection } from "eve/connections";
-import spec from "../../inventory-openapi.json";
+import spec from "../../calendar-openapi.json";
 
 export default defineOpenAPIConnection({
   spec,
   baseUrl: "https://api.example.com",
-  description: "Inventory lookups and purchase orders.",
+  description: "Read and schedule team calendar events.",
   auth: {
     principalType: "app",
-    getToken: async () => ({ token: process.env.INVENTORY_API_TOKEN! }),
+    getToken: async () => ({ token: process.env.CALENDAR_API_TOKEN! }),
   },
-  operations: { allow: ["getStock", "createOrder"] },
+  operations: { allow: ["listEvents", "createEvent"] },
   approval: ({ toolName }) =>
-    toolName === "inventory__createOrder" ? "user-approval" : "not-applicable",
+    toolName === "calendar__createEvent" ? "user-approval" : "not-applicable",
 });
 ```
 
@@ -186,7 +191,7 @@ A subagent is a directory under `agent/subagents/` with its own `agent.ts`, inst
 ```text
 agent/subagents/researcher/agent.ts
 agent/subagents/researcher/instructions.md
-agent/subagents/researcher/connections/notion.ts   # export { default } from "../../../connections/notion";
+agent/subagents/researcher/connections/tracker.ts   # export { default } from "../../../connections/tracker";
 agent/subagents/reviewer/agent.ts
 agent/subagents/reviewer/instructions.md
 ```
@@ -195,7 +200,7 @@ agent/subagents/reviewer/instructions.md
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  description: "Researches a question in the team's Notion and returns a sourced answer.",
+  description: "Researches a question in the issue tracker and returns a sourced answer.",
   model: "anthropic/claude-sonnet-5",
 });
 ```
@@ -228,29 +233,29 @@ To hide a subagent from the parent model so only workflow tools can call it, set
 
 ## Load knowledge only when it's needed
 
-```md title="agent/skills/metric-definitions.md"
+```md title="agent/skills/release-checklist.md"
 ---
-description: Metric definitions. Load when someone asks about a metric such as ARR or churn.
+description: Steps for cutting a release. Load when someone asks to ship, tag, or release a version.
 ---
 
-# Metric definitions
+# Release checklist
 
-- ARR: ...
+1. ...
 ```
 
 Only the `description` stays in context; the model loads the body when a request matches it. Put always-on behavior in `instructions.md` instead. See [Skills](./skills.mdx).
 
 ## Run on a schedule and post to Slack
 
-```ts title="agent/schedules/weekly-digest.ts"
+```ts title="agent/schedules/monthly-recap.ts"
 import { defineSchedule } from "eve/schedules";
 import slack from "../channels/slack";
 
 export default defineSchedule({
-  cron: "0 15 * * 1", // Mondays at 15:00 UTC
+  cron: "0 8 1 * *", // 08:00 UTC on the first of each month
   async run({ to, waitUntil, appAuth }) {
     waitUntil(
-      to(slack, { channelId: "C0123ABC" }).send("Post this week's metrics summary.", {
+      to(slack, { channelId: "C0123ABC" }).send("Recap the projects that shipped last month.", {
         auth: appAuth,
       }),
     );
@@ -262,33 +267,35 @@ The agent runs a turn as the app principal and posts its reply as a new thread i
 
 ## Receive a signed webhook and hand it to Slack
 
-```ts title="agent/channels/alerts.ts"
+```ts title="agent/channels/deploys.ts"
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { defineChannel, POST } from "eve/channels";
 import slack from "./slack";
 
 // Replace with your provider's scheme or SDK helper.
-function isSigned(body: string, signature: string | null): boolean {
-  const secret = process.env.ALERTS_WEBHOOK_SECRET;
-  if (!secret || !signature) return false;
-  const expected = createHmac("sha256", secret).update(body).digest();
+function isSigned(body: string, timestamp: string | null, signature: string | null): boolean {
+  const secret = process.env.DEPLOYS_WEBHOOK_SECRET;
+  if (!secret || !timestamp || !signature) return false;
+  if (!(Math.abs(Date.now() / 1000 - Number(timestamp)) <= 300)) return false;
+  const expected = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest();
   const given = Buffer.from(signature, "hex");
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 export default defineChannel({
   routes: [
-    POST("/webhooks/alerts", async (request, ctx) => {
+    POST("/webhooks/deploys", async (request, ctx) => {
       const body = await request.text();
-      if (!isSigned(body, request.headers.get("x-signature"))) {
+      const { headers } = request;
+      if (!isSigned(body, headers.get("x-timestamp"), headers.get("x-signature"))) {
         return new Response("invalid signature", { status: 401 });
       }
       ctx.waitUntil(
-        ctx.to(slack, { channelId: "C0123ABC" }).send(`Triage this alert:\n${body}`, {
+        ctx.to(slack, { channelId: "C0123ABC" }).send(`Summarize this deploy event:\n${body}`, {
           auth: {
-            authenticator: "alerts-webhook",
+            authenticator: "deploys-webhook",
             principalType: "service",
-            principalId: "alerts",
+            principalId: "deploys",
             attributes: {},
           },
         }),
@@ -299,7 +306,7 @@ export default defineChannel({
 });
 ```
 
-Routes mount at the path you give, here `POST /webhooks/alerts`. Verify the raw body before parsing, and return early so a rejected request never reaches the agent. Match the header and signed content to your provider; most also sign a timestamp, which lets you reject replayed requests. The agent's reply starts a Slack thread that people can continue by mentioning the app. See [Custom Channels](./channels/custom.mdx#cross-channel-hand-off). To post without an agent turn, with retries, see [Durable Cross-Channel Notifications](./patterns/durable-cross-channel-notifications.md).
+Routes mount at the path you give, here `POST /webhooks/deploys`. Verify the raw body before parsing, and return early so a rejected request never reaches the agent. Signing the timestamp with the body and rejecting requests older than five minutes stops old requests from being replayed. Match the headers and signed content to your provider's scheme. The agent's reply starts a Slack thread that people can continue by mentioning the app. See [Custom Channels](./channels/custom.mdx#cross-channel-hand-off). To post without an agent turn, with retries, see [Durable Cross-Channel Notifications](./patterns/durable-cross-channel-notifications.md).
 
 ## Remember facts across conversations
 
@@ -341,22 +348,24 @@ import { defineEvalConfig } from "eve/evals";
 export default defineEvalConfig({});
 ```
 
-```ts title="evals/order-lookup.eval.ts"
+```ts title="evals/project-lookup.eval.ts"
 import { defineEval } from "eve/evals";
 import { includes } from "eve/evals/expect";
 
 export default defineEval({
-  description: "Looks up an order with get_order.",
+  description: "Looks up a project with get_project.",
   async test(t) {
     const session = await t.session({
-      stubs: [{ id: "order", tool: "get_order", outcome: { response: { status: "shipped" } } }],
+      stubs: [
+        { id: "project", tool: "get_project", outcome: { response: { status: "on track" } } },
+      ],
     });
-    const turn = await session.send("Where is order 42?");
+    const turn = await session.send("How is project 42 doing?");
     t.succeeded();
-    t.calledTool("get_order");
-    t.check(turn.reply, includes("shipped"));
+    t.calledTool("get_project");
+    t.check(turn.reply, includes("on track"));
   },
 });
 ```
 
-Run it with `npx eve eval order-lookup`. See [Evals](./evals/overview.mdx) and [Tool Stubs](./evals/tool-stubs.mdx).
+Run it with `npx eve eval project-lookup`. See [Evals](./evals/overview.mdx) and [Tool Stubs](./evals/tool-stubs.mdx).

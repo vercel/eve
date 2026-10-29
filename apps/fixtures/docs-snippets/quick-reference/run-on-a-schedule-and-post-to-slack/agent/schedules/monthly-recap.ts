@@ -2,10 +2,10 @@ import { defineSchedule } from "eve/schedules";
 import slack from "../channels/slack";
 
 export default defineSchedule({
-  cron: "0 15 * * 1", // Mondays at 15:00 UTC
+  cron: "0 8 1 * *", // 08:00 UTC on the first of each month
   async run({ to, waitUntil, appAuth }) {
     waitUntil(
-      to(slack, { channelId: "C0123ABC" }).send("Post this week's metrics summary.", {
+      to(slack, { channelId: "C0123ABC" }).send("Recap the projects that shipped last month.", {
         auth: appAuth,
       }),
     );

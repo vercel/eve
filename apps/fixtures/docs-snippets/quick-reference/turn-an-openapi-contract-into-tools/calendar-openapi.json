@@ -1,0 +1,41 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Calendar", "version": "1.0.0" },
+  "paths": {
+    "/events": {
+      "get": {
+        "operationId": "listEvents",
+        "parameters": [
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "description": "Events" } }
+      },
+      "post": {
+        "operationId": "createEvent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": { "type": "string" },
+                  "start": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Event created" } }
+      }
+    },
+    "/events/{id}": {
+      "delete": {
+        "operationId": "deleteEvent",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Event deleted" } }
+      }
+    }
+  }
+}
