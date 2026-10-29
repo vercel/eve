@@ -949,6 +949,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
               // outcome has an invocation to hang under — never as a user
               // chat message.
               this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
+              if (
+                working &&
+                parsePromptCommand(prompt, this.#availablePromptCommands)?.type === "cancel"
+              ) {
+                this.#cancelRequested = true;
+              }
             } else {
               this.#hasUserMessage = true;
               this.#diagnostics?.recordPrompt();
