@@ -75,6 +75,8 @@ export async function admitSessionInboxPayload(
     }
     case "clear":
     case "compact":
+      // A clear stops hooks' messages; a compaction keeps them.
+      if (command.kind === "clear") input.queue.dropHookDeliveries();
       input.queue.enqueueControl(command.kind, controlOrigin(command));
       return { kind: "consumed" };
     case "session-timeout":
@@ -84,9 +86,11 @@ export async function admitSessionInboxPayload(
       }
       return { kind: "consumed" };
     case "reset":
+      input.queue.dropHookDeliveries();
       input.queue.enqueueControl("reset", controlOrigin(command));
       return { kind: "cancel" };
     case "cancel": {
+      input.queue.dropHookDeliveries();
       const origin = controlOrigin(command);
       return origin === undefined ? { kind: "cancel" } : { kind: "cancel", origin };
     }

@@ -27,7 +27,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services and cancel the running turn. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services, cancel the running turn, and send the session a message, which joins the conversation like any other. For instructions the model reads on every call, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -92,6 +92,7 @@ interface HookContext extends SessionContext {
   readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
   readonly memo: Memo;
   cancel(reason?: string): void;
+  send(message: MessageContent, options: HookSendOptions): HookSendResult;
 }
 ```
 
@@ -259,6 +260,64 @@ The same goes for the `call.progress` a workflow tool reports while the turn wai
 
 `ctx.cancel()` targets the turn being processed, including while its input is being admitted. Calls between turns without an incoming turn do nothing. Repeated requests cancel that turn only once; they never cancel a later turn. Hook-side `ctx.compact` and `ctx.once` are not available. Client and channel session compaction APIs are unchanged.
 
+## Send a message from a hook
+
+Call `ctx.send(message, options)` from any handler to send the session a message. This hook keeps the agent working until the tests pass, for at most ten more turns:
+
+```ts title="agent/hooks/until-green.ts"
+import { defineState } from "eve/context";
+import { defineHook } from "eve/hooks";
+
+const attempts = defineState("until-green.attempts", () => 0);
+
+export default defineHook({
+  events: {
+    async "turn.settled"(event, ctx) {
+      if (event.data.outcome !== "completed") return;
+      const sandbox = await ctx.getSandbox();
+      const test = await sandbox.run({ command: "pnpm test --reporter=dot" });
+      if (test.exitCode === 0 || attempts.get() >= 10) {
+        attempts.update(() => 0);
+        return;
+      }
+      attempts.update((n) => n + 1);
+      ctx.send(
+        `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
+        { auth: ctx.session.auth.current, turnPolicy: "yield" },
+      );
+    },
+  },
+});
+```
+
+The message is [`MessageContent`](./client/messages). `options` takes `auth`, `context`, and `turnPolicy`, as `session.send()` does:
+
+- `auth` is required and names who the message acts for. Pass `ctx.session.auth.current` to act as the session's current identity, a principal to act for them, or `null` for no caller. The message's `delivery.admitted` records that principal, and `source: { channel, hook }` names the hook that sent it.
+- `turnPolicy` defaults to `"steer"`, and takes one more value than `session.send()`, `"yield"`:
+
+| `turnPolicy`        | While a turn runs                                                   | While no turn runs                              |
+| ------------------- | ------------------------------------------------------------------- | ----------------------------------------------- |
+| `"steer"` (default) | Joins the running turn at its next step, like a person's steering   | Starts a turn                                   |
+| `"queue"`           | Waits behind the running turn, then starts its own, like a person's | Starts a turn                                   |
+| `"yield"`           | Waits behind the running turn, unless anything else comes first     | Starts a turn, unless anything else comes first |
+
+`"steer"` and `"queue"` messages are admitted like a person's messages with the same policy, at the running turn's next step boundary. Unlike a person's message, a hook's doesn't interrupt a turn that waits on its tool calls or tasks: it waits for them. Only the turn's own principal steers it, so a message with another principal's `auth` queues instead. A `"yield"` message gives way: it's admitted only once nothing else waits, and dropped if any other turn starts first, such as a person's message. Sent while a delivery is being admitted, from `session.started` or that delivery's `delivery.admitted`, it waits on the turn that delivery opens. Use it for loops like the one above, so a person's message always wins and the hook decides again after their turn. `"yield"` messages for the same principal share one turn.
+
+A hook's loop can always be stopped. A cancel that no hook asked for, such as `session.cancel()`, a clear, or a reset drops every hook message that hasn't run yet, and after such a cancel stops a turn, `ctx.send()` refuses to start another until a new turn starts. A hook's message never steers a turn that waits on its person for an approval, a question, or a sign-in, and never answers one: it waits until they act. A hook can `ctx.cancel()` a turn and send a correction from its `turn.settled` handler.
+
+The model is told the message was sent automatically, not by a person, without naming the hook. A hook's message never shares a step's input or a turn with a person's message, so the note always applies to the whole message: when a person and a hook steer at the same moment, the person's message goes first and the hook's waits for the next step, or starts its own turn if the turn ends first. Like other hook effects, it's lost if the step that ran the handler is interrupted before it's saved. eve doesn't limit how many messages a hook sends, so bound loops yourself, as the example does.
+
+`ctx.send()` returns synchronously, because the session admits the message after the handler returns. It returns `{ recorded: true, deliveryId }`, or `{ recorded: false, reason: "cancelled" }` after such a cancel. `recorded` means eve recorded the message, not that it ran: a cancel, clear, or reset can still drop it, and so can another turn starting first, for `"yield"`.
+
+Every recorded message ends in a `delivery.settled` for its `deliveryId` on the session's stream:
+
+- once a turn ran it, an outcome such as `handled`, with the turn's `turnId`;
+- if it was dropped, `outcome: "ignored"`, with `reason` set to `"cancelled"`, `"cleared"`, `"reset"`, or `"preempted"` (a `"yield"` message another turn started ahead of). `HookSendDropReason` from `eve/hooks` types these values; `delivery.settled`'s `reason` is a plain string, since other deliveries record their own.
+
+A dropped message is recorded at the session's next step boundary, or once its turn ends. Messages still waiting when the session ends end with it.
+
+`delivery.admitted` records every message a hook sent, dropped ones included, with the hook in `source.hook`. It doesn't mean the message ran: the outcome is on `delivery.settled`, as for every [delivery](../concepts/sessions-runs-and-streaming#deliveries-and-responses). To count messages that ran, use `delivery.consumed`, or a `delivery.settled` outcome other than `ignored`.
+
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
@@ -270,6 +329,7 @@ A subagent's approvals, questions, and sign-ins are also relayed to the parent s
 | Need                                              | Use                                            |
 | ------------------------------------------------- | ---------------------------------------------- |
 | Observe runtime events (audit, metrics, alerting) | `events.<type>` (or a channel adapter handler) |
+| Send the session a message                        | `ctx.send()` from any handler                  |
 | Provide structured input to the model on demand   | a tool                                         |
 | Make a value available across the entire step     | a context provider                             |
 | Subscribe to platform-specific events             | a channel adapter handler                      |

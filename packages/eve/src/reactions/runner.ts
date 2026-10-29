@@ -4,13 +4,15 @@ import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { currentProjection } from "#harness/session-machine/current.js";
-import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { bundleReactions } from "./bundle.js";
 import { sessionFrameOf } from "./frame.js";
+import type { HookSendDropReason } from "#public/definitions/hook.js";
+import type { PendingSend } from "./hook-send.js";
 import { reportReactionFailure, takeIntents } from "./intents.js";
 import { effectiveModelId } from "./kinds/model.js";
 import type {
@@ -66,7 +68,12 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
   const onCommit = reactions.filter(
     (reaction): reaction is CommitReaction => reaction.timing === "commit",
   );
-  if (onCommit.length === 0 || input.written.length === 0) return;
+  if (input.written.length === 0) return;
+  // Hooks' messages are cleaned up even once no hook remains to send more.
+  if (onCommit.length === 0) {
+    dropHookSends(ctx, input.written);
+    return;
+  }
   let cancelBeforeTurn: (() => void) | undefined;
   const beforeTurn = input.cancelBeforeTurn;
   const context: CommitContext = {
@@ -92,6 +99,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
   }
   actOnCancels(ctx, reactions, input.cancelTurn);
+  dropHookSends(ctx, input.written);
   cancelBeforeTurn?.();
 }
 
@@ -396,6 +404,88 @@ function actOnCancels(
   takeIntents(ctx, (intent) => intent.type === "cancel");
   writeReactionsState(ctx, { ...readReactionsState(ctx), cancelledTurnId: first.turnId });
   cancelTurn({ hook, ...(first.reason !== undefined && { reason: first.reason }) });
+}
+
+/**
+ * A hook's message leaves the state once the session has admitted it: its `delivery.admitted` is
+ * in this commit, or its delivery already in the session's view, as after a retried step. Before
+ * then, it can be dropped, and stays, marked with why, until the session records that on the
+ * stream. Anything outside hooks can always stop a hook's loop: a cancel that no hook asked for, a
+ * clear, or a reset drops every message still waiting. A yielding message is dropped once any
+ * other turn starts, except one sent as a delivery opened that turn, which waits on it. A
+ * compaction keeps them all.
+ */
+function dropHookSends(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
+  const { sends, ...state } = readReactionsState(ctx);
+  if (sends === undefined) return;
+  const projection = currentProjection(ctx);
+  const latestTurnId = latestTurnIdOf(projection);
+  const admitted = new Set(
+    written.flatMap(({ event }) =>
+      event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
+    ),
+  );
+  const started = written.find(({ event }) => event.type === "turn.started")?.event.data as
+    | { readonly turnId: string }
+    | undefined;
+  const stopped = stopReason(written, state.cancelledTurnId);
+  let changed = false;
+  const pending = sends.flatMap((send): PendingSend[] => {
+    const { delivery, dropped, preemptible } = send;
+    if (
+      (delivery.deliveryMetadata ?? []).some(
+        ({ deliveryId }) =>
+          admitted.has(deliveryId) || projection.view.deliveries[deliveryId] !== undefined,
+      )
+    ) {
+      changed = true;
+      return [];
+    }
+    if (dropped !== undefined) return [send];
+    if (stopped !== undefined) {
+      changed = true;
+      return [{ ...send, dropped: stopped }];
+    }
+    if (preemptible?.opening === true && started !== undefined) {
+      changed = true;
+      return [{ ...send, preemptible: { turnId: started.turnId } }];
+    }
+    if (preemptible !== undefined && preemptible.turnId !== latestTurnId) {
+      changed = true;
+      return [{ ...send, dropped: "preempted" }];
+    }
+    return [send];
+  });
+  if (!changed) return;
+  writeReactionsState(ctx, pending.length === 0 ? state : { ...state, sends: pending });
+}
+
+/** Why this commit stops every hook message still waiting, if it does. */
+function stopReason(
+  written: readonly WrittenEvent[],
+  hookCancelledTurnId: string | undefined,
+): HookSendDropReason | undefined {
+  for (const { event } of written) {
+    switch (event.type) {
+      case "context.settled":
+        if (event.data.kind === "clear" && event.data.outcome === "completed") return "cleared";
+        break;
+      case "turn.settled":
+        if (event.data.outcome === "cancelled" && event.data.turnId !== hookCancelledTurnId) {
+          return "cancelled";
+        }
+        break;
+      case "delivery.admitted": {
+        const { source } = event.data;
+        if (source !== undefined && "control" in source) {
+          if (source.control === "cancel") return "cancelled";
+          if (source.control === "reset") return "reset";
+        }
+        break;
+      }
+    }
+  }
+  return undefined;
 }
 
 function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): ReactionsState {

@@ -3,46 +3,54 @@ import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { PendingSend } from "./hook-send.js";
 import type { Reaction } from "./reaction.js";
 import { readReactionsState, writeReactionsState, type PendingIntent } from "./state.js";
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. Repeated requests add nothing.
+// Cancellation targets the running turn, never a later one; repeated cancels add nothing. A send
+// waits, in order, for the session to admit it.
 
 /** A command a hook asked for, before it's queued. */
-export interface Command {
-  readonly type: "cancel";
-  readonly reason?: string;
-}
+export type Command =
+  | { readonly type: "cancel"; readonly reason?: string }
+  | ({ readonly type: "send" } & PendingSend);
 
-/**
- * Adds cancellations to the session's queue. Requests between turns are dropped.
- */
+/** Adds a hook's commands to the session's queue. Cancels between turns are dropped. */
 export function queueCommands(
   ctx: ContextContainer,
-  reactionId: string,
+  reaction: Pick<Reaction, "id" | "label">,
   occurrence: string,
   commands: readonly Command[],
 ): void {
   if (commands.length === 0) return;
   const state = readReactionsState(ctx);
   const intents = [...(state.intents ?? [])];
+  const sends = [...(state.sends ?? [])];
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
   for (const command of commands) {
+    if (command.type === "send") {
+      const { type: _type, ...send } = command;
+      sends.push(send);
+      changed = true;
+      continue;
+    }
     if (turnId === undefined || state.cancelledTurnId === turnId) continue;
     if (intents.some((queued) => queued.type === "cancel" && queued.turnId === turnId)) continue;
     intents.push({
       occurrence,
-      reactionId,
+      reactionId: reaction.id,
       type: command.type,
       ...(command.reason !== undefined && { reason: command.reason }),
       turnId,
     });
     changed = true;
   }
-  if (changed) writeReactionsState(ctx, { ...state, intents });
+  if (changed) {
+    writeReactionsState(ctx, { ...state, intents, ...(sends.length > 0 && { sends }) });
+  }
 }
 
 /** Removes and returns the waiting intents that match, because the session acted on them. */

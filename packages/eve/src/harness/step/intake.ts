@@ -6,6 +6,7 @@ import {
   createImportedHistoryMessages,
   createUserMessage,
   frameworkMessageKindForStepInput,
+  markSentByHooks,
   type HarnessModelMessage,
   normalizeMessage,
   userContentOf,
@@ -129,14 +130,14 @@ export async function prepareTurnInput(
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
   if (staged !== undefined) {
-    messages.push(
-      anchorToTurn(
-        kind === undefined
-          ? createUserMessage("user", staged)
-          : createFrameworkUserMessage(kind, staged),
-        turnId,
-      ),
+    const message = anchorToTurn(
+      kind === undefined
+        ? createUserMessage("user", staged)
+        : createFrameworkUserMessage(kind, staged),
+      turnId,
     );
+    const hooks = sentByHooks(step, input);
+    messages.push(hooks === undefined ? message : markSentByHooks(message, hooks));
   }
   return {
     clientContext,
@@ -148,6 +149,27 @@ export async function prepareTurnInput(
     storedClientContext,
     turnId,
   };
+}
+
+/**
+ * The hooks that sent the input, read from its deliveries' `source.hook`, which the admission
+ * commit recorded before the step. Input that coalesced a person's message isn't marked.
+ */
+function sentByHooks(
+  step: Step,
+  input: HarnessStepInput | undefined,
+): readonly string[] | undefined {
+  const deliveries = input?.deliveries ?? [];
+  if (deliveries.length === 0) return undefined;
+  const rows = step.view().projection.view.deliveries;
+  const hooks: string[] = [];
+  for (const { deliveryId } of deliveries) {
+    const source = rows[deliveryId]?.source;
+    const hook = source !== undefined && "hook" in source ? source.hook : undefined;
+    if (hook === undefined) return undefined;
+    if (!hooks.includes(hook)) hooks.push(hook);
+  }
+  return hooks;
 }
 
 /** The turn's input as it follows tool results: a user message needs a boundary before it. */

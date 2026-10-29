@@ -17,7 +17,7 @@ import {
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { foldLine } from "#protocol/session-projection/fold.js";
-import type { HookContext } from "#public/definitions/hook.js";
+import type { HookContext, HookSendResult } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineTool } from "#tools/definition.js";
@@ -26,7 +26,14 @@ import { takeTurnFailure } from "./intents.js";
 import { takeUserInstructionMessages } from "./kinds/instructions.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { evaluateValues, isReactionFailedError, restoreReactions, runReactions } from "./runner.js";
-import { MEMOS_CAP, forgetSessionLive, memoBytes, readReactionsState, slotsOf } from "./state.js";
+import {
+  MEMOS_CAP,
+  forgetSessionLive,
+  memoBytes,
+  readReactionsState,
+  slotsOf,
+  writeReactionsState,
+} from "./state.js";
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
 
@@ -532,6 +539,14 @@ describe("evaluateValues", () => {
   });
 });
 
+const ALICE = {
+  attributes: {},
+  authenticator: "test",
+  issuer: "test",
+  principalId: "alice",
+  principalType: "user" as const,
+};
+
 describe("runReactions", () => {
   const hook = (
     slug: string,
@@ -657,5 +672,232 @@ describe("runReactions", () => {
       expect.stringMatching(/:hook:audit:1\.0:turn\.started$/),
       expect.stringMatching(/:hook:audit:2\.0:turn\.started$/),
     ]);
+  });
+
+  describe("hook sends", () => {
+    const started = (turnId: string) => ({
+      data: { cause: { deliveryId: `d_${turnId}` }, follows: null, turnId },
+      type: "turn.started",
+    });
+    const settled = (turnId: string, outcome = "completed") => ({
+      data: { outcome, turnId },
+      type: "turn.settled",
+    });
+    const control = (line: number, control: string) =>
+      written(line, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
+
+    /** A session whose `facts` are folded, with a hook that sends on `turn.settled`. */
+    function sessionWith(
+      facts: readonly { readonly data: object; readonly type: string }[],
+      options:
+        | Parameters<HookContext["send"]>[1]
+        | ((ctx: HookContext) => Parameters<HookContext["send"]>[1]),
+      results: HookSendResult[] = [],
+    ) {
+      const ctx = session(noTools, [
+        hook("reviewer", {
+          "turn.settled": (_event, ctx) =>
+            results.push(
+              ctx.send("Summarize it.", typeof options === "function" ? options(ctx) : options),
+            ),
+        }),
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      return { ctx, projection, results };
+    }
+
+    async function sent(options: Parameters<HookContext["send"]>[1]) {
+      const { ctx, projection, results } = sessionWith(
+        [started("turn-1"), settled("turn-1")],
+        options,
+      );
+      await commit(ctx, { written: written(1, "turn.settled", settled("turn-1").data) });
+      const [result] = results;
+      expect(result).toEqual({ deliveryId: expect.stringMatching(/^hook-/u), recorded: true });
+      return { ctx, deliveryId: result!.recorded ? result!.deliveryId : "", projection };
+    }
+
+    it("records the message with the principal it acts for and the hook that sent it", async () => {
+      const { ctx, deliveryId } = await sent({ auth: ALICE, context: ["Keep it short."] });
+      const [send] = readReactionsState(ctx).sends ?? [];
+      expect(send).toEqual({
+        delivery: expect.objectContaining({
+          auth: ALICE,
+          deliveryMetadata: [
+            expect.objectContaining({ channelKind: "http", deliveryId, hook: "reviewer" }),
+          ],
+          payloads: [{ context: ["Keep it short."], message: "Summarize it." }],
+          turnPolicy: "steer",
+        }),
+      });
+    });
+
+    it("keeps a message through a compaction until the session admits it", async () => {
+      const { ctx, deliveryId } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      await commit(ctx, { written: control(2, "compact") });
+      expect(readReactionsState(ctx).sends).toHaveLength(1);
+      await commit(ctx, {
+        written: written(3, "delivery.admitted", {
+          deliveryId,
+          source: { channel: "http", hook: "reviewer" },
+        }),
+      });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    const droppedAs = (ctx: ContextContainer) =>
+      readReactionsState(ctx).sends?.map(({ dropped }) => dropped);
+
+    it.each([
+      ["cancel", "cancelled"],
+      ["reset", "reset"],
+    ])("drops every message when a %s arrives, until it's recorded", async (kind, reason) => {
+      const { ctx, deliveryId } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      await commit(ctx, { written: control(2, kind) });
+      expect(droppedAs(ctx)).toEqual([reason]);
+      // Recording the drop admits the delivery, which ends it.
+      await commit(ctx, {
+        written: written(3, "delivery.admitted", {
+          deliveryId,
+          source: { channel: "http", hook: "reviewer" },
+        }),
+      });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("drops every message when the history is cleared", async () => {
+      const { ctx } = await sent({ auth: ALICE });
+      await commit(ctx, {
+        written: written(2, "context.settled", {
+          changeId: "c_1",
+          kind: "clear",
+          outcome: "completed",
+          selects: null,
+        }),
+      });
+      expect(droppedAs(ctx)).toEqual(["cleared"]);
+    });
+
+    it("drops a yielding message once another turn starts", async () => {
+      const { ctx, projection } = await sent({
+        auth: ALICE,
+        turnPolicy: "yield",
+      });
+      expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({ turnId: "turn-1" });
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:02.000Z", facts: [started("turn-2")] },
+        projection.view.position,
+      );
+      await commit(ctx, { written: written(2, "turn.started", started("turn-2").data) });
+      expect(droppedAs(ctx)).toEqual(["preempted"]);
+    });
+
+    it("refuses a message after a cancel no hook asked for", async () => {
+      const { ctx, results } = sessionWith([started("turn-1"), settled("turn-1", "cancelled")], {
+        auth: ALICE,
+        turnPolicy: "queue",
+      });
+      await commit(ctx, {
+        written: written(1, "turn.settled", settled("turn-1", "cancelled").data),
+      });
+      expect(results).toEqual([{ reason: "cancelled", recorded: false }]);
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("drops a message the session already admitted, as after a retried step", async () => {
+      const { ctx, deliveryId, projection } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      // The retried step adopted the admission without handing it to this commit.
+      foldLine(
+        projection.view,
+        {
+          at: "2026-01-01T00:00:02.000Z",
+          facts: [
+            {
+              data: { deliveryId, source: { channel: "http", hook: "reviewer" } },
+              type: "delivery.admitted",
+            },
+          ],
+        },
+        projection.view.position,
+      );
+      await commit(ctx, { written: written(3, "usage.recorded", {}) });
+      expect(readReactionsState(ctx).sends).toBeUndefined();
+    });
+
+    it("cleans up once no hook remains to send more", async () => {
+      const { ctx, deliveryId, projection } = await sent({ auth: ALICE, turnPolicy: "queue" });
+      const bare = session(noTools, []);
+      bare.set(ChannelKey, { kind: "http" } as never);
+      writeReactionsState(bare, readReactionsState(ctx));
+      enterSessionProjectionAt(bare, projection);
+      await commit(bare, {
+        written: written(2, "delivery.admitted", {
+          deliveryId,
+          source: { channel: "http", hook: "reviewer" },
+        }),
+      });
+      expect(readReactionsState(bare).sends).toBeUndefined();
+    });
+
+    it("waits on the turn a delivery opens when a hook yields from its admission", async () => {
+      const ctx = session(noTools, [
+        hook("reviewer", {
+          "delivery.admitted": (_event, ctx) =>
+            ctx.send("Review what you wrote.", { auth: ALICE, turnPolicy: "yield" }),
+        }),
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts: [started("turn-1"), settled("turn-1")] },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, {
+        cancelBeforeTurn: () => {},
+        written: written(1, "delivery.admitted", {
+          deliveryId: "d_alice",
+          source: { channel: "http" },
+        }),
+      });
+      expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({
+        opening: true,
+        turnId: "turn-1",
+      });
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:02.000Z", facts: [started("turn-2")] },
+        projection.view.position,
+      );
+      await commit(ctx, { written: written(2, "turn.started", started("turn-2").data) });
+      expect(readReactionsState(ctx).sends?.[0]?.preemptible).toEqual({ turnId: "turn-2" });
+    });
+
+    it("requires auth", async () => {
+      const errors: string[] = [];
+      const ctx = session(noTools, [
+        hook("reviewer", {
+          "turn.settled": (_event, ctx) => {
+            try {
+              ctx.send("Summarize it.", {} as never);
+            } catch (error) {
+              errors.push((error as Error).message);
+            }
+          },
+        }),
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      await commit(ctx, { written: written(1, "turn.settled", settled("turn-1").data) });
+      expect(errors).toEqual([expect.stringContaining("without auth")]);
+    });
   });
 });

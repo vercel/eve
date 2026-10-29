@@ -22,6 +22,7 @@ import {
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
+  durableMessagesRead,
   previewPrompt,
   projectPrompt,
   type Prompt,
@@ -121,11 +122,7 @@ export async function runModelStep(
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
-      // Usage measures what the model read only when no client context was spliced in.
-      durableModelPromptMessageCount:
-        prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
-          ? caller.modelMessages.length
-          : undefined,
+      durableModelPromptMessageCount: durableMessagesRead(prompt, caller.modelMessages.length),
       endsTurnTools: endsTurnTools(catalog, endsTurn),
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,

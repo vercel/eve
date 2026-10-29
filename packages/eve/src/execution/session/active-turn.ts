@@ -27,6 +27,8 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
+import { pendingHookSends } from "#reactions/hook-send.js";
+import { settleDroppedHookSends } from "#execution/session/next-input.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -138,10 +140,24 @@ export class ActiveTurn {
     this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
   }
 
-  /** Admits everything the pump accepted while the last step ran. */
+  /** Admits everything the pump accepted while the last step ran, then what its hooks sent. */
   async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload, settled);
+    this.admitHookSends();
+    await settleDroppedHookSends(this.input.cursor);
+  }
+
+  /**
+   * Admits the messages hooks sent as the steps that ran them left them, like a person's messages.
+   * Their idempotency keys admit each once. A turn a cancel stopped admits none: they're dropped.
+   */
+  private admitHookSends(): void {
+    if (this.controller.signal.aborted) return;
+    for (const delivery of pendingHookSends(this.input.cursor.serializedContext)) {
+      const admission = this.input.queue.enqueueDelivery(delivery);
+      if (admission !== undefined) this.admitted.add(admission.sequence);
+    }
   }
 
   /**
@@ -150,6 +166,22 @@ export class ActiveTurn {
    * step; only deliveries still unread re-signal the next generation.
    */
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
+    // Steps that ran while the turn waited, such as a workflow tool's progress, can send too.
+    this.admitHookSends();
+    // A person's message and a hook's never share a step's input, or the model couldn't tell the
+    // hook's words from theirs. A person's go first; a hook's wait for the next step.
+    let steering = await this.collectSteering({ ...options, fromHooks: false });
+    if (steering.length === 0 && !this.controller.signal.aborted) {
+      steering = await this.collectSteering({ ...options, fromHooks: true });
+    }
+    this.resetSteering();
+    if (steering.length === 0) return undefined;
+    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
+    if (delivery.caller !== undefined) this.caller = delivery.caller;
+    return delivery;
+  }
+
+  private async collectSteering(options: SteeringOptions): Promise<DeliverHookPayload[]> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
@@ -162,11 +194,7 @@ export class ActiveTurn {
       }
       if (routed.kind === "turn") steering.push(routed.delivery);
     }
-    this.resetSteering();
-    if (steering.length === 0) return undefined;
-    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
-    if (delivery.caller !== undefined) this.caller = delivery.caller;
-    return delivery;
+    return steering;
   }
 
   /**

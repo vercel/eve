@@ -6,6 +6,7 @@ import type { AlsContext } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
+import { REACTIONS_STATE_KEY, type PendingSend } from "./hook-send.js";
 
 // The session's reactions as they stand, in its checkpointed state, never on the stream: one slot
 // per dynamic value with what's installed, memo results, and the commands hooks queued. Installed values that carry code live in an in-process
@@ -41,13 +42,15 @@ export interface ReactionsState {
   readonly at?: string;
   /** The runtime revision the latest step ran; memos made under another are discarded. */
   readonly revision?: string;
-  /** Commands hooks queued that the session hasn't acted on yet. */
+  /** Commands hooks queued for the running turn that the session hasn't acted on yet. */
   readonly intents?: readonly PendingIntent[];
+  /** Messages hooks sent with `ctx.send()`, in order, until the session admits or drops them. */
+  readonly sends?: readonly PendingSend[];
   /** The turn a hook's cancel stopped: a cancel acts once on its turn. */
   readonly cancelledTurnId?: string;
 }
 
-/** A command a hook queued, waiting for the session to act on it. */
+/** A command a hook queued for the running turn, waiting for the session to act on it. */
 export interface PendingIntent {
   /** The hook that queued it. */
   readonly reactionId: string;
@@ -60,7 +63,7 @@ export interface PendingIntent {
   readonly turnId?: string;
 }
 
-export const ReactionsStateKey = new ContextKey<ReactionsState>("eve.reactions");
+export const ReactionsStateKey = new ContextKey<ReactionsState>(REACTIONS_STATE_KEY);
 
 const EMPTY_STATE: ReactionsState = { latest: {}, slots: {} };
 

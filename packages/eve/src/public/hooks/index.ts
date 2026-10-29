@@ -2,7 +2,8 @@
  * Hook authoring helpers for `agent/hooks/*.ts` files.
  *
  * A hook is a map of event handlers: each runs once for each matching fact a commit carries. A
- * handler can cancel the running turn with `ctx.cancel`. External effects use
+ * handler can cancel the running turn with `ctx.cancel`, or send the session a message with
+ * `ctx.send`. External effects use
  * `ctx.occurrence.idempotencyKey` for services that support idempotency.
  */
 
@@ -13,6 +14,10 @@ export {
   type HookEventKey,
   type HookEventMap,
   type HookEventType,
+  type HookSendDropReason,
+  type HookSendOptions,
+  type HookSendResult,
+  type HookTurnPolicy,
   type StreamEventHook,
   type StreamEventHooks,
   defineHook,

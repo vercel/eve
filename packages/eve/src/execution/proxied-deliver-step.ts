@@ -13,7 +13,7 @@ import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { isSteeringDelivery } from "#execution/session/input-queue.js";
+import { isHookDelivery, isSteeringDelivery } from "#execution/session/input-queue.js";
 import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
   type PublishedSessionEvents,
@@ -85,10 +85,12 @@ async function routeProxiedDeliver(
   const children = new Map<string, ChildBucket>();
   let parentAction: RoutedDeliverPayload["parentAction"];
   // A typed answer joins the open turn, so only the turn's own principal may
-  // send one, as only they steer it. Anyone else's text waits for the turn to
-  // end; their button answers still settle a request as its responder.
+  // send one, as only they steer it, and never a hook's message. Anyone
+  // else's text waits for the turn to end; their button answers still settle a
+  // request as its responder.
   const resolveMessage =
     !hasDelegatedSessionContext(serializedContext) &&
+    !isHookDelivery(sourceDelivery) &&
     isSteeringDelivery(
       sourceDelivery,
       { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },

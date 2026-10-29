@@ -109,6 +109,11 @@ export class SessionInputQueue {
     return admission;
   }
 
+  /** Drops the hooks' messages still waiting: a cancel, clear, or reset stops them. */
+  dropHookDeliveries(): void {
+    this.retain((entry) => entry.kind !== "delivery" || !isHookDelivery(entry.delivery));
+  }
+
   enqueueControl(control: SessionControl, origin?: ControlOrigin): void {
     const entry: { -readonly [K in keyof QueuedControl]: QueuedControl[K] } = {
       control,
@@ -187,6 +192,10 @@ export class SessionInputQueue {
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
+        // A hook's message would withdraw what the turn asked its person; it waits for them.
+        !(options?.heldSince !== undefined && isHookDelivery(entry.delivery)) &&
+        (options?.fromHooks === undefined ||
+          isHookDelivery(entry.delivery) === options.fromHooks) &&
         isSteeringDelivery(entry.delivery, turn, {
           heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
         }),
@@ -235,10 +244,12 @@ export class SessionInputQueue {
   /**
    * Consecutive deliveries of one authenticated principal and one delegated
    * call share a turn, as they would steer it. Claims may change between
-   * them; the turn runs with the latest.
+   * them; the turn runs with the latest. A hook's message never shares a turn
+   * with a person's, or the model couldn't tell the hook's words from theirs.
    */
   private takeFollowingDeliveriesFrom(first: QueuedDelivery): QueuedDelivery[] {
     const principal = principalOf(first.delivery.auth);
+    const fromHook = isHookDelivery(first.delivery);
     const following: QueuedDelivery[] = [];
     let callId = first.delivery.caller?.callId;
     while (true) {
@@ -247,6 +258,7 @@ export class SessionInputQueue {
         next?.kind !== "delivery" ||
         principal === ANONYMOUS_PRINCIPAL ||
         principalOf(next.delivery.auth) !== principal ||
+        isHookDelivery(next.delivery) !== fromHook ||
         (callId !== undefined &&
           next.delivery.caller !== undefined &&
           next.delivery.caller.callId !== callId)
@@ -282,6 +294,8 @@ export interface SteeringOptions {
    * they stay queued and never answer it.
    */
   readonly heldSince?: number;
+  /** Takes only hooks' messages, or only people's, which never share a step's input. */
+  readonly fromHooks?: boolean;
 }
 
 /**
@@ -300,6 +314,11 @@ export function isSteeringDelivery(
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
+}
+
+/** A message a hook sent with `ctx.send()`. */
+export function isHookDelivery(delivery: DeliverHookPayload): boolean {
+  return (delivery.deliveryMetadata ?? []).some((metadata) => metadata.hook !== undefined);
 }
 
 /** A steering delivery with a message for the model, not only answers to requests. */

@@ -85,6 +85,26 @@ export function createFrameworkUserMessage(
   return createUserMessage(kind, content, metadata);
 }
 
+/** The metadata key naming the hooks whose `ctx.send()` brought a message into history. */
+const SENT_BY_HOOKS_KEY = "eve.sentByHooks";
+
+/** Marks a message hooks sent, from the deliveries' `source.hook`. */
+export function markSentByHooks<T extends UserModelMessage>(
+  message: T,
+  hooks: readonly string[],
+): T {
+  return { ...message, metadata: { ...message.metadata, [SENT_BY_HOOKS_KEY]: hooks } };
+}
+
+/** The hooks that sent a message, when hooks alone sent it. */
+export function sentByHooksOf(message: HarnessModelMessage): readonly string[] | undefined {
+  if (message.role !== "user") return undefined;
+  const hooks = message.metadata?.[SENT_BY_HOOKS_KEY];
+  return Array.isArray(hooks) && hooks.length > 0 && hooks.every((hook) => typeof hook === "string")
+    ? (hooks as readonly string[])
+    : undefined;
+}
+
 /** The metadata key that marks the messages a turn's input brought into history. */
 const TURN_ANCHOR_KEY = "eve.turn";
 

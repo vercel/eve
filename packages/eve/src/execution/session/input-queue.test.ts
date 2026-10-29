@@ -127,4 +127,58 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
   });
+
+  describe("hooks' messages", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "U_ALICE",
+      principalType: "user" as const,
+    };
+    const fromAlice = (message: string, turnPolicy: "steer" | "queue") => ({
+      auth: alice,
+      deliveryMetadata: [
+        { channelKind: "slack", channelName: "slack", deliveryId: `d-${message}`, payloadIndex: 0 },
+      ],
+      kind: "deliver" as const,
+      payloads: [{ message }],
+      turnPolicy,
+    });
+    const fromHook = (message: string, turnPolicy: "steer" | "queue") => {
+      const delivery = fromAlice(message, turnPolicy);
+      return {
+        ...delivery,
+        deliveryMetadata: [{ ...delivery.deliveryMetadata[0]!, hook: "reviewer" }],
+      };
+    };
+
+    it("never shares a turn with a person's message, even for the same principal", () => {
+      const queue = new SessionInputQueue([]);
+      queue.enqueueDelivery(fromAlice("Alice asks for charts.", "queue"));
+      queue.enqueueDelivery(fromHook("Then summarize it.", "queue"));
+      queue.enqueueDelivery(fromHook("Fix the lint errors.", "queue"));
+
+      const messages = (selection: ReturnType<SessionInputQueue["takeNext"]>) =>
+        selection?.kind === "turn" ? selection.delivery.payloads.map(({ message }) => message) : [];
+      expect(messages(queue.takeNext())).toEqual(["Alice asks for charts."]);
+      expect(messages(queue.takeNext())).toEqual(["Then summarize it.", "Fix the lint errors."]);
+    });
+
+    it("steers apart from a person's message", () => {
+      const queue = new SessionInputQueue([]);
+      const admitted = new Set([
+        queue.enqueueDelivery(fromHook("Also include the appendix.", "steer"))!.sequence,
+        queue.enqueueDelivery(fromAlice("Alice asks for charts.", "steer"))!.sequence,
+      ]);
+      const turn = { callerCallId: undefined, principal: principalOf(alice) };
+
+      expect(queue.takeSteering(admitted, turn, { fromHooks: false })?.delivery.payloads).toEqual([
+        { message: "Alice asks for charts." },
+      ]);
+      expect(queue.takeSteering(admitted, turn, { fromHooks: false })).toBeUndefined();
+      expect(queue.takeSteering(admitted, turn, { fromHooks: true })?.delivery.payloads).toEqual([
+        { message: "Also include the appendix." },
+      ]);
+    });
+  });
 });
