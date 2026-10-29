@@ -23,7 +23,8 @@ async function latestVersion(): Promise<string | null> {
 async function ReleaseLabels(): Promise<JSX.Element> {
   const version = await latestVersion();
   return (
-    <div className="flex items-center justify-center gap-2 text-copy-13 text-gray-900">
+    // Inset like the tabs above the command, clear of its rounded end.
+    <div className="flex items-center gap-2 pl-3 text-copy-13 text-gray-900">
       {version ? (
         <>
           <span className="tabular-nums">v{version}</span>
@@ -55,8 +56,7 @@ export function Hero({ tagline }: { tagline: string }): JSX.Element {
         <p className="max-w-[34rem] text-pretty text-copy-18 text-gray-900 sm:text-copy-20">
           {tagline}
         </p>
-        {/* As wide as the command, so the labels center under it. */}
-        <div className="mt-2 flex w-fit flex-col gap-3">
+        <div className="mt-2 flex flex-col gap-3">
           <InstallSwitcher source="home_hero" />
           <ReleaseLabels />
         </div>
