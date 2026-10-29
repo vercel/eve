@@ -30,6 +30,12 @@ type WithHistory = Pick<HarnessSession, "compaction" | "history">;
 
 /** The one way a session's history changes. Every message is checked as it joins. */
 export function changeHistory<T extends WithHistory>(session: T, change: HistoryChange): T {
+  const changed = applyChange(session, change);
+  if (changed !== session && checksHistory()) assertAnswersFollowCalls(changed.history);
+  return changed;
+}
+
+function applyChange<T extends WithHistory>(session: T, change: HistoryChange): T {
   if ("append" in change) {
     if (change.append.length === 0) return session;
     return {
@@ -69,6 +75,33 @@ function assertKeeps(previous: readonly ModelMessage[], next: readonly ModelMess
       );
     }
     at += 1;
+  }
+}
+
+/**
+ * Under `eve dev` and in tests, every tool result answers a call made earlier in history, once.
+ * A provider rejects a result without its call, so history that holds one can't be sent.
+ */
+function assertAnswersFollowCalls(history: readonly ModelMessage[]): void {
+  const calls = new Set<string>();
+  const answered = new Set<string>();
+  for (const [index, message] of history.entries()) {
+    if (typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-call") calls.add(part.toolCallId);
+      if (part.type !== "tool-result" || message.role !== "tool") continue;
+      if (!calls.has(part.toolCallId)) {
+        throw new Error(
+          `History message ${index} answers tool call ${part.toolCallId}, which no earlier message made.`,
+        );
+      }
+      if (answered.has(part.toolCallId)) {
+        throw new Error(
+          `History message ${index} answers tool call ${part.toolCallId} a second time.`,
+        );
+      }
+      answered.add(part.toolCallId);
+    }
   }
 }
 
