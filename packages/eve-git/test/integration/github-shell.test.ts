@@ -396,12 +396,16 @@ test("rewrites SSH GitHub remotes to HTTPS so they carry the credential", async 
     },
   });
   const repository = mkdtempSync(join(tmpdir(), "eve-git-ssh-"));
+  // Only the git config: the sandbox PATH would hide the host's git.
+  const gitConfig = Object.fromEntries(
+    Object.entries(runs[0]!.env ?? {}).filter(([key]) => key.startsWith("GIT_CONFIG_")),
+  );
   try {
     const git = (...args: string[]) =>
       execFileSync("git", args, {
         cwd: repository,
         encoding: "utf8",
-        env: { ...process.env, ...runs[0]!.env },
+        env: { ...process.env, ...gitConfig },
       }).trim();
     git("init", "-q");
     for (const remote of [
