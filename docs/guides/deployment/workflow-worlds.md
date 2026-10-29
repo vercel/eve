@@ -29,10 +29,12 @@ On startup, `eve start` queues pending and running local workflow runs again. Ru
 
 The [`@workflow/world-postgres`](https://www.npmjs.com/package/@workflow/world-postgres) package stores runs in PostgreSQL and queues their work with Graphile Worker. Every `eve start` process connected to the same database processes queued work, so you can run several replicas behind a load balancer.
 
+eve delivers Postgres queue jobs to handlers inside each server process. Network requests to the Workflow execution route are rejected with HTTP 401, independently of the agent's channel authentication policy. No shared delivery secret or proxy authentication is needed. Use `@workflow/world-postgres` 5.0.5 or later; eve refuses to start a Postgres world without in-process delivery support.
+
 1. Install the package in your app:
 
    ```bash
-   pnpm add @workflow/world-postgres
+   pnpm add @workflow/world-postgres@^5.0.5
    ```
 
 2. Select it in the root `agent.ts`:
