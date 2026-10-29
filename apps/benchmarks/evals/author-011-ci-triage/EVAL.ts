@@ -233,8 +233,9 @@ beforeEach(() => {
   vi.stubEnv("METRICS_TOKEN", "test-metrics-token");
   // No test reaches the real network. GitHub answers the way it would for the failed PR in
   // these payloads: the App gets an installation token, and the Checks and Actions read
-  // endpoints a triage might consult list one failed run, so a channel hook that looks up the
-  // failure through `ctx.github` before starting the turn works as it would in production.
+  // endpoints a triage might consult list one failed run and the PR itself reads back, so a
+  // channel hook that looks the failure up through `ctx.github` before starting the turn works as
+  // it would in production.
   // Any other GitHub call is a 404.
   vi.stubGlobal("fetch", vi.fn(offlineGitHub));
 });
@@ -263,6 +264,21 @@ async function offlineGitHub(input: unknown, init?: RequestInit): Promise<Respon
     }
     if (/\/actions\/runs\/\d+\/jobs$/.test(path)) {
       return Response.json({ total_count: 1, jobs: [{ ...failedRun, steps: [] }] });
+    }
+    if (path === "/repos/pinecone-labs/ledger/pulls/31") {
+      return Response.json({
+        number: 31,
+        state: "open",
+        title: "Speed up ledger totals",
+        html_url: "https://github.com/pinecone-labs/ledger/pull/31",
+        user: { login: "octo-dev" },
+        head: {
+          ref: "faster-totals",
+          sha: "4f1c2e9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+          repo: { id: 4242, full_name: "pinecone-labs/ledger" },
+        },
+        base: { ref: "main", repo: { id: 4242, full_name: "pinecone-labs/ledger" } },
+      });
     }
   }
   return Response.json({ message: "Not Found" }, { status: 404 });
@@ -557,7 +573,13 @@ function comment(body: string) {
   return {
     ...webhookBase(),
     action: "created",
-    comment: { body, id: 9001, user: { id: 7, login: "ada", type: "User" } },
+    // GitHub always sends the commenter's association; Ada is on the repo's team.
+    comment: {
+      body,
+      id: 9001,
+      user: { id: 7, login: "ada", type: "User" },
+      author_association: "MEMBER",
+    },
     issue: { number: 17 },
   };
 }
@@ -649,17 +671,30 @@ function sandboxRuntime(module: { environment: object }): any {
   ];
 }
 
+/**
+ * The pnpm version the commands installed, as pnpm would report it: an exact pin such as
+ * `pnpm@9.15.9` or `PNPM_VERSION=9.15.9`, else the newest 9.x at the time of writing.
+ */
+function pnpmVersion(log: string): string {
+  const pinned = /pnpm@(9\.\d+\.\d+)\b|PNPM_VERSION=["']?(9\.\d+\.\d+)/.exec(log);
+  return pinned?.[1] ?? pinned?.[2] ?? "9.15.4";
+}
+
 /** A sandbox that records the commands it runs and how often it was stopped. */
 function recordingSandbox() {
   const commands: string[] = [];
   const execute = (input: string | { command: string }) => {
     const command = typeof input === "string" ? input : input.command;
     commands.push(command);
-    // Answer version checks once pnpm 9 is installed, so a `prepare` that verifies its install passes.
-    const installed = pnpm9Install.test(commands.join("\n"));
+    // Answer version checks once pnpm 9 is installed, with the version installed, so a `prepare`
+    // that verifies its install passes.
+    const log = commands.join("\n");
+    const installed = pnpm9Install.test(log);
     // Some installs expose pnpm 9 under an alias such as `pnpm9`.
     const stdout =
-      installed && /\bpnpm[\w.-]*\s+(?:--version|-v)\b/.test(command) ? "9.15.4\n" : "";
+      installed && /\bpnpm[\w.-]*\s+(?:--version|-v)\b/.test(command)
+        ? `${pnpmVersion(log)}\n`
+        : "";
     return { exitCode: 0, stdout, stderr: "" };
   };
   const sandbox = {

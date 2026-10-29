@@ -525,6 +525,28 @@ function appSourceFiles(): string[] {
 }
 
 /** Every frontend module that drives eve from React, joined with the modules it imports. */
+/**
+ * The fixed headers the app's own chat panel sends with every request, such as a custom
+ * anti-CSRF header (`headers: { "x-tally-assistant": "1" }` passed to `useEveAgent`), so a
+ * channel that requires one sees what the panel would send. Only string literals are replayed;
+ * a header the app computes, like a ticket its server signs, can't be.
+ */
+function panelHeaders(): Record<string, string> {
+  let source: string;
+  try {
+    source = panelSource();
+  } catch {
+    return {};
+  }
+  const headers: Record<string, string> = {};
+  for (const block of source.matchAll(/\bheaders\s*:\s*\{([^{}]*)\}/gu)) {
+    for (const entry of block[1]!.matchAll(/["']([\w-]+)["']\s*:\s*["']([^"']*)["']/gu)) {
+      headers[entry[1]!.toLowerCase()] = entry[2]!;
+    }
+  }
+  return headers;
+}
+
 function panelSource(): string {
   const panels = appSourceFiles().filter((file) =>
     /from\s+["']eve\/react["']/.test(readFileSync(file, "utf8")),
@@ -628,7 +650,7 @@ async function createSession(
   const response: Response = await route.handler(
     new Request("https://tally.example.com/eve/v1/session", {
       method: "POST",
-      headers: { "content-type": "application/json", ...headers },
+      headers: { "content-type": "application/json", ...panelHeaders(), ...headers },
       body: JSON.stringify({ message }),
     }),
     {
