@@ -9,12 +9,23 @@ import { loadModelReaction } from "./kinds/model.js";
 import { skillReaction, syncDynamicSkillFiles } from "./kinds/skill.js";
 import { subagentReaction } from "./kinds/subagent.js";
 import { toolReaction } from "./kinds/tool.js";
-import { REACTION_ORDER, type BundleReactions, type Reaction } from "./reaction.js";
+import type { BundleReactions, Reaction, ValueReaction } from "./reaction.js";
 
 const cache = new WeakMap<CompiledBundle, Promise<BundleReactions>>();
 const EMPTY: BundleReactions = { effects: {}, reactions: [] };
 
-/** The reactions the session's agent declares, in run order. */
+/** The dynamic values the agent's files declare, in run order. */
+export async function manifestValues(
+  ctx: Pick<ContextReader, "get" | "has">,
+): Promise<readonly ValueReaction[]> {
+  const { reactions } = await bundleReactions(ctx);
+  return reactions.filter((reaction): reaction is ValueReaction => reaction.timing !== "commit");
+}
+
+/**
+ * The reactions the session's agent declares, in run order: hooks after each commit; then the
+ * model, which every later value can read, and each kind that may read the ones before it.
+ */
 export async function bundleReactions(
   ctx: Pick<ContextReader, "get" | "has">,
 ): Promise<BundleReactions> {
@@ -48,9 +59,6 @@ async function buildReactions(bundle: CompiledBundle): Promise<BundleReactions> 
     ...agent.dynamicSkillResolvers.map(skillReaction),
     ...agent.dynamicInstructionsResolvers.map(instructionsReaction),
   ];
-  reactions.sort(
-    (left, right) => REACTION_ORDER.indexOf(left.kind) - REACTION_ORDER.indexOf(right.kind),
-  );
   return {
     effects: {
       ...((agent.dynamicConnectionResolvers ?? []).length === 0

@@ -14,6 +14,7 @@ import { takeTurnFailure } from "#reactions/intents.js";
 import { takeUserInstructionMessages } from "#reactions/kinds/instructions.js";
 import { isDynamicModelSelectionError } from "#reactions/kinds/model.js";
 import { evaluateValues, isReactionFailedError } from "#reactions/runner.js";
+import { ProgramFailedError, programValues } from "#harness/program/kernel.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -167,12 +168,15 @@ export async function prepareModelCall(
   const ctx = step.ctx as ContextContainer | undefined;
   if (ctx === undefined) return undefined;
   throwIfTurnAborted(step.config.abortSignal);
+  const conversation = validateHarnessModelMessages(withClientContext(preview));
   try {
     await evaluateValues(ctx, {
       abortSignal: step.config.abortSignal,
-      conversation: validateHarnessModelMessages(withClientContext(preview)),
+      conversation,
+      sources: await programValues(step, conversation),
     });
   } catch (error) {
+    if (error instanceof ProgramFailedError) return failTurn(step, error, error.code);
     if (!isReactionFailedError(error)) throw error;
     return failTurn(step, error, "REACTION_FAILED");
   }

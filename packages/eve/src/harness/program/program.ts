@@ -1,4 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { ValueReaction } from "#reactions/reaction.js";
 import type { JsonValue } from "#shared/json.js";
 
 // A session program is a function of the session that says what should happen next. eve
@@ -49,6 +50,8 @@ export interface ProgramContext {
   readonly history: readonly HarnessModelMessage[];
   /** Present where eve has to shrink the history. */
   readonly compaction?: Compaction;
+  /** The dynamic values the agent's files declare, in the order eve evaluates them. */
+  manifest(): Promise<readonly ValueReaction[]>;
   readonly tasks: { readonly working: readonly string[] };
   readonly signal: AbortSignal | undefined;
 }
@@ -66,6 +69,11 @@ export type Next =
 
 /** What a program says should be true. A field it leaves out is eve's own. */
 export interface Plan {
+  /**
+   * The dynamic values that make the agent before each model call: its model, connections,
+   * subagents, tools, skills, and instructions, each kept under its own ID with its memos.
+   */
+  readonly agent?: Lazy<readonly ValueReaction[]>;
   /**
    * The history the session keeps. eve reads it only where it has to shrink the history, inside
    * the context change it opens there, and checks it unless it's what `compaction.native`

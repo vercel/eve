@@ -8,7 +8,10 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
+import type { ContextContainer } from "#context/container.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { manifestValues } from "#reactions/bundle.js";
+import type { ValueReaction } from "#reactions/reaction.js";
 import { checkHistory } from "./check.js";
 import { nativeNext, nativeProgram } from "./native.js";
 import {
@@ -52,9 +55,11 @@ interface Decision {
 function programContext(step: Step, decision: Decision): ProgramContext {
   const turnId = activeTurnIdOf(step.view().projection);
   const history = decision.history ?? step.session.history;
+  const container = step.ctx as ContextContainer | undefined;
   return {
     ...(decision.compaction !== undefined && { compaction: decision.compaction }),
     history,
+    manifest: async () => (container === undefined ? [] : await manifestValues(container)),
     signal: step.config.abortSignal,
     tasks: { working: workingTaskIds(step.session) },
     turn:
@@ -134,6 +139,33 @@ async function applyNext(
 }
 
 /**
+ * The dynamic values the session's program makes the agent from, before a model call that reads
+ * `conversation`. Throws {@link ProgramFailedError} when the program throws.
+ */
+export async function programValues(
+  step: Step,
+  conversation: readonly HarnessModelMessage[],
+): Promise<readonly ValueReaction[]> {
+  const ctx = programContext(step, { history: conversation });
+  try {
+    return (await force(programOf(step)(ctx).agent ?? ctx.manifest)) ?? [];
+  } catch (error) {
+    throwIfTurnAborted(step.config.abortSignal);
+    log.error("the session program's agent threw", { error, turnId: ctx.turn?.id });
+    throw new ProgramFailedError(error);
+  }
+}
+
+/** A program threw where eve can't fail the turn itself; the cause stays out of the message. */
+export class ProgramFailedError extends Error {
+  override readonly name = "ProgramFailedError";
+  readonly code = PROGRAM_FAILED.code;
+  constructor(cause: unknown) {
+    super(PROGRAM_FAILED.message, { cause });
+  }
+}
+
+/**
  * The history the session's program keeps where eve has to shrink it, inside the change eve
  * opened. eve's own compaction's result applies as it is, and its failures are its own; anything
  * else the program returns is checked first, and a program that throws fails the change with a
@@ -171,7 +203,7 @@ export async function programHistory(
     throwIfTurnAborted(step.config.abortSignal);
     if (typeof error === "object" && error !== null && failures.has(error)) throw error;
     log.error("the session program's history threw", { error, turnId: ctx.turn?.id });
-    throw new Error(PROGRAM_FAILED.message, { cause: error });
+    throw new ProgramFailedError(error);
   }
   if (history === undefined) return [...input.messages];
   if (natives.has(history)) return history as HarnessModelMessage[];

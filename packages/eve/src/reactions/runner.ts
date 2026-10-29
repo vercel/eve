@@ -124,11 +124,13 @@ export async function evaluateValues(
   input: {
     readonly abortSignal?: AbortSignal;
     readonly conversation: readonly ModelMessage[];
+    /** The values to evaluate, in order: the session program's. Absent, the agent's files'. */
+    readonly sources?: readonly ValueReaction[];
   },
 ): Promise<void> {
   const { reactions, effects } = await bundleReactions(ctx);
   const changed = new Set<Reaction["kind"]>();
-  for (const reaction of values(reactions)) {
+  for (const reaction of input.sources ?? values(reactions)) {
     const started = Date.now();
     let result: { readonly changed: boolean };
     try {

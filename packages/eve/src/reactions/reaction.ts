@@ -19,21 +19,6 @@ export type ReactionKind =
   | "skill"
   | "instructions";
 
-/**
- * The order reactions run in. Hooks run after each commit, before dynamic values; the model is
- * chosen first among values, so every later kind can read it.
- */
-export const REACTION_ORDER: readonly ReactionKind[] = [
-  "hook",
-  "memory",
-  "model",
-  "connection",
-  "subagent",
-  "tool",
-  "skill",
-  "instructions",
-];
-
 /** What a dynamic value contributes: its JSON form, and the code that form can't carry. */
 export interface Contribution {
   readonly value: JsonValue;
