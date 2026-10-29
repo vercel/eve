@@ -157,7 +157,12 @@ export function checkCompactedHistory(
       "The compaction strategy placed a checkpoint after other messages. Put ctx.checkpoint() first, followed by the history you keep.",
     );
   }
-  if (input.automatic && hasTurnInput(before) && !hasTurnInput(messages)) {
+  const turnInput = latestUserMessage(before);
+  if (
+    input.automatic &&
+    turnInput !== undefined &&
+    !messages.some((message) => JSON.stringify(message) === JSON.stringify(turnInput))
+  ) {
     throw new Error(
       "The compaction strategy removed the turn's input. Keep the latest user message: the model answers it next.",
     );
@@ -179,8 +184,8 @@ function isCheckpointMarker(message: ModelMessage): boolean {
   );
 }
 
-function hasTurnInput(history: readonly ModelMessage[]): boolean {
-  return history.some((message) => isUserModelMessage(message) && message.kind === "user");
+function latestUserMessage(history: readonly ModelMessage[]): ModelMessage | undefined {
+  return history.findLast((message) => isUserModelMessage(message) && message.kind === "user");
 }
 
 /**
