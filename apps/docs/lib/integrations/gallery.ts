@@ -9,15 +9,15 @@ export type GalleryFilter = "all" | IntegrationType;
  */
 export const FEATURED_SLUGS: readonly string[] = [
   "eve",
-  "linear-agent",
-  "telegram",
-  "twilio",
   "slack",
   "github",
   "photon",
   "linq",
   "discord",
   "teams",
+  "linear-agent",
+  "telegram",
+  "twilio",
 ];
 
 const featuredRank = (integration: Integration): number => {

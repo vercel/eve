@@ -33,15 +33,15 @@ describe("integrations gallery order", () => {
     const slugs = filterIntegrations(integrations, "channel", "").map(({ slug }) => slug);
     expect(slugs.slice(0, 10)).toEqual([
       "eve",
-      "linear-agent",
-      "telegram",
-      "twilio",
       "slack",
       "github",
       "photon",
       "linq",
       "discord",
       "teams",
+      "linear-agent",
+      "telegram",
+      "twilio",
     ]);
   });
 
