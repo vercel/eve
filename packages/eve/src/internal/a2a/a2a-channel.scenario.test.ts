@@ -1,13 +1,15 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { join } from "node:path";
-import type { Readable } from "node:stream";
-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   materializeScenarioApp,
   type ScenarioAppDescriptor,
 } from "#internal/testing/scenario-app.js";
+import {
+  requiredRecord,
+  requiredString,
+  startScenarioEveDev,
+  type RunningEveDev,
+} from "#internal/testing/scenario-eve-dev.js";
 
 const SETUP_TIMEOUT_MS = 360_000;
 const TEST_TIMEOUT_MS = 60_000;
@@ -102,7 +104,7 @@ function url(): string {
 describe("A2A channel", () => {
   beforeAll(async () => {
     app = await materializeScenarioApp(A2A_AGENT_DESCRIPTOR);
-    server = await startEveDev(app.appRoot);
+    server = await startScenarioEveDev(app.appRoot);
   }, SETUP_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -135,7 +137,7 @@ describe("A2A channel", () => {
   );
 
   it(
-    "refuses unauthenticated calls, other versions, and unsupported features",
+    "refuses unauthenticated calls, other versions, unknown tasks, and disallowed files",
     async () => {
       const anonymous = await fetch(new URL("/eve/v1/a2a", url()), {
         body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "GetTask", params: { id: "x" } }),
@@ -144,25 +146,12 @@ describe("A2A channel", () => {
       });
       expect(anonymous.status).toBe(401);
 
-      // An absent version means 0.3.
-      const legacy = await rpc("alice", "GetTask", { id: "x" }, { version: null });
-      expect(rpcErrorCode(legacy)).toBe(-32009);
-      expect(rpcErrorCode(await rpc("alice", "GetTask", { id: "x" }, { version: "2.0" }))).toBe(
+      // The protocol's own refusals are unit-tested (json-rpc.test.ts); these need the server:
+      // the version header reaching the handler, the ownership lookup, and the upload policy.
+      expect(rpcErrorCode(await rpc("alice", "GetTask", { id: "x" }, { version: null }))).toBe(
         -32009,
       );
-
       expect(rpcErrorCode(await rpc("alice", "GetTask", { id: "not-a-task" }))).toBe(-32001);
-      expect(rpcErrorCode(await rpc("alice", "message/send", {}))).toBe(-32601);
-      expect(rpcErrorCode(await rpc("alice", "GetExtendedAgentCard", {}))).toBe(-32004);
-      expect(
-        rpcErrorCode(await rpc("alice", "CreateTaskPushNotificationConfig", { taskId: "x" })),
-      ).toBe(-32003);
-      expect(rpcErrorCode(await rpc("alice", "SendMessage", { message: { parts: [] } }))).toBe(
-        -32602,
-      );
-      expect(rpcErrorCode(await rpc("alice", "ListTasks", { contextId: "x", pageSize: 500 }))).toBe(
-        -32602,
-      );
       expect(
         rpcErrorCode(
           await rpc("alice", "SendMessage", {
@@ -654,115 +643,4 @@ async function streamEvents(
       if (envelope.error !== undefined) throw new Error(JSON.stringify(envelope.error));
       return requiredRecord(envelope.result, "result");
     });
-}
-
-function requiredRecord(value: unknown, name: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${name} was not an object.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requiredString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${name} was not a non-empty string.`);
-  }
-  return value;
-}
-
-interface RunningEveDev {
-  readonly stderr: () => string;
-  readonly stdout: () => string;
-  readonly url: string;
-  stop(): Promise<void>;
-}
-
-async function startEveDev(appRoot: string): Promise<RunningEveDev> {
-  const eveBinPath = join(appRoot, "node_modules", "eve", "bin", "eve.js");
-  const child = spawn(
-    process.execPath,
-    [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"],
-    {
-      cwd: appRoot,
-      env: { ...process.env, EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  let stderr = "";
-  let stdout = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-
-  let url: string;
-  try {
-    url = await waitForServerUrl(child, () => ({ stderr, stdout }));
-  } catch (error) {
-    await stopChild(child);
-    throw error;
-  }
-  return {
-    stderr: () => stderr,
-    stdout: () => stdout,
-    async stop() {
-      await stopChild(child);
-    },
-    url,
-  };
-}
-
-async function waitForServerUrl(
-  child: ChildProcessByStdio<null, Readable, Readable>,
-  output: () => { readonly stderr: string; readonly stdout: string },
-): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      const current = output();
-      reject(new Error(`Timed out waiting for eve dev.\n${current.stdout}\n${current.stderr}`));
-    }, OPERATION_TIMEOUT_MS);
-    function inspect() {
-      const url = /\[DEV\] server listening at (http:\/\/[^\s]+)/u.exec(output().stdout)?.[1];
-      if (url !== undefined) {
-        cleanup();
-        resolve(url);
-      }
-    }
-    function exited(code: number | null, signal: NodeJS.Signals | null) {
-      cleanup();
-      const current = output();
-      reject(
-        new Error(
-          `eve dev exited before startup (code ${String(code)}, ${String(signal)}).\n${current.stdout}\n${current.stderr}`,
-        ),
-      );
-    }
-    function cleanup() {
-      clearTimeout(timeout);
-      child.stdout.off("data", inspect);
-      child.stderr.off("data", inspect);
-      child.off("exit", exited);
-    }
-    child.stdout.on("data", inspect);
-    child.stderr.on("data", inspect);
-    child.once("exit", exited);
-    inspect();
-  });
-}
-
-async function stopChild(child: ChildProcessByStdio<null, Readable, Readable>): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolve) => {
-    const force = setTimeout(() => child.kill("SIGKILL"), 10_000);
-    child.once("exit", () => {
-      clearTimeout(force);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
 }
