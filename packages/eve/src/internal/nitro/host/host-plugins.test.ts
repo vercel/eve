@@ -4,7 +4,7 @@ import { createModulePathMatcher } from "#internal/nitro/host/host-plugins.js";
 
 describe("createModulePathMatcher", () => {
   it("matches Windows module ids across separators, drive-letter case, and specifier forms", () => {
-    const match = createModulePathMatcher(
+    const { match } = createModulePathMatcher(
       "C:\\app",
       ["C:\\app\\.eve\\workflow\\workflows.mjs", "C:\\app\\.eve\\workflow\\steps.mjs"],
       "win32",
@@ -22,19 +22,39 @@ describe("createModulePathMatcher", () => {
   });
 
   it("resolves drive-less Windows paths the same way for targets and importers", () => {
-    const match = createModulePathMatcher("/app", ["/app/.eve/workflow/workflows.mjs"], "win32");
+    const { match } = createModulePathMatcher(
+      "/app",
+      ["/app/.eve/workflow/workflows.mjs"],
+      "win32",
+    );
 
     expect(match("./workflows.mjs", "/app/.eve/workflow/workflows-handler.mjs")).not.toBeNull();
     expect(match("/app/.eve/workflow/workflows.mjs")).not.toBeNull();
   });
 
   it("compares POSIX paths case-sensitively and ignores drive-letter specifiers", () => {
-    const match = createModulePathMatcher("/app", ["/app/.eve/workflow/steps.mjs"], "linux");
+    const { match } = createModulePathMatcher("/app", ["/app/.eve/workflow/steps.mjs"], "linux");
 
     expect(match("./steps.mjs", "/app/.eve/workflow/workflows.mjs")).toBe(
       "/app/.eve/workflow/steps.mjs",
     );
     expect(match("/app/.eve/Workflow/steps.mjs")).toBeNull();
     expect(match("C:/app/.eve/workflow/steps.mjs")).toBeNull();
+  });
+
+  it("filters each Windows target in the form the matcher resolves it to", () => {
+    for (const target of [
+      "C:\\app\\agent\\..\\agent\\steps\\add.ts",
+      "C:\\app\\agent\\steps\\.\\add.ts",
+      "c:/app/agent/steps/add.ts",
+      "/app/agent/steps/add.ts",
+    ]) {
+      const { idFilter, match } = createModulePathMatcher("C:\\app", [target], "win32");
+      const id = match(target);
+
+      expect(id, target).not.toBeNull();
+      expect(idFilter.test(id!), `${target} resolved to ${id}`).toBe(true);
+      expect(idFilter.test(`${id!.toUpperCase()}?v=1`), target).toBe(true);
+    }
   });
 });
