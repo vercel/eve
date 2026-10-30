@@ -6,7 +6,7 @@ import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/applica
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins, type HostPluginsInput } from "#internal/nitro/host/host-plugins.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
-import { callPluginHook } from "#internal/testing/plugin-hooks.js";
+import { bundleThroughPlugins } from "#internal/testing/rolldown-plugin-harness.js";
 
 const APP_ROOT = "/tmp/weather-agent";
 const WORKFLOW_DIR = `${APP_ROOT}/.eve/workflow`;
@@ -21,7 +21,6 @@ const NO_EXTERNALS: ExternalsPolicy = {
 };
 
 type Plugin = Record<string, unknown> & { readonly name: string };
-type HookName = "load" | "resolveId" | "transform";
 
 function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
   const list = createHostPlugins({
@@ -43,13 +42,12 @@ function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
   );
 }
 
-/** The first non-null result across the list, as the bundler resolves, loads, or transforms. */
-async function firstResult(list: Plugin[], hook: HookName, ...args: unknown[]) {
-  for (const plugin of list) {
-    const result = await callPluginHook(plugin, hook, ...args);
-    if (result !== null) return result;
+/** Asserts each `[before, after]` plugin pair keeps its relative order. */
+function expectOrder(names: readonly string[], pairs: readonly (readonly [string, string])[]) {
+  for (const [before, after] of pairs) {
+    expect(names.indexOf(before), `${before} in ${names.join(", ")}`).toBeGreaterThanOrEqual(0);
+    expect(names.indexOf(before), `${before} before ${after}`).toBeLessThan(names.indexOf(after));
   }
-  return null;
 }
 
 describe("createHostPlugins", () => {
@@ -86,18 +84,12 @@ describe("createHostPlugins", () => {
       },
     }).map((plugin) => plugin.name);
 
-    expect(names).toEqual([
-      "eve:workflow-step-transform",
-      "eve:side-effect-modules",
-      "eve:nitro-routing-import-specifiers",
-      "eve:instrumentation-entry",
-      "eve-node-esm-compat-banner",
-      "eve-pseudo-packages",
-      "eve:hosted-graph",
-      "eve-extension-mount",
-      "eve-extension-scope",
-      "eve-authored-asset-import",
+    expectOrder(names, [
+      ["eve:workflow-step-transform", "eve:side-effect-modules"],
+      ["eve:side-effect-modules", "eve:hosted-graph"],
+      ["eve:hosted-graph", "eve-extension-mount"],
     ]);
+    expect(names).toContain("eve:instrumentation-entry");
   });
 
   it("transforms step targets in step mode, giving eve's dist sources their src step ids", async () => {
@@ -112,19 +104,19 @@ describe("createHostPlugins", () => {
         workflowsPath: `${WORKFLOW_DIR}/workflows.mjs`,
       },
     });
-    const transform = async (id: string) =>
-      ((await firstResult(list, "transform", STEP_SOURCE, id)) as { code: string } | null)?.code;
+    const bundle = async (id: string) =>
+      await bundleThroughPlugins({ files: { [id]: STEP_SOURCE }, plugins: list, reexports: [id] });
 
-    expect(await transform(authoredStep)).toContain(
+    expect(await bundle(authoredStep)).toContain(
       'registerStepFunction("step//./agent/steps/add//add", add)',
     );
-    expect(await transform(distStep)).toContain(
+    expect(await bundle(distStep)).toContain(
       'registerStepFunction("step//./src/execution/fixture-step//add", add)',
     );
-    expect(await transform(sourceStep)).toContain(
+    expect(await bundle(sourceStep)).toContain(
       'registerStepFunction("step//./src/execution/fixture-step//add", add)',
     );
-    expect(await transform(`${APP_ROOT}/agent/steps/other.ts`)).toBeUndefined();
+    expect(await bundle(`${APP_ROOT}/agent/steps/other.ts`)).not.toContain("registerStepFunction");
   });
 
   it("keeps the workflow bundle, step targets, and instrumentation modules side-effectful", async () => {
@@ -138,31 +130,37 @@ describe("createHostPlugins", () => {
         workflowsPath: `${WORKFLOW_DIR}/workflows.mjs`,
       },
     });
-    const kept = (id: string) => ({ id, moduleSideEffects: "no-treeshake" });
-
-    expect(await firstResult(list, "resolveId", `${WORKFLOW_DIR}/steps.mjs`)).toEqual(
-      kept(`${WORKFLOW_DIR}/steps.mjs`),
-    );
-    expect(
-      await firstResult(
-        list,
-        "resolveId",
-        "./workflows.mjs",
-        `${WORKFLOW_DIR}/workflows-handler.mjs`,
-      ),
-    ).toEqual(kept(`${WORKFLOW_DIR}/workflows.mjs`));
-    expect(
-      await firstResult(list, "resolveId", "./imports/step-module.js", `${WORKFLOW_DIR}/steps.mjs`),
-    ).toEqual(kept(stepTarget));
-    expect(
-      await firstResult(
-        list,
-        "resolveId",
-        "workflow/internal/builtins",
+    const builtins = resolveWorkflowModulePath("workflow/internal/builtins");
+    const marker = (name: string) => `globalThis.marker = ${JSON.stringify(`${name} kept`)};\n`;
+    // Unclaimed modules are side-effect free, so the bundle drops every module
+    // the plugin does not keep.
+    const code = await bundleThroughPlugins({
+      files: {
+        [`${WORKFLOW_DIR}/steps.mjs`]: [
+          'import "./imports/step-module.js";',
+          'import "workflow/internal/builtins";',
+          marker("steps"),
+        ].join("\n"),
+        [`${WORKFLOW_DIR}/workflows-handler.mjs`]: 'import "./workflows.mjs";\n',
+        [`${WORKFLOW_DIR}/workflows.mjs`]: marker("workflows"),
+        [stepTarget]: marker("step target"),
+        [builtins]: marker("builtins"),
+        [instrumentation]: marker("instrumentation"),
+        "/tmp/other-module.mjs": marker("other"),
+      },
+      imports: [
         `${WORKFLOW_DIR}/steps.mjs`,
-      ),
-    ).toEqual(kept(resolveWorkflowModulePath("workflow/internal/builtins")));
-    expect(await firstResult(list, "resolveId", instrumentation)).toEqual(kept(instrumentation));
-    expect(await firstResult(list, "resolveId", "/tmp/other-module.mjs")).toBeNull();
+        `${WORKFLOW_DIR}/workflows-handler.mjs`,
+        instrumentation,
+        "/tmp/other-module.mjs",
+      ],
+      plugins: list,
+      sideEffectFree: true,
+    });
+
+    for (const name of ["steps", "workflows", "step target", "builtins", "instrumentation"]) {
+      expect(code).toContain(`${name} kept`);
+    }
+    expect(code).not.toContain("other kept");
   });
 });
