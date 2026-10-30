@@ -376,6 +376,26 @@ await buildWithNitroRolldown({
   onLog: onVendoredDependencyLog,
 });
 
+// Nitro cannot externalize workspace symlinks or resolve eve's private aliases
+// in Nuxt's alias namespace. Ship the production entry as a standalone module.
+await buildWithNitroRolldown({
+  input: join(SRC_ROOT, "public/nuxt/production-server.ts"),
+  external: (source) => isBuiltin(source),
+  platform: "node",
+  resolve: {
+    conditionNames: ["eve-source"],
+    mainFields: ["module", "main"],
+  },
+  treeshake: { moduleSideEffects: false },
+  output: {
+    file: join(OUTPUT_DIR, "public/nuxt/production-server.js"),
+    format: "esm",
+    minify: false,
+    sourcemap: false,
+  },
+  onLog: onVendoredDependencyLog,
+});
+
 // Vue integration — separate build that resolves `#` subpath imports so the
 // output is self-contained and consumable by Vite/bundlers that don't
 // understand Node.js package `imports`. Without minification so Vite's SSR
