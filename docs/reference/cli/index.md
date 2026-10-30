@@ -27,7 +27,7 @@ The `eve` CLI scaffolds, runs, inspects, and deploys agents. Run it from the app
 
 ## CLI telemetry
 
-eve collects CLI telemetry by default. Run `eve telemetry disable` to turn it off for this machine, or set `EVE_TELEMETRY_DISABLED=1` for one command. See [CLI telemetry](./telemetry) for collected fields, exclusions, debug mode, and preference storage.
+eve collects CLI telemetry by default. Run `eve telemetry disable` to turn it off for this machine, or set `EVE_TELEMETRY_DISABLED=1` for one command. See [CLI telemetry](/docs/reference/telemetry) for collected fields, exclusions, debug mode, and preference storage.
 
 ## `eve init`
 
@@ -253,7 +253,7 @@ Serves the built output and prints the listening URL.
 
 Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime. This also applies when you run `node .output/server/index.mjs` directly. Other values leave schedules on. HTTP requests and workflow jobs still run, and eve prints a `schedules disabled` line. `--no-schedules` sets the variable to `1` for the spawned server only; omit it to keep any value you set.
 
-Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosted-operations#run-schedules). It also disables authored cron dispatch on Vercel if set there, but not explicit schedule dispatch in `eve dev`.
+Use this setting when [scaling self-hosted replicas](/docs/guides/deployment/self-hosted-operations#run-schedules). It also disables authored cron dispatch on Vercel if set there, but not explicit schedule dispatch in `eve dev`.
 
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. Preserve the relative layout of workspace packages, because startup loads sandbox modules from the deployed source. The deployment directory can differ from the build directory.
 
@@ -284,9 +284,9 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 
 `localDev()` refuses callers connecting from another machine. When `--host` binds another interface, such as `0.0.0.0`, those callers need another authenticator in the channel's `auth` list. A same-machine tunnel or reverse proxy, such as ngrok, cloudflared, or a local nginx, connects locally. eve authenticates every caller it forwards as `local-dev`, so put an authenticator in front of any dev server you expose that way.
 
-Bundled development extensions mount without adding files to your project; pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification).
+Bundled development extensions mount without adding files to your project; pass `--no-default-extensions` to disable them. See [Self-Modification](/docs/guides/self-modification).
 
-A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`; chat needs no Vercel project, channels, or integrations. Use `/model` to change models and settings, and `/add` to install an addition. `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
+A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`; chat needs no Vercel project, channels, or integrations. Use `/model` to change models and settings, and `/add` to install an addition. `--input` text stays editable in the prompt. See [Terminal UI](/docs/guides/dev-tui) for credential precedence and login options.
 
 ### Local development lifecycle
 
@@ -298,7 +298,7 @@ With any Workflow World, eve keeps each replaced snapshot for at least 30 minute
 
 Local dev records traces under `.eve/traces/`, bounded by age, size, and a keep-newest floor. Configure the store with `EVE_TRACES*` in `.env.local`, or disable it with `agent/instrumentation/local.ts`; see [`eve traces`](#retention).
 
-`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and supported features.
+`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](/docs/protocols/acp) for client configuration and supported features.
 
 ### Local workflow recovery
 
@@ -470,7 +470,7 @@ Without `--url`, `eve eval` starts its own local server on a free port with stat
 | `--keep-state`           | flag   | off     | Keep the local eval server's state after the run (not `--url`) |
 | `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout            |
 
-See [Evals](../evals/overview) for authoring evals.
+See [Evals](/docs/evals/overview) for authoring evals.
 
 ## Recommended loop
 
@@ -483,5 +483,5 @@ See [Evals](../evals/overview) for authoring evals.
 ## What to read next
 
 - [Agent Files](/docs/reference/agent-files): what `eve info` discovers
-- [Instrumentation](../observability/instrumentation): tracing and the error catalog
-- [Deployment](../guides/deployment/overview): `eve build` and `eve start` in production
+- [Instrumentation](/docs/observability/instrumentation): tracing and the error catalog
+- [Deployment](/docs/guides/deployment/overview): `eve build` and `eve start` in production
