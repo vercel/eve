@@ -1,0 +1,270 @@
+---
+title: "Quickstart: Triage Agent"
+description: "Build an eve agent that labels new GitHub issues and reproduces reported bugs in a sandbox, then deploy it to your repository."
+contentType: "Tutorial"
+---
+
+You'll build an agent that reads each new GitHub issue, labels it as a bug, feature request, question, or duplicate, and reproduces bugs by running the code in a sandbox. It replies on the issue with the label and what it found.
+
+## Build it with a coding agent
+
+Paste this prompt into your coding agent to build the agent from this page. The rest of the page walks through the same steps by hand.
+
+```text
+Build the triage agent from https://eve.dev/docs/getting-started/triage-agent.md
+in ./triage-agent. Fetch that page and follow each step in order.
+
+- Ask me for the GitHub repository to use in place of <owner>/slugify-demo,
+  and wait while I create it and open the sample issue.
+- Use the code from the page as written.
+- Ask me before you run eve add channel/github or deploy.
+
+Finish with npm run eval and npm run typecheck, then tell me what passed.
+```
+
+## Prerequisites
+
+- Node.js 24 or newer, which includes npm
+- Access to an AI model, as in [Getting Started](/docs/getting-started#prerequisites)
+- [Docker](https://docs.docker.com/get-started/get-docker/), running, so the agent gets a Linux sandbox with Node.js and Git on your machine
+- A GitHub account
+
+## Create a demo repository
+
+The agent needs a repository with a bug to find. Create a public GitHub repository named `slugify-demo` with these three files:
+
+```json title="package.json"
+{
+  "name": "slugify-demo",
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
+```
+
+```js title="slugify.js"
+export function slugify(title) {
+  return title
+    .toLowerCase()
+    .trim()
+    .replaceAll(" ", "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
+```
+
+```js title="slugify.test.js"
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { slugify } from "./slugify.js";
+
+test("slugifies a title", () => {
+  assert.equal(slugify("Hello World"), "hello-world");
+});
+```
+
+Then open an issue on it:
+
+> **Title:** Double dashes in slugs
+>
+> `slugify("Hello  World")` returns `hello--world` when the title has two spaces in a row. I expected `hello-world`.
+
+## Create the agent
+
+```bash
+npx eve@latest init triage-agent
+```
+
+The command opens the terminal UI. Leave it running; eve reloads each file you add in the next steps.
+
+## Add the instructions
+
+Replace `agent/instructions.md`:
+
+```md title="agent/instructions.md"
+You triage new GitHub issues.
+
+For each issue:
+
+1. Call `get_issue` with the repository and issue number. If the message
+   already includes the issue text, use that instead.
+2. Label it `bug`, `feature`, `question`, or `duplicate`. Use `duplicate` only
+   when another open issue asks for the same thing, and link that issue.
+3. For a bug, reproduce it before you answer. Follow the `reproduce-bug` skill.
+4. Reply in this format:
+
+   Label: <label>
+
+   <One or two sentences on what the issue asks for.>
+
+   <For a bug: the command you ran and its output, or what you tried.>
+
+Keep replies short. Don't propose a fix unless the reporter asks for one.
+```
+
+## Add the issue tool
+
+Create `agent/tools/get_issue.ts`. It reads the issue and the repository's other open issues from GitHub's public API, so the agent can spot duplicates.
+
+```ts title="agent/tools/get_issue.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+interface Issue {
+  number: number;
+  title: string;
+  body: string | null;
+  html_url: string;
+  user: { login: string };
+  pull_request?: unknown;
+}
+
+export default defineTool({
+  description: "Fetch a GitHub issue and the titles of the repository's other open issues.",
+  inputSchema: z.object({
+    repository: z.string().describe("The repository as owner/repo"),
+    issueNumber: z.number().int().positive(),
+  }),
+  async execute({ repository, issueNumber }, ctx) {
+    const issue = await github<Issue>(
+      `/repos/${repository}/issues/${issueNumber}`,
+      ctx.abortSignal,
+    );
+    const open = await github<Issue[]>(
+      `/repos/${repository}/issues?state=open&per_page=50`,
+      ctx.abortSignal,
+    );
+    return {
+      title: issue.title,
+      body: issue.body ?? "",
+      author: issue.user.login,
+      otherOpenIssues: open
+        .filter((other) => other.number !== issueNumber && !other.pull_request)
+        .map((other) => ({ number: other.number, title: other.title, url: other.html_url })),
+    };
+  },
+});
+
+async function github<T>(path: string, signal: AbortSignal): Promise<T> {
+  const token = process.env.GITHUB_TOKEN;
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      accept: "application/vnd.github+json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    signal,
+  });
+  if (!response.ok) throw new Error(`GitHub returned ${response.status} for ${path}`);
+  return (await response.json()) as T;
+}
+```
+
+The tool runs in your app, not in the sandbox. Without a token, it can read public repositories up to GitHub's limit of 60 requests an hour. To raise the limit, set `GITHUB_TOKEN` to a [fine-grained token](https://github.com/settings/personal-access-tokens) with read access to issues, in `.env.local` and in your Vercel project.
+
+## Add the reproduction skill
+
+A [skill](/docs/skills) is a procedure the agent loads only when it needs it. Create `agent/skills/reproduce-bug/SKILL.md`:
+
+```md title="agent/skills/reproduce-bug/SKILL.md"
+---
+description: Reproduce a reported bug in the sandbox before triaging it.
+---
+
+1. If the working directory is a Git checkout of the issue's repository, work
+   there. Otherwise run `git clone --depth 1 https://github.com/<owner>/<repo> repo`
+   and work in `repo/`.
+2. If `package.json` lists dependencies, run `npm install`.
+3. Write the smallest script that shows the reported behavior, such as a
+   `node -e` one-liner, and run it with `bash`.
+4. Run `npm test` to see whether the existing tests catch it.
+5. Report the exact command and its output, and say whether you reproduced it.
+```
+
+The agent runs these commands with its built-in `bash` tool in the [sandbox](/docs/sandbox). With Docker running, eve starts a container from its default image, which includes Node.js, npm, and Git.
+
+## Triage the issue locally
+
+In the terminal UI, replace `<owner>` with your GitHub username and send:
+
+```text
+Triage <owner>/slugify-demo#1
+```
+
+The agent calls `get_issue`, loads `reproduce-bug`, clones the repository, and runs a script that prints `hello--world`. Its reply starts with `Label: bug`.
+
+Try a second issue that asks for a feature, such as a custom separator, and check that the agent labels it without running any code.
+
+## Add an eval
+
+An [eval](/docs/evals) turns that check into a test you can rerun after you change the instructions. Create `evals/evals.config.ts`:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+
+export default defineEvalConfig({});
+```
+
+Then create `evals/feature-request.eval.ts`:
+
+```ts title="evals/feature-request.eval.ts"
+import { defineEval } from "eve/evals";
+
+export default defineEval({
+  description: "Labels a feature request without running code.",
+  async test(t) {
+    await t.send(
+      "Triage this issue. Title: Support a custom separator. Body: I'd like slugify('Hello World', '_') to return hello_world.",
+    );
+    t.succeeded();
+    t.messageIncludes("Label: feature");
+    t.notCalledTool("bash");
+  },
+});
+```
+
+Run it:
+
+```bash
+npm run eval
+```
+
+## Connect GitHub
+
+Add the GitHub channel so new issues reach the agent:
+
+```bash
+eve add channel/github
+```
+
+When setup asks what the GitHub App should respond to, select **New issues** along with the defaults. Setup signs you in to Vercel, links a project, creates a GitHub App through Vercel Connect, and writes the channel file:
+
+```ts title="agent/channels/github.ts"
+import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "triage-agent",
+  credentials: connectGitHubCredentials("github/triage-agent"),
+  onIssue(ctx, issue) {
+    if (issue.action !== "opened") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },
+});
+```
+
+Your `botName` and connection name come from the GitHub App that setup creates. `onIssue` starts a turn when someone opens an issue. The agent also answers comments that include `@<botName>`.
+
+## Deploy
+
+```bash
+npm run deploy
+```
+
+Open the GitHub App in the Vercel Connect dashboard and install it on `slugify-demo`. Then open a new issue, such as one reporting that `slugify("Hello - World")` returns `hello---world`.
+
+On Vercel, the GitHub channel checks out the repository into the sandbox before each turn, so the agent works on the real files. The App's token never enters the sandbox. The agent replies on the issue with its label and reproduction.
+
+## Where to go next
+
+- Add more evals, including one for a bug report, in [Evals](/docs/evals).
+- Let the agent add labels or open fix pull requests with the [git extension](/docs/code-extension#publish-with-the-git-extension).
+- Require approval before a tool acts on GitHub with [Human-in-the-Loop](/docs/human-in-the-loop).
+- See every GitHub channel option in [GitHub](/docs/channels/github).
