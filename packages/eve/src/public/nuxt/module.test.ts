@@ -1,6 +1,6 @@
 import { ChildProcess } from "node:child_process";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
@@ -91,6 +91,11 @@ async function setupModule(input: {
   await nuxt.runHook("modules:done");
   return nuxt;
 }
+
+beforeEach(() => {
+  vi.stubEnv("EVE_BASE_URL", undefined);
+  vi.stubEnv("VERCEL", undefined);
+});
 
 afterEach(() => {
   vi.clearAllMocks();
