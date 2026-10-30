@@ -108,6 +108,7 @@ describe("Web Chat auth scaffold", () => {
       );
       const document = JSON.parse(await readFile(input.packagePath, "utf8"));
       expect(document.dependencies["better-auth"]).toBeDefined();
+      expect(document.dependencies["@opentelemetry/api"]).toBe("1.9.0");
       expect(document.scripts["dev:all"]).toBe("vercel dev --local");
       expect(await readFile(layoutPath, "utf8")).toBe(layout);
       await (
