@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { createNitro } from "nitro/builder";
-import type { LoadConfigOptions, Nitro, NitroConfig, NitroModule } from "nitro/types";
+import type { LoadConfigOptions, Nitro, NitroConfig } from "nitro/types";
 
 import {
   resolvePackageRoot,
@@ -25,7 +25,10 @@ import {
 } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { onNitroBundlerLog } from "#internal/nitro/host/nitro-bundler-config.js";
-import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-assets.js";
+import {
+  SKILL_FILES_PLUGIN_ID,
+  writeSkillFilesPlugin,
+} from "#internal/nitro/host/skill-files-plugin.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
   type WorkflowArtifacts,
@@ -78,13 +81,13 @@ export async function createHostNitro(
     outDir: locations.workflowBuildDir,
     rootDir: resolvePackageRoot(),
   }).build();
-  const serverAssets = spec.development
-    ? undefined
-    : await prepareSkillServerAssets({
+  const skillFilesPlugin = spec.runtimePlugins.includes("skill-files")
+    ? await writeSkillFilesPlugin({
         skills: spec.skills,
         skillsRoot: locations.skillsRoot,
-        stagingDirectory: join(locations.buildDir, "eve-skill-assets"),
-      });
+        stagingDirectory: join(locations.buildDir, "eve-skill-files"),
+      })
+    : undefined;
   const routes = await renderHostRoutes(spec.routes, {
     artifactsConfig: spec.development
       ? createDevelopmentNitroArtifactsConfig({
@@ -97,7 +100,7 @@ export async function createHostNitro(
   });
 
   return await createNitro(
-    toNitroConfig(spec, { routes, serverAssets, workflowArtifacts }),
+    toNitroConfig(spec, { routes, skillFilesPlugin, workflowArtifacts }),
     createNitroLoadOptions(locations.buildDir),
   );
 }
@@ -106,7 +109,7 @@ function toNitroConfig(
   spec: HostSpec,
   built: {
     readonly routes: HostNitroRoutes;
-    readonly serverAssets: NitroConfig["serverAssets"];
+    readonly skillFilesPlugin: string | undefined;
     readonly workflowArtifacts: WorkflowArtifacts;
   },
 ): NitroConfig {
@@ -143,10 +146,7 @@ function toNitroConfig(
     logLevel: spec.development ? 1 : undefined,
     // Gzipping every output file only annotates the build log's file tree.
     logging: spec.development ? undefined : { compressedSizes: false },
-    modules: [
-      ...(instrumentationEntry ? [instrumentationEntry.module] : []),
-      ...(spec.development ? [] : [serverAssetsModule]),
-    ],
+    modules: instrumentationEntry ? [instrumentationEntry.module] : [],
     noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets),
     output: { dir: locations.outputDir },
     plugins: spec.runtimePlugins.map((plugin) =>
@@ -178,27 +178,18 @@ function toNitroConfig(
     rootDir: locations.appRoot,
     // eve registers every handler, plugin, and task explicitly.
     scanDirs: [],
-    serverAssets: built.serverAssets,
     serverDir: false,
     serverEntry: false,
     traceDeps: [...spec.externals.traceDeps],
     vercel: spec.vercel,
+    virtual: {
+      ...built.routes.virtual,
+      ...(built.skillFilesPlugin !== undefined && {
+        [SKILL_FILES_PLUGIN_ID]: built.skillFilesPlugin,
+      }),
+    },
   };
 }
-
-/**
- * Nitro always appends a `server` asset for `<rootDir>/assets`. eve reads only
- * its own bases, and reading storage would otherwise start bundling an app's
- * `assets/` directory. Nitro adds it while resolving options, before modules.
- */
-const serverAssetsModule: NitroModule = {
-  name: "eve:server-assets",
-  setup(nitro) {
-    nitro.options.serverAssets = nitro.options.serverAssets.filter(
-      (asset) => asset.baseName !== "server",
-    );
-  },
-};
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
   "local-schedules": "src/internal/nitro/host/local-schedules-runtime-plugin.ts",
@@ -219,6 +210,8 @@ function resolveRuntimePluginPath(
         throw new Error("Instrumented host has no instrumentation plugin.");
       }
       return compiledArtifacts.instrumentationPluginPath;
+    case "skill-files":
+      return SKILL_FILES_PLUGIN_ID;
     case "workflow-world":
       return compiledArtifacts.workflowWorldPluginPath;
     default:

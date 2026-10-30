@@ -69,6 +69,15 @@ export function stringifyEsmImportSpecifier(specifier: string): string {
 }
 
 /**
+ * Serializes a Nitro `text:` or `bytes:` import of a file for generated ESM.
+ * Nitro's `replace` skips these modules, so data loaded through them reaches
+ * the bundle exactly as written.
+ */
+export function stringifyNitroDataImportSpecifier(kind: "bytes" | "text", path: string): string {
+  return JSON.stringify(`${kind}:${path.replaceAll("\\", "/")}`);
+}
+
+/**
  * Rewrites generated ESM source containing raw Windows absolute imports.
  */
 export function normalizeGeneratedEsmImportSpecifiers(source: string): string {

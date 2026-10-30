@@ -381,7 +381,7 @@ eve serves a skill whole or not at all. It leaves out a skill, and logs a warnin
 
 A `SKILL.md` whose frontmatter names the skill and has a `description` is served as written. Otherwise, eve serves it with generated frontmatter that carries the name and description, as for flat `.md` and module skills. The digest covers the served document. eve doesn't serve skills from dynamic resolvers or subagents.
 
-Production builds ship skill files as server assets, so they count toward the deployed function's size. `eve build` drops Nitro's default `server` server-asset entry, so a route that reads `assets:server` storage finds it empty in production.
+Production builds embed skill files in the server bundle, so they count toward the deployed function's size.
 
 ## Troubleshooting
 

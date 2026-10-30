@@ -40,6 +40,7 @@ export type HostRuntimePlugin =
   | "local-schedules"
   | "local-tracing"
   | "sandbox-shutdown"
+  | "skill-files"
   | "workflow-sandbox"
   | "workflow-world";
 
@@ -58,7 +59,7 @@ export interface HostSpec {
   readonly preset: "vercel" | undefined;
   readonly routes: HostRouteTable;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
-  /** Skills production reads through server assets; dev reads the compile directory. */
+  /** Skills a production build embeds; dev reads the compile directory. */
   readonly skills: readonly string[];
   readonly vercel: ReturnType<typeof createEveVercelOptions>;
   readonly websocket: boolean;
@@ -104,6 +105,7 @@ export function createHostSpec(
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development && !instrumented ? (["local-tracing"] as const) : []),
     "compiled-artifacts",
+    ...(development ? [] : (["skill-files"] as const)),
     "workflow-world",
     ...(hasWorkflowProgram(manifest) ? (["workflow-sandbox"] as const) : []),
     ...(instrumented ? (["instrumentation"] as const) : []),

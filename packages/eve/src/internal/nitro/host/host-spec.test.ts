@@ -162,17 +162,19 @@ describe("createHostSpec", () => {
     }
   });
 
-  it("adds sandbox shutdown and development-runtime pruning only to production hosts", async () => {
+  it("adds embedded skill files, sandbox shutdown, and development-runtime pruning only to production hosts", async () => {
     const manifest = await compileAgent();
     const production = spec(manifest, PRODUCTION);
     const development = spec(manifest, DEVELOPMENT);
 
     expect(production.runtimePlugins).toEqual([
       "compiled-artifacts",
+      "skill-files",
       "workflow-world",
       "sandbox-shutdown",
     ]);
     expect(production.externals.pruneDevelopmentRuntime).toBe(true);
+    expect(development.runtimePlugins).not.toContain("skill-files");
     expect(development.runtimePlugins).not.toContain("sandbox-shutdown");
     expect(development.externals.pruneDevelopmentRuntime).toBe(false);
   });
