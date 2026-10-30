@@ -8,10 +8,7 @@ import {
   WEB_APP_TEMPLATE_FILES,
   WEB_CHANNEL_TEMPLATES,
 } from "#setup/scaffold/create/web-template.js";
-import {
-  resolveWebPackageVersions,
-  WEB_AUTH_OPENTELEMETRY_API_VERSION,
-} from "#setup/scaffold/update/web-options.js";
+import { resolveWebPackageVersions } from "#setup/scaffold/update/web-options.js";
 
 async function readOptional(path: string): Promise<string | undefined> {
   try {
@@ -70,8 +67,6 @@ export async function prepareWebAuthScaffold(input: {
     };
     document.dependencies = {
       ...document.dependencies,
-      "@opentelemetry/api":
-        document.dependencies?.["@opentelemetry/api"] ?? WEB_AUTH_OPENTELEMETRY_API_VERSION,
       "better-auth":
         document.dependencies?.["better-auth"] ??
         resolveWebPackageVersions(undefined, "sign-in-with-vercel").betterAuthPackageVersion,
