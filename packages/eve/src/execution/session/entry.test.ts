@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   getWritable: vi.fn(() => new WritableStream<Uint8Array>()),
 }));
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getWorkflowMetadata: () => ({
     workflowRunId: "session-1",
     workflowStartedAt: new Date("2026-02-01T00:00:00.000Z"),

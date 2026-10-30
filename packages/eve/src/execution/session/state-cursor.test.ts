@@ -1,3 +1,4 @@
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -196,6 +197,64 @@ describe("SessionStateCursor", () => {
       if (meanwhile === "nothing") expect(claimSessionHooks).not.toHaveBeenCalled();
     },
   );
+  it("retains an immutable prefix, commits only new messages, and leaves it unchanged after failed work", async () => {
+    vi.stubEnv("WORKFLOW_SHARED_HISTORY", "1");
+    try {
+      const cursor = new SessionStateCursor({
+        history: [],
+        inbox: { claimSessionHooks: async () => {} },
+        sessionWritable: new WritableStream<Uint8Array>(),
+        serializedContext: {},
+        sessionState: state(""),
+      });
+      await expect(
+        cursor.advanceWithHistory((input) =>
+          withSessionStateDelta(input, async () => {
+            throw new Error("crashed before output");
+          }),
+        ),
+      ).rejects.toThrow("crashed before output");
+      expect(cursor.history).toEqual([]);
+      const first = await cursor.advanceWithHistory((input) =>
+        withSessionStateDelta(input, async () => ({
+          history: [
+            { role: "user" as const, kind: "user" as const, content: "Alice asks" },
+            { role: "assistant" as const, content: "Bob replies" },
+          ],
+        })),
+      );
+      expect(SharedHistory.appendedCursor(first.stateDelta.history)).toEqual({
+        logId: "conversation:session-1",
+        end: 2,
+      });
+      const prefix = cursor.history;
+      const next = await cursor.advanceWithHistory((input) =>
+        withSessionStateDelta(input, async () => ({
+          history: [...input.history, { role: "assistant" as const, content: "next" }],
+        })),
+      );
+      expect(next.stateDelta.history).toEqual({
+        kind: "array",
+        length: 3,
+        set: { "2": { role: "assistant", content: "next" } },
+      });
+      expect(prefix).toHaveLength(2);
+      expect(Object.isFrozen(prefix)).toBe(true);
+      await expect(
+        cursor.advanceWithHistory((input) =>
+          withSessionStateDelta(input, async () => ({
+            history: [
+              { role: "assistant" as const, content: "rewritten" },
+              ...input.history.slice(1),
+            ],
+          })),
+        ),
+      ).rejects.toThrow("append-only");
+      expect(cursor.history).toHaveLength(3);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 function state(continuationToken: string): DurableSessionState {

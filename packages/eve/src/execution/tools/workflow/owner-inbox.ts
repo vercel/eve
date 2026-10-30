@@ -1,3 +1,4 @@
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type {
@@ -14,12 +15,14 @@ export function workflowToolRunOutcomeToToolResult(
 ): RuntimeToolResultActionResult {
   const { from, result } = message;
   if (result.status === "completed") {
-    return {
+    const value: RuntimeToolResultActionResult = {
       callId: from.callId,
       kind: "tool-result",
       output: result.output,
       toolName: from.toolName,
     };
+    const origin = SharedHistory.origin(result, "output");
+    return origin === undefined ? value : SharedHistory.project(value, { output: origin });
   }
   return {
     callId: from.callId,

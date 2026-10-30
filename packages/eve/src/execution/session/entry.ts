@@ -1,7 +1,12 @@
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
-import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
+import {
+  SharedHistory,
+  createHook,
+  getWorkflowMetadata,
+  getWritable,
+} from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -495,6 +500,23 @@ function createInitialDelivery(
   serializedContext: Record<string, unknown>,
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
+  const payload = attachClientContext(
+    {
+      message: input.input.message,
+      context: input.input.context,
+      history: input.input.history,
+      outputSchema: input.input.outputSchema,
+      state: input.input.state,
+    },
+    readClientContext(input.input),
+  );
+  const fields = Object.fromEntries(
+    Object.keys(payload).flatMap((key) => {
+      const origin = SharedHistory.origin(input.input, key);
+      return origin === undefined ? [] : [[key, origin]];
+    }),
+  );
+  if (Object.keys(fields).length > 0) SharedHistory.project(payload, fields);
   return {
     auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
     idempotencyKey: input.idempotencyKey,
@@ -509,18 +531,7 @@ function createInitialDelivery(
             },
           ],
     kind: "deliver",
-    payloads: [
-      attachClientContext(
-        {
-          message: input.input.message,
-          context: input.input.context,
-          history: input.input.history,
-          outputSchema: input.input.outputSchema,
-          state: input.input.state,
-        },
-        readClientContext(input.input),
-      ),
-    ],
+    payloads: [payload],
     requestId: readChannelRequestId(serializedContext),
   };
 }

@@ -1,3 +1,5 @@
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
+import { randomUUID } from "node:crypto";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { readInboxHandle } from "#execution/session-inbox/handle.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
@@ -70,6 +72,14 @@ export async function resumeRunnableHook(
     }
   }
   if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
+  if (
+    process.env.WORKFLOW_SHARED_HISTORY === "1" &&
+    payload !== null &&
+    typeof payload === "object"
+  ) {
+    const id = randomUUID();
+    SharedHistory.source(payload, `hook:${id}`);
+  }
   return await resumeHook(token, payload);
 }
 

@@ -7,7 +7,10 @@ import type {
   SessionStateValues,
   WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { diffValue, snapshotValue } from "#shared/value-delta.js";
+import type { TurnStepPayload } from "#execution/session/turn-step-types.js";
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
+import { diffValue, snapshotValue, type ValueDelta } from "#shared/value-delta.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 
 // Steps only: the workflow body applies what this returns with `applySessionStateDelta`, and
 // can't import the session's publication.
@@ -36,8 +39,13 @@ export async function withSessionStateDelta(
   input: Partial<SessionStateValues>,
   work: (input: Partial<SessionStateValues>) => Promise<Partial<SessionStateValues>>,
 ): Promise<SessionStateTransition> {
+  // A shared-history prefix is frozen, so it is its own snapshot and keeps its cursor.
+  const historyCursor = SharedHistory.cursor(input.history);
   const base = Object.fromEntries(
-    SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
+    SESSION_VALUE_KEYS.map((key) => [
+      key,
+      key === "history" && historyCursor !== undefined ? input[key] : snapshotValue(input[key]),
+    ]),
   );
   const { sessionWritable } = input as { readonly sessionWritable?: WritableStream<Uint8Array> };
   if (sessionWritable !== undefined && base.sessionState !== undefined) {
@@ -64,5 +72,51 @@ export async function withSessionStateDelta(
     const delta = next[key] === undefined ? undefined : diffValue(base[key], next[key]);
     if (delta !== undefined) stateDelta[key] = delta;
   }
+  if (historyCursor !== undefined && stateDelta.history !== undefined && history !== undefined) {
+    markSharedHistoryAppend(input, historyCursor, stateDelta.history, history);
+  }
   return { ...result, stateDelta };
+}
+
+/**
+ * Validates that a step only appended to its shared-history prefix and marks the delta as that
+ * appended range, projecting new user messages back to the delivery payload that owns their body.
+ */
+function markSharedHistoryAppend(
+  input: Partial<SessionStateValues>,
+  historyCursor: { readonly logId: string; readonly end: number },
+  delta: ValueDelta,
+  history: HarnessModelMessage[],
+): void {
+  if (delta.kind === "array") {
+    if (
+      delta.patch !== undefined ||
+      Object.keys(delta.set ?? {}).some((key) => Number(key) < historyCursor.end)
+    ) {
+      throw new Error("Shared history currently requires append-only model messages.");
+    }
+  } else if (!(delta.kind === "value" && historyCursor.end === 0 && Array.isArray(delta.value))) {
+    throw new Error("Shared history currently requires append-only model messages.");
+  }
+  // Channel payloads are the authoritative user producer. The adapter may
+  // normalize the outer message while referring to its already stored body.
+  const turn = input as { input?: TurnStepPayload };
+  for (let i = historyCursor.end; i < history.length; i++) {
+    const message = history[i];
+    if (message?.role !== "user" || message.kind !== "user") continue;
+    for (const payload of turn.input?.delivery?.payloads ?? []) {
+      const origin = SharedHistory.origin(payload, "message");
+      if (origin !== undefined && payload.message === message.content) {
+        SharedHistory.project(message, { content: origin });
+        // diffValue snapshots new values by reference; project the delta's
+        // actual entry as well when a normalization made another object.
+        const stored =
+          delta.kind === "value" ? (delta.value as typeof history)[i] : delta.set?.[String(i)];
+        if (stored !== null && typeof stored === "object")
+          SharedHistory.project(stored, { content: origin });
+        break;
+      }
+    }
+  }
+  SharedHistory.append(delta, historyCursor, history.length);
 }

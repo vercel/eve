@@ -1,3 +1,5 @@
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
+import { randomUUID } from "node:crypto";
 import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { readRemoteChildBinding } from "#execution/child-binding.js";
@@ -213,6 +215,9 @@ export function createWorkflowRuntime(config: {
       ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
       serializedContext,
     };
+    if (process.env.WORKFLOW_SHARED_HISTORY === "1" && workflowInput.input !== undefined) {
+      SharedHistory.source(workflowInput.input, `initial:${input.idempotencyKey ?? randomUUID()}`);
+    }
     if (input.continuationConflictCommand !== undefined) {
       workflowInput.continuationConflictCommand = input.continuationConflictCommand;
     }

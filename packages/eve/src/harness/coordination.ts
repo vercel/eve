@@ -1,3 +1,4 @@
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
 import { observeToolOutput } from "#tool-stubs/execute.js";
 import type { JSONValue, ModelMessage } from "ai";
 
@@ -280,11 +281,17 @@ async function projectToolResultOutput(
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {
-  if (typeof result.output === "string")
-    return { type: result.isError === true ? "error-text" : "text", value: result.output };
-  return {
-    type: result.isError === true ? "error-json" : "json",
-    // Runtime results are already JSON; detach them for the SDK's mutable message types.
-    value: structuredClone(result.output) as JSONValue,
-  };
+  // This is the untransformed producer output. Custom toModelOutput results
+  // take a separate path and must keep their own representation.
+  const output: ToolResultPart["output"] =
+    typeof result.output === "string"
+      ? { type: result.isError === true ? "error-text" : "text", value: result.output }
+      : {
+          type: result.isError === true ? "error-json" : "json",
+          // Runtime results are already JSON; detach them for the SDK's mutable message types.
+          value: structuredClone(result.output) as JSONValue,
+        };
+  const origin = SharedHistory.origin(result, "output");
+  if (origin !== undefined) SharedHistory.project(output, { value: origin });
+  return output;
 }

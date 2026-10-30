@@ -1,3 +1,5 @@
+export { SharedHistory } from "#compiled/@workflow/core/shared-history.js";
+
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
 const WORKFLOW_GET_STREAM_ID = Symbol.for("WORKFLOW_GET_STREAM_ID");

@@ -1,3 +1,4 @@
+import { SharedHistory } from "#compiled/@workflow/core/index.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type {
   SessionHistoryStepState,
@@ -27,6 +28,7 @@ export class SessionStateCursor {
   /** Session steps adopted so far, and those still running. */
   private adopted = 0;
   private running = 0;
+  private readonly sharedLogId: string | undefined;
 
   constructor(
     input: SessionStateValues & {
@@ -36,8 +38,19 @@ export class SessionStateCursor {
   ) {
     this.inbox = input.inbox;
     this.sessionWritable = input.sessionWritable;
+    this.sharedLogId = SharedHistory.enabled()
+      ? `conversation:${input.sessionState.sessionId}`
+      : undefined;
+    if (this.sharedLogId !== undefined && input.history.length !== 0)
+      throw new Error("Shared history preview requires empty initial history.");
     this.values = {
-      history: input.history,
+      history:
+        this.sharedLogId === undefined
+          ? input.history
+          : SharedHistory.prefix(input.history, {
+              logId: this.sharedLogId,
+              end: input.history.length,
+            }),
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     };
@@ -133,6 +146,18 @@ export class SessionStateCursor {
       await this.inbox.claimSessionHooks(sessionHookTokens(next));
       if (this.values !== base) {
         throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
+      }
+      if (this.sharedLogId !== undefined && options.withHistory) {
+        const cursor =
+          SharedHistory.appendedCursor(result.stateDelta.history) ??
+          SharedHistory.cursor(base.history);
+        if (
+          cursor === undefined ||
+          cursor.logId !== this.sharedLogId ||
+          cursor.end !== next.history.length
+        )
+          throw new Error("Shared history cursor was not committed with the step output.");
+        SharedHistory.prefix(next.history, cursor);
       }
       this.values = next;
       this.adopted++;

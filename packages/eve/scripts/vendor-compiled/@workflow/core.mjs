@@ -178,6 +178,7 @@ export default {
   chunkGroup: "workflow",
   plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
   entries: [
+    { entry: "dist/shared-history.js", outputPath: "shared-history" },
     { entry: "dist/serialization.js", outputPath: "serialization" },
     { entry: "dist/runtime/helpers.js", outputPath: "runtime/helpers" },
     {
