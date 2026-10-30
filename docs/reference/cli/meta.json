@@ -1,4 +1,5 @@
 {
   "title": "CLI",
+  "defaultOpen": false,
   "pages": ["../telemetry"]
 }
