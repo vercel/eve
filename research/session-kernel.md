@@ -16,7 +16,7 @@ This plan splits eve into layers so those guarantees hold whatever loop runs and
 - A **harness** is the inside of the agent loop: what the next model call gets, and what the turn does next. eve's own loop becomes one harness.
 - A **host** runs the session: Workflow when deployed, or one process for an agent embedded in a CLI, a worker, or a test.
 
-None of this is part of 1.0. The kernel and harness split is drafted in stack #5638, #5566, #5604, #5609, #5621, and #5640, and this document uses its names. Anything the stack doesn't have is marked proposed, including the flat harness shape; the stack groups the model, instructions, and tools under `agent`. Code here is pseudocode.
+None of this is part of 1.0. The kernel and harness split is drafted in stack #5638, #5566, #5604, #5609, #5621, and #5640, and this document uses its names. Anything the stack doesn't have is marked proposed, including the flat harness shape. The stack nests the call's fields under `agent` and names the system prompt `agent.instructions`. Code here is pseudocode.
 
 ## What eve guarantees
 
@@ -50,7 +50,7 @@ This is the proposed layering. The kernel section covers where today's code diff
 flowchart TD
   Authoring["Authoring<br/>agent/ files or code"] -- resolved agent --> Runtime
   Runtime["Session runtime<br/>admission, answers, controls, tasks, hooks"] -- inputs --> Kernel
-  Harness["Harness: replaceable<br/>model, instructions, tools, history, next"] -- policy --> Kernel
+  Harness["Harness: replaceable<br/>model, system, tools, history, next"] -- policy --> Kernel
   Kernel["Kernel: sealed<br/>machine, commit, step"] -- facts --> Protocol["Protocol<br/>facts, progress, fold, selectors"]
   Kernel -- lines --> Host["Host<br/>inbox, timers, storage, durable runs"]
   Host -- next input --> Runtime
@@ -71,7 +71,7 @@ A step runs from the harness choosing the model to the harness deciding what's n
 
 ```mermaid
 flowchart TD
-  Model["next: model"] --> Evaluate["evaluate model, instructions, tools, history"]
+  Model["next: model"] --> Evaluate["evaluate model, system, tools, history"]
   Evaluate --> Provider["provider call through the AI SDK"]
   Provider --> Text["text: content facts"]
   Provider --> Calls["tool calls"]
@@ -96,9 +96,8 @@ Sandboxes and connections are execution environments that the host provides and 
 - A call runs as the person whose turn made it.
 - A turn doesn't settle while its tasks work. The kernel waits for them and calls the model with their results.
 - Input that arrives during a turn is read in that turn.
-- A turn can't loop forever. A harness can send the model back with a note at most three times per turn.
 - Usage limits apply before every model call, and every model call is billed, including the summarizer's and `decide()`'s (#5638).
-- History changes are checked, so a harness can't send the model a history the provider would reject, such as a tool result without its call.
+- History is checked, so a harness can't send the model a request the provider would reject: a tool result without its call, or a history that ends in the model's own reply with nothing new to read.
 - A settled output must match the turn's output schema.
 - A harness that throws or returns something invalid fails the turn with "The agent's harness failed." The reason goes only to the logs.
 
@@ -147,30 +146,30 @@ At its core, every agent harness is a while loop:
 
 ```ts
 while (true) {
-  const response = await callModel({ model, instructions, tools, history });
+  const response = await callModel({ model, system, tools, history });
   history.push(...response.messages);
   if (response.toolCalls.length === 0) return response.text;
   for (const call of response.toolCalls) history.push(await runTool(call));
 }
 ```
 
-Skills, compaction, critics, and model routing are all variations on what `callModel` gets and when the loop stops. An eve harness is the inside of that loop. `model`, `instructions`, `tools`, and `history` are what `callModel` gets, and `next` decides whether the loop goes around again. The loop itself and `runTool` belong to the kernel, because approvals, identity, and parking live there.
+Skills, compaction, critics, and model routing are all variations on what `callModel` gets and when the loop stops. An eve harness is the inside of that loop. `model`, `system`, `tools`, and `history` are what `callModel` gets, and `next` decides whether the loop goes around again. The loop itself and `runTool` belong to the kernel, because approvals, identity, and parking live there.
 
 ```ts title="agent/harness.ts"
 import { defineHarness } from "eve/experimental/harness";
 
-export default defineHarness((ctx) => ({ model, instructions, tools, history, next }));
+export default defineHarness((ctx) => ({ model, system, tools, history, next }));
 ```
 
 Each field is a value or a function, and the kernel calls a function only when it needs the value. A missing field, or one that returns `undefined`, falls back to eve's. The flat shape is proposed.
 
-| Field          | What it returns                                          | When the kernel evaluates it                                               |
-| -------------- | -------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `model`        | Which model, with its options                            | Before each model call                                                     |
-| `instructions` | The whole system prompt                                  | Before each model call                                                     |
-| `tools`        | Every tool the model is offered                          | Before each model call                                                     |
-| `history`      | What the model remembers, saved as the session's history | Before each model call, and on `session.compact()`                         |
-| `next`         | What the turn does next                                  | At turn start, after each model step, and after the harness's calls settle |
+| Field     | What it returns                                          | When the kernel evaluates it                                               |
+| --------- | -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `model`   | Which model, with its options                            | Before each model call                                                     |
+| `system`  | The whole system prompt                                  | Before each model call                                                     |
+| `tools`   | Every tool the model is offered                          | Before each model call                                                     |
+| `history` | What the model remembers, saved as the session's history | Before each model call, and on `session.compact()`                         |
+| `next`    | What the turn does next                                  | At turn start, after each model step, and after the harness's calls settle |
 
 ### Familiar from `defineDynamic`
 
@@ -201,14 +200,14 @@ eve's harness keeps what you declared apart from what eve adds, and combines the
 
 ```ts
 model: async () => (await declared(ctx)).model,
-instructions: async () => builtins(ctx).prompt.instructions(await declared(ctx)),
+system: async () => builtins(ctx).prompt.system(await declared(ctx)),
 tools: async () => ({ ...(await declared(ctx)).tools, ...builtins(ctx).tools }),
 ```
 
-- **`declared(ctx)`** is what the agent's files declare, as data, with dynamic values resolved: instructions, skills (each with `load()`), tools, the workspace, and the model. Default tools such as `bash` count as declared, because a file can replace or turn off each one.
-- **`builtins(ctx)`** is what eve adds: its `eve__` system tools, and renderers for its prompt sections.
+- **`declared(ctx)`** is what the agent's files declare, as data, with dynamic values resolved: instructions with their system or user role, skills (each with `load()`), tools, the workspace, and the model. Default tools such as `bash` count as declared, because a file can replace or turn off each one.
+- **`builtins(ctx)`** is what eve adds: its `eve__` tools, and renderers for its prompt sections.
 
-Your harness can recombine these however it likes. `instructions` is the whole system prompt, and `tools` is exactly what the model is offered, so leaving out an `eve__` tool turns off its feature. Without `eve__skill`, for example, skills can't load. `model` accepts whatever `agent.ts`'s `model` does, including a selection with provider options.
+Your harness can recombine these however it likes. `system` is the whole system prompt; eve's builds it from the system-role instructions and its own sections. `tools` is exactly what the model is offered, so leaving out an `eve__` tool turns off its feature. Without `eve__skill`, for example, skills can't load. `model` accepts whatever `agent.ts`'s `model` does, including a selection with provider options.
 
 ### `history`
 
@@ -267,7 +266,7 @@ This is eve's entire default harness:
 ```ts
 export const native = defineHarness((ctx) => ({
   model: async () => (await declared(ctx)).model,
-  instructions: async () => builtins(ctx).prompt.instructions(await declared(ctx)),
+  system: async () => builtins(ctx).prompt.system(await declared(ctx)),
   tools: async () => ({ ...(await declared(ctx)).tools, ...builtins(ctx).tools }),
   history: () => nativeHistory(ctx),
 
@@ -294,7 +293,7 @@ Each example is a complete `agent/harness.ts`, and some use the proposed `ctx` f
 import { declared, defineHarness } from "eve/experimental/harness";
 
 export default defineHarness((ctx) => ({
-  instructions: async () => {
+  system: async () => {
     const files = await declared(ctx);
     const refunds = files.skills.find((skill) => skill.name === "refunds");
     const others = files.skills.filter((skill) => skill !== refunds && !skill.deferred);
@@ -310,7 +309,7 @@ export default defineHarness((ctx) => ({
 }));
 ```
 
-A dynamic instruction supplies one entry, and eve places it in a prompt that still has eve's own sections: the workspace, the note on tools, the skills list, and the note on tasks. A harness's `instructions` is the entire system prompt, so those sections appear only if you include them. Here, the harness writes its own skills list and loads `refunds` up front.
+A dynamic instruction supplies one entry, and eve places it in a prompt that still has eve's own sections: the workspace, the note on tools, the skills list, and the note on tasks. A harness's `system` is the entire system prompt, so those sections appear only if you include them. Here, the harness writes its own skills list and loads `refunds` up front.
 
 </details>
 
@@ -452,9 +451,9 @@ export default defineHarness((ctx) => {
       return { ...(plan === "enterprise" ? tools : rest), ...builtins(ctx).tools };
     },
 
-    instructions: async () =>
+    system: async () =>
       [
-        builtins(ctx).prompt.instructions(await declared(ctx)),
+        builtins(ctx).prompt.system(await declared(ctx)),
         `This customer is on the ${(await account()).plan} plan.`,
       ].flat(),
   };
@@ -580,7 +579,7 @@ The same handle could back a web chat in a small worker. The worker still needs 
 
 The draft stack already exports `defineHarness`, `declared(ctx)`, and `builtins(ctx)` from `eve/experimental/harness`. The rest could become public in steps after 1.0, each one experimental first:
 
-- **`agent/harness.ts`** default-exports `defineHarness((ctx) => ({ model, instructions, tools, history, next }))`. Authors can adopt one field at a time.
+- **`agent/harness.ts`** default-exports `defineHarness((ctx) => ({ model, system, tools, history, next }))`. Authors can adopt one field at a time.
 - **Composition is a function call.** To combine eve's compaction with its own trimming, a harness calls `nativeHistory` inside its own `history`. There's no processor pipeline.
 - **`compaction` options in `agent.ts`** keep configuring eve's harness. A harness that defines `history` owns compaction.
 - **`eve/experimental/embed`** exports `createSession`. It takes an agent defined in code, plus an optional store, identity, and sandbox, and returns a `Session`.
