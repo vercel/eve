@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -15,7 +18,7 @@ import {
   executeGrepSearch,
   processGrepOutput,
   shouldUseFixedStrings,
-} from "../../extension/lib/grep-search.ts";
+} from "eve/internal/grep";
 
 test("defaults to files_with_matches and a tight row cap", () => {
   assert.equal(effectiveOutputMode(undefined), "files_with_matches");
@@ -64,7 +67,7 @@ test("ripgrep content mode keeps line numbers and a per-file cap", () => {
   });
   assert.match(command, /--line-number/u);
   assert.match(command, /--context 2/u);
-  assert.match(command, /--max-count 20/u);
+  assert.match(command, /--max-count 21/u);
   assert.match(command, /--ignore-case/u);
   assert.doesNotMatch(command, /--fixed-strings/u);
   assert.doesNotMatch(command, /--files-with-matches/u);
@@ -81,7 +84,10 @@ test("quotes patterns so they cannot break out of the sandbox command", () => {
     path: "/workspace",
     pattern: "it's a trap",
   });
-  assert.match(command, /'it'"'"'s a trap'/u);
+  const args = execFileSync("bash", ["-c", 'rg() { printf "%s\\0" "$@"; }; ' + command])
+    .toString()
+    .split("\0");
+  assert.deepEqual(args.slice(-3, -1), ["it's a trap", "/workspace"]);
 });
 
 test("posix fallback lists files without installing ripgrep", () => {
@@ -295,22 +301,6 @@ test("content protocol distinguishes matches from context lines", () => {
   );
 });
 
-test("search command bounds combined command output before sandbox buffering", () => {
-  const command = buildSearchCommand({
-    contextLines: 0,
-    glob: undefined,
-    ignoreCase: false,
-    limit: 10,
-    literal: true,
-    outputMode: "content",
-    path: "/workspace",
-    pattern: "needle",
-  });
-
-  assert.match(command, new RegExp(`2>&1 \\| head -c ${MAX_GREP_COMMAND_BYTES + 1}`, "u"));
-  assert.match(command, /PIPESTATUS\[0\]/u);
-});
-
 test("returned output has per-line and total UTF-8 byte bounds", () => {
   const oversizedLine = "🙂".repeat(MAX_GREP_LINE_BYTES);
   const result = processGrepOutput({
@@ -378,20 +368,110 @@ test("ripgrep and fallback content modes emit an unambiguous filename protocol",
     pattern: "needle",
   };
 
-  assert.match(buildRipgrepCommand(input), /--with-filename --null/u);
+  assert.match(buildRipgrepCommand(input), /--with-filename --json/u);
   assert.match(buildPosixGrepCommand(input), /-n -H -Z/u);
 });
 
-test("tool description is truthful about fallback gitignore behavior", async () => {
-  const source = await readFile(new URL("../../extension/tools/grep.ts", import.meta.url), "utf8");
-  assert.match(source, /POSIX fallback does not read \.gitignore/u);
+test("code and worker remount the canonical grep with truthful fallback documentation", async () => {
+  const { default: tool } = await import("../../extension/tools/grep.ts");
+  const { default: worker } = await import("../../extension/subagents/worker/tools/grep.ts");
+  const { grep } = await import("eve/tools/grep");
+  assert.equal(tool, grep);
+  assert.equal(worker, grep);
+  assert.match(tool.description, /POSIX fallback does not read \.gitignore/u);
 });
 
-test("worker remounts the extension grep instead of eve's provided tool", async () => {
-  const source = await readFile(
-    new URL("../../extension/subagents/worker/tools/grep.ts", import.meta.url),
-    "utf8",
+test("canonical grep executes native search modes and rejects errors without swallowing pipeline status", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-grep-"));
+  const sandbox = {
+    resolvePath: (path: string) => resolve(root, path),
+    async run({ command }: { command: string }) {
+      const result = spawnSync("bash", ["-c", command], {
+        cwd: root,
+        encoding: "utf8",
+        maxBuffer: 512 * 1024,
+      });
+      if (result.error) throw result.error;
+      return { stdout: result.stdout, stderr: result.stderr, exitCode: result.status ?? 1 };
+    },
+  };
+  try {
+    await writeFile(join(root, "a:notes.txt"), "shared-token\n");
+    await writeFile(join(root, "b.txt"), "shared-token\n");
+    for (const outputMode of ["files_with_matches", "content", "count"] as const) {
+      const result = await executeGrepSearch({ pattern: "shared-token", outputMode }, sandbox);
+      assert.equal(result.matchCount, 2, outputMode);
+      assert.equal(result.truncated, false);
+      assert.match(result.content, /a:notes\.txt/u);
+      if (outputMode === "content") assert.match(result.content, /:1:shared-token/u);
+    }
+    await writeFile(join(root, "single.txt"), "repeated-token\nrepeated-token\nrepeated-token\n");
+    const limited = await executeGrepSearch(
+      { pattern: "repeated-token", path: "single.txt", limit: 2, outputMode: "content" },
+      sandbox,
+    );
+    assert.equal(limited.matchCount, 2);
+    assert.equal(limited.truncated, true);
+    const singleCount = await executeGrepSearch(
+      { pattern: "repeated-token", path: "single.txt", outputMode: "count" },
+      sandbox,
+    );
+    assert.equal(singleCount.matchCount, 3);
+    assert.match(singleCount.content, /single\.txt:3/u);
+    await assert.rejects(
+      executeGrepSearch({ pattern: "[", literal: false }, sandbox),
+      /grep failed/u,
+    );
+    await writeFile(join(root, "large.txt"), "longline" + "x".repeat(MAX_GREP_COMMAND_BYTES * 2));
+    const bounded = await executeGrepSearch(
+      { pattern: "longline", outputMode: "content" },
+      sandbox,
+    );
+    assert.equal(bounded.truncated, true);
+    assert.equal(bounded.matchCount, 1);
+    assert.match(bounded.content, /longline/u);
+    assert.match(bounded.content, /Output truncated/u);
+    await writeFile(join(root, "context.txt"), "shared-token\nnear\nfar1\nfar2\nshared-token\n");
+    const context = await executeGrepSearch(
+      { context: 1, outputMode: "content", path: "context.txt", pattern: "shared-token" },
+      sandbox,
+    );
+    const native = await sandbox.run({
+      command: buildSearchCommand({
+        contextLines: 1,
+        glob: undefined,
+        ignoreCase: false,
+        limit: 50,
+        literal: true,
+        outputMode: "content",
+        path: join(root, "context.txt"),
+        pattern: "shared-token",
+      }).replace("--json", "--null"),
+    });
+    assert.equal(
+      context.content,
+      processGrepOutput({ limit: 50, outputMode: "content", path: root, stdout: native.stdout })
+        .content,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("home-scoped grep paths fail with workspace guidance before any command", async () => {
+  let commands = 0;
+  await assert.rejects(
+    executeGrepSearch(
+      { pattern: "guide", path: "$HOME/.agents/skills" },
+      {
+        resolvePath: () => "/workspace",
+        async run() {
+          commands += 1;
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
+      },
+    ),
+    /limited to the sandbox workspace/u,
   );
-  assert.match(source, /from "\.\.\/\.\.\/\.\.\/tools\/grep\.ts"/u);
-  assert.doesNotMatch(source, /eve\/tools\/grep/u);
+  assert.equal(commands, 0);
 });

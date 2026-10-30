@@ -2,11 +2,8 @@
  * Teams Adaptive Card rendering and decode helpers for eve HITL prompts.
  */
 
-import {
-  type InputRequest,
-  parseInputResponse,
-  type ValidatedInputResponse,
-} from "#shared/input.js";
+import { parseAnswer, type ValidatedAnswer } from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
 import type {
   TeamsActivity,
   TeamsInvokeActivity,
@@ -21,6 +18,7 @@ import {
 } from "#public/channels/teams/limits.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { truncate } from "#public/channels/text.js";
 
 /** Adaptive Card attachment content type used by Teams. */
 export const TEAMS_ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive";
@@ -40,9 +38,30 @@ export const TEAMS_HITL_REQUEST_KIND_KEY = "kind";
 /** Prompt carried on approval actions so a response can recover its card record. */
 export const TEAMS_HITL_PROMPT_KEY = "prompt";
 
+/**
+ * A literal Adaptive Card paragraph. TextBlock renders markdown, so a model-written
+ * `[docs](https://evil.example)` would show as a link to a different address. TextRun does not.
+ */
+function literalText(
+  text: string,
+  run: { readonly color?: string; readonly fontType?: "Monospace" } = {},
+): Record<string, unknown> {
+  return {
+    inlines: [
+      {
+        ...(run.color !== undefined && { color: run.color }),
+        ...(run.fontType !== undefined && { fontType: run.fontType }),
+        text: truncate(text, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+        type: "TextRun",
+      },
+    ],
+    type: "RichTextBlock",
+  };
+}
+
 /** Renders one input request as a Teams message body containing an Adaptive Card. */
-export function renderInputRequestMessage(
-  request: InputRequest,
+export function renderInteractionMessage(
+  request: Interaction,
   options: {
     readonly adaptiveCardVersion?: string;
     readonly replyToActivityId?: string;
@@ -51,8 +70,11 @@ export function renderInputRequestMessage(
   const details = formatApprovalInput(request);
   const renderedDetails = details ? truncate(details, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH) : null;
   return {
-    attachments: [renderInputRequestAttachment(request, options)],
-    text: renderedDetails ? `${request.prompt}\n\nTool input:\n${renderedDetails}` : request.prompt,
+    attachments: [renderInteractionAttachment(request, options)],
+    text: renderedDetails
+      ? `${request.request.prompt}\n\nTool input:\n${renderedDetails}`
+      : request.request.prompt,
+    textFormat: "plain",
   };
 }
 
@@ -61,8 +83,8 @@ export function renderInputRequestMessage(
  * `options.adaptiveCardVersion` sets the card schema version (default "1.5").
  * Long prompt, choice, and action text is truncated to Teams card limits.
  */
-export function renderInputRequestAttachment(
-  request: InputRequest,
+export function renderInteractionAttachment(
+  request: Interaction,
   options: {
     readonly adaptiveCardVersion?: string;
     readonly replyToActivityId?: string;
@@ -73,21 +95,8 @@ export function renderInputRequestAttachment(
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     actions: renderActions(request, options.replyToActivityId),
     body: [
-      {
-        text: truncate(request.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-        type: "TextBlock",
-        wrap: true,
-      },
-      ...(details
-        ? [
-            {
-              fontType: "Monospace",
-              text: truncate(details, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-              type: "TextBlock",
-              wrap: true,
-            },
-          ]
-        : []),
+      literalText(request.request.prompt),
+      ...(details ? [literalText(details, { fontType: "Monospace" })] : []),
       ...renderInputs(request),
     ],
     type: "AdaptiveCard",
@@ -101,25 +110,40 @@ export function renderInputRequestAttachment(
 }
 
 /** Renders an answered Teams card that replaces a pending HITL prompt. */
-export function renderAnsweredInputRequestMessage(input: {
+export function renderAnsweredInteractionMessage(input: {
   readonly includeText?: boolean;
   readonly label?: string;
   readonly prompt: string;
 }): TeamsMessageBody {
   const text = input.label ? `Answered: ${input.label}` : "Answered";
-  const result: TeamsMessageBody = {
+  const result = renderSettledInputRequestMessage(input.prompt, { color: "good", text });
+  if (input.includeText !== false) return { ...result, text, textFormat: "plain" };
+  return result;
+}
+
+/**
+ * Renders the card that replaces a prompt no session can answer anymore: its
+ * prompt, then `label`, as the session would have resolved it.
+ */
+export function renderInactiveInputRequestMessage(
+  prompt: string | undefined,
+  label: string,
+): TeamsMessageBody {
+  return renderSettledInputRequestMessage(prompt, { text: label });
+}
+
+/** A card without its choices: `status` under the prompt, when the prompt is known. */
+function renderSettledInputRequestMessage(
+  prompt: string | undefined,
+  status: { readonly color?: string; readonly text: string },
+): TeamsMessageBody {
+  const promptBlocks = prompt === undefined ? [] : [literalText(prompt)];
+  return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          body: [
-            {
-              text: truncate(input.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-              type: "TextBlock",
-              wrap: true,
-            },
-            { color: "good", text, type: "TextBlock", wrap: true },
-          ],
+          body: [...promptBlocks, literalText(status.text, { color: status.color })],
           type: "AdaptiveCard",
           version: "1.5",
         }),
@@ -127,13 +151,11 @@ export function renderAnsweredInputRequestMessage(input: {
       },
     ],
   };
-  if (input.includeText !== false) return { ...result, text };
-  return result;
 }
 
 /** Returns true when a Teams activity carries an eve HITL submit payload. */
-export function isTeamsInputResponseActivity(activity: TeamsActivity): boolean {
-  return deriveTeamsInputResponses(activity).length > 0;
+export function isTeamsAnswerActivity(activity: TeamsActivity): boolean {
+  return deriveTeamsAnswers(activity).length > 0;
 }
 
 /** Returns whether an eve HITL activity answers a tool approval. */
@@ -145,6 +167,11 @@ export function isTeamsToolApprovalResponseActivity(activity: TeamsActivity): bo
 
 /** Reads the original prompt from a tool-approval submit activity. */
 export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | undefined {
+  return isTeamsToolApprovalResponseActivity(activity) ? readTeamsInputPrompt(activity) : undefined;
+}
+
+/** Reads the prompt a submit activity answers, which every eve card carries in its submit data. */
+export function readTeamsInputPrompt(activity: TeamsActivity): string | undefined {
   const value = readActivityValue(activity);
   const payload = value && readHitlPayload(value);
   const prompt = payload?.[TEAMS_HITL_PROMPT_KEY];
@@ -153,13 +180,11 @@ export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | u
 
 /**
  * Decodes the eve HITL submit payload from a Teams activity. Returns a single
- * `InputResponse` (option selection, freeform text, or a bare requestId
+ * `Answer` (option selection, freeform text, or a bare requestId
  * acknowledgement), or an empty array when the activity has no recognizable
  * HITL payload or requestId.
  */
-export function deriveTeamsInputResponses(
-  activity: TeamsActivity,
-): readonly ValidatedInputResponse[] {
+export function deriveTeamsAnswers(activity: TeamsActivity): readonly ValidatedAnswer[] {
   const value = readActivityValue(activity);
   if (!value) return [];
   const payload = readHitlPayload(value);
@@ -179,9 +204,9 @@ export function deriveTeamsInputResponses(
       ? value[TEAMS_HITL_FREEFORM_INPUT_ID]
       : undefined;
 
-  if (optionId !== undefined) return [parseInputResponse({ optionId, requestId })];
-  if (text !== undefined) return [parseInputResponse({ requestId, text })];
-  return [parseInputResponse({ requestId })];
+  if (optionId !== undefined) return [parseAnswer({ interactionId: requestId, optionId })];
+  if (text !== undefined) return [parseAnswer({ interactionId: requestId, text })];
+  return [parseAnswer({ interactionId: requestId })];
 }
 
 /**
@@ -212,11 +237,15 @@ export function teamsInvokeResponse(
   };
 }
 
-function renderInputs(request: InputRequest): readonly Record<string, unknown>[] {
-  if (request.display === "select" && request.options && request.options.length > 0) {
+function renderInputs(request: Interaction): readonly Record<string, unknown>[] {
+  if (
+    request.request.display === "select" &&
+    request.request.options &&
+    request.request.options.length > 0
+  ) {
     return [
       {
-        choices: request.options.map((option) => ({
+        choices: request.request.options.map((option) => ({
           title: truncate(option.label, TEAMS_ADAPTIVE_CARD_CHOICE_TITLE_MAX_LENGTH),
           value: option.id,
         })),
@@ -228,7 +257,11 @@ function renderInputs(request: InputRequest): readonly Record<string, unknown>[]
     ];
   }
 
-  if (request.allowFreeform === true || !request.options || request.options.length === 0) {
+  if (
+    request.request.allowFreeform === true ||
+    !request.request.options ||
+    request.request.options.length === 0
+  ) {
     return [
       {
         id: TEAMS_HITL_FREEFORM_INPUT_ID,
@@ -243,21 +276,26 @@ function renderInputs(request: InputRequest): readonly Record<string, unknown>[]
 }
 
 function renderActions(
-  request: InputRequest,
+  request: Interaction,
   replyToActivityId: string | undefined,
 ): readonly Record<string, unknown>[] {
   const payload = (optionId?: string): Record<string, unknown> => {
-    const value: Record<string, unknown> = { requestId: request.requestId };
-    if (request.kind === "tool-approval") {
-      value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
-      value[TEAMS_HITL_PROMPT_KEY] = request.prompt;
-    }
+    // The prompt the card shows rides along so a card can be retired without
+    // the session that posted it, such as when that session is gone.
+    const value: Record<string, unknown> = {
+      requestId: request.interactionId,
+      [TEAMS_HITL_PROMPT_KEY]: truncate(
+        request.request.prompt,
+        TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH,
+      ),
+    };
+    if (request.request.kind === "approval") value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
     if (replyToActivityId !== undefined) value.replyToActivityId = replyToActivityId;
     if (optionId !== undefined) value.optionId = optionId;
     return value;
   };
-  const options = request.options;
-  if (options && options.length > 0 && request.display !== "select") {
+  const options = request.request.options;
+  if (options && options.length > 0 && request.request.display !== "select") {
     return options.slice(0, TEAMS_ADAPTIVE_CARD_ACTION_LIMIT).map((option) => ({
       data: {
         [TEAMS_HITL_DATA_KEY]: payload(option.id),
@@ -305,16 +343,10 @@ function readHitlPayload(value: Record<string, unknown>): Record<string, unknown
   return isObject(nested) ? nested : null;
 }
 
-function formatApprovalInput(request: InputRequest): string | null {
-  if (request.kind !== "tool-approval") {
+function formatApprovalInput(request: Interaction): string | null {
+  if (request.request.kind !== "approval") {
     return null;
   }
-  const json = JSON.stringify(request.action.input, null, 2);
+  const json = JSON.stringify(request.call?.input ?? {}, null, 2);
   return json === "{}" ? null : json;
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
 }

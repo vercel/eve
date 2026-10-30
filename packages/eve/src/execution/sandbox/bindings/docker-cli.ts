@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 
 /**
  * Buffered result of one `docker …` invocation.
@@ -29,6 +29,7 @@ export interface DockerRunOptions {
  * shape so the sandbox engine can adapt it directly.
  */
 export interface DockerProcess {
+  readonly stdin?: WritableStream<Uint8Array>;
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   wait(): Promise<{ exitCode: number }>;
@@ -44,7 +45,10 @@ export interface DockerCli {
   /** Runs `docker <args>` to completion, buffering stdout/stderr. */
   run(args: readonly string[], options?: DockerRunOptions): Promise<DockerCommandResult>;
   /** Spawns `docker <args>` with streaming stdout/stderr. */
-  stream(args: readonly string[], options?: { readonly signal?: AbortSignal }): DockerProcess;
+  stream(
+    args: readonly string[],
+    options?: { readonly signal?: AbortSignal; readonly stdin?: boolean },
+  ): DockerProcess;
 }
 
 /**
@@ -56,7 +60,7 @@ export class DockerUnavailableError extends Error {
   readonly hint =
     "Install and start Docker Desktop, OrbStack, Colima, or another runtime exposing a " +
     "Docker-compatible `docker` CLI (or point EVE_DOCKER_PATH at one, e.g. Podman). " +
-    "Alternatively use MicrosandboxSandbox, the dependency-free JustBashSandbox, " +
+    "Alternatively use the dependency-free JustBashSandbox, " +
     "VercelSandbox, or DefaultSandbox to pick by availability.";
 
   constructor(cause?: unknown) {
@@ -74,7 +78,7 @@ export class DockerDaemonUnavailableError extends Error {
   /** Structured remediation, surfaced by the semantic-error catalog. */
   readonly hint =
     "Start Docker Desktop (or your Docker-compatible runtime) and retry. Alternatively use " +
-    "MicrosandboxSandbox, the dependency-free JustBashSandbox (installed automatically " +
+    "the dependency-free JustBashSandbox (installed automatically " +
     "by `eve dev`, or `pnpm add -D just-bash`), VercelSandbox, or DefaultSandbox " +
     "to pick by availability.";
 
@@ -107,16 +111,33 @@ function resolveDockerExecutable(): string {
 let cachedLinuxDockerAvailability: boolean | undefined;
 
 /**
+ * Carries one probe result to every process and worker `eve dev` starts
+ * later: `"1"` when a Linux Docker daemon is available, `"0"` when it is not.
+ */
+export const LINUX_DOCKER_AVAILABILITY_ENV = "EVE_DEVELOPMENT_LINUX_DOCKER_AVAILABLE";
+
+/**
  * Synchronously probes whether a reachable Docker daemon runs Linux
  * containers, for `defaultSandbox()`'s availability chain. eve's Docker
  * sandbox image is Linux-only, so a Windows-container daemon is not a
  * compatible default even though it answers the Docker CLI. The result is
- * cached for the process lifetime: provider selection must be stable, and
- * the probe costs a subprocess round-trip.
+ * cached, and adopted from {@link LINUX_DOCKER_AVAILABILITY_ENV} when set:
+ * provider selection must be stable for the whole dev server, and the probe
+ * costs a subprocess round-trip.
  */
 export function isLinuxDockerDaemonAvailableSync(): boolean {
-  cachedLinuxDockerAvailability ??= probeLinuxDockerDaemonSync();
+  cachedLinuxDockerAvailability ??= readAdoptedAvailability() ?? probeLinuxDockerDaemonSync();
   return cachedLinuxDockerAvailability;
+}
+
+/** This module instance's probe result, or `undefined` before the first probe. */
+export function peekLinuxDockerDaemonAvailability(): boolean | undefined {
+  return cachedLinuxDockerAvailability;
+}
+
+function readAdoptedAvailability(): boolean | undefined {
+  const value = process.env[LINUX_DOCKER_AVAILABILITY_ENV];
+  return value === "1" ? true : value === "0" ? false : undefined;
 }
 
 function probeLinuxDockerDaemonSync(): boolean {
@@ -125,6 +146,7 @@ function probeLinuxDockerDaemonSync(): boolean {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
+      windowsHide: true,
     });
     return result.status === 0 && result.stdout.trim().toLowerCase() === "linux";
   } catch {
@@ -143,6 +165,7 @@ export function createDockerCli(): DockerCli {
       const child = spawn(resolveDockerExecutable(), args, {
         signal: options.signal,
         stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       const stdoutChunks: Buffer[] = [];
@@ -171,8 +194,10 @@ export function createDockerCli(): DockerCli {
       throwIfAborted(options.signal);
       const child = spawn(resolveDockerExecutable(), args, {
         signal: options.signal,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
+      if (options.stdin !== true) child.stdin.end();
 
       const exit = new Promise<number>((resolve, reject) => {
         child.on("error", (error) => reject(adaptSpawnError(error)));
@@ -183,6 +208,10 @@ export function createDockerCli(): DockerCli {
       exit.catch(() => {});
 
       return {
+        stdin:
+          options.stdin === true
+            ? (Writable.toWeb(child.stdin) as WritableStream<Uint8Array>)
+            : undefined,
         stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
         stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
         async wait() {

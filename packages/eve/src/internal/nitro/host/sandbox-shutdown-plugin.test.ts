@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  shutdownActiveSandboxHandles,
-  trackActiveSandboxHandle,
-} from "#execution/sandbox/active-handles.js";
+  shutdownActiveSandboxConnections,
+  trackActiveSandboxConnection,
+} from "#execution/sandbox/active-connections.js";
 import {
   installSandboxShutdownHandlers,
   runSandboxShutdown,
@@ -30,7 +30,7 @@ function createFakeProcess(env: Record<string, string | undefined> = {}) {
 }
 
 afterEach(async () => {
-  await shutdownActiveSandboxHandles();
+  await shutdownActiveSandboxConnections();
   vi.unstubAllEnvs();
 });
 
@@ -63,8 +63,8 @@ describe("installSandboxShutdownHandlers", () => {
   });
 
   it("stops tracked sandboxes and exits 143 on SIGTERM", async () => {
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
+    const connection = { stop: vi.fn(async () => {}) };
+    trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
     const fakeProcess = createFakeProcess();
 
     installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
@@ -73,12 +73,12 @@ describe("installSandboxShutdownHandlers", () => {
     await vi.waitFor(() => {
       expect(fakeProcess.exit).toHaveBeenCalledWith(143);
     });
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
+    expect(connection.stop).toHaveBeenCalledTimes(1);
   });
 
   it("stops tracked sandboxes and exits 130 on SIGINT", async () => {
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
+    const connection = { stop: vi.fn(async () => {}) };
+    trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
     const fakeProcess = createFakeProcess();
 
     installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
@@ -87,12 +87,12 @@ describe("installSandboxShutdownHandlers", () => {
     await vi.waitFor(() => {
       expect(fakeProcess.exit).toHaveBeenCalledWith(130);
     });
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
+    expect(connection.stop).toHaveBeenCalledTimes(1);
   });
 
   it("stops tracked sandboxes through the nitro close hook", async () => {
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
+    const connection = { stop: vi.fn(async () => {}) };
+    trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
     let closeHandler: (() => Promise<void>) | undefined;
     const nitroApp = {
       hooks: {
@@ -112,16 +112,16 @@ describe("installSandboxShutdownHandlers", () => {
     });
     await closeHandler?.();
 
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
+    expect(connection.stop).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("runSandboxShutdown", () => {
-  it("exits even when a handle shutdown never settles", async () => {
+  it("exits even when a connection shutdown never settles", async () => {
     vi.useFakeTimers();
     try {
-      const handle = { onRuntimeShutdown: vi.fn(() => new Promise<void>(() => {})) };
-      trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
+      const connection = { stop: vi.fn(() => new Promise<void>(() => {})) };
+      trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
       const log = vi.fn();
 
       const shutdown = runSandboxShutdown(log);

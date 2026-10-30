@@ -102,6 +102,7 @@ function createTestSession(runResult = { exitCode: 0, stderr: "", stdout: "" }):
     readTextFile: vi.fn(async () => null),
     writeFile: vi.fn(async () => {}),
     writeBinaryFile: vi.fn(async () => {}),
+    writeFiles: vi.fn(async () => {}),
     writeTextFile: vi.fn(async () => {}),
     removePath: vi.fn(async () => {}),
   };

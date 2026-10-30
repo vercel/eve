@@ -1,4 +1,5 @@
 import { toErrorMessage } from "#shared/errors.js";
+import { outputOf } from "#evals/output.js";
 import { formatAssertionName } from "#evals/diagnostics.js";
 import type {
   AssertionEvaluation,
@@ -124,7 +125,9 @@ export class AssertionCollector {
     const results: AssertionResult[] = [];
     for (const entry of this.#entries) {
       if (entry.kind === "deferred" && entry.spec !== undefined) {
-        const outcome = await entry.spec.evaluate(entry.selectSubject?.(result) ?? result);
+        const outcome = await entry.spec.evaluate(
+          entry.selectSubject?.(result) ?? { ...result, output: outputOf(result) },
+        );
         entry.score = outcome.score;
         entry.message = outcome.message;
         entry.metadata = outcome.metadata;

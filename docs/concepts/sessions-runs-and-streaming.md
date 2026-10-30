@@ -3,48 +3,31 @@ title: "Sessions, Runs & Streaming"
 description: "The ID-addressed session contract: messages, controls, the NDJSON event stream, and reconnecting."
 ---
 
-Every eve app speaks the same stable HTTP API to a [durable session](./execution-model-and-durability). This page is the contract you hold: the handles you get back, the events you stream, and how to reconnect.
+Every eve app serves the same stable HTTP API for [sessions](./execution-model-and-durability). The API returns a session handle, streams the session's events, and lets a reader reconnect from a cursor.
 
 ## Identity by surface
 
-The HTTP API and TypeScript client use one durable `sessionId` for messages,
-controls, and streams. Every operation targets that exact session; none follows
-or creates a replacement implicitly.
+The HTTP API and TypeScript client address a session by one `sessionId` for messages, controls, and streams. Every operation targets that exact session and never follows or creates a replacement implicitly.
 
-The session ID currently identifies the original Workflow run that owns the
-event stream. A deployment or compaction handoff changes the executing run, not
-the session ID or stream. Stream namespaces belong to a run; eve does not support
-caller-assigned session IDs or globally addressed streams.
+The session ID and its event stream stay the same across a deployment or [compaction handoff](./execution-model-and-durability#compaction-handoff). eve doesn't support caller-assigned session IDs or globally addressed streams.
 
-Authored channels also have channel-local continuation tokens. A token addresses
-whichever session currently owns a platform conversation, such as a Slack thread.
-That identity stays behind the channel boundary and is never accepted or returned
-by the eve HTTP session API. See [Custom channels](../channels/custom#channel-operations-and-session-handles).
+Authored channels also use channel-local continuation tokens. A token addresses whichever session currently holds a platform conversation, such as a Slack thread. The eve HTTP session API never accepts or returns these tokens. See [Custom channels](../channels/custom#channel-operations-and-session-handles).
 
-Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
-`agent.ts`, or set it to `false` to disable the deadline. A successful deployment
-handoff or legacy-session import restarts the original configured duration.
-Ordinary messages, compaction handoffs, and process restarts keep the existing deadline. At expiration, eve
-lets an active turn settle, emits `session.completed`, and releases the
-session's continuation addresses so the next qualifying channel message starts fresh. Stored
-session data is not deleted. See [Agent config](../agent-config#runtime-limits).
+A session completes after 30 idle days by default. Set `limits.sessionTimeoutMs` in `agent.ts` to change the window, or `false` to disable it. The idle window restarts each time a turn ends. A session never expires while a turn is open. At expiration, eve emits `session.ended` with `outcome: "completed"` and releases the session's channel addresses. The next qualifying channel message then starts a fresh session. Stored data follows the session's [run-data retention policy](../agent-config#run-data-retention). Outside development, the default policy requests deletion when private and unknown-audience sessions end, if the Workflow world supports deletion. See [Agent config](../agent-config#runtime-limits).
 
-React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
+React, Vue, and Svelte apps use [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session
 
-Create and park a conversation session before its first turn by omitting `message`:
+Omit `message` to create a prewarmed session that waits for its first message:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session
 ```
 
-eve starts the durable workflow, establishes its inbox, and waits for the first message before
-running session-scoped initialization or emitting `session.started`. The first message sent to the returned
-`sessionId` remains `turn_0`. Message-free creation does not accept turn-scoped `clientContext`,
-`outputSchema`, callbacks, or activity observers.
+The stream stays empty until the first message. Session setup and `session.started` are then recorded in the same line as that message's `delivery.admitted`, and the message is still `turn_0`. Creating a session without a message doesn't accept per-turn `clientContext`, `outputSchema`, callbacks, or activity observers.
 
-To create the session and start its first turn in one request, include the message:
+Include `message` to create the session and start its first turn in one request:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session \
@@ -52,12 +35,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-In both forms, eve responds with `202` and the durable `sessionId` in the JSON body and
-`x-eve-session-id` header as soon as Workflow accepts the run. The command inbox can still be
-starting at that point. An immediate follow-up can return `409 session_not_ready`; retry that
-code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects
-the caller's abort signal. Do not wait
-for `session.waiting` on a prewarmed session: initialization and its first events require a message.
+Both forms return `202` with the `sessionId` in the JSON body and the `x-eve-session-id` header as soon as the run is accepted. The session may not accept input yet, so an immediate follow-up can return `409 session_not_ready`. Retry that code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects the caller's abort signal.
 
 ## Stream a session
 
@@ -65,141 +43,269 @@ for `session.waiting` on a prewarmed session: initialization and its first event
 curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 ```
 
-The stream is newline-delimited JSON (NDJSON), one event per line:
-
-| Event                     | Meaning                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.started`         | A durable session was created; carries `trace` when the runtime is traced, and `predecessor` when the session [replaced a stranded one](./execution-model-and-durability#what-a-replacement-session-receives). |
-| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                                                                                                                       |
-| `message.received`        | Input reached a turn; carries flattened text plus structured text/file parts.                                                                                                                                  |
-| `step.started`            | A model step began.                                                                                                                                                                                            |
-| `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                                                                                                                        |
-| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                                                                                                                  |
-| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                                                                                                       |
-| `action.result`           | A tool call returned.                                                                                                                                                                                          |
-| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                                                                                       |
-| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                                                                                         |
-| `agent.started`           | A workflow run opened a session with `ctx.agent`, such as an agent tool's; carries `taskId` when the run is a task, `sessionId`, and the `streamPath` that `session.agent(started).stream()` follows.          |
-| `task.started`            | A tool call started a [task](#task-events); carries `taskId`, `callId`, `turnId`, the tool `name`, and `kind`: `"agent"` for an agent tool, `"tool"` otherwise.                                                |
-| `task.settled`            | A task's call settled; carries `taskId`, `callId`, `turnId`, the tool `name`, `kind`, `status`, and `output` or `error.message`; a cancelled call carries `cancel.reason` instead.                             |
-| `reasoning.appended`      | A reasoning text delta.                                                                                                                                                                                        |
-| `reasoning.completed`     | The finalized reasoning block.                                                                                                                                                                                 |
-| `message.appended`        | An assistant text delta.                                                                                                                                                                                       |
-| `message.completed`       | A finalized assistant text block.                                                                                                                                                                              |
-| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                                                                                                  |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.                                                                                                |
-| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.                                                                                              |
-| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                                                                                                     |
-| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                                                                                      |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                                                                                       |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                                                                                                    |
-| `turn.waiting`            | The open turn parked; carries `turnId` and `on`: `"input"` while a person must act on a sign-in, approval, or question, `"tasks"` while work it started runs. The turn has not ended.                          |
-| `turn.completed`          | The turn finished.                                                                                                                                                                                             |
-| `turn.failed`             | The turn failed; carries `{ code, message, details?, terminal? }`. `terminal` is `true` when `session.failed` follows instead of `session.waiting`.                                                            |
-| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                                                                                                                 |
-| `session.waiting`         | The session parked and is ready for the next message.                                                                                                                                                          |
-| `session.failed`          | The session failed.                                                                                                                                                                                            |
-| `session.completed`       | The session reached a terminal end.                                                                                                                                                                            |
-
-The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
-
-`reasoning.appended`, `message.appended`, and `action.input.appended` stream incremental output as it arrives. Each append stores only its new text in `reasoningDelta`, `messageDelta`, or `inputTextDelta`. Accumulate the deltas in stream order when you need the text so far. When the durable stream writer is busy, eve may coalesce adjacent deltas for the same event type, stream coordinates, and tool `callId`. The resulting text and event ordering stay the same.
-
-The default client reducer accumulates assistant text, reasoning, and streamed tool input. A raw consumer can append each delta to its local accumulator. If it reconnects without that state, it must replay the earlier events or wait for `message.completed` or `reasoning.completed`. Those completed events carry the authoritative value for each finalized block and remain the compatibility path for clients that do not render incremental streaming.
-
-If a model provider fails after partial output and eve retries the call, the durable stream keeps events from both attempts. When the failed attempt emitted only deltas, a later completed event lets replaceable projections converge on the successful attempt. A completed block does not mean the provider attempt itself later succeeded; removing abandoned completed blocks would require attempt identity, which these events do not carry.
-
-The client validates the `x-eve-stream-version` header on every connection. It accepts v21 through v26 and normalizes v21–v24 cumulative message and reasoning appends, plus v24 offset-based tool-input appends, to the delta-only contract that v25 introduced. It also adds the skill's `name` to `load-skill` requests that eve 0.75 and earlier recorded without one. This lets a reconnect cross deployments without changing the reducer input. A current server performs the same normalization when replaying a session written by an earlier deployment. A missing or unsupported version, or an append whose fields do not match its declared version, fails instead of being interpreted as a current event.
-
-When a streamed tool input becomes a validated call, its `action.input.appended` events precede the matching `actions.requested` event. The default client reducer projects the potentially incomplete JSON as a `dynamic-tool` part with `state: "input-streaming"` and cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
-
-A call the model makes through [`eve__tool` or `eve__skill`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported as a call to the entry it names. Its `actions.requested` and `action.result` events carry that entry's name and input, such as `linear__list_issues`, never the catalog tool's. An `eve__skill` call is reported as a skill load: a `load-skill` action with the skill's `name` and the call's `{ name }` input, then a `load-skill-result` with the same `name`. Calls through either tool publish no `action.input.appended` events, because their entry is known only once their input is complete.
-
-`action.partial` carries one complete preliminary output snapshot from an authored async-generator tool. A later partial for the same `callId` replaces it, and `action.result` is the final snapshot. When the durable writer is busy, eve may keep only the newest adjacent partial for a call. Treat partials as last-write-wins: a durable step can retry and replay overlapping event runs. Provider-executed tool progress and MCP progress notifications are not projected as `action.partial` events.
-
-Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
-
-`message.completed` can fire more than once in a turn: the agent often emits interim assistant text before a tool call. To tell tool-call narration from a terminal reply, check `message.completed.data.finishReason`. `step.completed.data.finishReason` mirrors the step outcome, and each step's usage lives on `step.completed`. `session.waiting`, `session.failed`, `session.completed`, and `turn.waiting` carry `data.usage`: the session's running total of its own model calls plus what the agents it delegated to spent. `costUsd` is absent when no model call reported a cost, and compaction calls are not counted.
-
-A delegated subagent publishes progress on its own child-session stream. When a subagent tool call or a workflow tool's `ctx.agent` opens a session, the parent emits `agent.started` with the call's `callId` and `turnId`, its `taskId` when the call runs as a task, the child's `sessionId`, and a `streamPath` that a client follows with `session.agent(started).stream()`. A subagent tool call is a [task](#task-events) whose `task.started` has `kind: "agent"`: its `task.started` and `task.settled` carry the call, and `task.settled.data.output` is the child's reply. A call that fails before the child session opens has no `agent.started`. A settled call does not end the child session; later calls with the same `taskId` reach it.
-
-A question or sign-in from inside a running call does not end the turn. This covers a workflow tool's `ctx.ask()`, including the built-in `ask_question` tool, and a delegated subagent's question or sign-in. The stream emits `input.requested` or `authorization.required`, then `turn.waiting` with `on: "input"` and the open turn's `turnId`. After the answer or sign-in, the turn resumes with the next `step.started` for the same `turnId`, and only `turn.completed`, `turn.failed`, or `turn.cancelled` ends it. When you answer a question that belongs to a workflow tool or a subagent, the session you answer on emits `input.resolved` for it as it routes the answer down. A subagent's tool approval instead stays open until the subagent resolves it, and the session relays that subagent's `input.resolved`. While other relayed questions are still pending, it then emits `turn.waiting` with `on: "input"` again. If the workflow tool run that relayed a question or approval ends before anyone answers, that session emits `input.resolved` with `outcome: "cancelled"` for it. This covers the run's own `ctx.ask()` questions and requests from sessions it opened with `ctx.agent`. A cancelled turn does the same for every question or approval the session relays. A sign-in or tool approval the turn raises itself holds it the same way, also with `on: "input"`. A message from the same person steers the turn and cancels the request: a sign-in reports `authorization.completed` with `outcome: "declined"`, and an approval reports `input.resolved` with `outcome: "ignored"`. Messages from other people wait until the turn ends. Cancelling the turn ends both: a held sign-in reports `authorization.completed` with `outcome: "declined"`, and a held approval reports `input.resolved` with `outcome: "cancelled"`.
-
-### Task events
-
-A call to a tool that runs as a task, such as an agent tool, `agentRouter()`, the `workflow` tool, or a workflow tool that defines [`task(input, ctx)`](/docs/tools/workflows#run-calls-as-tasks-task) or [`serve(receive, ctx)`](/docs/tools/workflows#resumable-tasks-serve), returns a receipt as its `action.result` and keeps working. `task.started` reports the task's `taskId` for the call's `callId` and `turnId`, both when a call starts a task and when a call reaches a resumable task by its `taskId`, before any event the task's run publishes for that call. `task.settled` comes once per call, with the same `turnId`, `name`, and `kind` as its `task.started`, `status` `"completed"`, `"failed"`, or `"cancelled"`, and the call's `output` when it completed or `error.message` when it failed. Events recorded by earlier eve versions omit `name` and `kind` on `task.settled`, so match them to their `task.started` by `callId` when those fields are missing. Results reach the model as a message in its history, not as a stream event, so read outcomes from `task.settled`. A session the task's run opens with `ctx.agent` is announced with `agent.started` carrying the `taskId`. An `input.requested`, `authorization.required`, or `authorization.completed` event from a task's run carries its `taskId`. Each of these events names the call the task is serving when it happens: a resumable task's later call brings its own `callId` and `turnId`, which may belong to a later turn than the call that started the task. An `input.requested` relayed from a subagent or a workflow tool run also carries `callId`, the call in this session that the request serves. The request keeps the coordinates it was raised with, and a relayed approval's `request.action.callId` still names the asking run's call, not one of this session's.
-
-A turn doesn't end while tasks are working. When the model ends its text early, eve holds the turn and the stream emits `turn.waiting` for it; the turn continues once a result arrives or its caller writes. In a root session, that text completes as an ordinary `message.completed`. In a child session or a schedule's session, it reports `finishReason: "tool-calls"`, so channels post only the final reply. When the model calls `eve__task_wait` and no result is ready yet, the stream also emits `turn.waiting`. Either way, the next `step.started` for the same `turnId` means the turn resumed, and `session.waiting` comes only after the turn ends. See [Tasks](/docs/tools/tasks#turns-wait-for-their-tasks).
-
-`step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.failed` also carries `terminal`: `true` when the failure ends the session and `session.failed` follows, `false` when `session.waiting` follows and the next message can retry. Events from eve versions before `terminal` was added omit it. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, and discards incomplete assistant output. Tool calls the cancellation stopped stay in history, each answered as cancelled, so the model sees that the work started and stopped instead of a request left unanswered. Before `turn.cancelled`, the stream reports requests the cancel strands as `cancelled` in `input.resolved`. These include the turn's own questions, the session-limit prompt, and requests relayed from the work it stops. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`). Both carry `data.principalId` when a session principal started the sign-in. It holds the same value as `responderPrincipalId` on approval events, so a channel can deliver the challenge privately to that person even after someone else starts a later turn.
-
-A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
-`details.semanticErrorId: "model-response-content-filtered"`, and
-`details.finishReason: "content-filter"`. Details also include the Gateway
-`generationId` when available. eve does not retry the filtered response or emit
-`message.completed` for its partial text; deltas already streamed remain visible.
-The session then waits for another user message.
-
-## The event envelope
-
-Alongside `type` and `data`, every event carries a `meta` envelope:
+The stream is newline-delimited JSON (NDJSON), stream version 27 (`x-eve-stream-version: 27`). Each stored line is either an **event line** or a **progress record**:
 
 ```json
-{
-  "type": "message.completed",
-  "data": {
-    "message": "Sunny and 72°F.",
-    "finishReason": "stop",
-    "sequence": 0,
-    "stepIndex": 0,
-    "turnId": "turn_0"
-  },
-  "meta": { "id": "evt_01KYJBZA88B4M9XN3RTC5FDGHJ", "at": "2026-07-27T18:04:11.912Z" }
+{"at":"2026-07-27T18:04:11.912Z","facts":[{"type":"turn.settled","scope":{"turnId":"turn_0"},"data":{"turnId":"turn_0","outcome":"completed","reply":["part_0"]}},{"type":"delivery.settled","data":{"deliveryId":"d_1","outcome":"handled","turnId":"turn_0"}}]}
+{"progress":{"type":"content.delta","scope":{"turnId":"turn_1","runId":"run_2"},"data":{"partId":"part_3","delta":"Sunny"}}}
+```
+
+- An **event line** (`{at, facts}`) holds, in its `facts` array, every event one state change produced, in order. Readers never see half of a line: a turn that ends, the deliveries it answered, and the work it closed land together.
+- A **progress record** (`{progress}`) carries streamed output that no state depends on: text and reasoning deltas, streamed tool input, and preliminary tool output.
+
+The stream route also sends transport records that aren't session events:
+
+- `{"$eve":"heartbeat"}` while the stream is quiet.
+- `{"$eve":"stream.lease-ended"}` when a renewable read ends. Reconnect from your cursor.
+- `{"$eve":"stream.ended"}` once the session has ended and its stream is closed.
+
+### Facts
+
+Each entry in `facts` is an event, and events are grouped into families. Most events open, update, or end an item, such as a turn or a call. Informational events, such as `usage.recorded` and `child.sent`, add data without opening anything that must end. Every event carries `type` and `data`, and most carry a `scope` naming the turn, run, task, or context change it belongs to.
+
+| Family        | Events                                                               | What it is                                                                                                                                                                                                                                                                                                        |
+| ------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session`     | `session.started`, `session.ended`                                   | The session. `session.started` carries `runtime`, `parent` for a child session, `predecessor` when the session [replaced a stranded one](./execution-model-and-durability#what-a-replacement-session-receives), and `trace` when traced. `session.ended` has `outcome` `"completed"` or `"failed"`.               |
+| `delivery`    | `delivery.admitted`, `delivery.consumed`, `delivery.settled`         | One accepted message, answer, control, or callback. `delivery.consumed` carries the `parts` a turn received, and any `history` the delivery imported; `delivery.settled` reports what became of it.                                                                                                               |
+| `turn`        | `turn.started`, `turn.paused`, `turn.settled`                        | A turn. `turn.paused` lists the requests for input it's `awaiting`. `turn.settled` has `outcome` `"completed"`, `"failed"`, or `"cancelled"` and, when completed, the `reply` part ids.                                                                                                                           |
+| `model`       | `model.requested`, `model.started`, `model.retried`, `model.settled` | One model run, for a turn or a context change. `model.started` names the `modelId` and `attempt` for each attempt. `model.retried` records a failed attempt that runs again. `model.settled` carries `outcome` and `finishReason`.                                                                                |
+| `content`     | `content.completed`                                                  | One finished part of model output: `kind` `"text"`, `"reasoning"`, `"result"`, or `"file"`, its `value`, and its `phase`: `"reply"` or `"narration"`.                                                                                                                                                             |
+| `call`        | `call.requested`, `call.started`, `call.settled`                     | One tool, agent, or skill call. `call.requested` names the tool, agent, or skill in `capability` (`remote: true` for a remote agent) and its `input`. `call.started` carries `taskId` for a task and `clearedBy` when an approval or policy let it run. `call.settled` carries `outcome` and `output` or `error`. |
+| `task`        | `task.started`, `task.ended`                                         | Work that outlives the call that started it, such as an agent tool's child session. See [Task events](#task-facts).                                                                                                                                                                                               |
+| `interaction` | `interaction.opened`, `interaction.settled`                          | A person's approval, question, budget prompt, or sign-in.                                                                                                                                                                                                                                                         |
+| `response`    | `response.submitted`, `response.admitted`, `response.settled`        | One answer to a request for input, tied to the delivery it arrived in.                                                                                                                                                                                                                                            |
+| `child`       | `child.opened`, `child.sent`                                         | A child session a call opened. `child.opened` carries its `sessionId`, `name`, and `stream` path. `child.sent` links a delivery the child accepted, as `childDeliveryId`, to the `callId` that sent it.                                                                                                           |
+| `context`     | `context.started`, `context.settled`                                 | A context change: `kind` `"compaction"` or `"clear"`.                                                                                                                                                                                                                                                             |
+| `usage`       | `usage.recorded`                                                     | Model spend, tied to the run, call, or context change that spent it.                                                                                                                                                                                                                                              |
+
+Progress records come in three types:
+
+- `content.delta`: a text or reasoning delta for a `partId`.
+- `call.input`: a raw tool-input delta for a `callId`.
+- `call.progress`: a preliminary output snapshot for a `callId`.
+
+A call's label is `capability.label` before execution, `call.progress.data.label` in a progress snapshot, and `call.settled.data.label` at completion; `call(view, callId)?.label` reads the final one. A prompt's heading is `request.title`.
+
+The conversation is a chain of turns. Each `turn.started` names the turn it `follows`, or `null` for a first turn. A completed `context.settled` can change the conversation with `selects`: `null` empties it, as a clear does, and `{ turnId }` makes that earlier turn the newest, leaving out the turns after it. The next turn then follows the selected turn. Because either can name any earlier turn, read the conversation with `conversation(view)` instead of assuming it holds every turn in order.
+
+The full catalog, its outcome sets, and TypeScript types are exported from `eve/events`, along with the shared fold and queries over [opaque session snapshots](#query-session-state):
+
+```ts
+import { FACT_CATALOG, foldEvents, activeTurn, reply } from "eve/events";
+```
+
+The family-specific arrays `SESSION_OUTCOMES`, `DELIVERY_OUTCOMES`, `TURN_OUTCOMES`,
+`MODEL_OUTCOMES`, `CALL_OUTCOMES`, `TASK_OUTCOMES`, `INTERACTION_OUTCOMES`,
+`RESPONSE_OUTCOMES`, and `CONTEXT_OUTCOMES` list the outcomes known to this release.
+`TERMINAL_OUTCOMES` maps terminal fact types to those arrays. `isTerminal(fact)`
+narrows a fact to one that ends its entity; it does not test whether the whole
+session has ended. These helpers come from `eve/events`.
+
+#### What a later release can add
+
+Within stream version 27, a later minor release can add:
+
+- informational event types, such as a new family or a row update like `model.retried`;
+- progress record types;
+- optional fields;
+- outcomes, interaction kinds, context-change kinds, displays, and option styles.
+
+A new event type is never the only way an item opens or ends. A minor release never removes or renames an event type or field, and never adds a required field. It never changes what an event means or whether it opens, updates, or ends its item. Any other change is a new stream version, which readers refuse.
+
+Readers ignore event types, progress types, and fields they don't know. An ending event with an unknown outcome still ends its row and keeps the outcome as sent. The TypeScript types name only current values, so keep a default branch when you switch on an outcome, kind, display, or style.
+
+After a reconnect, `foldEvents` skips positions it has already seen. It ignores a repeated start or end of a row it holds, and an update can't reopen an ended row. It doesn't deduplicate progress and usage at new positions.
+
+`session.started` and `turn.started` carry an optional `data.trace` with W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use them to correlate stream consumers, such as eval reporters, with an observability backend. An uninstrumented target omits it.
+
+### Streamed output
+
+`content.delta` and `call.input` carry only new text; accumulate them in stream order per `partId` or `callId`. eve may merge adjacent deltas for the same part or call without changing the text or its order. `content.completed` carries each finished part's final value. A reader that reconnects without its accumulated text can wait for it instead of replaying deltas.
+
+A streamed tool input's `call.input` records precede its `call.requested`. The client shows the possibly incomplete JSON as a `tool` part with `state: "streaming"` and its `inputText`, then as `state: "requested"` with the validated `input`.
+
+`call.progress` carries one complete preliminary output snapshot from an authored async-generator tool. Treat snapshots for a `callId` as last-write-wins; `call.settled` carries the final output. Provider-executed tool progress and MCP progress notifications don't appear as `call.progress`.
+
+A call through [`eve__tool` or `eve__skill`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported as a call to the entry it names. Its `call.requested` carries that entry's name and input, such as `linear__list_issues`. An `eve__skill` call has `capability: { kind: "skill", name }`. The task controls `eve__task_wait` and `eve__task_cancel` have `kind: "control"`, and activity views usually leave them out. A `call.input` that announces a call carries the same `kind` beside its `name`. Calls through `eve__tool` or `eve__skill` publish no `call.input`, because eve knows the entry only once the input is complete.
+
+Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning content in your application.
+
+### Replies and narration
+
+Each text part's `content.completed.data.phase` is `"reply"` for the turn's answer. It's `"narration"` for text written on the way to more work, such as before a tool call. `turn.settled.data.reply` lists the reply's part ids, so a reader that needs only the answer can wait for the turn to end. In a hook or channel handler, `reply(ctx.view, turnId)` returns them. A turn that requested an output schema reports the structured result as a `content.completed` with `kind: "result"`.
+
+`usage.recorded` records spend once per model run (`owner: { runId }`). It also records once per delegated call for what the called agent spent (`owner: { callId }`). A compaction summary run belongs to its context change. Its usage stays counted even when a hook cancels the turn as compaction finishes. Spend a task reports after its calls end has no `owner` and has `kind: "delegated-late"`. `usage(view).total` returns the sum of the session's records. `costUsd` is absent when no record reported a cost. The usage window that [`limits.sessionUsage`](../agent-config#runtime-limits) reads starts at that total on the line where the session's own budget prompt is accepted.
+
+### Deliveries and responses
+
+A delivery is anything that reaches a session: a message, an answer, a control such as `cancel` or `end`, or a sign-in callback. `delivery.admitted` records it with the sender in `principal` and its `source`. When a turn takes in a message, `delivery.consumed` carries the `parts` it received and any imported [prior history](../channels/eve#start-from-prior-history) in `history`. Parts hold text and file metadata, without raw bytes or sandbox paths. Every delivery ends with exactly one `delivery.settled`, except after a degraded termination (see below):
+
+| Outcome          | Meaning                                                                                 |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `handled`        | The turn that took it in ended.                                                         |
+| `awaiting-input` | The turn paused for an approval, question, or sign-in. A later answer resumes the turn. |
+| `applied`        | A control or answer took effect.                                                        |
+| `ignored`        | It had nothing to act on, or a cancel or clear ended its turn before the turn read it.  |
+| `refused`        | Its sender may not do what it asked; `reason` says why.                                 |
+| `failed`         | It couldn't be handled, such as when the session ended first.                           |
+
+`POST /eve/v1/session/:sessionId` returns the message's `deliveryId`. A client resuming from an old cursor uses it to find the `delivery.settled` that ends its response. Steering and coalesced messages each keep their own delivery. An answer-only delivery stops on its own `delivery.settled`.
+
+Ending a stranded session records the end's `delivery.admitted` and `delivery.settled` before the session ends, with `session.ended.data.cause.deliveryId` naming that delivery. The recorded control is `source: { control: "reset" }`.
+
+A control that the session's eve version doesn't support, such as one added in a later release, settles `failed` with a `reason` that names it. Sessions started by eve versions without this check drop the control, and its delivery never settles.
+
+When someone other than the turn's caller sends an answer and a message together, they become separate deliveries. The answer reaches the waiting turn, and the message keeps the receipt and waits. Follow the answer through the request it answers.
+
+To follow an accepted receipt in a client view, use `delivery(view, receipt.deliveryId)` from `eve/events`:
+
+| Observation          | Meaning                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `undefined`          | The delivery has not been observed in this view. Acceptance can precede stream admission. |
+| `status: "admitted"` | Admitted but not yet consumed; `queue(view)` lists these while the session is open.       |
+| `status: "consumed"` | A turn took the input; `turnId` identifies it.                                            |
+| `status: "settled"`  | The delivery ended; `outcome` says how.                                                   |
+
+A `session.ended` event also ends the wait. A degraded termination may not record every ending, so a retained delivery can still say `admitted` or `consumed`. Don't wait for another `delivery.settled` on a closed stream.
+
+Client views retain observed history; hook and channel views can prune older finished deliveries. An ID without an accepted receipt can't distinguish an unknown delivery from one not yet admitted. `Delivery.result().status` describes a finished request (`completed`, `awaiting-input`, `failed`, or `cancelled`), not a live readiness state.
+
+### Turns and interactions
+
+A turn waiting for an approval, question, or sign-in pauses rather than ends. `turn.paused.data.awaiting` lists the requests it waits on, as `{ interactionId }`. No event announces the turn resuming: the next event under it, such as `model.requested`, shows it's running. Only `turn.settled` ends it. A turn waiting on its own work, such as its tasks, stays running.
+
+The same pause can be reported more than once, such as when a message arrives that doesn't resume the turn. To notify someone once per pause, compare `awaiting` with the last one you saw.
+
+Questions, approvals, and sign-ins raised by the turn or its calls all pause the turn. An answer arrives in a new delivery: `response.submitted` records it, and `interaction.settled` confirms the decision. Relayed requests carry `origin` coordinates for the asking call. Steering can withdraw a pending request, and cancellation interrupts it. A submitted answer isn't necessarily applied. Its `response.settled` reports the result:
+
+| Outcome                  | Meaning                                       |
+| ------------------------ | --------------------------------------------- |
+| `applied`                | The answer decided its request.               |
+| `refused`                | A response policy rejected it.                |
+| `withdrawn`, `abandoned` | The request ended another way.                |
+| `expired`, `failed`      | The answer didn't apply for any other reason. |
+
+### Task facts
+
+A call to a tool that runs as a task keeps working after the model gets a receipt. Task tools include agent tools, `agentRouter()`, the `workflow` tool, and workflow tools that define [`task(input, ctx)`](/docs/tools/workflows#run-calls-as-tasks-task) or [`serve(receive, ctx)`](/docs/tools/workflows#resumable-tasks-serve). `task.started` reports the task once, with its `taskId`, `name`, `kind` (`"agent"` for an agent tool, `"tool"` otherwise), and the call that started it. Each call the task serves, including later calls that reach a resumable task by its `taskId`, publishes `call.started` with that `taskId` and its own `call.settled`. Calls that share one reply reference the first call's output with `outputOf`.
+
+`task.ended` reports the task's end, including immediate cancellation of agent and one-shot tasks. Its `outcome` is `"completed"`, `"failed"`, or `"cancelled"`. The final event is `task.ended`, not `task.settled`, because the task ends once while each call it serves ends separately. Results reach the model as a message in its history, so read outcomes from `call.settled`.
+
+`child.opened` announces a child session. Ending a call doesn't end that session; later calls with the same `taskId` can reach it. The turn keeps running while its tasks work. See [Tasks](/docs/tools/tasks#turns-wait-for-their-tasks).
+
+`child.sent` records each delivery a child accepted for one of this session's calls, after the child returns its receipt. It opens nothing. The delivery's events are on the child's stream under `childDeliveryId`, and the call's outcome is its `call.settled`. A remote agent on an earlier protocol returns no receipt, so its deliveries have no `child.sent`.
+
+### Failures and cancellation
+
+Before the next model request, eve repairs a local tool call in saved history that has no recorded result. It adds an error result that says the outcome is unknown, so the model checks external state before repeating side effects. The repair never runs the old call or closes work held by approvals, sign-in, workflows, or tasks. eve leaves provider-executed calls, SDK approvals, and duplicate call IDs unchanged.
+
+A failed model run, turn, or session carries `error: { code, message, id?, hint? }` on its `model.settled`, `turn.settled`, or `session.ended`. `id` is a support id that eve's server logs also carry, and `hint` is a remedy when eve recognizes the failure.
+
+A turn that ends closes what it left open in the same line. Running calls and open requests for input end `interrupted`, and their pending answers end `withdrawn`. A task can outlive its turn and stays open.
+
+A session that fails ends its turn `cancelled`, because the session failed, not the turn. The error is on `session.ended`, and `failure(view, turnId)` reads it for that turn. Built-in channels post one notice for it.
+
+When cancellation or clear ends a turn, input queued inside it but not yet read ends `ignored` and doesn't carry into the next turn. Messages the session holds for a later turn aren't part of that unread input.
+
+A cancelled turn isn't a failure. It ends with `outcome: "cancelled"` and a `cause` naming the cancel delivery, and the session accepts the next message normally. What the turn streamed stays on the stream. Session history keeps the accepted user input and finished work and discards incomplete assistant output. Tool calls the cancellation stopped stay in history, each answered as cancelled, so the model sees that the work started and stopped.
+
+When a model call fails transiently before publishing anything, the run records `model.retried` and tries again. Once it has published output, the run ends `abandoned` with its unfinished calls, and a new run tries again.
+
+A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message.
+
+## Query session state
+
+`SessionView` from `eve/events` is an opaque, immutable snapshot derived from the stream. Read it with queries:
+
+```ts
+import { activeTurn, call, calls, openInteractions, usage } from "eve/events";
+
+const currentTurn = activeTurn(agent.view);
+const tools = calls(agent.view, { kind: "tool", turnId: currentTurn?.turnId });
+const pending = openInteractions(agent.view);
+const totals = usage(agent.view);
+const observed = call(agent.view, callId);
+if (observed?.state === "failed") console.error(observed.error.message);
+```
+
+`callOutputSource(view, callId)` returns the call that produced a call's output. `call(view, callId)?.output` already follows `outputOf`, so use `callOutputSource` when you need the producing call itself, such as its `callId` or label.
+
+Calls include their resolved `turnId`, `runId`, and `taskId` when known, so you don't join calls to runs to find their turn. `turns`, `deliveries`, `tasks`, `runs`, `parts`, and `children` return curated observations, and `turn`, `delivery`, `task`, and `interaction` look one up by ID. `waiting`, `activity`, and `reply` answer the status questions that built-in clients and channels use. Queries are synchronous and perform no I/O; referenced payloads stay references until explicitly read.
+
+| `waiting(view, turnId)` returns       | When                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `{ on: "session" }`                   | The session can make progress.                                                              |
+| `{ on: "interaction", interactions }` | Answers are needed.                                                                         |
+| `{ on: "work", calls, tasks }`        | Calls or tasks hold the turn.                                                               |
+| `undefined`                           | The turn is absent or ended, or the session has ended, even if a degraded end left it open. |
+
+`openInteractions(view, { about })` filters by what holds the work:
+
+| `about`          | Includes                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `{ callId }`     | The call's approval, questions relayed through it, and requests from its task.                               |
+| `{ taskId }`     | That task's requests.                                                                                        |
+| `{ turnId }`     | The turn's requests, including those of its inline calls and responses, but not ones from independent tasks. |
+| `{ responseId }` | That response.                                                                                               |
+
+Read `interaction.subject` to match the subject itself. An answered request that a response policy still weighs stays in `openInteractions` until it ends. `callState(view, callId)` distinguishes `approval` and `blocked` from running work. Both selectors return immutable observations.
+
+Query results can't change the view, and a snapshot you retain doesn't change when later events arrive. Request observations omit private sign-in callback URLs, including in `waiting`, `activity`, and `openInteractions` results. Use `callPreview(view, callId)` and `contentPreviews(view)` for transient progress held by a client or a custom fold; recorded values stay separate. Hook and channel snapshots always describe a whole recorded line.
+
+A custom reader uses the same fold:
+
+```ts
+import { emptySessionView, foldEvents, calls } from "eve/events";
+
+let view = emptySessionView();
+for await (const event of session.stream()) {
+  view = foldEvents(view, [event]);
+  render(calls(view, { kind: "tool" }));
 }
 ```
 
-- **`meta.id`** uniquely identifies the event. It is an `evt_`-prefixed [ULID](https://github.com/ulid/spec): a millisecond timestamp followed by random bits, so ids are broadly time-ordered.
-- **`meta.at`** is the ISO-8601 time the event was emitted.
-- **`meta.deliveryIds`**, when present, identifies the accepted messages that own
-  the turn. `POST /eve/v1/session/:sessionId` returns its `deliveryId`, allowing
-  clients to skip earlier turns when resuming from an old cursor. Coalesced
-  messages share the same turn events.
+`foldEvents` returns a new snapshot without changing its input. It holds incomplete lines until their final event arrives and absorbs overlapping replay. The view isn't a serialization format; persist events and session cursors to reconstruct it.
 
-`meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
+## Positions
 
-`meta.at` has always been there; `meta.id` arrived in stream version 20, `action.input.appended` arrived in version 24, and delta-only message and reasoning appends replaced cumulative snapshots in version 25. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
+A reader turns each entry in `facts`, and each progress record, into an event with a `meta` field:
 
-That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
-
-```sql
-insert into agent_events (id, session_id, type, data, emitted_at)
-values ($1, $2, $3, $4, $5)
-on conflict (id) do nothing;
+```json
+{
+  "type": "content.completed",
+  "scope": { "runId": "run_0", "turnId": "turn_0" },
+  "data": {
+    "partId": "part_0",
+    "runId": "run_0",
+    "kind": "text",
+    "phase": "reply",
+    "value": "Sunny and 72°F."
+  },
+  "meta": { "position": { "line": 6, "index": 0 }, "at": "2026-07-27T18:04:11.912Z" }
+}
 ```
 
-Because ids lead with a timestamp, a `primary key (id)` stays roughly append-ordered and keeps inserts clustered.
+- **`meta.position`** is where the event sits: the zero-based stored `line`, and its `index` within that line. A line, once written, never changes or moves, so a position identifies its event across reconnects, rewinds, and replays.
+- **`meta.at`** is the time of the line that holds the event, or, for a progress record, of the latest event line before it.
+- **`meta.endOfLine`** is `false` while more events of the same line follow. Readers that stop on an event finish its line first.
 
-**What the id covers.** Reconnecting is not the only way the same event reaches you twice. Keying on `meta.id` is what makes ingestion correct in all of these:
+That makes `(sessionId, line, index)` the key for ingesting a stream without duplicating rows when you re-read it:
 
-- Reconnecting mid-turn and overlapping events you already handled.
-- Rewinding with `startIndex=0`, or reading back from the tail with a negative `startIndex`.
-- Restoring a saved event log that overlaps the prefix the live stream replays.
+```sql
+insert into agent_events (session_id, line, index, type, data, emitted_at)
+values ($1, $2, $3, $4, $5, $6)
+on conflict (session_id, line, index) do nothing;
+```
 
-**What it does not cover: a retried step re-emits under new ids.** eve runs each durable step up to four times. If a step is interrupted partway — a crash, a timeout, a model error it retries through — whatever it already wrote stays on the stream, and the new attempt emits its own events with their own ids. Both attempts carry the same `turnId`, `stepIndex`, and `sequence`, because the retry restores that state from the step's input, but they are distinct events and no field records which attempt finished.
+Positions are also a total order within a session: sort by `line`, then `index`.
 
-Replaying a _completed_ step is a different thing and emits nothing at all: eve serves the recorded result from its journal without re-running the body. Crash recovery, redeploys, and resuming a parked turn therefore add nothing to the stream. Only an interrupted step re-runs.
+A subagent's events live on its own stream. When a parent relays a child's request, the parent's `interaction.opened` is its own event at its own position. Correlate the two through `child.opened.data.sessionId` and the relayed event's `origin`.
 
-Three more things to know:
-
-- **Ids are time-ordered, not a total order.** The turn steps of one session can run in different processes, each generating ids from its own clock and its own random bits. Two events emitted in the same millisecond by different steps may sort either way, and clock skew between machines can invert neighbours. Record your own ingestion sequence, or read the stream in order and store the index, when you need an exact ordering to page against — do not use `where id > $cursor` as a lossless cursor. The stream itself is authoritative: `startIndex` is an absolute event count.
-- **Ids identify events, not intent.** Two events with identical payloads — the `step.failed` → `turn.failed` → `session.failed` cascade, or two identical text deltas in one step — are distinct events with distinct ids. Deduplicate on `meta.id` only; matching on content would drop real data.
-- **A subagent's event is re-emitted, not shared.** When a parent forwards a child's event onto its own stream, the parent's copy is a separate event with its own id. Correlate the two streams through `agent.started.data.sessionId`.
-
-Authored [hooks](../guides/hooks) receive the same envelope, but observe each event as it is emitted rather than as it is read — so a hook sees a retry as new events, and `meta.id` is a key for a stored row rather than a retry guard. Two things a hook does not have to defend against: a turn that parks for human input resumes without re-emitting anything it already sent, and a retried turn dispatch cannot double-stream a turn, because one session owner executes it.
+Authored [hooks](../guides/hooks) and channels receive the same events, with their position as `ctx.position`, after the line is written.
 
 ## Send a follow-up message
 
-Once the session is waiting (you'll see `session.waiting`), POST your follow-up to its ID-addressed messages endpoint:
+After the turn ends, POST a follow-up to the session's messages endpoint:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
@@ -207,106 +313,105 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -d '{"message":"Now send the short version."}'
 ```
 
-The follow-up reuses the same durable session: same history, same state. A follow-up accepts exactly one of `message` or `inputResponses`. Use structured responses to answer one or more pending human-input requests by ID:
+The follow-up continues the same session, with the same history and state. A follow-up accepts exactly one of `message` or `answers`. Send `answers` to answer open requests by ID:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
-  -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
+  -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-Message sends default to `"steer"`. Before assistant output begins, eve interrupts pending model generation and continues the same turn with the correction. Reasoning and provider search progress do not count as assistant output. An executing eve tool finishes safely, and its result is preserved before the correction reaches the next model call. A steering message aborts the [`ctx.abortSignal`](/docs/tools/workflows#stop-early-for-a-new-message) of each `execute` workflow tool call the turn is waiting on: its questions are withdrawn, `sleep` and `ask_question` stop early, and the call settles with what its body returns. A steering message ends an `eve__task_wait` but never interrupts a task. Only the turn's own caller steers it; another caller's message waits for the turn to end. After assistant output starts, steering applies at the next committed workflow boundary; text already streamed remains visible. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when the active turn should finish first. Structured `inputResponses` answer their addressed requests.
+Message sends default to `turnPolicy: "steer"`: the new message joins the running turn instead of waiting for it. [Message delivery and steering](./execution-model-and-durability#message-delivery-and-steering) explains when it applies.
 
-If the session is waiting on a human-in-the-loop approval, respond with the channel’s Approve or Cancel controls. Text that doesn't match an option doesn't approve the call. From the person the turn serves, it steers the turn and cancels the approval, even when sent with `turnPolicy: "queue"`, since the turn can't end until that person acts; from anyone else, it waits until the turn ends. If they had already approved some calls in the batch, those calls still run. Cancelling the turn withdraws the approval, and a later answer to it approves nothing.
+A steering message aborts the [`ctx.abortSignal`](/docs/tools/workflows#stop-early-for-a-new-message) of each `execute` workflow tool call the turn is waiting on. The call's questions end `withdrawn`, `sleep` and `ask_question` stop early, and the call ends with what its body returns. Steering ends an `eve__task_wait` but never interrupts a task, and a task's questions stay open.
 
-A pending prompt, whether a `ctx.ask()` question from a tool such as `ask_question`, a tool approval, or a session-limit prompt, can be answered with plain text, including prompts proxied from a subagent. A message answers the first open prompt, as described in [Several requests at once](/docs/human-in-the-loop#several-requests-at-once): a reply that matches one of its options, such as `approve` or `continue`, answers it as if the sender had pressed that option, and so does any message when the prompt allows free text. Send one message per prompt to answer several. The stream records a message that answers a question as `message.received`, carrying its delivery id, just before the `input.resolved` it produces. A message that doesn't answer the first open prompt follows the normal `turnPolicy`. A steering message withdraws the questions of the `execute` workflow tool calls the turn waits on, which resolve as `cancelled`; a task's questions stay open. Use structured responses to target requests unambiguously.
+Only the turn's own caller steers it; another caller's message waits for the turn to end. Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. Structured `answers` answer the requests they name.
 
-A structured response matches any currently pending request by ID, not only the newest batch. It becomes stale only after that request was answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
+Answer a human-in-the-loop approval with the channel's Approve or Deny controls; text that doesn't match an option approves nothing. Such text from the person the turn serves steers the turn and cancels the approval, even with `turnPolicy: "queue"`. The turn can't end until that person acts. From anyone else, it waits until the turn ends. Calls already approved in the batch still run. Cancelling the turn withdraws the approval, and a later answer to it approves nothing.
 
-One delivery can answer requests from several batches. eve resumes approval-bearing batches in durable order and carries later answers forward until each batch can resume. If you answer only some approvals in a batch, eve saves those responses until the remaining approvals are answered. Meanwhile, unrelated messages can run tools and receive a completed reply. The saved partial responses neither block that reply nor trigger another model call after it.
+A pending prompt accepts a plain-text answer. Prompts include a `ctx.ask()` question from a tool such as `ask_question`, a tool approval, and the budget prompt, including ones proxied from a subagent. A message answers the first open prompt, as described in [Several requests at once](/docs/human-in-the-loop#several-requests-at-once). A reply matching one of its options, such as `approve` or `deny`, counts as pressing that option. Any message counts when the prompt allows free text. Send one message per prompt to answer several. On the stream, such a message is a delivery whose `response.submitted` answers the prompt. A message that doesn't answer the first open prompt follows the normal `turnPolicy`. Use structured responses to target requests unambiguously.
 
-When steering interrupts pending model generation, the interrupted step still ends with `step.completed`, carrying `finishReason: "other"` and any usage the provider reported. The correction's `message.received` and the next `step.started` for the same `turnId` follow.
+A structured response matches any pending request by ID, not only the newest batch. It becomes stale once that request is answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if still needed.
 
-Multiple steering messages retain their durable arrival order and may be folded into one input at the next boundary. A message accepted after turn settlement starts the next turn. See [message delivery and steering](./execution-model-and-durability#message-delivery-and-steering).
+One delivery can answer requests from several batches. Each answer stands as it arrives (`response.admitted`), and a later answer to the same request replaces it until the request is decided. A batch of approvals the model requested in one step is decided together once each has an answer. The approved calls then run, and the model reads their results next. Partial answers stand until the rest arrive. A message that steers the turn instead applies the answers already given and withdraws the rest. An answer a response policy weighs stays `response.submitted` until the policy allows it (`response.admitted`) or refuses it (`response.settled`).
+
+When steering interrupts model generation, the interrupted run ends `interrupted` with any usage the provider reported. The new message's `delivery.consumed` and the next `model.requested` for the same `turnId` follow.
+
+Multiple steering messages keep their arrival order and may be folded into one input at the next boundary. A message accepted after the turn ends starts the next turn.
 
 ## Cancel the in-flight turn
 
-POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
+POST to the session's cancel endpoint to stop the running turn. The body is optional; pass `turnId` (in the `scope` of every event that belongs to a turn) to cancel only the turn you observed:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
-# {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
+# {"ok":true,"sessionId":"<sessionId>","deliveryId":"delivery_cancel"}
 ```
 
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. Cancelling also stops every working task, each reported as `task.settled` with `status: "cancelled"` and `cancel.reason: "turn_cancelled"`, including while the session waits between turns. A live but already-parked session returns `"accepted"`; with no working tasks, cancellation is a no-op there. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+The route returns `202` with the `sessionId` and the cancel's `deliveryId`, and cancellation completes asynchronously. Confirm it on the stream as `turn.settled` with `outcome: "cancelled"` and a `cause` naming that delivery. Each cancelled child session reports its own cancellation on its own stream. A cancel without a `turnId` guard also stops working tasks, including between turns, with `task.ended` events.
 
-The HTTP route returns `202` for `"accepted"` and `200` for
-`"no_active_turn"`. Only the accepted result includes `sessionId`.
+A live idle session accepts a cancel as a no-op. A `turnId` guard for a different turn, including `turnId: null` for no observed turn, can't cancel unrelated work. The cancel's `delivery.settled` reports `applied` or `ignored`. An unknown or terminal session returns `409 session_not_active`, not a separate `no_active_turn` result.
 
 Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
-## Compact, clear, and reset
+## Compact, clear, and end
 
-All session controls are ID-addressed and accept no continuation token:
+Session controls are addressed by session ID and accept no continuation token:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/compact
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/clear
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
   -H 'content-type: application/json' \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Attributed [memory](../memory) records are excluded from the summary, canonicalized, and recalled again after the checkpoint. If a turn is active, eve queues the request until that turn settles. A successful compaction emits `compaction.requested` and `compaction.completed`, followed by `session.waiting`; if summarization fails before a checkpoint, the session returns to waiting with its previous history.
+Compaction summarizes history without adding a user message. If a turn is active, eve queues the request until that turn ends. User-role instructions are ordinary history and may be summarized; system-role instructions stay outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture history before compaction rewrites it. On the stream, compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the compaction ends `failed` and the session keeps its previous history.
 
-Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each resolves as `cancelled` in `input.resolved` or `declined` in `authorization.completed`. Requests relayed from tasks that keep running stay answerable. It then emits `context.cleared` followed by `session.waiting`.
+Clear removes model-message history in place, including static and dynamic user-role instructions. It keeps the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. Unchanged user-role instructions aren't inserted again. Clear doesn't delete data from a memory provider's external store, and the next turn recalls again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn. Unlike a compaction, clear doesn't wait for a running turn. It cancels the turn, which ends `cancelled`, stops the calls it waits on, and ends working tasks with `task.ended`. A stopped task never reports into the cleared conversation. On the stream, clear is a context change with `kind: "clear"`.
 
-Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
+A cancel stops turns, not a compaction or clear. A cancel that arrives while either runs ends `ignored`, and the compaction or clear finishes. A cancel, clear, or compact sent to a prewarmed session before its first message ends `ignored` once the session starts.
 
-A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. Reset still works: eve cancels the stranded workflow run and returns `"reset"`. Clear is refused with `409 session_stranded` (`SessionStrandedError` from a `Session` handle), because it would keep a session that cannot run. Compact returns `"no_active_session"` and cancel returns `"no_active_turn"`.
+End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
+
+A [stranded session](./execution-model-and-durability#stranded-sessions) can't run commands, so clear and compact can't repair it. End still works: eve retires the stranded session and returns the end's delivery receipt. The delivery ends after the session is retired and its addresses are released.
 
 ## Reconnect and rewind
 
-The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
+The stream is stored, so a consumer can reconnect from its cursor when an HTTP connection ends. A nonnegative `startIndex` is the next line to read. Pass the last line you read plus one to resume, or `0` to rewind to the start.
 
-When automatic reconnection is enabled and `startIndex` is nonnegative, the TypeScript client requests renewable leases over that durable stream. A server that supports leases sends transport heartbeats during quiet periods, then ends the response so the client reconnects from its current cursor. This bounds server-side stream readers even when a host does not report that the client disconnected. The lease renewal and heartbeats are transport details: they do not stop the run or appear as session events. Tail-relative reads and streams with reconnection disabled do not request leases.
+The stream route serves renewable leases. It sends heartbeats while the stream is quiet, then ends the response with `{"$eve":"stream.lease-ended"}`. The client then reconnects from its cursor. Leases bound each read even when a host doesn't report a client disconnect. A finished session's stream ends with `{"$eve":"stream.ended"}`, so readers stop instead of reconnecting. Leases and heartbeats don't stop the run or appear as session events.
 
-If a reconnect overlaps events you already handled, [`meta.id`](#the-event-envelope) identifies the duplicates: it is unchanged across reconnects and rewinds, so a consumer keyed on it can replay safely.
+If a reconnect overlaps events you already handled, [`meta.position`](#positions) identifies the duplicates.
 
 ```bash
-curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<line>"
 ```
 
-A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest event, which is normally `session.waiting` for a resumable session:
+A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest line:
 
 ```bash
 curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=-1"
 ```
 
-Because a tail-relative position does not resolve to an absolute consumed-event
-count, client tail reads do not automatically reconnect or advance the stored
-cursor.
-
-For a catch-up read that stops instead of following the live stream, pass `includeTailIndex=1`. The response then carries the `x-eve-stream-tail-index` header: the zero-based index of the last durably recorded event, or `-1` before the first. Read from your cursor until it passes that tail, then disconnect — reconnecting from the updated cursor if the connection drops first:
+Pass `includeTailIndex=1` for a catch-up read that stops instead of following the live stream. The response carries the `x-eve-stream-tail-index` header, the zero-based position of the last recorded line (`-1` before the first), and ends after that line:
 
 ```bash
-curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>&includeTailIndex=1"
+curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<line>&includeTailIndex=1"
 # x-eve-stream-tail-index: <tail>
 ```
 
-The lookup is opt-in; requests without the parameter get no header. Passing `follow=false` instead bounds the response at the durable tail on the server and implies the header. A bounded read only reads recorded history, so it also works for a [stranded session](./execution-model-and-durability#stranded-sessions), whose live stream returns `409 session_stranded`. The TypeScript client wraps this into `stream({ follow: false })`.
+Requests without the parameter get no header. `follow=false` instead bounds the response at the recorded tail on the server and implies the header. A bounded read only reads recorded history, so it also works for a [stranded session](./execution-model-and-durability#stranded-sessions), whose live stream returns `409 session_stranded`. The TypeScript client exposes this as `stream({ follow: false })`.
 
 ## Use the client from TypeScript
 
-For scripts, server-to-server calls, tests, evals, and custom UIs, `eve/client` wraps these routes in a typed client so you don't hand-roll the POST and NDJSON stream loop.
-
-Start with the [Client SDK](../guides/client/overview) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
+`eve/client` wraps these routes in a typed client for scripts, server-to-server calls, tests, evals, and custom UIs. Start with the [Client SDK](../guides/client/overview) guide, which covers sending messages, session state, streaming, and per-turn `outputSchema` results.
 
 ## Read a session in process
 
-Code running inside the agent's own deployment, such as a hook, tool, schedule, or channel route, can read a session's durable stream without calling its own HTTP route. `eve/server` exposes the same `attach(sessionId).stream(...)` shape as the client, so it needs no deployment URL, credentials, or stream protocol:
+Code inside the agent's deployment, such as a hook, tool, schedule, or channel route, can read a session's stream with `sessions` from `eve/server`. It doesn't call the HTTP route. It has the client's `attach(sessionId).stream(...)` shape and needs no deployment URL, credentials, or stream protocol:
 
 ```ts
 import { sessions } from "eve/server";
@@ -314,40 +419,55 @@ import { sessions } from "eve/server";
 const events = sessions.attach(sessionId).stream({ startIndex, follow: false });
 
 for await (const event of events) {
-  await saveEvent(sessionId, event.meta.id, event);
+  await saveEvent(sessionId, event.meta.position, event);
 }
 ```
 
-`stream()` accepts `startIndex` (negative values count back from the tail), `follow`, and `signal`. Key stored events on [`meta.id`](#the-event-envelope), which stays stable across reads. With `follow: false`, the read ends at the durable tail observed when it opens; otherwise it keeps following new events until the stream closes or the signal aborts.
+`stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a line position; negative values count back from the tail), `follow`, and `signal`. Client readers also accept `reconnect: false` or a `ReconnectOptions` object from `eve/client`. With `follow: false`, the read ends at the recorded tail observed when it opens. Otherwise it follows new events until the stream closes or the signal aborts. Key stored events on [`meta.position`](#positions), which stays stable across reads.
 
-A read reflects events that are already durable. In a hook, the current step's events may still be buffered, so a bounded read there can end before the event that triggered the hook; read again later to catch up. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It is available only in code that runs inside the eve server.
+A read sees only recorded events. A hook runs after its line is written, so a bounded read there includes the event that triggered it. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It's available only in code that runs inside the eve server.
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns agent-info version 6, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
-
-The info route belongs to the selected `channels/eve.ts` source and uses its resolved auth policy. Without an authored replacement, eve selects the default channel source with Vercel OIDC, local development access, and the production placeholder. Replacing or disabling that source replaces or removes the info route too; no native fallback serves it.
+`GET /eve/v1/info` returns agent-info version 5, a JSON snapshot of the effective compiled agent:
 
 ```bash
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, `localDev()` accepts requests to an `eve dev` or `vercel dev` server, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+The snapshot reports:
+
+- the selected config;
+- active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation, each with its source;
+- dynamic resolvers, separately from their session-specific output;
+- local and remote agents, in separate collections;
+- prepared built-in effects;
+- shadowed or disabled source diagnostics.
+
+Memory tool wrappers include their selected memory-source dependency, and channel routes appear in the order the HTTP host uses. Static instructions are an ordered array of entries with `content` and `role`. The sandbox's opaque `revisionHash` identifies its compiler-discovered environment inputs.
+
+The payload includes authored text and server paths, so the route serves only operator callers: `service` and `runtime` callers, and, when the channel's auth includes `localDev()`, callers it admits on a development server. Any other caller the channel admits, such as a `user` or `anonymous` caller, gets `403` with `{ "code": "info_forbidden", "ok": false }` and an `error` message. To give another credential access, return `principalType: "service"` or `allowAgentInfo: true` from its authenticator. See [Agent info access](../guides/auth-and-route-protection#agent-info-access).
+
+The version changes only when the shape breaks. A server can add fields and enum values within a version, so ignore unknown fields and handle unknown enum values. `kind` discriminants, such as an owner's, a model endpoint's, or a module's backing `kind`, are closed: a new variant comes with a new version.
+
+The info route belongs to the selected `channels/eve.ts` source and checks its auth policy before the operator check. Replacing or disabling that source replaces or removes the info route too. Without an authored source, eve uses the default auth chain `[vercelOidc(), localDev(), placeholderAuth()]`. A Vercel OIDC bearer takes precedence, and `localDev()` accepts requests to an `eve dev` or `vercel dev` server. Everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 
-Every stream event runs four steps, in this order:
+Each new event line goes through these stages in order:
 
-1. **Channel handler**: the channel's event handler runs and can mutate adapter state.
-2. **Metadata projection**: the framework re-evaluates the channel's `metadata(state)` and stores the result.
-3. **Hooks**: authored [hooks](../guides/hooks) subscribed to the event fire.
-4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata from step 2.
+1. **Write**: the line is written to the stream.
+2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`.
+3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
+4. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
 
-The order is structural, not incidental. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
+Before the next model call, eve evaluates [dynamic values](../guides/dynamic-capabilities) from `defineDynamic`. Hooks and dynamic values read the current `ctx.channel.metadata`.
+
+Channels and hooks observe what was written and can't change it.
 
 ## What to read next
 
-- [Execution model & durability](./execution-model-and-durability): what makes a session durable and how parked work resumes.
-- [Channels](../channels/overview): how platform addresses map to durable sessions.
+- [Execution model & durability](./execution-model-and-durability): how a session survives restarts and how parked work resumes.
+- [Channels](../channels/overview): how platform addresses map to sessions.
 - [Client SDK](../guides/client/overview): call these routes from scripts and server-side code.
 - [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.

@@ -6,7 +6,7 @@ import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js
 const traceAnalysisSkill = defineSkill({
   description:
     "Analyze local eve traces for latency, token usage, failures, repeated tool calls, and discovery inefficiency with a bounded, conversation-scoped investigation.",
-  markdown: `# Trace analysis
+  content: `# Trace analysis
 
 Use this workflow when the user asks to review, diagnose, or optimize behavior from local traces.
 

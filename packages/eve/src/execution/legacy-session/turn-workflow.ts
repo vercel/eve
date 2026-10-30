@@ -3,7 +3,6 @@ import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { failSession, runPreparedSession } from "#execution/session/program.js";
-import { sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { recordSessionOwnerStep } from "#execution/session/handoff-steps.js";
 import { completeLegacyDriverStep } from "./completion-step.js";
@@ -45,9 +44,10 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       sessionWritable,
     });
   }
-  const timeoutDeadline = sessionTimeoutDeadline(prepared.sessionTimeoutMs, Date.now());
+  const initialDeliveryKey = prepared.input.delivery?.idempotencyKey;
   await runPreparedSession(
     {
+      admittedDeliveryKeys: initialDeliveryKey === undefined ? [] : [initialDeliveryKey],
       anchor: {
         kind: "self",
         notify: (result) =>
@@ -75,12 +75,11 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       serializedContext: interrupted.serializedContext,
       sessionId,
       sessionState: interrupted.sessionState,
-      sessionTimeoutControl:
-        timeoutDeadline === undefined
-          ? undefined
-          : createSessionTimeoutControl({ deadline: timeoutDeadline, sessionId }),
+      sessionTimeoutControl: createSessionTimeoutControl({
+        sessionId,
+        timeoutMs: prepared.sessionTimeoutMs,
+      }),
       sessionTimeoutMs: prepared.sessionTimeoutMs,
-      sessionTimeoutDeadline: timeoutDeadline,
       sessionWritable,
     },
     inbox,

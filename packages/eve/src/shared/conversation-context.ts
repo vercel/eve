@@ -1,4 +1,4 @@
-import type { InstrumentationChannelKind } from "#public/channels/index.js";
+import type { InstrumentationChannelKind } from "#shared/instrumentation-channel.js";
 import { ContextKey } from "#context/key.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import { isNonEmptyString } from "#shared/guards.js";
@@ -17,12 +17,6 @@ export interface ConversationContext {
   readonly principalType: string;
 }
 
-export interface AudiencePrincipal {
-  readonly principalType: string;
-  readonly authenticator: string;
-  readonly attributes: Readonly<Record<string, string | readonly string[]>>;
-}
-
 export type AudienceCaller =
   | { readonly type: "anonymous" }
   | {
@@ -34,17 +28,12 @@ export type AudienceCaller =
       };
     };
 
-export interface AudienceInput<TState> {
+/** Privacy-limited input for conversation audience classification. */
+export interface AudienceContext<TState> {
   readonly state: TState;
-  /** @deprecated Use `caller`; it excludes `principalId`, `issuer`, and `subject`. */
-  readonly auth: AudiencePrincipal | null;
+  readonly caller: AudienceCaller;
   readonly channel: ConversationContext["channel"];
   readonly environment: ConversationEnvironment;
-}
-
-/** Preferred input type for new audience callback annotations. */
-export interface AudienceContext<TState> extends AudienceInput<TState> {
-  readonly caller: AudienceCaller;
 }
 
 /** Safe projection for durable sessions created before `eve.conversation` existed. */

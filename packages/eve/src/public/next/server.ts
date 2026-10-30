@@ -56,6 +56,7 @@ export async function ensureEveProductionServer(input: {
       appRoot: input.appRoot,
       host: EVE_NEXT_HOST,
       origin: input.origin,
+      portRetryHint: "set EVE_NEXT_PRODUCTION_PORT to another port",
     }).catch((error: unknown) => {
       state.servers.delete(key);
       throw error;

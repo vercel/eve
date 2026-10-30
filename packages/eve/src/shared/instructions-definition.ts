@@ -8,18 +8,10 @@
  * static instructions execute once at build time. The compiler captures
  * the resulting content into the compiled manifest.
  */
-export type PublicInstructionsDefinition =
-  | {
-      readonly content: string;
-      readonly role?: "system" | "user";
-      readonly markdown?: never;
-    }
-  | {
-      /** @deprecated Use `content`. */
-      readonly markdown: string;
-      readonly content?: never;
-      readonly role?: never;
-    };
+export interface PublicInstructionsDefinition {
+  readonly content: string;
+  readonly role?: "system" | "user";
+}
 
 export type InstructionsRole = "system" | "user";
 

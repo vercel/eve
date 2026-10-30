@@ -25,7 +25,9 @@ describe("default file-memory backend", () => {
     const key = `mem_${crypto.randomUUID()}`;
 
     await first.write({ content: "local", expectedVersion: null, key, signal });
-    await expect(second.read({ key, signal })).resolves.toMatchObject({ content: "local" });
+    await expect(second.read({ key, signal })).resolves.toMatchObject({
+      content: "local",
+    });
     expect(get).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
   });
@@ -39,7 +41,9 @@ describe("default file-memory backend", () => {
     vi.stubEnv("EVE_DEV", undefined);
     vi.stubEnv("VERCEL", "1");
 
-    await expect(backend.read({ key, signal })).resolves.toMatchObject({ content: "local" });
+    await expect(backend.read({ key, signal })).resolves.toMatchObject({
+      content: "local",
+    });
     expect(get).not.toHaveBeenCalled();
   });
 
@@ -169,7 +173,12 @@ describe("default file-memory backend", () => {
       await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
       vi.stubEnv("VERCEL_OIDC_TOKEN", "rotated-oidc-token");
       await expect(
-        backend.write({ content: "memory", expectedVersion: null, key: "mem_a", signal }),
+        backend.write({
+          content: "memory",
+          expectedVersion: null,
+          key: "mem_a",
+          signal,
+        }),
       ).resolves.toEqual({ content: "memory", version: "etag-next" });
 
       const credentials = expect.objectContaining({

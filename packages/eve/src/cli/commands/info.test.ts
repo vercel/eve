@@ -37,7 +37,7 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
       },
       {
         loadNamespace: async () => ({
-          default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the digest." }),
+          default: defineSchedule({ cron: "0 9 * * *", content: "Run the digest." }),
         }),
         logicalPath: "schedules/morning-digest.ts",
       },
@@ -78,6 +78,7 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
       compileDirectoryPath: `${APP_ROOT}/.eve/compile`,
       compileMetadataPath: `${APP_ROOT}/.eve/compile/compile-metadata.json`,
       diagnosticsPath: `${APP_ROOT}/.eve/discovery/diagnostics.json`,
+      modelMetadataPath: `${APP_ROOT}/.eve/compile/model-metadata.json`,
       discoveryManifestPath: `${APP_ROOT}/.eve/discovery/agent-discovery-manifest.json`,
       discoveryDirectoryPath: `${APP_ROOT}/.eve/discovery`,
       moduleMapPath: `${APP_ROOT}/.eve/compile/module-map.mjs`,

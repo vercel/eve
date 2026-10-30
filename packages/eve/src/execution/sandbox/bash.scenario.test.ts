@@ -10,7 +10,7 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 import { executeBashOnSandbox } from "./bash.js";
-import { buildSandboxSession } from "./session.js";
+import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -95,11 +95,11 @@ async function createHostSandbox(): Promise<{
   const unsupported = async (): Promise<never> => {
     throw new Error("not used by the bash tool");
   };
-  const sandbox = buildSandboxSession({
+  const sandbox = createConnectionSession({
     readFile: unsupported,
     removePath: unsupported,
-    resolvePath: (path) => path,
-    writeFile: unsupported,
+    stop: unsupported,
+    writeFiles: unsupported,
     async spawn(options) {
       const child = spawn("bash", ["-lc", options.command], {
         cwd: home,
@@ -112,14 +112,14 @@ async function createHostSandbox(): Promise<{
       });
       launches.push(exited);
       // Like many providers, aborting kills only the launched process.
-      options.abortSignal?.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
+      options.signal?.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
       return {
         pid: child.pid,
         stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
         stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
         async wait() {
           const result = await exited;
-          options.abortSignal?.throwIfAborted();
+          options.signal?.throwIfAborted();
           return result;
         },
         async kill() {

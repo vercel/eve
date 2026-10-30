@@ -11,9 +11,8 @@ import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentat
 import { collectOtelPipeline } from "#tracing/eve/otel-declaration.js";
 import {
   isInstrumentationDisabled,
-  isInstrumentationProvider,
   type InstrumentationProvider,
-} from "#public/instrumentation/provider.js";
+} from "#instrumentation/provider.js";
 
 /**
  * Process-global registry of the providers authored under
@@ -162,3 +161,5 @@ function toProviderDefinition(
     tracePolicy: entry.provider.tracePolicy,
   };
 }
+
+import { isInstrumentationProvider } from "#instrumentation/provider.js";

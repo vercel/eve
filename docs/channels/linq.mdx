@@ -3,9 +3,9 @@ title: Linq
 description: Connect an eve agent to iMessage and SMS through Linq.
 ---
 
-Use `linqChannel` to receive and reply to iMessage and SMS conversations through Linq.
+The Linq channel connects your agent to iMessage and SMS conversations through `agent/channels/linq.ts`.
 
-Run `eve add channel/linq` to choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in and creates or links a Vercel project when needed. Then choose whether to create a managed Linq account and line or connect an existing account with its partner API token. eve fetches the phone numbers assigned to that account, and you select the numbers for the agent. eve configures the connector and webhook through Connect:
+Run `eve add channel/linq` and choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in and links a Vercel project. It then asks whether to create a managed Linq account and line, or connect an existing account with its partner API token. You select the account's phone numbers for the agent, and eve configures the connector and webhook through Connect:
 
 ```ts title="agent/channels/linq.ts"
 import { connectLinqCredentials } from "@vercel/connect/eve";
@@ -16,13 +16,13 @@ export default linqChannel({
 });
 ```
 
-The default webhook route is `/eve/v1/linq`. The channel verifies forwarded webhooks with same-project Vercel OIDC by default, derives user auth from each message author, marks accepted messages as read, and continues the same eve session for every message in a Linq conversation. A new accepted message steers the active turn. Before answer output or local tool execution begins, steering can interrupt pending model generation. Executing tools finish first; after answer output starts, steering waits for the next committed workflow boundary. See [Overlapping messages](./overview#overlapping-messages).
+The channel receives webhooks at `/eve/v1/linq` and, by default, verifies them with Vercel OIDC from the same project and environment. It builds auth from the person who sent each message, marks accepted messages as read, and keeps one eve session per Linq conversation.
 
-Set `turnPolicy: "queue"` when every response should finish before Linq starts the next message.
+A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](./overview#overlapping-messages) for when a new message can interrupt the model.
 
-Images and other files people send reach the agent as file parts. eve downloads each one from Linq's CDN and passes the bytes; a failed download, or a file over 25 MB, reaches the agent as a short note.
+Images and other files people send reach the agent as file parts. eve downloads each one over HTTPS. Downloads and redirects must resolve to public network addresses and time out after 30 seconds. A failed download, or a file over 25 MB, reaches the agent as a short note instead.
 
-Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
+Customize inbound handling with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the run title when the message starts a run:
 
 ```ts
 export default linqChannel({
@@ -37,11 +37,78 @@ export default linqChannel({
 });
 ```
 
-Set `route` to override the webhook path or `webhookVerifier` to use a different trusted-forwarder verifier.
+Set `route` to change the webhook path, or `webhookVerifier` (typed `LinqWebhookVerifier` from `eve/channels/linq`) to use a different trusted-forwarder verifier. A verifier receives the request and its raw body bytes. It rejects a webhook by throwing or returning a falsy value such as `null` or `false`.
+
+## Tapbacks
+
+`IMESSAGE_TAPBACKS` from `eve/channels/linq` lists the built-in tapback names.
+Use it to populate a picker or validate a named reaction. Tapback APIs can also
+accept a single emoji; the list does not enumerate those.
+
+eve ignores tapbacks people send unless you pass `onTapback`. It receives the tapback and returns the same result as `onMessage`, or `null` to ignore it:
+
+```ts title="agent/channels/linq.ts"
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { defaultLinqAuth, linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+  onTapback(_ctx, tapback) {
+    if (!tapback.added) return null;
+    return { auth: defaultLinqAuth(tapback) };
+  },
+});
+```
+
+| Field               | Value                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `tapback.tapback`   | `love`, `like`, `dislike`, `laugh`, `emphasize`, `question`, or the emoji for an emoji tapback |
+| `tapback.messageId` | The message the tapback is on                                                                  |
+| `tapback.author`    | The person who sent it                                                                         |
+
+The agent reads an accepted tapback as iMessage's text form, such as `Tapback: Loved “See you at 7”` or `Tapback: Removed a like tapback from a message`. The quoted text appears when Linq can return the original message. An accepted tapback starts or steers a turn like any other message, following `turnPolicy`.
+
+`onTapback` runs instead of `onMessage` for tapbacks, so repeat any sender checks from `onMessage` there. The agent's own tapbacks never reach it. Tapbacks arrive as `reaction.added` and `reaction.removed` webhook events, which `eve add channel/linq` subscribes to.
+
+To let the agent send tapbacks, export the channel's tapback tool from a file in `agent/tools/`. The file name becomes the tool name:
+
+```ts title="agent/tools/tapback.ts"
+import linq from "../channels/linq";
+
+export default linq.tapbackTool();
+```
+
+The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or any single emoji, such as `{ "tapback": "🎉" }`. eve reacts to the latest message someone sent in the conversation. A standard tapback's own emoji, such as `👍`, sends that tapback.
+
+The model can send a tapback alongside a reply; to let a tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply). Subagents don't receive the tool. In a session from another channel, such as web chat, or before anyone has sent a message, the call returns an error to the model.
+
+### Answer approvals with a tapback
+
+Return `answer` from `onTapback` to answer the approval or question in the message the tapback is on. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `deny`, so a like or dislike on the approval prompt can approve or deny it:
+
+```ts title="agent/channels/linq.ts"
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { defaultLinqAuth, linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+  onTapback(_ctx, tapback) {
+    if (!tapback.added) return null;
+    const auth = defaultLinqAuth(tapback);
+    if (tapback.tapback === "like") return { auth, answer: "approve" };
+    if (tapback.tapback === "dislike") return { auth, answer: "deny" };
+    return { auth };
+  },
+});
+```
+
+`answer` answers only the request posted in that message, and only while that request is still open and offers that option. A tapback on any other message, or on an answered prompt, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the sender may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids.
+
+Return `message` to replace the text the agent receives for a tapback. Don't set `message` to an option's id, label, or number, because eve reads that text like a typed reply. A typed reply answers the first waiting approval, no matter which message the tapback is on.
 
 ## Other hosts
 
-For a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/linq`. eve writes `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` to `.env.local`.
+On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/linq`. eve writes `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` to `.env.local`.
 
 After deploying the agent:
 
@@ -61,7 +128,7 @@ export default linqChannel({
 });
 ```
 
-For direct Linq webhooks, pass `signingSecret`. A supplied `webhookVerifier` takes precedence over it.
+A supplied `webhookVerifier` takes precedence over `signingSecret`.
 
 ## What to read next
 

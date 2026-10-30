@@ -10,8 +10,8 @@ import {
 
 describe("discordContinuationToken", () => {
   it("builds a channel-local token from channel and conversation ids", () => {
-    expect(discordContinuationToken("C01", "M01")).toBe("C01:M01");
-    expect(discordContinuationToken("C01", undefined)).toBe("C01:");
+    expect(discordContinuationToken({ channelId: "C01", conversationId: "M01" })).toBe("C01:M01");
+    expect(discordContinuationToken({ channelId: "C01", conversationId: undefined })).toBe("C01:");
   });
 });
 

@@ -44,7 +44,6 @@ export function buildConversationContext(
     inherited?.audience ??
     resolveAudience(run.adapter, {
       state: run.adapter.state,
-      auth,
       caller: toAudienceCaller(auth),
       channel,
       environment,

@@ -1,20 +1,21 @@
-import type { DeliverPayload } from "#channel/types.js";
-import { createLogger, logError } from "#internal/logging.js";
+import { replyTextOf } from "#public/channels/reply.js";
+import { createLogger } from "#internal/logging.js";
 import {
   SLACK_MARKDOWN_TEXT_MAX_LENGTH,
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
+import { reportUndeliveredReply } from "#public/channels/undelivered-reply.js";
 import type {
   SlackChannelInternalEvents,
-  SlackChannelState,
+  SlackChannelContext,
   SlackContext,
-  SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 
 const log = createLogger("slack.reply");
 const LONG_RESPONSE_FILENAME = "eve-response.md";
 const LONG_RESPONSE_NOTICE = "Here's a snippet with the full response.";
 const FALLBACK_LOG = "Slack refused the final reply; delivering it with a fallback";
+const ROOT_GONE_LOG = "Slack thread root was deleted; dropping the final reply";
 
 /**
  * Slack error codes for a message payload Slack refused as too large or
@@ -29,7 +30,7 @@ const REFUSED_PAYLOAD_ERRORS = new Set([
   "msg_too_long",
 ]);
 
-type MessageCompletedHandler = NonNullable<SlackChannelInternalEvents["message.completed"]>;
+type ContentCompletedHandler = NonNullable<SlackChannelInternalEvents["content.completed"]>;
 
 /**
  * A completed reply for {@link postCompletedSlackReply}: Markdown alone, or
@@ -64,6 +65,11 @@ export type SlackCompletedReply =
  *    This requires the `files:write` bot scope. In a session without a
  *    thread yet, the note posts first and anchors the thread.
  *
+ * Before any of that, while eve has not yet posted in the thread, it checks
+ * that the bound thread's root still exists. Slack posts a reply to a
+ * deleted root as a top-level channel message, so eve drops the reply
+ * instead of posting it unthreaded.
+ *
  * Any other error, and a failed upload, is thrown so your renderer sees it.
  * eve logs each fallback it takes with Slack's error code, never the reply.
  *
@@ -94,6 +100,10 @@ export async function deliverCompletedSlackReply(
   logFields: { readonly turnId?: string },
 ): Promise<void> {
   const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
+  if (await threadRootIsGone(channel)) {
+    log.warn(ROOT_GONE_LOG, logFields);
+    return;
+  }
   let slackError: string | undefined;
   if (blocks !== undefined) {
     try {
@@ -122,6 +132,36 @@ export async function deliverCompletedSlackReply(
   await uploadReplySnippet(channel, markdown);
 }
 
+/**
+ * True when the bound thread's root message no longer exists. Slack accepts
+ * a `thread_ts` whose parent is gone and posts the message at the top level
+ * of the channel, so a reply to a deleted root would leak into the channel.
+ *
+ * `chat.getPermalink` needs no scopes, unlike `conversations.replies`, so
+ * the check works with the minimal `app_mentions:read` + `chat:write` app.
+ * Only `message_not_found` counts as gone. Any other failure to look it up
+ * counts as "not gone", so a lookup problem never swallows a reply.
+ *
+ * Once eve has posted in the thread, deleting the root leaves a tombstone
+ * that keeps the thread, and `chat.getPermalink` may not tell a tombstone
+ * from a missing message, so the check is skipped.
+ */
+async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
+  const { channelId, codeChannel, threadTs } = channel.slack;
+  // A code channel has no session root, and a reply that lands top-level stays in the channel.
+  if (!channelId || !threadTs || codeChannel) return false;
+  if ((channel as Partial<SlackChannelContext>).state?.postedInThread === true) return false;
+  try {
+    const response = await channel.slack.request("chat.getPermalink", {
+      channel: channelId,
+      message_ts: threadTs,
+    });
+    return response.ok !== true && response.error === "message_not_found";
+  } catch {
+    return false;
+  }
+}
+
 async function uploadReplySnippet(channel: SlackContext, message: string): Promise<void> {
   const file = {
     data: new Blob([message], { type: "text/markdown" }),
@@ -129,7 +169,8 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
     mimeType: "text/markdown",
   };
 
-  const hasThread = channel.slack.threadTs.length > 0;
+  // A code channel posts top-level by design; only a threadless proactive session needs an anchor.
+  const hasThread = channel.slack.codeChannel || channel.slack.threadTs.length > 0;
   if (!hasThread) {
     // Uploads cannot anchor proactive sessions; post the notice first.
     const anchor = await channel.thread.post(LONG_RESPONSE_NOTICE);
@@ -143,8 +184,13 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
   });
 }
 
+/** Whether Slack's error `code` means it refused the message's content and posted nothing. */
+export function isRefusedPayloadCode(code: unknown): code is string {
+  return typeof code === "string" && REFUSED_PAYLOAD_ERRORS.has(code);
+}
+
 /** Slack's error code when `error` is a refused-payload error, checking its causes. */
-function refusedPayloadError(error: unknown): string | undefined {
+export function refusedPayloadError(error: unknown): string | undefined {
   let current = error;
   for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
     const candidate = current as {
@@ -154,14 +200,14 @@ function refusedPayloadError(error: unknown): string | undefined {
     };
     // eve's Slack client reports the code on `response`; `@slack/web-api` on `data`.
     const code = candidate.response?.error ?? candidate.data?.error;
-    if (typeof code === "string" && REFUSED_PAYLOAD_ERRORS.has(code)) return code;
+    if (isRefusedPayloadCode(code)) return code;
     current = candidate.cause;
   }
   return undefined;
 }
 
 /**
- * Wraps a channel's composed `message.completed` chain, authored renderers
+ * Wraps a channel's composed `content.completed` chain, authored renderers
  * included, so a final reply that fails is never lost without a trace.
  *
  * When the chain throws on a final reply, eve logs the error at error level,
@@ -169,54 +215,25 @@ function refusedPayloadError(error: unknown): string | undefined {
  * next delivery that its reply was not seen. eve never sends the reply from
  * here: the chain owns the content, including any change a renderer made
  * before `next`, and {@link postCompletedSlackReply} owns the fallbacks.
- * Steps that end in tool calls and empty replies pass through.
+ * Narration, other content, and empty replies pass through.
  */
 export function withFinalReplyDelivery(
-  render: MessageCompletedHandler | undefined,
-): MessageCompletedHandler {
-  return async (event, channel, ctx) => {
-    if (event.finishReason === "tool-calls" || !event.message) {
-      await render?.(event, channel, ctx);
+  render: ContentCompletedHandler | undefined,
+): ContentCompletedHandler {
+  return async (event, ctx) => {
+    if (replyTextOf(event.data) === undefined) {
+      await render?.(event, ctx);
       return;
     }
     try {
-      await render?.(event, channel, ctx);
+      await render?.(event, ctx);
     } catch (error) {
-      await reportUndeliveredReply(channel, event.turnId, error);
+      const { channel } = ctx;
+      await reportUndeliveredReply(
+        { log, name: "Slack", post: (notice) => channel.thread.post(notice), state: channel.state },
+        ctx.session.turn.id,
+        error,
+      );
     }
   };
-}
-
-async function reportUndeliveredReply(
-  channel: SlackEventContext,
-  turnId: string,
-  error: unknown,
-): Promise<void> {
-  const errorId = logError(log, "final reply was not delivered to Slack", error, { turnId });
-  channel.state.undeliveredReplyErrorId = errorId;
-  try {
-    await channel.thread.post(
-      `I finished, but couldn't deliver my answer in Slack (error id \`${errorId}\`). Please ask me to resend it.`,
-    );
-  } catch (noticeError) {
-    logError(log, "undelivered reply notice failed", noticeError, { errorId, turnId });
-  }
-}
-
-/**
- * Tells the model, ahead of the next message, that its previous reply never
- * reached Slack, so it does not assume the user read that reply.
- */
-export function withUndeliveredReplyNote<T extends DeliverPayload>(
-  state: SlackChannelState,
-  payload: T,
-): T {
-  const errorId = state.undeliveredReplyErrorId;
-  if (!errorId || payload.message === undefined) return payload;
-  state.undeliveredReplyErrorId = null;
-  const note = [
-    `Your previous reply was not delivered to Slack (error id ${errorId}).`,
-    "The user has not seen it. Do not assume they read it; send the answer again if they ask for it.",
-  ].join(" ");
-  return { ...payload, context: [note, ...(payload.context ?? [])] };
 }

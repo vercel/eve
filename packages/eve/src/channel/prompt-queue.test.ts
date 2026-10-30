@@ -1,94 +1,114 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { promptQueueEvents, type PromptQueueState } from "#channel/prompt-queue.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#shared/input.js";
+import { snapshotOf } from "#protocol/session-projection/session-view.js";
+import { firstOpenRequest } from "#channel/interaction-prompts.js";
+import { promptQueue } from "#channel/prompt-queue.js";
+import type { StoredLine } from "#protocol/session-events/envelope.js";
+import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 
-const AT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+const at = "2026-10-09T00:00:00.000Z";
+const turnId = "turn_0";
+const runId = "run_0";
+const scope = { runId, turnId };
 
-function question(requestId: string): InputRequest {
-  return {
-    action: { callId: requestId, input: {}, kind: "tool-call", toolName: "ask" },
-    display: "text",
-    kind: "question",
-    prompt: requestId,
-    requestId,
-  };
+/** A paused turn asking two approvals in one batch, and then `answers`' lines. */
+function viewWith(answers: readonly StoredLine[] = []) {
+  const call = (callId: string) => ({
+    data: { callId, capability: { kind: "tool", name: callId }, owner: { runId } },
+    scope,
+    type: "call.requested",
+  });
+  const approval = (interactionId: string, callId: string) => ({
+    data: {
+      interactionId,
+      request: { kind: "approval", prompt: `Approve ${callId}?` },
+      subject: { callId },
+    },
+    scope: { turnId },
+    type: "interaction.opened",
+  });
+  const lines: StoredLine[] = [
+    {
+      at,
+      facts: [
+        { data: {}, type: "session.started" },
+        { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+      ],
+    },
+    {
+      at,
+      facts: [
+        {
+          data: { cause: { deliveryId: "d_0" }, follows: null, turnId },
+          scope: { turnId },
+          type: "turn.started",
+        },
+        { data: { owner: { turnId }, runId }, scope, type: "model.requested" },
+        call("a"),
+        call("b"),
+        { data: { outcome: "completed", runId }, scope, type: "model.settled" },
+        approval("approval-a", "a"),
+        approval("approval-b", "b"),
+      ],
+    },
+    ...answers,
+  ];
+  const view = emptySessionView();
+  foldLines(view, lines, 0);
+  return view;
 }
 
-function requested(...requests: InputRequest[]): UnstampedMessageStreamEvent {
-  return { data: { requests, ...AT }, type: "input.requested" };
-}
+const answerA: StoredLine[] = [
+  {
+    at,
+    facts: [
+      { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
+      {
+        data: {
+          deliveryId: "d_1",
+          interactionId: "approval-a",
+          responseId: "r_a",
+          value: { optionId: "approve" },
+        },
+        type: "response.submitted",
+      },
+      { data: { responseId: "r_a" }, type: "response.admitted" },
+    ],
+  },
+];
 
-function resolved(requestId: string): UnstampedMessageStreamEvent {
-  return {
-    data: { resolutions: [{ kind: "question", outcome: "answered", requestId }], ...AT },
-    type: "input.resolved",
-  };
-}
-
-/** Publishes `events` as a session does: each handler runs, then the session records it. */
-async function publish(
-  show: (channel: unknown, request: InputRequest) => Promise<boolean | void>,
-  events: readonly UnstampedMessageStreamEvent[],
-) {
-  const handlers = promptQueueEvents(show) as Record<
-    string,
-    (data: unknown, channel: { state: PromptQueueState }) => Promise<void>
-  >;
-  const channel: { state: PromptQueueState } = { state: {} };
-  const ctx = new ContextContainer();
-  enterSessionProjection(ctx, undefined);
-  await contextStorage.run(ctx, async () => {
-    for (const event of events) {
-      await handlers[event.type]?.("data" in event ? event.data : undefined, channel);
-      recordPublishedEvent(ctx, event);
-    }
-  });
-}
-
-describe("promptQueueEvents", () => {
-  it("shows a budget prompt ahead of a request already shown, then returns to it", async () => {
-    const show = vi.fn(async (_channel: unknown, _request: InputRequest) => {});
-    await publish(show, [
-      requested(question("day")),
-      requested({ ...question("budget"), kind: "session-limit" }),
-      resolved("budget"),
-    ]);
-    expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual([
-      "day",
-      "budget",
-      "day",
-    ]);
+describe("showing one request at a time", () => {
+  it("shows the first open request, then the next once its answer waits for the batch", () => {
+    expect(firstOpenRequest(viewWith())?.interactionId).toBe("approval-a");
+    expect(firstOpenRequest(viewWith(answerA))?.interactionId).toBe("approval-b");
   });
 
-  it("never shows a request again once it closed, even when it is requested again", async () => {
-    const show = vi.fn(async (_channel: unknown, _request: InputRequest) => {});
-    await publish(show, [requested(question("day")), resolved("day"), requested(question("day"))]);
-    expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual(["day"]);
+  it("moves a channel's shown request on when an answer is admitted, once per change", async () => {
+    const shown: string[] = [];
+    const committed = promptQueue(async (_channel: unknown, request: Interaction) => {
+      shown.push(request.interactionId);
+    });
+    const channel = { state: {} };
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
+    await committed(undefined, { channel, view: snapshotOf(viewWith(answerA)) });
+
+    expect(shown).toEqual(["approval-a", "approval-b"]);
   });
 
-  it("throws instead of showing nothing when the step's projection is missing", async () => {
-    const show = vi.fn(async (_channel: unknown, _request: InputRequest) => {});
-    const handlers = promptQueueEvents(show);
-    const channel = { ctx: new ContextContainer(), state: { shownPromptId: "day" } };
-    await expect(
-      handlers["input.resolved"](
-        { resolutions: [{ kind: "question", outcome: "answered", requestId: "day" }], ...AT },
-        channel,
-      ),
-    ).rejects.toThrow("initialized projection");
-    expect(channel.state.shownPromptId).toBe("day");
-    expect(show).not.toHaveBeenCalled();
-  });
+  it("tries a request it failed to show again at the next commit", async () => {
+    let fails = true;
+    const shown: string[] = [];
+    const committed = promptQueue(async (_channel: unknown, request: Interaction) => {
+      if (fails) return false;
+      shown.push(request.interactionId);
+    });
+    const channel = { state: {} };
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
+    fails = false;
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
 
-  it("tries a request it could not show again on the next event", async () => {
-    const show = vi
-      .fn(async (_channel: unknown, _request: InputRequest): Promise<boolean> => true)
-      .mockResolvedValueOnce(false);
-    await publish(show, [requested(question("day")), requested(question("time"))]);
-    expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual(["day", "day"]);
+    expect(shown).toEqual(["approval-a"]);
   });
 });

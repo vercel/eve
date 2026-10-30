@@ -1,5 +1,5 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,
@@ -73,23 +73,24 @@ async function openDevelopmentSessionStream(input: {
   return openDevelopmentMessageStream({
     resourceUrl: streamResponse.resourceUrl,
     response: streamResponse.response,
+    startIndex: input.startIndex,
   });
 }
 
 async function readDevelopmentTurnEvents(input: {
   readonly headers?: DevelopmentRequestHeaders;
   readonly initialStartIndex: number;
-  onEvent?(event: MessageStreamEvent): void;
+  onEvent?(event: SessionStreamEvent): void;
   readonly sessionId: string;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   readonly stream: ReturnType<typeof openDevelopmentMessageStream>;
 }): Promise<{
-  readonly events: MessageStreamEvent[];
+  readonly events: SessionStreamEvent[];
   readonly stream: ReturnType<typeof openDevelopmentMessageStream>;
 }> {
   let currentStream = input.stream;
-  const events: MessageStreamEvent[] = [];
+  const events: SessionStreamEvent[] = [];
   let currentStreamIndex = input.initialStartIndex;
   let remainingReconnectAttempts = DEVELOPMENT_TURN_STREAM_RECONNECT_LIMIT;
 
@@ -99,7 +100,7 @@ async function readDevelopmentTurnEvents(input: {
     });
 
     events.push(...nextEvents);
-    currentStreamIndex += nextEvents.length;
+    currentStreamIndex = currentStream.nextIndex;
 
     if (extractCurrentTurnBoundaryEvent(nextEvents)) {
       return {
@@ -135,14 +136,14 @@ async function readDevelopmentTurnEvents(input: {
 export async function sendDevelopmentMessage(input: {
   headers?: DevelopmentRequestHeaders;
   message: string;
-  onEvent?(event: MessageStreamEvent): void;
+  onEvent?(event: SessionStreamEvent): void;
   onResponseStart?(response: { sessionId?: string }): void;
   signal?: AbortSignal;
   session: DevelopmentSessionState;
   serverUrl: string;
 }): Promise<{
   completedMessage?: string;
-  events: MessageStreamEvent[];
+  events: SessionStreamEvent[];
   sessionId?: string;
   session: DevelopmentSessionState;
 }> {

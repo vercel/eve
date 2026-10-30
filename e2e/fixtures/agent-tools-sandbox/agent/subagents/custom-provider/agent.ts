@@ -7,9 +7,14 @@ export default defineAgent({
   ...e2eSubagentConfig({ mock: respond }),
 });
 
+/** Runs each scenario's tools in order, then replies with the last tool's output. */
 function respond(request: MockModelRequest): MockModelResponse | string {
-  const result = request.toolResults.find((entry) => entry.name === "verify-provider-session");
-  return result === undefined
-    ? { toolCalls: [{ input: {}, name: "verify-provider-session" }] }
-    : String(result.output);
+  const message = request.lastUserMessage ?? "";
+  const tools = message.includes("maintenance")
+    ? ["leave-note", "check-note"]
+    : ["verify-provider-session"];
+  const next = tools.find((name) => !request.toolResults.some((entry) => entry.name === name));
+  if (next !== undefined) return { toolCalls: [{ input: {}, name: next }] };
+  const last = request.toolResults.find((entry) => entry.name === tools.at(-1));
+  return typeof last?.output === "string" ? last.output : JSON.stringify(last?.output);
 }

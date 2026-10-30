@@ -32,12 +32,6 @@ export interface WorkflowBundleBuilderOptions {
   /** Test-harness-only: also scans `src/internal/testing/`. */
   includeTestFixtures?: boolean;
 }
-const PSEUDO_PACKAGES = new Set([
-  "server-only",
-  "client-only",
-  "next/dist/compiled/server-only",
-  "next/dist/compiled/client-only",
-]);
 const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
@@ -194,31 +188,8 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
   };
 }
 
-export function createWorkflowPseudoPackagePlugin(): WorkflowRolldownPlugin {
-  return {
-    name: "eve-workflow-pseudo-packages",
-    resolveId(source: string) {
-      if (!PSEUDO_PACKAGES.has(source)) {
-        return undefined;
-      }
-
-      return { id: `\0eve-workflow-pseudo-package:${source}` };
-    },
-    load(id: string) {
-      if (!id.startsWith("\0eve-workflow-pseudo-package:")) {
-        return undefined;
-      }
-
-      return {
-        code: "",
-        moduleType: "js",
-      };
-    },
-  };
-}
-
 /**
- * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * `eve/workflow` resolves to the body-side shim. An `eve/workflow/api` import still live
  * after step bodies were stubbed means a body calls the runtime API; fail the
  * build here rather than the driver later.
  */
@@ -230,7 +201,11 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         return resolveWorkflowModulePath(source);
       }
 
-      if (source === "workflow/api" || source === "workflow/runtime") {
+      if (
+        source === "eve/workflow/api" ||
+        source === "workflow/api" ||
+        source === "workflow/runtime"
+      ) {
         const via = importer ? ` (imported by "${importer}")` : "";
         throw new Error(
           `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
@@ -238,7 +213,7 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         );
       }
 
-      if (source !== "workflow") {
+      if (source !== "eve/workflow" && source !== "workflow") {
         return undefined;
       }
 

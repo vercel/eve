@@ -33,7 +33,7 @@ test("materializes fixtures and complete experiment inputs", async () => {
     writeFileSync(join(evals, "not-a-case"), "ignored");
     assert.deepEqual(fixtureNames(evals), ["author-001-first", "author-002-second"]);
 
-    await prepareFixtures(evals, subject);
+    assert.deepEqual(await prepareFixtures(evals, subject), { timeoutSeconds: undefined });
     assert.equal(readFileSync(join(evals, "author-001-first", "PROMPT.md"), "utf8"), "Build it.\n");
     assert.deepEqual(
       JSON.parse(readFileSync(join(evals, "author-001-first", ".eve-authoring-bootstrap.json"))),
@@ -58,17 +58,35 @@ test("materializes fixtures and complete experiment inputs", async () => {
     const experiment = readFileSync(join(experiments, "test-opencode--guided.ts"), "utf8");
     assert.match(experiment, /revision: "1234567890abcdef1234567890abcdef12345678"/u);
     assert.match(experiment, /pkg\.eve\.dev\/1234567890abcdef1234567890abcdef12345678\/eve\.tgz/u);
+    assert.doesNotMatch(experiment, /timeoutSeconds/u);
+
+    writeCase(evals, "author-003-large", "timeoutSeconds: 1800, ");
+    writeCase(evals, "author-004-larger", "timeoutSeconds: 2400, ");
+    assert.deepEqual(
+      await prepareFixtures(evals, subject, ["author-001-first", "author-003-large"]),
+      { timeoutSeconds: 1800 },
+    );
+    assert.deepEqual(await prepareFixtures(evals, subject), { timeoutSeconds: 2400 });
+    writeExperiment(experiments, "large", {
+      revision: subject.revision,
+      packageSpec: subject.packageSpec,
+      runs: 1,
+      timeoutSeconds: 1800,
+      benchmark,
+      treatment: "guided",
+    });
+    assert.match(readFileSync(join(experiments, "large.ts"), "utf8"), /timeoutSeconds: 1800,/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-function writeCase(evals, name) {
+function writeCase(evals, name, extra = "") {
   const root = join(evals, name);
   mkdirSync(root, { recursive: true });
   writeFileSync(
     join(root, "CASE.ts"),
-    'export default { startingPoint: { workspace: "scaffolded" }, async interact({ send }) { await send("Build it."); } };\n',
+    `export default { ${extra}startingPoint: { workspace: "scaffolded" }, async interact({ send }) { await send("Build it."); } };\n`,
   );
   assert.ok(existsSync(root));
 }

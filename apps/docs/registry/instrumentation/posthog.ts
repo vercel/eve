@@ -18,6 +18,6 @@ export default otelIntegration({
     const distinctId =
       input.session.auth.initiator?.principalId ?? input.session.auth.current?.principalId;
 
-    return distinctId ? { "posthog.distinct_id": distinctId } : undefined;
+    return distinctId ? { posthog_distinct_id: distinctId } : undefined;
   },
 });

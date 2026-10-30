@@ -23,17 +23,11 @@ import {
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
   type PublicAgentStaticModelDefinition,
+  type SessionUsageLimit,
 } from "#shared/agent-definition.js";
-import {
-  isDynamicSentinel,
-  type DynamicEvents,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-type MutableDynamicEvents = {
-  -readonly [K in DynamicToolEventName]?: DynamicEvents[DynamicToolEventName];
-};
 
 type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
   build?: {
@@ -51,6 +45,11 @@ export function normalizeAgentDefinition(
   value: unknown,
   message: string,
 ): Readonly<NormalizedAgentDefinition> {
+  if (isDynamicSentinel(value)) {
+    throw new Error(
+      `${message} agent.ts exports defineAgent(). To choose the model per session, make the model field dynamic: model: defineDynamic(async (ctx) => model) from "eve/models", or model: auto({ ... }).`,
+    );
+  }
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
@@ -74,15 +73,14 @@ export function normalizeAgentDefinition(
   }
 
   const definition: Mutable<NormalizedAgentDefinition> = {
-    model: normalizeAgentModelDefinition(record.model, message),
+    model: normalizeAgentModel(record.model, message),
   };
-
   if (
     isDynamicSentinel(definition.model) &&
     (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
   ) {
     throw new Error(
-      `${message} Dynamic model definitions do not support sibling "modelContextWindowTokens" or "modelOptions" fields. Return those overrides from the resolver selection instead.`,
+      `${message} A dynamic model returns its "modelContextWindowTokens" and "modelOptions" with the model they describe: return { model, modelContextWindowTokens, modelOptions } from its function.`,
     );
   }
 
@@ -132,37 +130,20 @@ export function normalizeAgentDefinition(
   return definition as Readonly<NormalizedAgentDefinition>;
 }
 
+/** A static model passes through; a dynamic one is its `defineDynamic(fn)` value. */
+function normalizeAgentModel(value: unknown, message: string): NormalizedAgentDefinition["model"] {
+  if (!isDynamicSentinel(value)) return value as NormalizedAgentDefinition["model"];
+  assertDynamicSentinelKeys(value, `${message} The dynamic "model":`);
+  // Keep the sentinel itself: eve's own resolvers, such as auto(), carry internal hooks on it.
+  return value as NormalizedAgentDefinition["model"];
+}
+
 function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
   if (!isAgentReasoningDefinition(value)) throw new Error(message);
   return value;
-}
-
-function normalizeAgentModelDefinition(
-  value: unknown,
-  message: string,
-): NormalizedAgentDefinition["model"] {
-  if (!isDynamicSentinel(value)) {
-    return value as NormalizedAgentDefinition["model"];
-  }
-
-  const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
-
-  const rawEvents = expectObjectRecord(record.events, message);
-  const events: MutableDynamicEvents = {};
-  for (const [eventName, handler] of Object.entries(rawEvents)) {
-    events[eventName as DynamicToolEventName] = expectFunction(handler, message) as NonNullable<
-      DynamicEvents[DynamicToolEventName]
-    >;
-  }
-
-  return {
-    events,
-    kind: record.kind,
-  } as NormalizedAgentDefinition["model"];
 }
 
 /** `false` explicitly disables one numeric runtime limit. */
@@ -174,31 +155,12 @@ function expectPositiveIntegerOrFalse(value: unknown, message: string): number |
   return expectPositiveInteger(value, message);
 }
 
-function expectPositiveNumberOrFalse(value: unknown, message: string): number | false {
-  if (value === false) {
-    return false;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(message);
-  }
-  return value;
-}
-
 function normalizeAgentLimitsDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["limits"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(
-    record,
-    [
-      "maxInputTokensPerSession",
-      "maxOutputTokensPerSession",
-      "maxTokenCostUsdPerSession",
-      "sessionTimeoutMs",
-    ],
-    message,
-  );
+  expectOnlyKnownKeys(record, ["sessionTimeoutMs", "sessionUsage"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
   if (record.sessionTimeoutMs !== undefined) {
@@ -207,23 +169,11 @@ function normalizeAgentLimitsDefinition(
       message,
     );
   }
-  if (record.maxInputTokensPerSession !== undefined) {
-    normalizedDefinition.maxInputTokensPerSession = expectPositiveIntegerOrFalse(
-      record.maxInputTokensPerSession,
-      message,
-    );
-  }
-  if (record.maxOutputTokensPerSession !== undefined) {
-    normalizedDefinition.maxOutputTokensPerSession = expectPositiveIntegerOrFalse(
-      record.maxOutputTokensPerSession,
-      message,
-    );
-  }
-  if (record.maxTokenCostUsdPerSession !== undefined) {
-    normalizedDefinition.maxTokenCostUsdPerSession = expectPositiveNumberOrFalse(
-      record.maxTokenCostUsdPerSession,
-      message,
-    );
+  if (record.sessionUsage !== undefined) {
+    normalizedDefinition.sessionUsage =
+      record.sessionUsage === false
+        ? false
+        : expectFunction<SessionUsageLimit>(record.sessionUsage, message);
   }
   return normalizedDefinition;
 }
@@ -371,7 +321,12 @@ function normalizeAgentCompactionDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["compaction"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "thresholdPercent"], message);
+  if ("thresholdPercent" in record) {
+    throw new Error(
+      `${message} Rename "compaction.thresholdPercent" to "compaction.threshold" (a fraction from 0 to 1).`,
+    );
+  }
+  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "threshold"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
 
   if (record.model !== undefined) {
@@ -390,19 +345,19 @@ function normalizeAgentCompactionDefinition(
     );
   }
 
-  if (record.thresholdPercent !== undefined) {
-    const thresholdPercent = record.thresholdPercent;
+  if (record.threshold !== undefined) {
+    const threshold = record.threshold;
 
     if (
-      typeof thresholdPercent !== "number" ||
-      !Number.isFinite(thresholdPercent) ||
-      thresholdPercent < 0 ||
-      thresholdPercent > 1
+      typeof threshold !== "number" ||
+      !Number.isFinite(threshold) ||
+      threshold < 0 ||
+      threshold > 1
     ) {
       throw new Error(message);
     }
 
-    normalizedDefinition.thresholdPercent = thresholdPercent;
+    normalizedDefinition.threshold = threshold;
   }
 
   return normalizedDefinition;
@@ -421,23 +376,7 @@ export function normalizeInstructionsDefinition(
   message: string,
 ): { readonly content: string; readonly role: "system" | "user" } {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["content", "markdown", "role"], message);
-
-  const hasContent = Object.hasOwn(record, "content");
-  const hasMarkdown = Object.hasOwn(record, "markdown");
-  if (hasContent === hasMarkdown) {
-    throw new Error(`${message} Provide exactly one of "content" or "markdown".`);
-  }
-
-  if (hasMarkdown) {
-    if (Object.hasOwn(record, "role")) {
-      throw new Error(`${message} The deprecated "markdown" shape does not support "role".`);
-    }
-    return {
-      content: expectString(record.markdown, message),
-      role: "system",
-    };
-  }
+  expectOnlyKnownKeys(record, ["content", "role"], message);
 
   const role = record.role === undefined ? "system" : expectString(record.role, message);
   if (role !== "system" && role !== "user") {
@@ -460,12 +399,12 @@ export function normalizeSkillDefinition(value: unknown, message: string): Skill
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["deferred", "description", "files", "license", "markdown", "metadata"],
+    ["deferred", "description", "files", "license", "content", "metadata"],
     message,
   );
   const definition: Mutable<SkillDefinition> = {
     description: expectString(record.description, message),
-    markdown: expectString(record.markdown, message),
+    content: expectString(record.content, message),
   };
   if (record.deferred !== undefined) {
     definition.deferred = expectBoolean(record.deferred, message);
@@ -512,33 +451,33 @@ function normalizeSkillFiles(
  * shape.
  *
  * Authored `name` fields are rejected — schedule identity is derived from
- * the file path under `agent/schedules/`. Exactly one of `markdown` (the
+ * the file path under `agent/schedules/`. Exactly one of `content` (the
  * fire-and-forget agent prompt) or `run` (the cron handler function)
  * must be provided.
  */
 export function normalizeScheduleDefinition(value: unknown, message: string): ScheduleDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["cron", "markdown", "run"], message);
+  expectOnlyKnownKeys(record, ["cron", "content", "run"], message);
 
   const cron = expectString(record.cron, message);
-  const hasMarkdown = record.markdown !== undefined;
+  const hasContent = record.content !== undefined;
   const hasRun = record.run !== undefined;
 
-  if (hasMarkdown && hasRun) {
+  if (hasContent && hasRun) {
     throw new Error(
-      `${message} Pass either "markdown" (fire-and-forget) or "run" (handler) — not both.`,
+      `${message} Pass either "content" (fire-and-forget) or "run" (handler) — not both.`,
     );
   }
-  if (!hasMarkdown && !hasRun) {
+  if (!hasContent && !hasRun) {
     throw new Error(
-      `${message} Must provide either "markdown" (fire-and-forget) or "run" (handler).`,
+      `${message} Must provide either "content" (fire-and-forget) or "run" (handler).`,
     );
   }
 
-  const definition: { cron: string; markdown?: string; run?: ScheduleRunHandler } = { cron };
+  const definition: { cron: string; content?: string; run?: ScheduleRunHandler } = { cron };
 
-  if (hasMarkdown) {
-    definition.markdown = expectString(record.markdown, message);
+  if (hasContent) {
+    definition.content = expectString(record.content, message);
   } else {
     definition.run = expectFunction(record.run, message) as ScheduleRunHandler;
   }

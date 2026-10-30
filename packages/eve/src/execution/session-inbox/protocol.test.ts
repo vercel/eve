@@ -33,5 +33,10 @@ describe("session inbox payloads", () => {
     expect(() => decodeSessionInboxPayload({ kind: "legacy-send" })).toThrowError(
       SessionInboxPayloadError,
     );
+    for (const idempotencyKey of ["", "x".repeat(257), 1]) {
+      expect(() =>
+        decodeSessionInboxPayload({ kind: "send", idempotencyKey, payload: { message: "hello" } }),
+      ).toThrowError(SessionInboxPayloadError);
+    }
   });
 });

@@ -18,7 +18,7 @@ const target = await resolveTestVercelTarget({
   projectId: "prj_example",
 });
 const clientOptions: ClientOptions = {
-  host: "https://agent.example.com",
+  baseUrl: "https://agent.example.com",
   redirect: "manual",
 };
 
@@ -110,7 +110,7 @@ describe("inspectVerifiedRemoteAgent", () => {
           resolveVerifiedRemoteDevelopmentClient: async () => ({
             deploymentResolution: { kind: "not-found" },
             lastOidcTokenFailure: () => undefined,
-            options: { host: "https://unverified.example.com", redirect: "manual" },
+            options: { baseUrl: "https://unverified.example.com", redirect: "manual" },
           }),
           runRemoteAuthFlow,
         },

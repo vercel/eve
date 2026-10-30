@@ -17,7 +17,7 @@ export interface SkillPackageDefinition {
   readonly deferred?: boolean;
   readonly description: string;
   readonly license?: string;
-  readonly markdown: string;
+  readonly content: string;
   readonly metadata?: Record<string, string>;
   readonly files?: Readonly<Record<string, SkillFileContent>>;
 }

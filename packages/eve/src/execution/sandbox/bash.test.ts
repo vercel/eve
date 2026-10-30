@@ -59,6 +59,7 @@ function createTestSandboxSession(result: SandboxCommandResult): SandboxSession 
       wait: async () => ({ exitCode: result.exitCode }),
     }),
     writeBinaryFile: async () => {},
+    writeFiles: async () => {},
     writeFile: async () => {},
     writeTextFile: async () => {},
   };

@@ -1,55 +1,62 @@
 <script lang="ts">
-  import type { EveDynamicToolPart } from "eve/svelte";
+  import type { EveToolPart } from "eve/svelte";
 
-  type InputResponses = readonly {
+  type Answers = readonly {
     readonly optionId?: string;
-    readonly requestId: string;
+    readonly interactionId: string;
     readonly text?: string;
   }[];
 
   let {
     part,
     canRespond,
-    onInputResponses,
+    onAnswers,
   }: {
-    part: EveDynamicToolPart;
+    part: EveToolPart;
     canRespond: boolean;
-    onInputResponses: (responses: InputResponses) => void | Promise<void>;
+    onAnswers: (answers: Answers) => void | Promise<void>;
   } = $props();
 
-  let userOpen = $state<boolean>();
-  let initiallyOpen = $derived(
-    part.state === "approval-requested" || part.state === "approval-responded",
+  let interaction = $derived(part.interaction?.request);
+  let answer = $derived(part.interaction?.answer);
+  let awaitingApproval = $derived(
+    interaction?.kind === "approval" && part.interaction?.status !== "settled",
   );
-  let isOpen = $derived(userOpen ?? initiallyOpen);
+  let errorText = $derived(
+    (part.state === "failed" || part.state === "rejected" || part.state === "cancelled")
+      ? (part.error?.message ?? part.state)
+      : undefined,
+  );
 
-  let title = $derived(part.toolMetadata?.eve?.label ?? part.toolMetadata?.eve?.name ?? part.toolName);
+  let userOpen = $state<boolean>();
+  let isOpen = $derived(userOpen ?? part.interaction !== undefined);
+
+  let title = $derived(part.label);
   let stateLabel = $derived.by(() => {
-    const labels: Record<string, string> = {
-      "input-streaming": "Pending",
-      "input-available": "Running",
-      "approval-requested": "Awaiting Approval",
-      "approval-responded": "Responded",
-      "output-available": "Completed",
-      "output-error": "Error",
-      "output-denied": "Denied",
-    };
+    if (part.state === "streaming") return "Pending";
+    if (awaitingApproval) return "Awaiting Approval";
 
+    const labels: Record<string, string> = {
+      requested: "Pending",
+      running: "Running",
+      approval: "Awaiting Approval",
+      blocked: "Awaiting Input",
+      completed: "Completed",
+      failed: "Error",
+      rejected: "Denied",
+      cancelled: "Cancelled",
+    };
     return labels[part.state] ?? part.state;
   });
   let stateColor = $derived.by(() => {
-    if (part.state === "output-error" || part.state === "output-denied") {
-      return "text-destructive";
-    }
-    if (part.state === "output-available") return "text-emerald-600";
-    if (part.state === "approval-requested") return "text-yellow-600";
+    if (part.state === "completed") return "text-emerald-600";
+    if (part.state === "failed" || part.state === "rejected" || part.state === "cancelled") return "text-destructive";
+    if (awaitingApproval) return "text-yellow-600";
     return "text-muted-foreground";
   });
 
-  let inputRequest = $derived(part.toolMetadata?.eve?.inputRequest);
-  let inputResponse = $derived(part.toolMetadata?.eve?.inputResponse);
   let selectedOption = $derived(
-    inputRequest?.options?.find((option) => option.id === inputResponse?.optionId),
+    interaction?.options?.find((option) => option.id === answer?.optionId),
   );
   let formattedInput = $derived(JSON.stringify(part.input, null, 2));
   let formattedOutput = $derived.by(() => {
@@ -57,8 +64,8 @@
     return String(part.output ?? "");
   });
 
-  function respondWithOption(optionId: string, requestId: string) {
-    void onInputResponses([{ optionId, requestId }]);
+  function respondWithOption(optionId: string, interactionId: string) {
+    void onAnswers([{ optionId, interactionId }]);
   }
 </script>
 
@@ -107,19 +114,19 @@
         <pre class="overflow-x-auto rounded-md bg-muted/50 p-3 text-xs">{formattedInput}</pre>
       </div>
 
-      {#if inputRequest}
+      {#if interaction}
         <div class="space-y-3 rounded-md border-y border-yellow-500/30 bg-yellow-500/5 p-3">
           <p class="text-sm text-muted-foreground">
-            {inputRequest.prompt}
+            {interaction.prompt}
           </p>
-          {#if inputResponse}
+          {#if answer}
             <p class="text-sm font-medium">
               Responded:
-              {selectedOption?.label ?? inputResponse.text ?? inputResponse.optionId}
+              {selectedOption?.label ?? answer.text ?? answer.optionId}
             </p>
           {:else}
             <div class="flex flex-wrap gap-2">
-              {#each inputRequest.options ?? [] as option (option.id)}
+              {#each interaction.options ?? [] as option (option.id)}
                 <button
                   disabled={!canRespond}
                   type="button"
@@ -127,7 +134,7 @@
                   'danger'
                     ? 'bg-destructive text-white hover:bg-destructive/90'
                     : 'bg-primary text-primary-foreground hover:bg-primary/90'}"
-                  onclick={() => respondWithOption(option.id, inputRequest.requestId)}
+                  onclick={() => respondWithOption(option.id, part.interaction!.interactionId)}
                 >
                   {option.label}
                 </button>
@@ -137,14 +144,14 @@
         </div>
       {/if}
 
-      {#if part.output || part.errorText}
+      {#if part.output || errorText}
         <div class="space-y-2 p-4">
           <h4 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {part.errorText ? "Error" : "Result"}
+            {errorText ? "Error" : "Result"}
           </h4>
-          {#if part.errorText}
+          {#if errorText}
             <div class="rounded-md bg-destructive/10 p-3 text-xs text-destructive">
-              {part.errorText}
+              {errorText}
             </div>
           {:else}
             <pre class="overflow-x-auto rounded-md bg-muted/50 p-3 text-xs">{formattedOutput}</pre>

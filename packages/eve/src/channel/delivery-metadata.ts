@@ -1,11 +1,11 @@
-import type { ChannelDeliveryMetadata, SessionTraceContext } from "#channel/types.js";
+import type { ChannelDeliveryMetadata, SessionTraceSeed } from "#channel/types.js";
 
 export interface ChannelDeliverySource {
   readonly acceptedDeploymentId?: string;
   readonly channelKind: string;
   readonly channelName: string;
   readonly requestId?: string;
-  readonly requestTraceContext?: SessionTraceContext;
+  readonly requestTraceContext?: SessionTraceSeed;
 }
 
 /** Mints the opaque identity for one inbound channel operation. */
@@ -18,7 +18,7 @@ export function createChannelDeliveryMetadata(
     channelName: string;
     deliveryId: string;
     requestId?: string;
-    requestTraceContext?: SessionTraceContext;
+    requestTraceContext?: SessionTraceSeed;
   } = {
     channelKind: source.channelKind,
     channelName: source.channelName,

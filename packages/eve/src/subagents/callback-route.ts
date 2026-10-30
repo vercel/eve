@@ -1,137 +1,71 @@
-import { renameLegacyTaskCallback } from "#execution/legacy-remote-agent/protocol.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
+import { known } from "#protocol/session-events/common.js";
+import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
+import { interactionSchemas } from "#protocol/session-events/families/interaction.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
+import {
+  parseProtocolTwoInputCallback,
+  PROTOCOL_TWO_INPUT_CALLBACK_KINDS,
+  readProtocolTwoInputCallback,
+} from "#subagents/protocol-two-callback.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
+import {
+  readCallbackProtocol,
+  REMOTE_CALLBACK_NOT_PENDING,
+  REMOTE_CALLBACK_NOT_PENDING_MESSAGE,
+  V26_INPUT_REMOTE_AGENT_PROTOCOL,
+} from "#protocol/remote-agent-protocol.js";
 
 // The callback token grants access to the pending turn. Validate remote input
 // before handing it to the parent; the child session ID is not authority.
-const sessionInputCallbackSchema = z.object({
+const sessionInteractionCallbackSchema = z.object({
   callId: z.string().min(1),
-  childContinuationToken: z.string().min(1),
   childSessionId: z.string().min(1),
-  childSessionInbox: z
-    .object({ sessionId: z.string().min(1) })
-    .strict()
-    .optional(),
-  inputSource: z.string().min(1).optional(),
-  remote: z
+  kind: z.literal("subagent-interaction"),
+  subagentName: z.string().min(1),
+  route: z
     .object({
-      name: z.string().min(1),
-      url: z.string().url(),
-      forwardPrincipal: z.boolean().optional(),
-      sessionId: z.string().min(1),
-      resolverId: z.string().min(1).optional(),
+      childContinuationToken: z.string().min(1),
+      childSessionInbox: z
+        .object({ sessionId: z.string().min(1) })
+        .strict()
+        .optional(),
+      inputSource: z.string().min(1).optional(),
+      remote: z
+        .object({
+          name: z.string().min(1),
+          url: z.string().url(),
+          forwardPrincipal: z.boolean().optional(),
+          sessionId: z.string().min(1),
+          resolverId: z.string().min(1).optional(),
+        })
+        .strict()
+        .optional(),
     })
-    .strict()
     .optional(),
-  kind: z.literal("subagent-input-request"),
-  subagentName: z.string().min(1),
-  event: z.object({
-    requests: z.array(inputRequestSchema).min(1),
-    sequence: z.number(),
-    stepIndex: z.number(),
-    taskId: z.string().optional(),
-    turnId: z.string(),
-  }),
-});
-
-const sessionAuthorizationCallbackSchema = z.object({
-  callId: z.string().min(1),
-  childSessionId: z.string().min(1),
-  kind: z.literal("subagent-authorization-event"),
-  subagentName: z.string().min(1),
-  event: z.discriminatedUnion("type", [
-    z.object({
-      type: z.literal("approval.candidate"),
-      data: z
-        .object({
-          candidateId: z.string(),
-          outcome: z.enum(["pending", "rejected", "failed", "timed-out", "stale"]),
-          requestId: z.string(),
-          responderPrincipalId: z.string(),
+  events: z.array(
+    z.discriminatedUnion("type", [
+      interactionSchemas["interaction.opened"],
+      interactionSchemas["interaction.settled"],
+      z.object({
+        type: z.literal("response.admitted"),
+        data: z.object({ deliveryId: z.string().optional(), interactionId: z.string() }),
+      }),
+      z.object({
+        type: z.literal("response.settled"),
+        data: z.object({
+          deliveryId: z.string().optional(),
+          interactionId: z.string(),
+          outcome: known<ResponseOutcome>(),
           reason: z.string().optional(),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("approval.settled"),
-      data: z
-        .object({
-          outcome: z.enum(["approved", "cancelled"]),
-          requestId: z.string(),
-          responderPrincipalId: z.string(),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("input.resolved"),
-      data: z
-        .object({
-          resolutions: z.array(
-            z
-              .object({
-                kind: z.enum(["question", "session-limit", "tool-approval"]),
-                outcome: z.enum([
-                  "answered",
-                  "approved",
-                  "cancelled",
-                  "denied",
-                  "ignored",
-                  "invalid",
-                ]),
-                requestId: z.string(),
-                response: inputResponseSchema.optional(),
-              })
-              .passthrough(),
-          ),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("authorization.required"),
-      data: z
-        .object({
-          description: z.string(),
-          name: z.string(),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-          webhookUrl: z.string().optional(),
-          attemptId: z.string().optional(),
-          taskId: z.string().optional(),
-          principalId: z.string().optional(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("authorization.completed"),
-      data: z
-        .object({
-          name: z.string(),
-          outcome: z.enum(["authorized", "declined", "failed", "timed-out"]),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-          attemptId: z.string().optional(),
-          taskId: z.string().optional(),
-          principalId: z.string().optional(),
-        })
-        .passthrough(),
-    }),
-  ]),
+        }),
+      }),
+    ]),
+  ),
 });
 
 /** A settled remote turn must state its outcome; callers do not infer its lifecycle. */
@@ -163,34 +97,66 @@ export async function handleSessionCallbackRequest(
 
   let body: unknown;
   try {
-    body = renameLegacyTaskCallback(await request.json());
+    body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
-  const kind = callbackKind(body);
-  const forwarded =
-    kind === "subagent-input-request"
-      ? sessionInputCallbackSchema.safeParse(body)
-      : kind === "subagent-authorization-event"
-        ? sessionAuthorizationCallbackSchema.safeParse(body)
-        : undefined;
-  if (forwarded !== undefined && !forwarded.success) {
+  const forwarded = readInteractionCallback(body, readCallbackProtocol(request.url));
+  if (forwarded === null) {
     return Response.json({ error: "Invalid session input callback.", ok: false }, { status: 400 });
   }
+  // A protocol 2 callback that records nothing to mirror, such as an approval's own settlement.
+  if (isEmptyRelay(forwarded)) return Response.json({ ok: true }, { status: 202 });
   const result = forwarded === undefined ? projectSessionCallbackResult(body) : undefined;
   if (result instanceof Response) return result;
 
   try {
     await resumeRunnableHook(
       token,
-      forwarded?.success ? forwarded.data : { kind: "runtime-action-result", results: [result] },
+      forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
   } catch {
-    return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    return Response.json(
+      { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
+      { status: 404 },
+    );
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+/**
+ * A child's input callback as the payload its parent run reads: `undefined` when the body is not
+ * one, or comes from a protocol this parent didn't agree to, and `null` when it claims to be but
+ * doesn't parse. The callback URL names the protocol the parent agreed with the child.
+ */
+function readInteractionCallback(
+  body: unknown,
+  agreedProtocol: number | undefined,
+): SubagentInteractionHookPayload | object | null | undefined {
+  const kind = callbackKind(body);
+  if (kind === "subagent-interaction") {
+    const parsed = sessionInteractionCallbackSchema.safeParse(body);
+    // The envelope schemas validate each fact's data, though zod infers it as `unknown`.
+    return parsed.success ? (parsed.data as SubagentInteractionHookPayload) : null;
+  }
+  if (!PROTOCOL_TWO_INPUT_CALLBACK_KINDS.has(kind)) return undefined;
+  // A parent that agreed to protocol 2 reads its input as v27 relay facts.
+  if (agreedProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL)
+    return readProtocolTwoInputCallback(body) ?? null;
+  // An unmarked URL is a parent run from before v27, which a child's callback reaches once the
+  // deployment upgrades: it reads protocol 2 input as is, as its own deployment's route passed it.
+  if (agreedProtocol === undefined) return parseProtocolTwoInputCallback(body) ?? null;
+  // A child that agreed to another protocol doesn't send these: refused as an unsupported kind.
+  return undefined;
+}
+
+function isEmptyRelay(payload: object | null | undefined): boolean {
+  if (payload === null || payload === undefined) return false;
+  if (Reflect.get(payload, "kind") !== "subagent-interaction") return false;
+  const events: unknown = Reflect.get(payload, "events");
+  return Array.isArray(events) && events.length === 0;
 }
 
 function callbackKind(value: unknown): unknown {

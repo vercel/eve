@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { importConversation, normalizeHistory } from "./snapshot.js";
+import { normalizeHistory } from "#execution/session/imported-conversation.js";
+import { importConversation } from "./snapshot.js";
 import type { LegacySession } from "./snapshot.js";
-import { nextStepIndex, storedProjection, turnPosition } from "#harness/session-machine/view.js";
+import { storedProjection, turnPosition } from "#harness/session-machine/view.js";
+import { sessionUsage } from "#harness/session-usage.js";
 describe("conversation import", () => {
-  it("preserves authored state, budget, emission coordinates and storage", () => {
+  it("preserves authored state, emission coordinates and storage", () => {
     const session: LegacySession = {
       sessionId: "old",
       continuationToken: "slack:thread",
       history: [{ role: "user", content: "Alice chose blue." }],
       agent: { system: "old prompt" },
-      limits: { maxInputTokensPerSession: 40 },
       sandboxState: { session: null },
       state: {
         "app.color": "blue",
@@ -27,13 +28,12 @@ describe("conversation import", () => {
     const { history, sessionState: result } = importConversation(session);
     expect(result.snapshot.session).toMatchObject({
       sessionId: "old",
-      limits: session.limits,
       sandboxState: session.sandboxState,
-      state: {
-        "app.color": "blue",
-        "eve.harness.turnUsage": session.state!["eve.harness.turnUsage"],
-      },
+      state: { "app.color": "blue" },
     });
+    // What the driver counted the session spent is what its view records.
+    expect(sessionUsage(result.snapshot.session)).toMatchObject({ inputTokens: 42 });
+    expect(result.snapshot.session.state).not.toHaveProperty("eve.harness.turnUsage");
     expect(result.snapshot.session.state).not.toHaveProperty(
       "eve.runtime.pendingCoordinationBatch",
     );
@@ -41,7 +41,7 @@ describe("conversation import", () => {
     const projection = storedProjection(result.snapshot.session.state);
     expect(turnPosition(projection).sequence).toBe(9);
     // The legacy driver kept the index its next step takes.
-    expect(nextStepIndex(projection)).toBe(3);
+    expect(projection.view.turns["turn_8"]?.runs).toBe(3);
     expect(result.snapshot.session).not.toHaveProperty("history");
     expect(history[0]).toMatchObject({
       kind: "user",

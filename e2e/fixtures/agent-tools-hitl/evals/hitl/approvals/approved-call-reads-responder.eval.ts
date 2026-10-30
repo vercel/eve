@@ -18,20 +18,16 @@ export default defineEval({
     const session = await aliceSession(t);
     const request = approvalFor(await session.send(SAY.releaseGrant, asAlice), "release-grant");
     const approved = (await session.respond(answers("approve", request), asBob)).expectOk();
-    expectResolved(approved, request, "approved");
-    approved.event("action.result", {
+    expectResolved(approved, request, "accepted");
+    approved.calledTool("release-grant", {
       count: 1,
-      data: {
-        result: {
-          toolName: "release-grant",
-          output: {
-            requester: "alice",
-            requesterToken: "release-token:alice",
-            responder: "bob",
-            responderToken: "release-token:bob",
-          },
-        },
+      output: {
+        requester: "alice",
+        requesterToken: "release-token:alice",
+        responder: "bob",
+        responderToken: "release-token:bob",
       },
+      status: "completed",
     });
   },
 });

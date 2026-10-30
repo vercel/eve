@@ -19,3 +19,11 @@ export function principalIdentity(auth: SessionAuthContext): readonly string[] {
 export function isAnonymousPrincipal(auth: SessionAuthContext): boolean {
   return auth.principalType === "anonymous";
 }
+
+/** The principal `none()` gives every unauthenticated caller. */
+export const ANONYMOUS_SESSION_AUTH_CONTEXT: SessionAuthContext = {
+  attributes: {},
+  authenticator: "none",
+  principalId: "anonymous",
+  principalType: "anonymous",
+};

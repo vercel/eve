@@ -33,3 +33,23 @@ export function resolveTurnPrincipal(
   if (auth !== undefined) return principalOf(auth);
   return principalOf(serializedContext[AuthKey.name] as SessionAuthContext | null | undefined);
 }
+
+/**
+ * The identity a running turn continues under once a message sent as `auth`
+ * joins it. Within a turn the principal is fixed and only its claims may
+ * update, so only the turn's own principal may join it; input without auth
+ * acts as the turn's identity. Anyone else's answers settle requests as their
+ * responder without joining the turn.
+ */
+export function continueTurnAuth<T extends SessionAuthContext | null | undefined>(
+  turnAuth: T,
+  auth: SessionAuthContext | null | undefined,
+): T | SessionAuthContext | null {
+  if (auth === undefined) return turnAuth;
+  if (principalOf(auth) !== principalOf(turnAuth)) {
+    throw new Error(
+      "A message from another principal cannot join a running turn. Gate it with isSteeringDelivery so it waits for the turn to end.",
+    );
+  }
+  return auth;
+}

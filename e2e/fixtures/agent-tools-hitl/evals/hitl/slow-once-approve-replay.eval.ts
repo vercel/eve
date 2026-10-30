@@ -23,14 +23,14 @@ export default defineEval({
     );
     const session = parked.session;
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    const request = session.requireInputRequest({
+    const request = session.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
     const approved = await session.respond([
       {
-        requestId: request.requestId,
+        interactionId: request.interactionId,
         optionId: "approve",
       },
     ]);
