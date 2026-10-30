@@ -31,13 +31,8 @@ export const DISCOVER_MODULE_SLOT_COLLISION = "discover/module-slot-collision";
  */
 export const DISCOVER_REQUIRED_INSTRUCTIONS_MISSING = "discover/required-instructions-missing";
 
-/**
- * Shared diagnostic emitted when discovery falls back to the deprecated
- * `system.{md,ts,...}` slot because no `instructions.{md,ts,...}` source
- * was found. The fallback resolves successfully; the warning prompts the
- * author to rename the file.
- */
-export const DISCOVER_DEPRECATED_SYSTEM_SLOT = "discover/deprecated-system-slot";
+/** Diagnostic emitted for removed root-level `system.{md,ts,...}` instruction files. */
+export const DISCOVER_REMOVED_SYSTEM_SLOT = "discover/removed-system-slot";
 
 /**
  * Shared diagnostic emitted when a slot has both markdown and module sources.
@@ -193,10 +188,8 @@ export async function readSortedDirectoryEntries(
 /**
  * Discovers instructions sources from a root directory.
  *
- * Supports three forms:
- * 1. **Directory**: `agent/instructions/` with multiple `.md` and `.ts` files.
- * 2. **Flat file**: `agent/instructions.md` or `agent/instructions.{ts,...}`.
- * 3. **Legacy**: `agent/system.{md,ts,...}` with a deprecation warning.
+ * Supports a directory (`agent/instructions/`) or a flat file
+ * (`agent/instructions.md` or `agent/instructions.{ts,...}`).
  *
  * A flat file and a directory can coexist — the flat file appears first
  * in the returned array.
@@ -210,6 +203,29 @@ export async function discoverInstructionsSource(input: {
   diagnostics: DiscoverDiagnostic[];
   instructions: InstructionsSourceRef[];
 }> {
+  const removedCandidates = collectFlatSlotCandidates(input.rootEntries, {
+    markdownFileName: "system.md",
+    moduleBaseName: "system",
+  });
+  const removedFiles = [
+    ...(removedCandidates.markdownFileName === undefined
+      ? []
+      : [removedCandidates.markdownFileName]),
+    ...removedCandidates.moduleFileNames,
+  ];
+  if (removedFiles.length > 0) {
+    return {
+      diagnostics: removedFiles.map((fileName) =>
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_REMOVED_SYSTEM_SLOT,
+          message: `The "${fileName}" instruction slot is no longer supported. Rename it to "${fileName.replace(/^system/i, "instructions")}", or merge its content into your existing instructions and remove "${fileName}".`,
+          sourcePath: join(input.rootPath, fileName),
+        }),
+      ),
+      instructions: [],
+    };
+  }
+
   const hasDirectory = input.rootEntries.some((e) => e.name === "instructions" && e.isDirectory());
 
   // Check for flat-file candidates alongside the directory.
@@ -249,39 +265,6 @@ export async function discoverInstructionsSource(input: {
     return {
       diagnostics: flatResult.diagnostics,
       instructions: flatResult.source !== undefined ? [flatResult.source] : [],
-    };
-  }
-
-  // Legacy system.{md,ts,...} fallback.
-  const legacyResult = await discoverSlotSource({
-    markdownFileName: "system.md",
-    moduleBaseName: "system",
-    rootEntries: input.rootEntries,
-    rootPath: input.rootPath,
-    slotLabel: "system",
-    source: input.source,
-  });
-
-  if (legacyResult.source !== undefined) {
-    const fileName =
-      legacyResult.source.sourceKind === "markdown" ? "system.md" : legacyResult.source.logicalPath;
-    return {
-      diagnostics: [
-        createDiscoverWarningDiagnostic({
-          code: DISCOVER_DEPRECATED_SYSTEM_SLOT,
-          message: `The "${fileName}" slot is deprecated. Rename it to "${fileName.replace(/^system/, "instructions")}" — the runtime still loads the legacy slot for now, but support will be removed in a future release.`,
-          sourcePath: join(input.rootPath, fileName),
-        }),
-        ...legacyResult.diagnostics,
-      ],
-      instructions: [legacyResult.source],
-    };
-  }
-
-  if (legacyResult.diagnostics.length > 0) {
-    return {
-      diagnostics: legacyResult.diagnostics,
-      instructions: [],
     };
   }
 

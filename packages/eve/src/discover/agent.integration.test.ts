@@ -16,7 +16,6 @@ import {
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
 } from "#discover/extensions.js";
 import {
-  DISCOVER_DEPRECATED_SYSTEM_SLOT,
   DISCOVER_EXTENSION_NAME_INVALID,
   DISCOVER_HOOK_NAME_INVALID,
   DISCOVER_MODULE_SLOT_COLLISION,
@@ -265,86 +264,75 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
-  it("falls back to the deprecated system.md slot with a deprecation warning", async () => {
-    const project = buildMemoryAgentProject({
-      agentFiles: {
-        "system.md": "You are a precise assistant.",
-      },
-    });
+  it.each(["md", "ts", "cts", "mts", "js", "cjs", "mjs"])(
+    "rejects the removed system.%s slot with rename guidance instead of loading it",
+    async (extension) => {
+      const fileName = `system.${extension}`;
+      const project = buildMemoryAgentProject({
+        agentFiles: { [fileName]: "Retired instructions." },
+      });
 
-    const result = await discoverAgent({
-      agentRoot: project.agentRoot,
-      appRoot: project.appRoot,
-      source: project.source,
-    });
+      const result = await discoverAgent(project);
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_DEPRECATED_SYSTEM_SLOT,
-    ]);
-    expect(result.diagnostics[0]?.severity).toBe("warning");
-    expect(result.manifest.instructions).toEqual([
-      {
-        definition: {
-          content: "You are a precise assistant.",
-          role: "system",
+      expect(result.diagnostics).toEqual([
+        {
+          code: "discover/removed-system-slot",
+          severity: "error",
+          sourcePath: resolve(project.agentRoot, fileName),
+          message: expect.stringContaining(`Rename it to "instructions.${extension}"`),
         },
-        sourceKind: "markdown",
-        logicalPath: "system.md",
-        sourceId: "system.md",
-      },
-    ]);
-  });
+      ]);
+      expect(result.manifest.instructions).toEqual([]);
+    },
+  );
 
-  it("falls back to the deprecated system.ts module slot with a deprecation warning", async () => {
+  it.each([
+    ["agent", "instructions.md"],
+    ["agent", "instructions/brief.md"],
+    ["subagent", undefined],
+    ["subagent", "instructions.md"],
+  ] as const)(
+    "rejects a removed system slot at the %s root with current instructions %s",
+    async (kind, instructionsPath) => {
+      const prefix = kind === "subagent" ? "subagents/researcher/" : "";
+      const project = buildMemoryAgentProject({
+        agentFiles: {
+          ...(kind === "subagent"
+            ? {
+                "instructions.md": "Help Alice with research.",
+                [`${prefix}agent.ts`]: "export default {};",
+              }
+            : {}),
+          ...(instructionsPath === undefined
+            ? {}
+            : { [`${prefix}${instructionsPath}`]: "Current instructions." }),
+          [`${prefix}SYSTEM.MD`]: "Retired instructions.",
+        },
+      });
+
+      const result = await discoverAgent(project);
+
+      expect(result.diagnostics).toEqual([
+        {
+          code: "discover/removed-system-slot",
+          severity: "error",
+          sourcePath: resolve(project.agentRoot, prefix, "SYSTEM.MD"),
+          message: expect.stringContaining('Rename it to "instructions.MD"'),
+        },
+      ]);
+    },
+  );
+
+  it("allows system-named files inside the instructions directory", async () => {
     const project = buildMemoryAgentProject({
-      agentFiles: {
-        "system.ts": 'export default { markdown: "From legacy system module." };\n',
-      },
+      agentFiles: { "instructions/system.md": "Help Alice with research." },
     });
 
-    const result = await discoverAgent({
-      agentRoot: project.agentRoot,
-      appRoot: project.appRoot,
-      source: project.source,
-    });
-
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_DEPRECATED_SYSTEM_SLOT,
-    ]);
-    expect(result.manifest.instructions).toEqual([
-      {
-        sourceKind: "module",
-        logicalPath: "system.ts",
-        sourceId: "system.ts",
-      },
-    ]);
-  });
-
-  it("prefers instructions.md over the deprecated system.md without emitting a warning", async () => {
-    const project = buildMemoryAgentProject({
-      agentFiles: {
-        "instructions.md": "Preferred instructions.",
-        "system.md": "Legacy fallback that should be ignored.",
-      },
-    });
-
-    const result = await discoverAgent({
-      agentRoot: project.agentRoot,
-      appRoot: project.appRoot,
-      source: project.source,
-    });
+    const result = await discoverAgent(project);
 
     expect(result.diagnostics).toEqual([]);
     expect(result.manifest.instructions).toEqual([
-      {
-        definition: {
-          content: "Preferred instructions.",
-          role: "system",
-        },
-        sourceKind: "markdown",
-        logicalPath: "instructions.md",
-        sourceId: "instructions.md",
-      },
+      expect.objectContaining({ logicalPath: "instructions/system.md" }),
     ]);
   });
 
