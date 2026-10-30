@@ -1,5 +1,35 @@
 # eve
 
+## 1.0.0-rc.0
+
+Released 2026-10-30 · [Compare with 0.91.0](https://github.com/vercel/eve/compare/eve%400.91.0...eve%401.0.0-rc.0)
+
+### Breaking Changes
+
+- eve 1.0 puts stable APIs under semantic versioning: they change incompatibly only in a major release, and a deprecated API keeps working until the next one.
+  The [stability policy](https://eve.dev/docs/reference/typescript-api#stability-policy) lists which APIs are stable and which are experimental. To move an existing project, follow [Upgrade to 1.0](https://eve.dev/docs/guides/upgrade). ([#5620](https://github.com/vercel/eve/pull/5620))
+
+### Features
+
+- Setup prompts for coding agents from a prerelease eve CLI now use its dist-tag, such as `npx eve@rc init`, instead of `npx eve@latest`. ([#5620](https://github.com/vercel/eve/pull/5620))
+- `eve add` now installs a registry item on an eve prerelease, such as `1.0.0-rc.0`, when that version meets the item's minimum eve version.
+  Previously no prerelease satisfied a requirement such as `>=0.62.0`, so every item that declared one failed with "This registry item requires eve". ([#5620](https://github.com/vercel/eve/pull/5620))
+
+### Bug Fixes
+
+- A `HEAD` request to a channel path that declares `GET` but not `HEAD` now gets `405 Method Not Allowed` with an `Allow` header instead of `404`, and the `GET` handler doesn't run.
+  Declare `HEAD()` on a path to answer `HEAD` requests there, under any parameter name: `HEAD("/items/:itemId")` answers for `GET("/items/:id")`. Paths that already declare `HEAD()`, such as `/` and `/eve/v1/health`, are unchanged. On a CORS-enabled path, the `405` carries the CORS headers, so a browser can read it.
+  `eve build` and `eve dev` no longer merge the app root's `nitro.config`, `.nitrorc`, or `.env` files into eve's own Nitro host, and no longer serve an app-root `server.*` or `index.html` as a catch-all in front of eve's routes. A Nitro app that shares its root with an eve agent, such as a TanStack Start host, keeps its Nitro configuration to itself. eve still loads `.env`, `.env.local`, `.env.development`, and `.env.development.local` for `eve dev` through its own environment handling, and still serves files in an app-root `public/` directory as static files.
+  `eve dev` now rebuilds its host when a connection turns on events or an extension mount changes the package export it imports. Before, those edits reused the running host, so the event receiver route or the new mount stayed missing until `eve dev` restarted. ([#5692](https://github.com/vercel/eve/pull/5692))
+- Background work a channel route registers with `waitUntil` while its streamed response is still being sent now runs to completion on hosted platforms, instead of being dropped.
+  Channel route `params` keep encoded path separators (`%2F` and `%5C`) encoded, so a param can no longer contain a `/` or `\` that the request path never had. Other percent-encoded characters are still decoded, so `/files/caf%C3%A9` gives `café`; a handler that expected `%2F` decoded to `/` must now decode it itself.
+  Agent text that mentions a Nitro build constant such as `import.meta.dev` now reaches production builds unchanged, instead of being rewritten to its value or failing the build. Skill files are embedded in the server bundle instead of Nitro server assets, so hosted output no longer ships Nitro's storage layer unless authored code imports Nitro storage itself.
+  A channel path that declares both `GET()` and `WS()` now accepts WebSocket upgrades, which the `GET` route used to answer as a plain HTTP request. WebSocket routes register for `GET` only, the method an upgrade uses. Because one handler serves both, the two routes must name their path parameters the same way; `eve build` rejects a pair such as `GET("/rooms/:id")` and `WS("/rooms/:room")`.
+  Vercel service builds keep the schedule consumer function and its queue trigger, so dynamic schedules deliver their occurrences.
+  `eve start` now runs the server's shutdown hooks, such as flushing instrumentation, when it stops the server in an environment that sets `CI`. The built server no longer inherits `CI` or `NITRO_UNIX_SOCKET` from `eve start`.
+  A server without eve's workflow program runtime installed now fails a generated workflow program with an error that explains why, instead of importing the runtime from a path hosted output can't resolve. ([#5698](https://github.com/vercel/eve/pull/5698))
+- Show the expected GitHub-side result as the gh tool's activity label instead of the generic tool name. ([#5668](https://github.com/vercel/eve/pull/5668))
+
 ## 0.91.0
 
 Released 2026-10-30 · [Compare with 0.90.0](https://github.com/vercel/eve/compare/eve%400.90.0...eve%400.91.0)
