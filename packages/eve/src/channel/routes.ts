@@ -29,7 +29,11 @@ export interface RouteHandlerArgs<TState = undefined> {
    * on the returned handle; the target channel owns its address and initial state.
    */
   readonly to: CrossChannelToFn;
-  /** Path parameters matched for the current route. */
+  /**
+   * Path parameters matched for the current route, percent-decoded except
+   * `%2F` and `%5C`, which stay encoded so a parameter never gains a path
+   * separator.
+   */
   params: Readonly<Record<string, string>>;
   /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;

@@ -44,6 +44,8 @@ Each route handler receives:
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 - `describe()`, `invokeTool()`, `listSkillFiles()`, and `readSkill()` describe the agent and run its tools without a conversation. See [Describe the agent and run tools directly](#describe-the-agent-and-run-tools-directly).
 
+`params` values are percent-decoded, except `%2F` and `%5C`: those stay encoded, so a parameter never contains a `/` or `\` that the request path didn't have. Decode them in your handler if it expects them.
+
 This fuller version adds commands, a stream route, and an event handler:
 
 ```ts title="agent/channels/support.ts"
@@ -459,6 +461,8 @@ export default defineChannel({
 ```
 
 `WS()` handlers receive the same `from`, `to`, `attachSession`, `params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The returned hooks, `upgrade`, `open`, `message`, `close`, and `error`, are compatible with Nitro/H3 websocket routing.
+
+A `WS()` route registers for `GET`, the method an upgrade request uses. A path can also declare `GET()`: upgrade requests go to the `WS()` handler and other requests to the `GET()` handler. Both routes must use the same parameter names, or `eve build` fails.
 
 ### Node upgrade server escape hatch
 
