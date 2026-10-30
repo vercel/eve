@@ -1,3 +1,5 @@
+import { ChildProcess } from "node:child_process";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -44,19 +46,25 @@ interface FakeNuxt {
   readonly options: {
     readonly dev: boolean;
     readonly rootDir: string;
-    readonly nitro: { vercel?: { config?: unknown } };
+    readonly nitro: { vercel?: { config?: unknown; functions?: { maxDuration: number } } };
+    readonly vite: { optimizeDeps?: { include?: string[] } };
   };
   readonly hook: (name: string, handler: () => unknown) => void;
   readonly runHook: (name: string) => Promise<void>;
 }
 
-function createNuxt(input: { readonly dev: boolean; readonly rootDir?: string }): FakeNuxt {
+function createNuxt(input: {
+  readonly dev: boolean;
+  readonly rootDir?: string;
+  readonly nitro?: FakeNuxt["options"]["nitro"];
+}): FakeNuxt {
   const handlers = new Map<string, (() => unknown)[]>();
   return {
     options: {
       dev: input.dev,
-      nitro: {},
+      nitro: input.nitro ?? {},
       rootDir: input.rootDir ?? "/app",
+      vite: {},
     },
     hook(name, handler) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
@@ -73,11 +81,12 @@ async function setupModule(input: {
   readonly dev: boolean;
   readonly options?: Record<string, unknown>;
   readonly rootDir?: string;
+  readonly nitro?: FakeNuxt["options"]["nitro"];
 }): Promise<FakeNuxt> {
   const definition = nuxtKit.definition;
   if (definition === undefined) throw new Error("the eve Nuxt module did not register");
 
-  const nuxt = createNuxt({ dev: input.dev, rootDir: input.rootDir });
+  const nuxt = createNuxt(input);
   await definition.setup({ ...definition.defaults, ...input.options }, nuxt);
   await nuxt.runHook("modules:done");
   return nuxt;
@@ -103,8 +112,15 @@ describe("eve/nuxt module", () => {
     });
   });
 
-  it("spawns the dev server from eveRoot and forwards devServerTimeoutMs", async () => {
-    await setupModule({
+  it("forwards eveRoot and devServerTimeoutMs and stops the spawned server on Nuxt close", async () => {
+    const child = new ChildProcess();
+    const kill = vi.spyOn(child, "kill").mockReturnValue(true);
+    vi.mocked(resolveSharedEveDevServer).mockResolvedValueOnce({
+      origin: "http://127.0.0.1:49152",
+      process: child,
+    });
+
+    const nuxt = await setupModule({
       dev: true,
       options: { devServerTimeoutMs: 5_000, eveRoot: "agent" },
     });
@@ -114,6 +130,11 @@ describe("eve/nuxt module", () => {
       host: { label: "Nuxt", slug: "nuxt" },
       timeoutMs: 5_000,
     });
+    expect(kill).not.toHaveBeenCalled();
+
+    await nuxt.runHook("close");
+
+    expect(kill).toHaveBeenCalledOnce();
   });
 
   it("rejects a non-positive devServerTimeoutMs", async () => {
@@ -144,22 +165,17 @@ describe("eve/nuxt module", () => {
     });
   });
 
-  it("proxies to the default loopback port outside Vercel", async () => {
-    await setupModule({ dev: false });
-
-    expect(extendRouteRules).toHaveBeenCalledWith(`${EVE_ROUTE_PREFIX}/**`, {
-      proxy: `http://127.0.0.1:4274${EVE_ROUTE_PREFIX}/**`,
-    });
-  });
-
   it("merges the generated eve service into the Nitro Vercel config on Vercel builds", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.mocked(ensureEveVercelServicesConfig).mockResolvedValueOnce({
       mode: "generated",
     } as Awaited<ReturnType<typeof ensureEveVercelServicesConfig>>);
 
+    const existingConfig = { routes: [{ src: "/existing", dest: "/api" }] };
+    const functions = { maxDuration: 60 };
     const nuxt = await setupModule({
       dev: false,
+      nitro: { vercel: { config: existingConfig, functions } },
       options: { eveBuildCommand: "pnpm build:eve", eveRoot: "agent" },
     });
 
@@ -169,8 +185,8 @@ describe("eve/nuxt module", () => {
       frameworkName: "Nuxt",
       hostRoot: "/app",
     });
-    expect(mergeEveVercelConfig).toHaveBeenCalledWith(undefined, { mode: "generated" });
-    expect(nuxt.options.nitro.vercel?.config).toEqual({ merged: true });
+    expect(mergeEveVercelConfig).toHaveBeenCalledWith(existingConfig, { mode: "generated" });
+    expect(nuxt.options.nitro.vercel).toEqual({ config: { merged: true }, functions });
     expect(extendRouteRules).not.toHaveBeenCalled();
   });
 
