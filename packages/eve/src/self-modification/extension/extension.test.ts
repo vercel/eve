@@ -37,7 +37,7 @@ describe("self-modification extension config", () => {
 
   it("rejects the former deployed option with migration guidance", () => {
     expect(() => selfModificationConfigSchema.parse({ deployed: {} })).toThrow(
-      "eve/self-modification/remote",
+      "eve/extensions/self-modification/remote",
     );
   });
 

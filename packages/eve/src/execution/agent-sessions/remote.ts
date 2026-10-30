@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
@@ -5,9 +7,11 @@ import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
-  UNVERSIONED_REMOTE_AGENT_PROTOCOL,
   formatRemoteAgentProtocolMismatch,
   readRemoteAgentProtocolVersion,
+  callbackUrlForProtocol,
+  servesRemoteAgentCaller,
+  V26_INPUT_REMOTE_AGENT_PROTOCOL,
 } from "#protocol/remote-agent-protocol.js";
 import {
   createEveCallbackRoutePath,
@@ -19,7 +23,7 @@ import type {
   CancelTurnResult,
   SessionAuthContext,
   SessionCapabilities,
-  SessionTraceContext,
+  SessionTraceSeed,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
@@ -31,12 +35,17 @@ import { formatSubagentInput, type SubagentParentContext } from "#subagents/invo
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
-import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import type {
+  DynamicRemoteAgentConfig,
+  RemoteAgentCredentials,
+} from "#runtime/subagents/dynamic-remote-agent-config.js";
+import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
+import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { JsonValue } from "#shared/json.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
-import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   writeForwardedAudienceBaggage,
@@ -46,18 +55,59 @@ import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js
 import { writeConversationBaggage } from "#tracing/eve/conversation-context.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 
-const CreateSessionResponseSchema = z.object({
+const DeliveryReceiptResponseSchema = z.object({
   ok: z.literal(true),
-  protocolVersion: z.number().optional(),
   sessionId: z.string().min(1),
-  status: z.literal("accepted"),
+  deliveryId: z.string().min(1),
 });
+
+const ProtocolRejectionSchema = z.object({
+  code: z.literal(REMOTE_AGENT_PROTOCOL_MISMATCH),
+  ok: z.unknown().optional(),
+  protocolVersion: z.unknown().optional(),
+  sessionId: z.unknown().optional(),
+});
+
+const RemoteCancelResponseSchema = z.union([
+  DeliveryReceiptResponseSchema.transform(({ sessionId }) => ({
+    sessionId,
+    status: "accepted" as const,
+  })),
+  CancelTurnResponseSchema,
+]);
+
+const RemoteResetResponseSchema = z.union([
+  DeliveryReceiptResponseSchema.transform(({ sessionId }) => ({
+    ok: true as const,
+    previousSessionId: sessionId,
+    status: "reset" as const,
+  })),
+  ResetResponseSchema,
+]);
+
+const CreateSessionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    protocolVersion: z.number().optional(),
+    sessionId: z.string().min(1),
+  })
+  .and(
+    z.union([
+      z.object({ deliveryId: z.string().min(1) }),
+      // Earlier protocol peers acknowledge creation without naming the delivery.
+      z.object({ status: z.literal("accepted") }),
+    ]),
+  );
 
 const UNKNOWN_REMOTE_OUTCOME =
   "The request may have completed on the remote agent. Do not retry automatically; check the remote outcome before sending the request again.";
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
+  /** The first message's delivery, which earlier-protocol receivers don't name. */
+  readonly deliveryId?: string;
+  /** The child's protocol, when it speaks an earlier one: its result arrives, nothing else. */
+  readonly earlierProtocol?: number;
 };
 
 export async function startRemoteAgentSession(input: {
@@ -99,7 +149,7 @@ export async function startRemoteAgentSession(input: {
       url: string;
     };
     forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
+    message: MessageContent<string | URL>;
     operationId?: string;
     outputSchema?: object;
     protocolVersion: number;
@@ -109,9 +159,9 @@ export async function startRemoteAgentSession(input: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
       token: callbackToken,
-      url: createWorkflowCallbackUrl(
-        input.callbackBaseUrl,
-        createEveCallbackRoutePath(callbackToken),
+      url: callbackUrlForProtocol(
+        createWorkflowCallbackUrl(input.callbackBaseUrl, createEveCallbackRoutePath(callbackToken)),
+        REMOTE_AGENT_PROTOCOL_VERSION,
       ),
     },
     message: formatRemoteAgentCallInputMessage({
@@ -129,40 +179,62 @@ export async function startRemoteAgentSession(input: {
     requestBody.operationId = input.operationId;
   }
 
-  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
-  const traceparent = formatTraceparent(input.parent?.traceContext);
-  if (traceparent !== undefined) setHeader(headers, "traceparent", traceparent);
-  setHeader(
-    headers,
-    "tracestate",
-    writeAgentDispatchTracestate(readHeader(headers, "tracestate"), input.parent?.traceContext),
-  );
-  const baggage = writeForwardedAudienceBaggage(
-    readHeader(headers, "baggage"),
-    buildForwardedTraceAssertion({
-      forwardedPrincipal,
-      originAudience: input.originAudience,
-      parentTraceContext: input.parent?.traceContext,
-      traceparent,
-    }),
-  );
-  const conversationBaggage = writeConversationBaggage(baggage, input.parent?.conversationId);
-  setHeader(
-    headers,
-    "baggage",
-    writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
-  );
-  const response = await agentDelegation.fetch(createRemoteAgentSessionUrl(input.remote), {
-    body: JSON.stringify(requestBody),
-    headers: {
-      "content-type": "application/json",
-      ...headers,
-    },
-    method: "POST",
-  });
+  const post = async (): Promise<Response> => {
+    const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+    const traceparent = formatTraceparent(input.parent?.traceContext);
+    if (traceparent !== undefined) setHeader(headers, "traceparent", traceparent);
+    setHeader(
+      headers,
+      "tracestate",
+      writeAgentDispatchTracestate(readHeader(headers, "tracestate"), input.parent?.traceContext),
+    );
+    const baggage = writeForwardedAudienceBaggage(
+      readHeader(headers, "baggage"),
+      buildForwardedTraceAssertion({
+        forwardedPrincipal,
+        originAudience: input.originAudience,
+        parentTraceContext: input.parent?.traceContext,
+        traceparent,
+      }),
+    );
+    const conversationBaggage = writeConversationBaggage(baggage, input.parent?.conversationId);
+    setHeader(
+      headers,
+      "baggage",
+      writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
+    );
+    return agentDelegation.fetch(createRemoteAgentSessionUrl(input.remote), {
+      body: JSON.stringify(requestBody),
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      method: "POST",
+    });
+  };
+  let response = await post();
+  let rejected = response.ok ? undefined : await readProtocolRejection(response);
+  if (
+    response.status === 409 &&
+    rejected?.refusedBeforeAdmission &&
+    servesRemoteAgentCaller(rejected.version) &&
+    rejected.version < REMOTE_AGENT_PROTOCOL_VERSION
+  ) {
+    requestBody.protocolVersion = rejected.version;
+    // The same callback, marked with the protocol it now agrees to.
+    requestBody.callback.url = callbackUrlForProtocol(requestBody.callback.url, rejected.version);
+    response = await post();
+    rejected = response.ok ? undefined : await readProtocolRejection(response);
+  }
 
   if (!response.ok) {
-    await throwIfRemoteAgentProtocolMismatch(response, input.action.remoteAgentName);
+    if (rejected)
+      throw new FatalError(
+        formatRemoteAgentProtocolMismatch({
+          name: input.action.remoteAgentName,
+          receiverVersion: rejected.version,
+        }),
+      );
     throw new Error(
       `Remote agent "${input.action.remoteAgentName}" create-session request failed with HTTP ${response.status}.`,
     );
@@ -184,37 +256,35 @@ export async function startRemoteAgentSession(input: {
     );
   }
   const receiverVersion = readRemoteAgentProtocolVersion(parsed.data.protocolVersion);
-  // A protocol-1 remote already accepted the work and settles it with the same result callbacks.
-  if (
-    receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION &&
-    receiverVersion !== UNVERSIONED_REMOTE_AGENT_PROTOCOL
-  ) {
+  if (!servesRemoteAgentCaller(receiverVersion)) {
     throw new FatalError(
       `${formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion })} ${UNKNOWN_REMOTE_OUTCOME} Remote session: ${parsed.data.sessionId}.`,
     );
   }
 
-  return { sessionId: parsed.data.sessionId };
+  if (receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION)
+    return { earlierProtocol: receiverVersion, sessionId: parsed.data.sessionId };
+  return "deliveryId" in parsed.data
+    ? { deliveryId: parsed.data.deliveryId, sessionId: parsed.data.sessionId }
+    : { sessionId: parsed.data.sessionId };
 }
 
-/** A receiver that speaks another protocol version rejects the create with its own version. */
-async function throwIfRemoteAgentProtocolMismatch(response: Response, name: string): Promise<void> {
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return;
-  }
-  if (body === null || typeof body !== "object") return;
-  if (Reflect.get(body, "code") !== REMOTE_AGENT_PROTOCOL_MISMATCH) return;
-  const receiverVersion = readRemoteAgentProtocolVersion(Reflect.get(body, "protocolVersion"));
-  throw new FatalError(formatRemoteAgentProtocolMismatch({ name, receiverVersion }));
+async function readProtocolRejection(response: Response) {
+  const parsed = ProtocolRejectionSchema.safeParse(await response.json().catch(() => undefined));
+  if (!parsed.success) return undefined;
+  return {
+    version: readRemoteAgentProtocolVersion(parsed.data.protocolVersion),
+    refusedBeforeAdmission:
+      parsed.data.ok === false &&
+      parsed.data.sessionId === undefined &&
+      typeof parsed.data.protocolVersion === "number",
+  };
 }
 
 function buildForwardedTraceAssertion(input: {
   readonly forwardedPrincipal: ForwardedPrincipal | undefined;
   readonly originAudience: ChannelAudience | undefined;
-  readonly parentTraceContext: SessionTraceContext | undefined;
+  readonly parentTraceContext: SessionTraceSeed | undefined;
   readonly traceparent: string | undefined;
 }) {
   const ceiling = decisionToTraceContentCeiling(input.parentTraceContext?.decision);
@@ -237,13 +307,29 @@ export async function respondToRemoteAgentSession(input: {
   readonly remote: RemoteAgentBinding & { readonly sessionId: string };
   readonly headers: Record<string, string>;
   readonly auth: SessionAuthContext | null | undefined;
-  readonly responses: readonly InputResponse[];
+  /**
+   * Names this set of answers, so a retried step's repeat is the same delivery to the child.
+   * Only a child on this protocol accepts it.
+   */
+  readonly idempotencyKey?: string;
+  readonly responses: readonly Answer[];
 }): Promise<void> {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
       body: JSON.stringify({
-        inputResponses: input.responses,
+        // A protocol 2 child takes answers as v26 responses, each naming the request it answers.
+        ...(input.remote.earlierProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL
+          ? {
+              inputResponses: input.responses.map(({ interactionId, optionId, text }) => ({
+                requestId: interactionId,
+                ...(optionId !== undefined && { optionId }),
+                ...(text !== undefined && { text }),
+              })),
+            }
+          : { answers: input.responses }),
+        ...(input.remote.earlierProtocol === undefined &&
+          input.idempotencyKey !== undefined && { idempotencyKey: input.idempotencyKey }),
         ...(input.remote.forwardPrincipal === true &&
           input.auth != null && {
             forwardedPrincipal: { current: input.auth },
@@ -270,26 +356,42 @@ export async function continueRemoteAgentSession(input: {
     readonly token: string;
     readonly url: string;
   };
-  readonly message: string;
+  readonly earlierProtocol?: number;
+  /**
+   * Names this message, so a retried step's repeat is the same delivery and returns the same
+   * receipt. Only a child on this protocol accepts it.
+   */
+  readonly idempotencyKey?: string;
+  readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
-}): Promise<void> {
+}): Promise<{ readonly sessionId: string; readonly deliveryId?: string }> {
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
     callback: typeof input.callback;
     forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
+    idempotencyKey?: string;
+    message: MessageContent<string | URL>;
     outputSchema?: JsonObject;
   } = {
-    callback: input.callback,
+    callback: {
+      ...input.callback,
+      url: callbackUrlForProtocol(
+        input.callback.url,
+        input.earlierProtocol ?? REMOTE_AGENT_PROTOCOL_VERSION,
+      ),
+    },
     message: input.message,
     outputSchema: input.outputSchema,
   };
+  // Earlier protocols reject fields they don't know.
+  if (input.earlierProtocol === undefined && input.idempotencyKey !== undefined) {
+    requestBody.idempotencyKey = input.idempotencyKey;
+  }
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }
-
   const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
     body: JSON.stringify(requestBody),
     headers: {
@@ -308,6 +410,15 @@ export async function continueRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" continue-session request failed with HTTP ${response.status}.${compatibilityHint}`,
     );
   }
+  // An earlier-protocol receiver's reply isn't read: it names no delivery the parent records.
+  if (input.earlierProtocol !== undefined) return { sessionId: input.sessionId };
+  const receipt = DeliveryReceiptResponseSchema.safeParse(await response.json().catch(() => null));
+  if (!receipt.success) {
+    throw new Error(
+      `Remote agent "${input.remote.name}" continue-session response was not a delivery receipt. The message may have been accepted.`,
+    );
+  }
+  return { deliveryId: receipt.data.deliveryId, sessionId: receipt.data.sessionId };
 }
 
 function buildForwardedPrincipalField(input: {
@@ -354,7 +465,7 @@ export async function cancelRemoteAgentTurn(input: {
     throw new Error(`Remote agent "${input.remote.name}" cancel-turn response was not valid JSON.`);
   }
 
-  const result = CancelTurnResponseSchema.safeParse(body);
+  const result = RemoteCancelResponseSchema.safeParse(body);
   if (
     !result.success ||
     (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
@@ -399,7 +510,7 @@ export async function resetRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" reset-session request failed with HTTP ${response.status}.`,
     );
   }
-  const result = ResetResponseSchema.safeParse(await response.json());
+  const result = RemoteResetResponseSchema.safeParse(await response.json());
   if (
     !result.success ||
     (result.data.status === "reset" && result.data.previousSessionId !== input.sessionId)
@@ -411,6 +522,8 @@ export async function resetRemoteAgentSession(input: {
 
 export function resolveRemoteAgentForAction(input: {
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+  /** A dynamic remote agent's credentials, built again from its child's binding. */
+  readonly credentials?: RemoteAgentCredentials;
   readonly nodeId: string;
   readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
   readonly remoteAgentName: string;
@@ -421,7 +534,6 @@ export function resolveRemoteAgentForAction(input: {
     if (definition === undefined) {
       throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
     }
-    const credentials = resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
     const config = input.dynamicRemoteAgent;
     const remote: {
       auth?: ResolvedRuntimeRemoteAgentNode["auth"];
@@ -450,12 +562,8 @@ export function resolveRemoteAgentForAction(input: {
     if (config.forwardPrincipal !== undefined) {
       remote.forwardPrincipal = config.forwardPrincipal;
     }
-    if (credentials.auth !== undefined) {
-      remote.auth = credentials.auth;
-    }
-    if (credentials.headers !== undefined) {
-      remote.headers = credentials.headers;
-    }
+    if (input.credentials?.auth !== undefined) remote.auth = input.credentials.auth;
+    if (input.credentials?.headers !== undefined) remote.headers = input.credentials.headers;
     return remote;
   }
   if (definition?.kind !== "remote") {
@@ -467,20 +575,19 @@ export function resolveRemoteAgentForAction(input: {
 /**
  * Resolves authored outbound headers for a server-authored remote child event.
  *
- * `resolverId` is the key persisted on the `agent.started` event (see
- * `AgentStartedStreamEvent`): it identifies the authored credential
- * functions, never their resolved values. Lookup order mirrors how dispatch
- * chose the key — first as a subagent node id (static remote definition),
- * then as a `credentialsStepId` in the step registry (dynamic remote
- * definition). The matched static definition must still agree with the
- * event's `name`/`url`, so a stale or mismatched key fails closed rather
- * than minting headers for the wrong upstream.
+ * `resolverId` is the key the parent's private child binding records: the subagent's node id,
+ * never resolved credentials. A static remote agent's definition must still agree with the
+ * event's `name`/`url`, and a dynamic one's credentials are built again from the binding the
+ * child was opened with, for the same destination, so a stale or mismatched key fails closed
+ * rather than minting headers for the wrong upstream.
  */
 export async function resolveRemoteAgentStreamHeaders(input: {
   readonly bundle: CompiledRuntimeAgentBundle;
   readonly name: string;
   readonly resolverId?: string;
   readonly url: string;
+  /** A dynamic remote agent's binding, from the parent's binding for the child. */
+  readonly dynamicBinding?: JsonValue | DynamicRemoteBinding;
 }): Promise<Record<string, string>> {
   if (input.resolverId === undefined) {
     return {};
@@ -488,6 +595,19 @@ export async function resolveRemoteAgentStreamHeaders(input: {
 
   const nodes = new Set([input.bundle.graph.root, ...input.bundle.graph.nodesByNodeId.values()]);
   for (const node of nodes) {
+    const { dynamicNodeIds, dynamicResolvers } = node.subagentRegistry;
+    if (dynamicNodeIds.has(input.resolverId)) {
+      // A dynamic remote agent without credentials keeps no binding.
+      if (input.dynamicBinding === undefined) return {};
+      return await resolveRemoteAgentRequestHeaders(
+        await remoteAgentCredentials({
+          binding: input.dynamicBinding as DynamicRemoteBinding,
+          destination: { name: input.name, url: input.url },
+          nodeId: input.resolverId,
+          resolvers: dynamicResolvers,
+        }),
+      );
+    }
     const definition = node.subagentRegistry.subagentsByNodeId.get(input.resolverId)?.definition;
     if (definition === undefined) continue;
     if (
@@ -500,64 +620,7 @@ export async function resolveRemoteAgentStreamHeaders(input: {
     return await resolveRemoteAgentRequestHeaders(definition);
   }
 
-  const credentials = resolveDynamicRemoteAgentCredentials({
-    credentialsStepId: input.resolverId,
-    description: "",
-    path: "",
-    url: input.url,
-  });
-  return await resolveRemoteAgentRequestHeaders(credentials);
-}
-
-function resolveDynamicRemoteAgentCredentials(config: DynamicRemoteAgentConfig): {
-  readonly auth?: ResolvedRuntimeRemoteAgentNode["auth"];
-  readonly headers?: HeadersValue;
-} {
-  if (config.credentialsStepId === undefined) {
-    return {};
-  }
-  const factory = getStepRegistry().get(config.credentialsStepId);
-  if (factory === undefined) {
-    throw new Error(
-      `Dynamic remote subagent credentials function "${config.credentialsStepId}" is not registered.`,
-    );
-  }
-  const record = expectObjectRecord(factory(), "Dynamic remote subagent credentials are invalid.");
-  const credentials: {
-    auth?: ResolvedRuntimeRemoteAgentNode["auth"];
-    headers?: HeadersValue;
-  } = {};
-  if (record.auth !== undefined) {
-    credentials.auth = expectFunction(record.auth, "Dynamic remote subagent auth is invalid.");
-  }
-  if (record.headers !== undefined) {
-    credentials.headers = resolveDynamicRemoteAgentHeaders(record.headers);
-  }
-  return credentials;
-}
-
-function resolveDynamicRemoteAgentHeaders(value: unknown): HeadersValue {
-  if (typeof value === "function") {
-    return value as Exclude<HeadersValue, Readonly<Record<string, string>>>;
-  }
-  const record = expectObjectRecord(value, "Dynamic remote subagent headers are invalid.");
-  for (const headerValue of Object.values(record)) {
-    if (typeof headerValue !== "string") {
-      throw new Error("Dynamic remote subagent headers are invalid.");
-    }
-  }
-  return record as Readonly<Record<string, string>>;
-}
-
-function getStepRegistry(): Map<string, Function> {
-  const key = Symbol.for("@workflow/core//registeredSteps");
-  const global = globalThis as Record<symbol, Map<string, Function> | undefined>;
-  let registry = global[key];
-  if (registry === undefined) {
-    registry = new Map();
-    global[key] = registry;
-  }
-  return registry;
+  throw new Error("This remote child's stream doesn't match an authored remote agent.");
 }
 
 function createRemoteAgentSessionUrl(remote: ResolvedRuntimeRemoteAgentNode): string {
@@ -597,8 +660,8 @@ async function resolveRemoteAgentRequestHeaders(
 function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
-}): string {
-  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
+}): MessageContent<string | URL> {
+  const message = normalizeAgentMessage(input.action.input.message as MessageContent<string | URL>);
   return formatSubagentInput({
     description: input.remote.description,
     message,

@@ -5,7 +5,6 @@ import {
 } from "#shared/public-route-prefix.js";
 
 const PRODUCTION_ENVIRONMENT = "production";
-const VERCEL_PROTECTION_BYPASS_QUERY = "x-vercel-protection-bypass";
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
 /**
@@ -68,18 +67,9 @@ export function createBrowserCallbackUrl(baseUrl: string, callbackPath: string):
 /**
  * Builds a framework-owned callback URL for server-to-server delivery.
  *
- * Unlike {@link createBrowserCallbackUrl}, it carries the deployment's
- * Protection Bypass for Automation secret so the caller can reach a
- * protected deployment.
+ * The URL carries only the callback's scoped capability. Deployment protection
+ * credentials belong to the delivering deployment's trusted-origin transport.
  */
 export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
-  const url = new URL(createBrowserCallbackUrl(baseUrl, callbackPath));
-
-  // https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
-  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
-  if (bypassSecret) {
-    url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
-  }
-
-  return url.toString();
+  return createBrowserCallbackUrl(baseUrl, callbackPath);
 }

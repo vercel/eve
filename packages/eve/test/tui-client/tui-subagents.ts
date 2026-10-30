@@ -29,7 +29,7 @@ const SUBAGENT_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
 process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
-  const client = new Client({ host: target.baseUrl });
+  const client = new Client({ baseUrl: target.baseUrl });
   const screen = new MockScreen({ columns: 120, rows: 50 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({

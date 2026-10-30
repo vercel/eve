@@ -41,33 +41,39 @@ export function createConnectionSession<Extensions extends object>(
     );
   }
   const resolveSandboxPath = (path: string) => posix.resolve(workspaceRoot, path);
-  async function read(options: { readonly abortSignal?: AbortSignal; readonly path: string }) {
+  async function read(options: { readonly signal?: AbortSignal; readonly path: string }) {
     return await connection.readFile({
-      abortSignal: options.abortSignal,
+      signal: options.signal,
       path: resolveSandboxPath(options.path),
     });
   }
-  async function readBytes(options: { readonly abortSignal?: AbortSignal; readonly path: string }) {
+  async function readBytes(options: { readonly signal?: AbortSignal; readonly path: string }) {
     const content = await read(options);
     if (content === null) return null;
     return ArrayBuffer.isView(content) ? Buffer.from(content) : await streamToBuffer(content);
   }
   async function write(
-    options: { readonly abortSignal?: AbortSignal; readonly path: string },
+    options: { readonly signal?: AbortSignal; readonly path: string },
     content: Uint8Array,
   ) {
     await connection.writeFiles({
-      abortSignal: options.abortSignal,
+      signal: options.signal,
       files: [{ content, path: resolveSandboxPath(options.path) }],
     });
   }
   async function spawn(options: SandboxSpawnOptions) {
-    return await connection.spawn({
-      abortSignal: options.abortSignal,
+    const process = await connection.spawn({
+      signal: options.signal,
+      stdin: options.stdin,
       command: options.command,
       env: options.env ?? {},
       workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
     });
+    if (options.stdin === true && process.stdin === undefined) {
+      await Promise.resolve(process.kill()).catch(() => undefined);
+      throw new Error("This sandbox provider does not support `stdin` on spawn.");
+    }
+    return process;
   }
   const session: SandboxSession = {
     resolvePath: resolveSandboxPath,
@@ -105,7 +111,7 @@ export function createConnectionSession<Extensions extends object>(
     },
     async writeFiles(options: SandboxWriteFilesOptions) {
       await connection.writeFiles({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         files: options.files.map((file) => ({
           content: file.content,
           path: resolveSandboxPath(file.path),
@@ -114,7 +120,7 @@ export function createConnectionSession<Extensions extends object>(
     },
     async removePath(options: SandboxRemovePathOptions) {
       await connection.removePath({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         force: options.force,
         path: resolveSandboxPath(options.path),
         recursive: options.recursive,

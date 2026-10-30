@@ -561,7 +561,7 @@ describe("Docker provider create", () => {
     const { calls, handle } = await createRunningSessionHandle({});
     const controller = new AbortController();
 
-    await handle.sandbox.spawn({ abortSignal: controller.signal, command: "sleep 300" });
+    await handle.sandbox.spawn({ signal: controller.signal, command: "sleep 300" });
     expect(findCall(calls, (args) => args.includes("eve-kill-tree"))).toBeUndefined();
 
     controller.abort();

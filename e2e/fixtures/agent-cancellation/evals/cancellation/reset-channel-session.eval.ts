@@ -1,15 +1,15 @@
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-interface MessageResponse {
+interface Delivery {
   readonly ok: boolean;
   readonly sessionId?: string;
 }
 
 interface ResetResponse {
   readonly acknowledgement?: string;
-  readonly previousSessionId?: string;
-  readonly status?: "no_active_session" | "reset";
+  readonly sessionId?: string;
+  readonly deliveryId?: string;
 }
 
 interface OwnerResponse {
@@ -43,21 +43,21 @@ export default defineEval({
 
   async test(t) {
     const threadId = crypto.randomUUID();
-    const initial = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const initial = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly RESET-INITIAL-OK.",
     });
     await t.require(
       initial,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        (value: Delivery) => value.ok === true && typeof value.sessionId === "string",
         "the initial message starts a session",
       ),
     );
     const previousSessionId = initial.sessionId!;
 
-    const initialTurn = await t.target.watchTurn(previousSessionId).result();
-    initialTurn.notEvent("turn.failed");
-    initialTurn.notEvent("session.failed");
+    const initialTurn = await t.target.attach(previousSessionId).watch().result();
+    initialTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initialTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     initialTurn.messageIncludes(/RESET-INITIAL-OK/i);
 
     const reset = await postJson<ResetResponse>(t.target, `/threads/${threadId}/new`, {});
@@ -65,8 +65,8 @@ export default defineEval({
       reset,
       satisfies(
         (value: ResetResponse) =>
-          value.status === "reset" &&
-          value.previousSessionId === previousSessionId &&
+          typeof value.deliveryId === "string" &&
+          value.sessionId === previousSessionId &&
           value.acknowledgement === "Started a new conversation.",
         "the route retires the observed session and returns its fixed acknowledgement",
       ),
@@ -81,13 +81,13 @@ export default defineEval({
       ),
     );
 
-    const replacement = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const replacement = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly RESET-REPLACEMENT-OK.",
     });
     await t.require(
       replacement,
       satisfies(
-        (value: MessageResponse) =>
+        (value: Delivery) =>
           value.ok === true &&
           typeof value.sessionId === "string" &&
           value.sessionId !== previousSessionId,
@@ -95,9 +95,9 @@ export default defineEval({
       ),
     );
 
-    const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    const replacementTurn = await t.target.attach(replacement.sessionId!).watch().result();
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/RESET-REPLACEMENT-OK/i);
 
     t.succeeded();

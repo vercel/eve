@@ -18,8 +18,6 @@ export type {
   ApprovalResponseSession,
   ApprovalStatus,
   ConnectionToolAnnotations,
-  ToolApproval,
-  ToolApprovalConfiguration,
 } from "#public/definitions/approval.js";
 export type { AutoApprovalOptions } from "#tools/approval/policies.js";
 export { always, auto, never, once } from "#tools/approval/policies.js";

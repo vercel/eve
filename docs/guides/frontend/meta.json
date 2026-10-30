@@ -3,6 +3,7 @@
   "defaultOpen": false,
   "pages": [
     "overview",
+    "use-eve-agent",
     "nextjs",
     "nuxt",
     "sveltekit",

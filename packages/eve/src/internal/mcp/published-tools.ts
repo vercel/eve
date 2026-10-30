@@ -97,7 +97,7 @@ function toCallToolResult(
   result: InvokeToolResult,
   hasOutputSchema: boolean,
 ): McpCallToolResult<JsonValue> {
-  switch (result.status) {
+  switch (result.outcome) {
     case "completed": {
       const output = result.output as JsonValue;
       const text =
@@ -111,24 +111,23 @@ function toCallToolResult(
         ? { content: [{ text, type: "text" }], structuredContent: output ?? null }
         : { content: [{ text, type: "text" }] };
     }
-    case "invalid-input":
-      throw new McpToolOperationError("invalid_input", result.message);
-    case "denied":
-      throw new McpToolOperationError(
-        "denied",
-        result.reason ?? `The tool "${name}" was denied by its approval policy.`,
-      );
-    case "approval-required":
-      throw new McpToolOperationError(
-        "approval_required",
-        `The tool "${name}" needs a person's approval, which this MCP channel cannot ask for. Call it from a conversation instead.`,
-      );
-    case "authorization-required":
-      throw new McpToolOperationError(
-        "authorization_required",
-        `The tool "${name}" needs a sign-in to ${result.connections.join(", ")}, which this MCP channel cannot ask for. Sign in from a conversation, then call it again.`,
-      );
+    case "rejected":
+      if (result.cause !== undefined) throw new McpToolOperationError("denied", result.reason);
+      if (result.reason === "approval-required")
+        throw new McpToolOperationError(
+          "approval_required",
+          `The tool "${name}" needs a person's approval, which this MCP channel cannot ask for. Call it from a conversation instead.`,
+        );
+      if (result.reason === "sign-in-required")
+        throw new McpToolOperationError(
+          "authorization_required",
+          `The tool "${name}" needs a sign-in to ${result.connections?.join(", ") ?? "its connections"}, which this MCP channel cannot ask for. Sign in from a conversation, then call it again.`,
+        );
+      throw new McpToolOperationError("denied", result.reason);
     case "failed":
-      throw new McpToolOperationError("internal", result.message);
+      throw new McpToolOperationError(
+        result.error.code === "INVALID_INPUT" ? "invalid_input" : "internal",
+        result.error.message,
+      );
   }
 }

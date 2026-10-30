@@ -7,7 +7,7 @@ export {
   type LinqCredentialValue,
   type LinqInboundMessageContext,
   type LinqInboundResult,
-  type LinqInboundResultOrPromise,
+  type LinqWebhookVerifier,
 } from "#public/channels/linq/linqChannel.js";
 export {
   IMESSAGE_TAPBACKS,

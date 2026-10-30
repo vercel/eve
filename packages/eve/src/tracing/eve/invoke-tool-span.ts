@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { context as otelContext, type Context } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InvokeToolResult } from "#channel/invoke-tool.js";
@@ -6,7 +7,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { buildConversationContext } from "#channel/conversation-context.js";
 import {
   toolCallIdempotencyKey,
-  type InstrumentationAttemptScope,
+  type InstrumentationScope,
   type InstrumentationHooks,
 } from "#instrumentation/lifecycle.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
@@ -50,8 +51,8 @@ export interface InvokeToolTraceOrigin {
  * Runs one direct tool call the way a conversation runs a model-issued one,
  * minus the turn around it.
  *
- * Instrumentation providers get the same `tool.call.started` and
- * `tool.call.completed` events, and the `execute_tool` span carries the same
+ * Instrumentation providers get the same `call.requested` and
+ * `call.settled` events, and the `execute_tool` span carries the same
  * attributes. Content follows the same decision: the OpenTelemetry
  * declaration's content setting, the trace policy, and the channel audience
  * ceiling. Arguments, the result, and error text are recorded only when that
@@ -70,6 +71,7 @@ export async function withInvokeToolSpan(
     /** The agent's name, on the span whether or not the call has a channel origin. */
     readonly agentName: string;
     readonly auth: SessionAuthContext;
+    readonly input: unknown;
     readonly callId: string;
     readonly origin: InvokeToolTraceOrigin | undefined;
     /** The call's own run id, never a tool session's: traces see each call as one run. */
@@ -79,7 +81,14 @@ export async function withInvokeToolSpan(
   run: (observer: InvokeToolObserver) => Promise<InvokeToolResult>,
 ): Promise<InvokeToolResult> {
   const base = withErrorContent(otelContext.active(), false);
-  return await otelContext.with(base, () => traced(input, base, run));
+  const runtime = getInstrumentationRuntime();
+  try {
+    return await otelContext.with(base, () => traced(input, base, run));
+  } finally {
+    await runtime?.forceFlush().catch((error: unknown) => {
+      log.warn("flushing a tool call's trace failed", { error: formatError(error) });
+    });
+  }
 }
 
 /**
@@ -123,23 +132,23 @@ async function traced(
   );
   const hooks =
     runtime.hooks.forTrace?.({ agentName: input.agentName, ...conversation }) ?? runtime.hooks;
-  const scope: InstrumentationAttemptScope = {
-    attemptId: input.callId,
-    attemptIndex: 0,
-    channelAudience: conversation.audience,
-    functionId: input.agentName,
-    rootSessionId: input.sessionId,
-    sessionId: input.sessionId,
-    stepIndex: 0,
-    traceSessionId: input.sessionId,
-    // No turn exists; the call stands in for one, as its session context does.
-    turnId: input.callId,
-  };
+  const scope: InstrumentationScope = instrumentationScope(
+    {
+      runId: input.callId,
+      attempt: 0,
+      channelAudience: conversation.audience,
+      functionId: input.agentName,
+      rootSessionId: input.sessionId,
+      sessionId: input.sessionId,
+      traceSessionId: input.sessionId,
+    },
+    0,
+  );
   const events = toolCallEvents(hooks, scope, input);
 
   const settings = runtime.otelSettings;
   // No declared OpenTelemetry: eve emits no agent spans anywhere, so none here either.
-  if (settings === undefined) return await run(events.observer(undefined));
+  if (settings === undefined) return await events.run(run, undefined);
 
   const decision = resolveTracePolicy(
     settings.tracePolicy,
@@ -150,7 +159,7 @@ async function traced(
       }),
   );
   if (decision.action === "drop") {
-    return await telemetry.suppressed!(() => run(events.observer(undefined)));
+    return await telemetry.suppressed!(() => events.run(run, undefined));
   }
   const content = applyLiveDeliveryAudienceCeiling(
     {
@@ -201,32 +210,32 @@ async function traced(
   });
 
   let failure: { readonly error: unknown } | undefined;
-  const observer = events.observer({
-    failedWith: (error) => {
+  const spanState = {
+    failedWith: (error: unknown) => {
       failure = { error };
     },
     recordInputs,
     span,
-  });
+  };
   try {
     const result = await telemetry.run(
       { type: "tool", reference: span.reference, capture, mcp },
-      () => run(observer),
+      () => events.run(run, spanState),
       host,
     );
-    span.setAttribute("eve.tool.outcome", result.status);
-    if (result.status === "completed" && recordOutputs) {
+    span.setAttribute("eve.tool.outcome", result.outcome);
+    if (result.outcome === "completed" && recordOutputs) {
       const output = contentAttribute(result.output);
       if (output !== undefined) span.setAttribute("gen_ai.tool.call.result", output);
     }
-    if (result.status === "invalid-input") {
+    if (result.outcome === "failed" && result.error.code === "INVALID_INPUT") {
       // A model-issued call with invalid input never runs, so it has no span to compare to.
-      span.fail(undefined, result.status);
-    } else if (result.status === "failed") {
+      span.fail(undefined, "invalid-input");
+    } else if (result.outcome === "failed") {
       // The conversation's rule: the error itself when outputs are recorded, else a generic one.
       span.fail(
         recordOutputs ? failure?.error : undefined,
-        failure === undefined ? result.status : undefined,
+        failure === undefined ? result.outcome : undefined,
       );
     }
     return result;
@@ -235,9 +244,6 @@ async function traced(
     throw error;
   } finally {
     span.end();
-    await runtime.forceFlush().catch((error: unknown) => {
-      log.warn("flushing a tool call's trace failed", { error: formatError(error) });
-    });
   }
 }
 
@@ -248,20 +254,20 @@ const silentObserver: InvokeToolObserver = {
 };
 
 /**
- * The `tool.call.*` events a model-issued call publishes, in the same shapes
- * (`instrumentation/ai-sdk-hook-bridge.ts`): started before `execute`, and
- * completed with its result or error after. Content is projected the same way.
+ * Direct calls publish one pair around the complete invocation, including validation and
+ * policy refusal. SDK execute timing remains separate from the final caller-visible outcome.
  */
 function toolCallEvents(
   hooks: InstrumentationHooks,
-  scope: InstrumentationAttemptScope,
-  input: { readonly callId: string; readonly toolName: string },
+  scope: InstrumentationScope,
+  input: { readonly callId: string; readonly toolName: string; readonly input: unknown },
 ) {
   const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
   const idempotencyKey = toolCallIdempotencyKey(scope, input.callId, 0);
   return {
-    observer(
+    async run(
+      run: (observer: InvokeToolObserver) => Promise<InvokeToolResult>,
       spanState:
         | {
             readonly failedWith: (error: unknown) => void;
@@ -269,50 +275,62 @@ function toolCallEvents(
             readonly span: SpanWriter;
           }
         | undefined,
-    ): InvokeToolObserver {
-      return {
-        async executing(toolInput) {
-          // The checked input, as a conversation's span records it; rejected input never gets here.
+    ): Promise<InvokeToolResult> {
+      let durationMs: number | undefined;
+      let failure: unknown;
+      const observer: InvokeToolObserver = {
+        async executing(checked) {
           if (spanState?.recordInputs) {
-            const args = contentAttribute(toolInput);
+            const args = contentAttribute(checked);
             if (args !== undefined) spanState.span.setAttribute("gen_ai.tool.call.arguments", args);
           }
-          await hooks.publish(
-            Object.freeze({
-              callId: input.callId,
-              idempotencyKey,
-              input: capturesInputs ? toolInput : undefined,
-              scope,
-              toolName: input.toolName,
-              type: "tool.call.started",
-            }),
-          );
         },
         async executed(outcome) {
-          spanState?.span.setAttribute("gen_ai.execute_tool.duration", outcome.durationMs / 1000);
-          const output =
-            outcome.type === "result"
-              ? capturesOutputs
-                ? { output: outcome.output, type: "result" as const }
-                : { type: "result" as const }
-              : capturesOutputs
-                ? { error: outcome.error, type: "error" as const }
-                : { type: "error" as const };
-          await hooks.publish(
-            Object.freeze({
-              durationMs: outcome.durationMs,
-              idempotencyKey,
-              output: Object.freeze(output),
-              scope,
-              type: "tool.call.completed",
-              outcome: outcome.type === "result" ? "completed" : "failed",
-            }),
-          );
+          durationMs = outcome.durationMs;
+          spanState?.span.setAttribute("gen_ai.execute_tool.duration", durationMs / 1000);
         },
         failedWith(error) {
+          failure = error;
           spanState?.failedWith(error);
         },
       };
+      await hooks.publish({
+        capability: { kind: "tool", name: input.toolName },
+        callId: input.callId,
+        frameworkTool: false,
+        idempotencyKey,
+        input: capturesInputs ? input.input : undefined,
+        scope,
+        toolName: input.toolName,
+        type: "call.requested",
+      });
+      let result: InvokeToolResult;
+      try {
+        result = await run(observer);
+      } catch (error) {
+        await hooks.publish({
+          durationMs,
+          error: capturesOutputs ? error : undefined,
+          idempotencyKey,
+          outcome: "failed",
+          scope,
+          type: "call.settled",
+        });
+        throw error;
+      }
+      await hooks.publish({
+        durationMs,
+        idempotencyKey,
+        outcome: result.outcome,
+        scope,
+        type: "call.settled",
+        reason: result.outcome === "rejected" ? result.reason : undefined,
+        cause: result.outcome === "rejected" ? result.cause : undefined,
+        error:
+          capturesOutputs && result.outcome === "failed" ? (failure ?? result.error) : undefined,
+        output: capturesOutputs && result.outcome === "completed" ? result.output : undefined,
+      });
+      return result;
     },
   };
 }

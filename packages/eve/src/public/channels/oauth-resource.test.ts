@@ -1,12 +1,8 @@
+import { readOAuthResourceOptions } from "#channel/auth/definitions.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import {
-  oauthResource,
-  readOAuthResourceOptions,
-  routeAuth,
-  type AuthFn,
-} from "#public/channels/auth.js";
+import { oauthResource, routeAuth, type AuthFn } from "#public/channels/auth.js";
 
 const principal: SessionAuthContext = {
   attributes: {},

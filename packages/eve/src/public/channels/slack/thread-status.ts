@@ -3,6 +3,7 @@
  * the last status it set, so a later model step, or a task card post that
  * Slack clears the status for, can show it again instead of a generic line.
  */
+import { setSlackCodeChannelStatus } from "#public/channels/slack/code-channel.js";
 import {
   SLACK_TYPING_STATUS_MAX_LENGTH,
   truncateTypingStatus,
@@ -36,6 +37,11 @@ export async function showStatus(
   const status = truncateTypingStatus(text);
   const now = Date.now();
   const current = channel.state.threadStatus;
+  // A code channel shows `processing`, not the text, and Slack doesn't time it out.
+  if (isCodeChannel(channel) && current != null && current.atMs > 0) {
+    channel.state.threadStatus = { atMs: now, text: status };
+    return;
+  }
   const showing =
     current?.text === status && now - current.atMs >= 0 && now - current.atMs < STATUS_REFRESH_MS;
   if (showing && options?.force !== true) return;
@@ -56,7 +62,15 @@ export async function restoreStatus(channel: SlackEventContext): Promise<void> {
 export async function hideStatus(channel: SlackEventContext): Promise<void> {
   const current = channel.state.threadStatus;
   if (current) channel.state.threadStatus = { ...current, atMs: 0 };
+  if (isCodeChannel(channel)) {
+    await setSlackCodeChannelStatus(channel.slack.request, channel.slack.channelId, "suspended");
+    return;
+  }
   await channel.thread.startTyping();
+}
+
+function isCodeChannel(channel: SlackEventContext): boolean {
+  return channel.slack.codeChannel;
 }
 
 /** Clears the thread status and forgets it: the turn has nothing more to show. */

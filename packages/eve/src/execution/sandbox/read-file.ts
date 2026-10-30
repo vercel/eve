@@ -9,9 +9,9 @@ import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import {
   detectImageMediaType,
   hasPdfHeader,
-  readMediaMetadata,
   type MediaMetadata,
 } from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
 import { inlinesSandboxRefAsBytes } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
@@ -43,7 +43,7 @@ export interface ReadFileResult {
   readonly content: string;
   /**
    * Set when the file is a PNG, JPEG, GIF, or WebP image or a PDF that the
-   * model reads natively. Carries no bytes, so `action.result` stays small.
+   * model reads natively. Carries no bytes, so `call.settled` stays small.
    */
   readonly file?: MediaMetadata;
   readonly nextOffset?: number;

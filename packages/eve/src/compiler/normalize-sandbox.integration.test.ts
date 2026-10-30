@@ -29,7 +29,7 @@ describe("sandbox compilation", () => {
     const app = await createAppRoot("eve-inherited-sandbox-child-resources-", {
       files: {
         "agent/subagents/foo/agent.ts":
-          "export default { description: 'foo', model: 'openai/gpt-5.4' };",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'foo', model: 'openai/gpt-5.4' });",
         "agent/subagents/foo/description.md": "foo\n",
         "agent/subagents/foo/sandbox/sandbox.ts":
           'import { defineParentSandbox } from "eve/sandbox"; export default defineParentSandbox();',

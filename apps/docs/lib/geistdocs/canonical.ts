@@ -4,12 +4,9 @@ export const canonicalRoutes = {
   home: "/",
   benchmarks: "/benchmarks",
   integrations: "/integrations",
-  templates: "/templates",
 } as const;
 
 export const integrationPath = (slug: string): string => `${canonicalRoutes.integrations}/${slug}`;
-
-export const templatePath = (slug: string): string => `${canonicalRoutes.templates}/${slug}`;
 
 export const canonicalPathname = (value: string): string => {
   const pathname = value.split(/[?#]/, 1)[0] || canonicalRoutes.home;

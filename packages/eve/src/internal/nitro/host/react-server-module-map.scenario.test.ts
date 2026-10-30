@@ -45,7 +45,8 @@ describe("react-server module maps", () => {
           }),
           "packages/condition/react-server.js": 'export const condition = "react-server";',
           "packages/condition/default.js": 'export const condition = "default";',
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/instructions.md": "Reply concisely.",
           // Step modules reach the Nitro bundle directly instead of through the module map.
           "agent/tools/lookup.ts": [

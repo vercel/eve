@@ -3,17 +3,11 @@ import { describe, expect, it } from "vitest";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { fileMemory } from "#public/memory/file/provider.js";
 import type {
-  MemoryCompactionCompletedContext,
   MemoryProvider,
-  MemoryToolDefinition,
   MemoryToolsContext,
   MemoryTurnStartedContext,
 } from "#public/memory/index.js";
 import type { ToolSchema } from "#tools/schema.js";
-
-interface TestTool<TInput> {
-  execute(input: TInput, context: never): unknown;
-}
 
 const signal = new AbortController().signal;
 const toolContext = { abortSignal: signal } as never;
@@ -57,7 +51,7 @@ describe("fileMemory", () => {
       key: "mem_scope",
       signal,
     });
-    await expect(recallAfterCompaction(provider)).resolves.toEqual({
+    await expect(recallAtTurnStart(provider)).resolves.toEqual({
       messages: [{ content: expect.stringContaining("4: Uses vim."), id: "file-memory-document" }],
     });
   });
@@ -74,7 +68,6 @@ describe("fileMemory", () => {
 
     const first = await recallAtTurnStart(provider);
     await expect(recallAtTurnStart(provider)).resolves.toEqual(first);
-    await expect(recallAfterCompaction(provider)).resolves.toEqual(first);
   });
 
   it("recalls an empty state after the final entry is removed", async () => {
@@ -384,26 +377,11 @@ async function resolveTools(provider: MemoryProvider) {
   if (saveMemory === undefined || removeMemory === undefined) {
     throw new Error("memory tools were not resolved");
   }
-  return {
-    remove_memory: testTool<{ readonly index: number }>(removeMemory),
-    save_memory: testTool<{ readonly text: string }>(saveMemory),
-  };
-}
-
-function testTool<TInput>(tool: MemoryToolDefinition): TestTool<TInput> {
-  return {
-    execute: (input, context) => tool.execute(input as never, context),
-  };
+  return { remove_memory: removeMemory, save_memory: saveMemory };
 }
 
 function recallAtTurnStart(provider: MemoryProvider) {
   return provider.recall["turn.started"](turnStartedContext());
-}
-
-function recallAfterCompaction(provider: MemoryProvider) {
-  const recall = provider.recall["compaction.completed"];
-  if (recall === undefined) throw new Error("compaction recall was not registered");
-  return recall(compactionCompletedContext());
 }
 
 function turnStartedContext(): MemoryTurnStartedContext {
@@ -413,25 +391,15 @@ function turnStartedContext(): MemoryTurnStartedContext {
   };
 }
 
-function compactionCompletedContext(): MemoryCompactionCompletedContext {
-  return {
-    ...operationContext(),
-    compaction: { modelId: "mock/model" },
-    turn: { id: "turn-1", input: [], sequence: 1 },
-  };
-}
-
 function toolsContext(): MemoryToolsContext {
   return {
-    channel: { kind: "http" },
-    model: null,
+    abortSignal: signal,
+    channel: { kind: "http", metadata: {} },
     memory: operationContext().memory,
-    messages: [],
     session: {
       auth: { current: null, initiator: null },
       id: "session-1",
     },
-    turn: { id: "turn-1", input: [], sequence: 1 },
   };
 }
 

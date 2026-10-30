@@ -3,7 +3,7 @@ import { equals, satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Metadata-only sessions lose their durable transcript after reset, while full-capture sessions retain it.",
+    "Metadata-only sessions lose their durable transcript after ending, while full-capture sessions retain it.",
   async test(t) {
     const message =
       "Alice has finished reviewing her notes. Greet her briefly without calling tools.";
@@ -13,24 +13,24 @@ export default defineEval({
         : {};
       const turn = await t.send(message, { headers });
       turn.expectOk();
-      turn.event("message.completed", { count: 1 });
+      turn.event("content.completed", { count: 1, data: { kind: "text", phase: "reply" } });
       const sessionPath = `/eve/v1/session/${encodeURIComponent(turn.sessionId)}`;
       const readHistory = () =>
         t.target.fetch(`${sessionPath}/stream?follow=false&startIndex=0`, {
           headers,
-          signal: t.signal,
+          signal: t.abortSignal,
         });
       const live = await readHistory();
       await t.require(live.status, equals(200));
       await t.require((await live.text()).includes(message), equals(true));
 
-      const reset = await t.target.fetch(`${sessionPath}/reset`, {
+      const ended = await t.target.fetch(`${sessionPath}/end`, {
         headers,
         method: "POST",
-        signal: t.signal,
+        signal: t.abortSignal,
       });
-      await t.require(reset.status, equals(200));
-      await reset.body?.cancel();
+      await t.require(ended.status, equals(202));
+      await ended.body?.cancel();
       if (!metadataOnly) {
         const retained = await readHistory();
         await t.require(retained.status, equals(200));
@@ -41,7 +41,15 @@ export default defineEval({
       let purged = false;
       for (const delayMs of [0, 50, 100, 200, 400, 800, 1_600, 3_200]) {
         await t.sleep(delayMs);
-        const history = await readHistory();
+        let history: Response;
+        try {
+          history = await readHistory();
+        } catch (error) {
+          // Purging the run can also interrupt a read before response headers arrive.
+          if (!(error instanceof TypeError)) throw error;
+          t.abortSignal.throwIfAborted();
+          continue;
+        }
         if (history.status === 410) {
           await t.require((await history.json()).code, equals("session_expired"));
           purged = true;
@@ -54,7 +62,7 @@ export default defineEval({
         } catch (error) {
           // A purge can interrupt a read after the server commits its 200 response.
           if (!(error instanceof TypeError)) throw error;
-          t.signal.throwIfAborted();
+          t.abortSignal.throwIfAborted();
           continue;
         }
         if (body.trim().length === 0) {
@@ -66,7 +74,7 @@ export default defineEval({
         purged,
         satisfies(
           (value: boolean) => value,
-          "metadata-only session history is expired or empty after reset",
+          "metadata-only session history is expired or empty after ending",
         ),
       );
     }

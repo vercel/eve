@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import type { EveEvalContext } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -15,36 +15,58 @@ export async function correctKeeperWhileItWorks(t: EveEvalContext, tool: string)
     `NOTEBOOK-CORRECT ${tool} Alice corrects the pier she asked about.`,
   );
   corrected.expectOk();
-  corrected.event("task.settled", {
+  // One reply settles both calls: the first carries the output, the correction shares it.
+  corrected.event("call.settled", {
     count: 1,
-    data: { callId: "notebook-correction", output: CORRECTED_MEASUREMENT, status: "completed" },
+    data: { callId: "notebook-measure", output: CORRECTED_MEASUREMENT, outcome: "completed" },
+  });
+  corrected.event("call.settled", {
+    count: 1,
+    data: {
+      callId: "notebook-correction",
+      outcome: "completed",
+      outputOf: { callId: "notebook-measure" },
+    },
   });
   corrected.messageIncludes(`NOTEBOOK-REPLY ${CORRECTED_MEASUREMENT}`);
 
-  t.event("agent.started", { count: 1, data: { name: tool } });
+  t.event("child.opened", { count: 1, data: { name: tool } });
   t.eventsSatisfy("the correction reaches the task the first call started", (events) => {
-    const calls = events.flatMap((event) =>
-      event.type === "task.started" && event.data.name === tool ? [event.data] : [],
+    // The first call starts the task; the correction's call reaches the same task.
+    const tasks = new Set(
+      events.flatMap((event) =>
+        event.type === "task.started" && event.data.name === tool ? [event.data.taskId] : [],
+      ),
     );
-    return calls.length === 2 && new Set(calls.map((call) => call.taskId)).size === 1;
+    const reached = events.flatMap((event) =>
+      event.type === "call.started" &&
+      event.data.taskId !== undefined &&
+      tasks.has(event.data.taskId)
+        ? [event.data.taskId]
+        : [],
+    );
+    return tasks.size === 1 && reached.length === 2;
   });
 
   const started = corrected.events.find(
-    (event) => event.type === "agent.started" && event.data.name === tool,
+    (event) => event.type === "child.opened" && event.data.name === tool,
   );
-  if (started?.type !== "agent.started") return;
-  const firstTurn: MessageStreamEvent[] = [];
+  if (started?.type !== "child.opened") return;
+  const firstTurn: SessionStreamEvent[] = [];
   for await (const event of corrected.session.agent(started).stream()) {
     firstTurn.push(event);
-    if (event.type === "turn.completed" || event.type === "turn.failed") break;
+    if (event.type === "turn.settled") break;
   }
   t.check(
     firstTurn,
     satisfies(
-      (events: readonly MessageStreamEvent[]) =>
+      (events: readonly SessionStreamEvent[]) =>
         events.some(
           (event) =>
-            event.type === "message.received" && event.data.message.includes(NOTEBOOK_CORRECTION),
+            event.type === "delivery.consumed" &&
+            event.data.parts.some(
+              (part) => part.kind === "text" && part.text.includes(NOTEBOOK_CORRECTION),
+            ),
         ),
       "the keeper's first turn reads the correction before it completes",
     ),

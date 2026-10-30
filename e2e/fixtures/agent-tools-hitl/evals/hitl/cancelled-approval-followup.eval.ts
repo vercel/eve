@@ -12,31 +12,30 @@ export default defineEval({
     );
     const session = held.session;
     held.calledTool(TOOL_NAME, { count: 1, status: "pending" });
-    session.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
+    session.requireInteraction({ display: "confirmation", toolName: TOOL_NAME });
 
-    const cancellation = t.target.watchTurn(session.sessionId, {
-      startIndex: session.state.streamIndex,
-    });
+    const cancellation = t.target
+      .attach(session.id, { startIndex: session.state.streamIndex })
+      .watch();
     const accepted = await session.cancel();
     await t.require(
       accepted,
       satisfies(
-        (value: typeof accepted) => value.status === "accepted",
+        (value: typeof accepted) => typeof value.deliveryId === "string",
         "the approval turn cancellation is accepted",
       ),
     );
     const cancelled = await cancellation.result();
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelled.notEvent("turn.failed");
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("turn.settled", { data: { outcome: "failed" } });
 
     const followup = await session.send(`Reply with exactly ${FOLLOWUP}.`);
 
     followup.expectOk();
     followup.messageIncludes(FOLLOWUP);
-    followup.event("step.started", { count: 1 });
-    followup.event("message.completed", { count: 1 });
-    followup.notEvent("turn.failed");
+    followup.event("model.started", { count: 1 });
+    followup.event("content.completed", { count: 1, data: { kind: "text" } });
+    followup.notEvent("turn.settled", { data: { outcome: "failed" } });
     t.succeeded();
   },
 });

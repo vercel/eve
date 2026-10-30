@@ -57,7 +57,7 @@ interface ReporterBinding {
  *
  * Run-level reporters observe every eval. Eval-defined reporters observe
  * only the evals that reference them; a reporter instance shared by several
- * evals (e.g. one `Braintrust()` passed to every entry of an array export)
+ * evals (e.g. one `braintrustReporter()` passed to every entry of an array export)
  * is deduplicated and observes all of its evals as one group.
  */
 export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSummary> {

@@ -30,7 +30,7 @@ export default defineEval({
     );
 
     t.succeeded();
-    const tokens = second.message?.match(CLIENT_CONTEXT_TOKEN_PATTERN) ?? [];
+    const tokens = second.reply?.match(CLIENT_CONTEXT_TOKEN_PATTERN) ?? [];
     await t.require(
       tokens,
       satisfies<readonly string[]>(

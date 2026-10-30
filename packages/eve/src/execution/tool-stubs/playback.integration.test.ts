@@ -164,7 +164,6 @@ describe("durable tool stub playback", () => {
             const delivered = await appendTaskContext({
               session,
               messages: [],
-              projectHistory: (messages) => messages,
               tools: new Map([["lookup", definition]]),
             });
             expect(JSON.stringify(delivered.messages)).toContain("raw");

@@ -3,17 +3,17 @@ title: "Ship It"
 description: "Part 8 of the Build an Agent tutorial. Put a web dashboard on the agent with useEveAgent, replace placeholderAuth, and deploy to Vercel."
 ---
 
-The analytics assistant runs in the TUI. Now add a web dashboard and deploy a private, single-user version on Vercel. This example protects the sample app with a username and password. It does not require another authentication service.
+The analytics assistant runs in the TUI. Next, add a web dashboard and deploy a private, single-user version on Vercel, protected by a username and password with no separate authentication service.
 
 ## Add the Web Chat app
 
-Step 1 scaffolded the agent without a web frontend. Add one now with `eve add channel/web`, run from the `analytics-assistant/` directory, and choose **Next.js** when it asks which framework to use:
+Step 1 scaffolded the agent without a web frontend. From the `analytics-assistant/` directory, run `eve add channel/web` and choose **Next.js** when it asks which framework to use:
 
 ```bash
 npx eve add channel/web
 ```
 
-This adds a Next.js app (`next.config.ts`, `app/page.tsx`, `app/_components/`) wired to the existing eve channel, plus the chat UI components and their dependencies. Run `npm install` afterward to install the added packages. The generated `next.config.ts` wraps your config with `withEve`, which wires the eve routes automatically:
+This adds a Next.js app (`next.config.ts`, `app/page.tsx`, `app/_components/`) wired to the existing eve channel, plus the chat UI components and their dependencies. Run `npm install` afterward. The generated `next.config.ts` wraps your config with `withEve`, which wires the eve routes:
 
 ```ts title="next.config.ts"
 import type { NextConfig } from "next";
@@ -28,15 +28,15 @@ export default withEve(nextConfig);
 
 Keep the generated `app/_components/agent-chat.tsx` and `agent-message.tsx` components. `app/page.tsx` already renders the chat, and `useEveAgent` handles session creation and streaming.
 
-The generated UI displays tool results and errors, authorization links, approval buttons, and question forms. The spend approval from [Guard the spend](./guard-the-spend) needs those controls to resume a waiting turn. A component that renders only text messages leaves those interactions unavailable.
+The generated UI displays tool results and errors, authorization links, approval buttons, and question forms. The spend approval from [Guard the spend](./guard-the-spend) needs those controls to resume a waiting turn, so a component that renders only text leaves it stuck.
 
-Run `npm run dev`, open the local web URL printed by the server, and ask for an unfiltered revenue query. Confirm that the approval appears and that approving it lets the query finish. You can customize the UI after this flow works; see [Frontend](../guides/frontend/overview).
+Run `npm run dev`, open the local web URL the server prints, and ask for an unfiltered revenue query. Confirm that the approval appears and that approving it lets the query finish. To customize the UI afterward, see [Frontend](../guides/frontend/overview).
 
 ## Replace `placeholderAuth`
 
-The scaffold's channel ships with `placeholderAuth()`, which rejects unauthenticated production requests. Replace it with a verifier that checks credentials on every request. Never return a fixed user without checking the request.
+The scaffold's channel ships with `placeholderAuth()`, which rejects unauthenticated production requests. Replace it with a verifier that checks credentials on every request; never return a fixed user without checking the request.
 
-Create `agent/lib/auth.ts`. This uses eve's HTTP Basic verifier, which compares passwords in constant time. Missing environment variables, missing credentials, and wrong credentials all fail closed:
+Create `agent/lib/auth.ts`. eve's HTTP Basic verifier compares passwords in constant time, and missing environment variables, missing credentials, and wrong credentials all fail closed:
 
 ```ts title="agent/lib/auth.ts"
 import { verifyHttpBasic, withAuthChallenges } from "eve/channels/auth";
@@ -63,7 +63,7 @@ export const appAuth = withAuthChallenges(
 );
 ```
 
-Replace `agent/channels/eve.ts`, removing the earlier `devTeam` entry. The eve channel checks `appAuth` for session creation, messages, controls, and streams. The remaining helpers preserve authenticated Vercel CLI access and local development:
+Replace `agent/channels/eve.ts`, dropping the `devTeam` entry from Step 6. The eve channel checks `appAuth` for session creation, messages, controls, and streams; the other helpers keep authenticated Vercel CLI access and local development:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -75,9 +75,9 @@ export default eveChannel({
 });
 ```
 
-The verified username becomes the user principal. The `growth` team selects the sample playbook from [Team playbooks](./team-playbooks). Keep these credentials private to one person. A shared password does not give each person a separate identity or isolated sessions. For a multi-user app, use a real session provider and enforce [session ownership](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
+The verified username becomes the signed-in user. The `growth` team selects the sample playbook from [Team playbooks](./team-playbooks). Keep these credentials private to one person, because a shared password gives no one a separate identity or isolated sessions. For a multi-user app, use a real session provider and check [which user each session belongs to](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
-Add `proxy.ts` at the project root so opening the dashboard triggers the browser's native username/password prompt. It protects the generated UI routes; eve API routes keep their channel auth, so an OIDC-authenticated CLI request does not encounter a browser-only gate:
+Add `proxy.ts` at the project root so opening the dashboard triggers the browser's username/password prompt. It protects only the generated UI routes; eve API routes keep their channel auth, so OIDC-authenticated CLI requests still work:
 
 ```ts title="proxy.ts"
 import { routeAuth } from "eve/channels/auth";
@@ -93,7 +93,7 @@ export async function proxy(request: Request) {
 export const config = { matcher: ["/", "/s/:path*"] };
 ```
 
-After login, the browser sends the credentials on same-origin requests from the generated chat. When a browser sends an `Origin` header, the Basic verifier also requires [`Sec-Fetch-Site: same-origin`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Sec-Fetch-Site). Keep the auth module server-side: never put the password in a React component, a `NEXT_PUBLIC_` variable, or a client-side `useEveAgent` option. Use HTTPS for deployed HTTP Basic authentication.
+After login, the browser sends the credentials on same-origin requests from the generated chat. When a browser sends an `Origin` header, `appAuth` also requires [`Sec-Fetch-Site: same-origin`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Sec-Fetch-Site). Keep the auth module server-side: never put the password in a React component, a `NEXT_PUBLIC_` variable, or a client-side `useEveAgent` option. Use HTTPS for deployed HTTP Basic authentication.
 
 ## Deploy to Vercel
 
@@ -105,15 +105,15 @@ npx vercel@latest env add ANALYTICS_USERNAME preview
 npx vercel@latest env add ANALYTICS_PASSWORD preview
 ```
 
-Before deploying, configure the model credential your agent uses in the project's Preview environment; local `.env` values are not uploaded by deployment. If you used a local ChatGPT subscription, switch `agent/agent.ts` to an AI Gateway model and configure `AI_GATEWAY_API_KEY` for that model. Subscription credentials stay on your laptop. See [Deployment](../guides/deployment/overview) for model and runtime configuration.
+Before deploying, configure your model credential in the project's Preview environment, because deployment doesn't upload local `.env` values. If you used a local ChatGPT subscription, which stays on your laptop, switch `agent/agent.ts` to an AI Gateway model and configure `AI_GATEWAY_API_KEY`. See [Deployment](../guides/deployment/overview) for model and runtime configuration.
 
 ```bash
 npx vercel@latest deploy
 ```
 
-Open the HTTPS preview URL and enter the configured username and password. Create a session and ask a sample-data question. In a private browser window, cancel the login prompt and verify the dashboard is denied. A `POST /eve/v1/session` request without credentials must also return `401`.
+Open the HTTPS preview URL, enter the username and password, and ask a sample-data question. In a private browser window, cancel the login prompt and verify the dashboard is denied. A `POST /eve/v1/session` request without credentials must also return `401`.
 
-The authenticated web app and eve runtime share the same origin, and the sandbox runs on Vercel Sandbox. You can also smoke-test the deployment through the authenticated CLI:
+The web app and the agent share one origin, and the sandbox runs on Vercel Sandbox. You can also smoke-test the deployment through the authenticated CLI:
 
 ```bash
 npx eve remote connect --url https://your-analytics-app.vercel.app
@@ -121,25 +121,25 @@ npx eve remote connect --url https://your-analytics-app.vercel.app
 
 For a production deployment, add the username, password, and model credential to the Production environment too, then run `npx vercel@latest deploy --prod`. Missing Basic credentials keep browser access closed.
 
-The private assistant queries the sample data, runs analysis in a sandbox, charts the results, remembers definitions, loads the Growth playbook, and asks before an expensive query.
+The private assistant queries the sample data, runs analysis in a sandbox, and charts the results. It also remembers definitions, loads the Growth playbook, and asks before an expensive query.
 
 ## What you learned
 
-Across the eight steps you built and shipped one agent, and along the way you used:
+Across the eight steps you built and shipped one agent using:
 
 - **Tools** to give the model typed actions (`run_sql`, `chart_series`, `define_metric`).
 - **The sandbox** to compute and chart beyond SQL in an isolated `/workspace`.
 - **State** (`defineState`) to remember the team's glossary across turns.
 - **Dynamic skills** (`defineDynamic`) to load the right team playbook per caller.
 - **Human-in-the-loop** approval (`approval`) to gate expensive queries.
-- **Channel auth** to turn a request into an authenticated principal.
-- **Deployment** to Vercel, with the runtime behind your web app.
+- **Channel auth** to turn a request into a signed-in user.
+- **Deployment** to Vercel, with the agent behind your web app.
 
 ## Next steps
 
 - [Connect a warehouse](./connect-a-warehouse) when you have a data service to use in place of the sample dataset.
 - [MCP connections](../connections/mcp) for tool allowlists and per-connection approval.
-- [Sandbox](../sandbox) for backends, lifecycle, and network policy.
+- [Sandbox](../sandbox) for backends, when sandboxes start and stop, and network policy.
 - [Dynamic capabilities](../guides/dynamic-capabilities) for schema-derived dynamic tools, a read-only analyst subagent, and model-authored report workflows on this same example.
 - [Authentication](../guides/auth-and-route-protection) for production auth patterns.
 

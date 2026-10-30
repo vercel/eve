@@ -49,7 +49,7 @@ async function resolveRemoteHeaders(input: {
  * credentials through this default path.
  */
 export function resolveDevelopmentClientOptions(serverUrl: string): ClientOptions {
-  return { host: serverUrl };
+  return { baseUrl: serverUrl };
 }
 
 /** Builds a non-redirecting local client, using ambient bearer auth only when it owns Authorization. */
@@ -64,7 +64,7 @@ export function resolveLocalDevelopmentClientOptions(input: {
       ? { ...input.headers, [LOCAL_DEV_INTERACTIVE_CLIENT_HEADER]: "1" }
       : input.headers;
   const options = {
-    host: input.serverUrl,
+    baseUrl: input.serverUrl,
     redirect: "manual",
   } satisfies ClientOptions;
 
@@ -103,7 +103,7 @@ export function resolveRemoteDevelopmentClientOptions(input: {
           headers: input.headers,
           includeTrustedOidcHeader: true,
         }),
-      host: input.serverUrl,
+      baseUrl: input.serverUrl,
       redirect: "manual",
     };
   }
@@ -119,7 +119,7 @@ export function resolveRemoteDevelopmentClientOptions(input: {
               headers: input.headers,
               includeTrustedOidcHeader: false,
             }),
-    host: input.serverUrl,
+    baseUrl: input.serverUrl,
     redirect: "manual",
   };
 }

@@ -13,7 +13,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 
 - Read `AGENTS.md` first. It requires reading the relevant guide under `node_modules/eve/dist/docs/public/` before writing code.
 - Read `docs/how-the-chatbot-works.md` for architecture changes and `docs/setup-and-deploy.md` for setup, auth, storage, or deployment changes.
-- Search with `rg "useEveAgent|ClientSession|SessionState|message.appended|authorization.required|eveSession|chat_event|streamIndex|continuationToken|defineMcpClientConnection|defineTool"`.
+- Search with `rg "useEveAgent|ClientSession|SessionState|content.delta|interaction.opened|eveSession|chat_event|streamIndex|continuationToken|defineMcpClientConnection|defineTool"`.
 - Keep Eve runtime code separate from product shell code: `agent/` defines agent behavior; `app/_components/agent-chat.tsx` bridges Eve to the web UI; `lib/db/*` persists app state.
 
 ## Core Model
@@ -35,10 +35,10 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 ## Streaming
 
 - `useEveAgent` reduces Eve events into renderable messages; the template wraps it with a custom `ClientSession` to persist and resume sessions.
-- Treat `message.appended.data.messageDelta` as the new text. Treat `messageSoFar`, reduced message text, and rendered parts as cumulative.
+- Treat `content.delta.data.delta` as the new text for its `partId`. Treat reduced message text and rendered parts as cumulative; `content.completed` carries a part's whole value.
 - Read the stream as NDJSON. Buffering until newline is normal parsing, not app-level response buffering.
-- Consider a turn settled on `session.completed`, `session.failed`, or `session.waiting`. Treat `authorization.required` as a blocked state for normal text input.
-- Treat `turn.waiting` as progress, not a settled turn: the turn is parked, for example while its tasks work or a running call asks a question, and resumes with the next `step.started` for the same `turnId`. Keep following the stream until one of the settling events above.
+- Consider a turn settled on an event `endsTurn` from `eve/client` accepts: `turn.settled`, `session.ended`, or a `turn.paused` awaiting a person. Treat a sign-in `interaction.opened` (`request.kind: "sign-in"`) as a blocked state for normal text input.
+- Treat a `turn.paused` awaiting only calls as progress, not a settled turn: the turn waits on its tasks and resumes with `turn.resumed` for the same `turnId`. Keep following the stream until one of the settling events above.
 - On disconnect, reconnect from the next unread remote stream index. On refresh mid-turn, resume from saved `activeChat.session` and layer resumed events until the final snapshot catches up.
 
 ## Connections And Tools
@@ -46,8 +46,8 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 - Define local tools in `agent/tools/<snake_case>.ts` with `defineTool(...)`. Tool filenames become runtime tool names, so keep them ASCII snake_case.
 - Define Vercel Connect-backed MCP connections in `agent/connections/<name>.ts` with `defineMcpClientConnection(...)` and `connect(process.env.ENV_NAME ?? "local-name")`.
 - Treat composer connection toggles as per-turn intent, not connector provisioning or OAuth state.
-- Do not parse assistant text for auth requirements. Use `authorization.required` and `authorization.completed` events.
-- Implement Skip as a structured outcome: stop the stream, synthesize declined authorization completion plus `session.waiting`, apply those local events to the session, persist them, and clear pending input.
+- Do not parse assistant text for auth requirements. Use sign-in `interaction.opened` and `interaction.settled` events.
+- Implement Skip as a structured outcome: stop the stream, synthesize a declined `interaction.settled` plus a cancelled `turn.settled`, apply those local events to the chat, persist them, and clear pending input. The chat's next message starts a new session.
 
 ## Upstream Signals
 

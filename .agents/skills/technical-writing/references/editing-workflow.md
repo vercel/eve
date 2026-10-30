@@ -31,6 +31,8 @@ Before editing:
 - Add limitations next to the workflow they constrain.
 - Add troubleshooting to the page that owns the failing workflow.
 - Prefer one focused example over a new page.
+- Replace history with current behavior. Remove migration notes, removed options, and "no longer" phrasing rather than adding to them.
+- Cut while editing: merge restated sentences, move option lists into tables, and drop internals the reader cannot act on. See the density rules in [style-rules.md](style-rules.md#density).
 
 When support feedback drove the edit, deduplicate incidents into user problems before writing. Do not quote internal discussion or expose implementation history unless it helps the reader act.
 

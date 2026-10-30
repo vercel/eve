@@ -1,3 +1,12 @@
+import { internalSession } from "#channel/session.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { Delivery } from "#shared/delivery.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { endsTurn } from "#client/session-utils.js";
+import { viewOfEvents } from "#protocol/session-projection/fold.js";
+import { classifyRecord } from "#protocol/session-events/envelope.js";
+import { createEventReader } from "#protocol/session-lines.js";
+import { idle } from "#protocol/session-projection/selectors.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
@@ -21,7 +30,6 @@ import {
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -711,7 +719,7 @@ async function converse(
       signInTool("read_mail"),
       {
         logicalPath: "tools/ask_question.ts",
-        loadNamespace: async () => ({ default: askQuestion() }),
+        loadNamespace: async () => ({ default: askQuestion }),
       },
       gatedTool(
         GATED_TOOL,
@@ -800,9 +808,9 @@ async function converse(
     // A cancelled run's hooks are gone, so its address is never claimed again.
     let runsCancelledInWorld = false;
 
-    function track(session: Session): Session {
-      sessions.set(session.id, session);
-      return session;
+    function track(delivery: Delivery): Delivery {
+      sessions.set(delivery.sessionId, attachSession(delivery.sessionId));
+      return delivery;
     }
 
     const dispatch: Dispatch = async (request) => {
@@ -833,8 +841,17 @@ async function converse(
           waitUntil: (task) => void pending.push(task),
         },
         async (input) => {
+          const generated = createChannelDeliveryMetadata({
+            channelKind: `channel:${channelName}`,
+            channelName,
+          });
+          const delivery =
+            input.deliveryId === undefined
+              ? generated
+              : { ...generated, deliveryId: input.deliveryId };
           const handle = await workflowRuntime.createSession({
             ...input,
+            delivery,
             adapter,
             channelName,
             continuationToken:
@@ -842,8 +859,8 @@ async function converse(
                 ? undefined
                 : `${channelName}:${input.continuationToken}`,
           });
-          track(attachSession(handle.sessionId));
-          return handle;
+          sessions.set(handle.sessionId, attachSession(handle.sessionId));
+          return { ...handle, deliveryId: delivery.deliveryId };
         },
       );
       const response = await route.handler(request, args);
@@ -987,7 +1004,7 @@ async function converse(
     };
 
     /**
-     * The turn emits `turn.waiting` inside the step that raised the request, but
+     * The turn emits `turn.paused` inside the step that raised the request, but
      * an address the channel aliased in that step (such as Discord's message id)
      * is only claimed once the step commits. Answering through it before then
      * finds no session.
@@ -1059,29 +1076,54 @@ async function converse(
 const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /**
- * Cancels `session` until it waits for its next message with none of its steps
- * still running. A turn that starts after the first cancel needs another.
+ * Cancels `session` until it rests: idle, as the shared fold reads its stream, with none of its
+ * steps still running. A turn that starts after the first cancel needs another. A cancel is a
+ * delivery the stream records, so a resting session isn't cancelled again.
  */
 async function cancelUntilResting(session: Session): Promise<void> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   let last: string | undefined;
   let running: string[] = [];
   while (Date.now() < deadline) {
-    await session.cancel();
-    const tail = await session.getStreamTailIndex();
-    // An empty stream has nothing to read, and reading it waits for its first event.
-    if (tail >= 0) {
-      const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-      last = (await reader.read().finally(() => reader.cancel())).value?.type;
-    }
+    const events = await readThroughTail(session);
+    last = events.at(-1)?.type;
     running = await runningSteps(session);
-    if (last === "session.waiting" && running.length === 0) return;
+    if (idle(viewOfEvents(events).view) && running.length === 0) return;
+    await session.cancel();
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(
     `Timed out waiting for session ${session.id} to rest. Its stream ends with ${last ?? "nothing"}` +
       (running.length === 0 ? "." : `, and these steps are still running: ${running.join(", ")}.`),
   );
+}
+
+/**
+ * Every event `session` recorded from line `startIndex` through its tail. It reads stored lines,
+ * not events, so a tail line that materializes no event (one a reader skips) still ends the read.
+ */
+async function readThroughTail(session: Session, startIndex = 0): Promise<SessionStreamEvent[]> {
+  const tail = await internalSession(session).getStreamTailIndex();
+  if (tail < startIndex) return [];
+  const events: SessionStreamEvent[] = [];
+  const eventsOf = createEventReader();
+  const reader = (await internalSession(session).getLineStream({ startIndex })).getReader();
+  try {
+    for (let position = startIndex; position <= tail; position += 1) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const record = classifyRecord(value);
+      if (record.kind === "commit" || record.kind === "progress") {
+        events.push(...eventsOf.read(record.line, position));
+      } else if (record.kind === "transport") {
+        // The route's records don't take positions; read on to the next stored line.
+        position -= 1;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return events;
 }
 
 /** The names of `session`'s steps that haven't finished. */
@@ -1127,12 +1169,8 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
     async () => {
       const states = await Promise.all(
         sessions.map(async (session) => {
-          const tail = await session.getStreamTailIndex();
-          const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-          const last = await reader.read().finally(() => reader.cancel());
-          const waiting =
-            last.value?.type === "session.waiting" ||
-            (last.value?.type === "turn.waiting" && last.value.data.on === "input");
+          const tail = await internalSession(session).getStreamTailIndex();
+          const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
           const steps = await world.steps.list({ resolveData: "none", runId: session.id });
           const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
           return { resting: waiting && idle, tail };
@@ -1153,74 +1191,55 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
 }
 
 /** Whether an event asks the person `prompt`. */
-const asks = (prompt: string) => (event: MessageStreamEvent) =>
-  event.type === "input.requested" &&
-  event.data.requests.some((request) => request.prompt === prompt);
+const asks = (prompt: string) => (event: SessionStreamEvent) =>
+  event.type === "interaction.opened" &&
+  event.data.request.kind !== "sign-in" &&
+  event.data.request.prompt === prompt;
 
-/** Whether `session` settled the request that asked `prompt`, answered or withdrawn. */
+/**
+ * Whether `session` settled the request that asked `prompt`, answered or withdrawn, or admitted
+ * an answer to it: an approval's answer waits, admitted, for the rest of its batch.
+ */
 async function settles(session: Session, prompt: string): Promise<boolean> {
-  const tail = await session.getStreamTailIndex();
-  if (tail < 0) return false;
-  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
   const requestIds = new Set<string>();
-  try {
-    for (let index = 0; index <= tail; index += 1) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value.type === "input.requested") {
-        for (const request of value.data.requests) {
-          if (request.prompt === prompt) requestIds.add(request.requestId);
-        }
-      } else if (value.type === "approval.settled" && requestIds.has(value.data.requestId)) {
-        return true;
-      } else if (
-        value.type === "input.resolved" &&
-        value.data.resolutions.some((resolution) => requestIds.has(resolution.requestId))
-      ) {
-        return true;
-      }
+  const answers = new Set<string>();
+  for (const event of await readThroughTail(session)) {
+    if (event.type === "interaction.opened" && event.data.request.prompt === prompt) {
+      requestIds.add(event.data.interactionId);
+    } else if (event.type === "interaction.settled" && requestIds.has(event.data.interactionId)) {
+      return true;
+    } else if (event.type === "response.submitted" && requestIds.has(event.data.interactionId)) {
+      answers.add(event.data.responseId);
+    } else if (event.type === "response.admitted" && answers.has(event.data.responseId)) {
+      return true;
     }
-  } finally {
-    await reader.cancel();
   }
   return false;
 }
 
 /** Whether an event asks the person to sign in. */
-const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.required";
+const isSignIn = (event: SessionStreamEvent) =>
+  event.type === "interaction.opened" && event.data.request.kind === "sign-in";
 
 /**
  * Whether the session held for the person after it last emitted an event
  * `asked` matches. A question, approval, or sign-in parks the open turn
- * (`turn.waiting`) after each request, or once after requests raised
- * together; a session-limit prompt ends the turn (`session.waiting`).
+ * (`turn.paused`) after each request, or once after requests raised
+ * together; a session-limit prompt pauses it the same way.
  */
 async function holdsFor(
   session: Session,
-  asked: (event: MessageStreamEvent) => boolean,
+  asked: (event: SessionStreamEvent) => boolean,
 ): Promise<boolean> {
-  const tail = await session.getStreamTailIndex();
-  if (tail < 0) return false;
-  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
   let seen = false;
   let held = false;
-  try {
-    for (let index = 0; index <= tail; index += 1) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (asked(value)) {
-        seen = true;
-        held = false;
-      } else if (
-        seen &&
-        ((value.type === "turn.waiting" && value.data.on === "input") ||
-          value.type === "session.waiting")
-      ) {
-        held = true;
-      }
+  for (const event of await readThroughTail(session)) {
+    if (asked(event)) {
+      seen = true;
+      held = false;
+    } else if (seen && endsTurn(event)) {
+      held = true;
     }
-  } finally {
-    await reader.cancel();
   }
   return held;
 }

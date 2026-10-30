@@ -3,7 +3,7 @@ title: "Hooks"
 description: "Subscribe to runtime stream events from agent/hooks/."
 ---
 
-Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview)).
+A hook runs your code after the agent records an event on its session stream, such as a session starting or a turn ending. Each hook is a file under `agent/hooks/`. Use hooks for audit logs, metrics and alerts, or copying sessions and messages to your own database. A hook sees events from every channel; to handle one channel's events, see [Scope side effects to a channel](#scope-side-effects-to-a-channel).
 
 ## Define a hook
 
@@ -15,42 +15,234 @@ export default defineHook({
     async "session.started"(_event, ctx) {
       console.info("session started", { sessionId: ctx.session.id });
     },
-    async "message.completed"(event) {
-      console.info("model finished", { length: event.data.message?.length ?? 0 });
+    async "content.completed"(event) {
+      if (event.data.phase !== "reply" || event.data.kind !== "text") return;
+      console.info("reply part", { length: String(event.data.value ?? "").length });
     },
   },
 });
 ```
 
-The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`, and `agent/hooks/auth/load-profile.ts` becomes `"auth/load-profile"`.
+The hook's name is its path without the extension: `agent/hooks/audit.ts` is `"audit"`, and `agent/hooks/auth/load-profile.ts` is `"auth/load-profile"`. `defineHook`, `HookDefinition`, and `HookContext` come from `eve/hooks`.
 
-`defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
+The `events` map keys each handler by event type, and `*` matches every event. Any event in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming) works, such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress events (`content.delta`, `call.input`, and `call.progress`) reach only handlers keyed on their exact type, never `*`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+Handlers can call external services, cancel the running turn, and [continue a finished turn](#continue-a-turn-from-a-hook) with a new message. They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+
+## Hook structure and context
+
+Every handler receives a `HookContext`, which includes the shared [session context](./session-context) helpers. `HookContext<K>` is keyed by the handler's event key. Only `turn.settled` and `*` handlers get `continue`, so type a helper that calls it as `HookContext<"turn.settled">`:
+
+```ts
+type HookContext<K extends HookEventKey = HookEventKey> = HookBaseContext &
+  (K extends "turn.settled" | "*" ? HookContinue : {});
+
+interface HookContinue {
+  continue(message: MessageContent, options?: HookContinueOptions): HookContinueResult;
+}
+
+interface HookBaseContext extends SessionContext {
+  readonly agent: { readonly name: string; readonly nodeId?: string };
+  readonly channel: { readonly kind?: string; readonly continuationToken?: string };
+  /** Where the event sits on the stream: its line, and its index in that line. */
+  readonly position: { readonly line: number; readonly index: number };
+  /** Immutable session snapshot as of the whole commit the event is in. */
+  readonly view: SessionView;
+  readonly turn: DynamicTurn | null;
+  readonly now: Date;
+  readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
+  readonly memo: Memo;
+  cancel(reason?: string): void;
+}
+```
+
+- `ctx.turn` is the latest turn, including one that ended, or `null` before the first turn.
+- `ctx.now` is the time eve recorded the event.
+- `ctx.memo(key, fn)` follows the [dynamic-value memo rules](./dynamic-capabilities#memo-rules).
+- `ctx.view` is a read-only snapshot of the session, taken with the event. Read what changed from the event and where things stand from the view. On `call.settled`, `call(ctx.view, event.data.callId)` from `eve/events` returns the call's name, kind, input, output, and state.
+- Hooks don't receive the assembled conversation history.
+
+For `task.started`, `task.ended`, and `child.opened`, `ctx.session.id` is the session that started the task or opened the child session, even when the event arrives between turns. These hooks can call `ctx.getSandbox()` on that session, and their state and sandbox changes carry into its next turn.
+
+A hook can stop the session's sandbox at a point you choose:
+
+```ts title="agent/hooks/stop-after-turn.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "turn.settled"(_event, ctx) {
+      const sandbox = await ctx.getSandbox();
+      await sandbox.stop();
+    },
+  },
+});
+```
+
+Every built-in sandbox backend stops the compute but keeps the session and its filesystem. On Vercel, the sandbox starts again on its next use. A failed stop follows the normal [hook failure behavior](#what-happens-when-a-hook-throws).
+
+### Narrowing tool results
+
+`toolResultFrom` from `eve/tools` checks whether a finished call came from a specific authored tool or MCP or OpenAPI connection, and returns its typed output. Pass it the result of `call(ctx.view, callId)`:
+
+```ts
+import { defineHook } from "eve/hooks";
+import { toolResultFrom } from "eve/tools";
+import { call } from "eve/events";
+import getWeather from "../tools/get-weather";
+import linear from "../connections/linear";
+
+export default defineHook({
+  events: {
+    "call.settled"(event, ctx) {
+      const observed = call(ctx.view, event.data.callId);
+
+      // Authored tool: output is typed as the tool's return type
+      const weather = toolResultFrom(observed, getWeather);
+      if (weather) {
+        console.log(weather.output.temperature);
+      }
+
+      // Connection: output is unknown, toolName is qualified
+      const linearResult = toolResultFrom(observed, linear);
+      if (linearResult) {
+        console.log(linearResult.connectionToolName, linearResult.output);
+      }
+    },
+  },
+});
+```
+
+| Call                            | `toolResultFrom` returns                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------ |
+| Doesn't match, or didn't finish | `undefined`                                                                    |
+| Authored tool                   | `{ output, toolName, callId }`, with `output` typed as the tool's `TOutput`    |
+| Connection                      | `{ output, toolName, connectionToolName, callId }`, with `output` as `unknown` |
+
+`toolResultFrom` matches by tool definition, not name, so it also works for tools from a mounted extension. Import the tool from the extension's `./tools` export:
+
+```ts
+import { search } from "@acme/crm/tools";
+import { call } from "eve/events";
+
+// inside "call.settled":
+const crmSearch = toolResultFrom(call(ctx.view, event.data.callId), search); // typed; matches crm__search
+```
+
+When one definition is mounted under several names, such as when a subagent re-exports an extension tool, `toolResultFrom` matches all of them.
+
+### Persist events to your own database
+
+`ctx.position` is the event's place on the stream. A position never changes, so `(session, line, index)` works as a primary key for an events table:
+
+```ts title="agent/hooks/persist.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "*"(event, ctx) {
+      await db.query(
+        `insert into agent_events (session_id, line, index, type, data)
+         values ($1, $2, $3, $4, $5)
+         on conflict (session_id, line, index) do nothing`,
+        [ctx.session.id, ctx.position.line, ctx.position.index, event.type, event.data],
+      );
+    },
+  },
+});
+```
+
+Reading the stream again yields the same positions, so the key removes duplicates. After an interruption, eve doesn't run hooks again for events it already published. Some handlers for an event may have run and others not, so effects are not exactly-once.
+
+Pass `ctx.occurrence.idempotencyKey`, which identifies this handler's run for this event, to services that support idempotency. For one effect per turn or call, key on `turnId` or `callId` instead. An effect such as one alert per session needs state you store yourself. `ctx.memo` caches lookups, not records of effects, and a deployment change can discard it.
+
+See [Positions](../concepts/sessions-runs-and-streaming#positions) for the full contract.
+
+## Execution order
+
+eve handles each recorded line of the stream in this order:
+
+1. Write. The line is saved to the session stream.
+2. Channel. The channel's handler runs for each event.
+3. Hooks. Typed handlers run first, then `*` handlers. Return values are ignored.
+4. Cancellation. A cancel requested with `ctx.cancel()` takes effect after the handlers return.
+
+Hooks run after the line is saved, so a hook that throws can't corrupt the stream. [Dynamic functions](./dynamic-capabilities) don't subscribe to events; they run before each model call.
+
+## What happens when a hook throws
+
+An unhandled error fails the running turn before its next model call, or when the turn would end. Between turns, eve only logs the error. Catch errors from optional audit or metrics work if the turn should continue. To stop without a failure, call [`ctx.cancel(reason?)`](#cancel-the-running-turn-from-a-hook).
+
+eve doesn't retry a failed hook or undo the state changes and side effects it made before the error. Handle retries or compensation inside the hook. Runtime failures outside the handler, such as context setup or saving state, still propagate.
+
+## Cancel the running turn from a hook
+
+Call `ctx.cancel(reason?)` when a hook finds that the turn can't continue. For example, a `turn.started` hook that can't load the caller's credentials can stop the turn before the model runs:
+
+```ts title="agent/hooks/require-credentials.ts"
+import { defineHook } from "eve/hooks";
+import { loadWorkspaceCredentials } from "../lib/credentials";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      try {
+        await loadWorkspaceCredentials(ctx.session.auth.current);
+      } catch (error) {
+        console.warn("cancelling turn: workspace credentials unavailable", {
+          error,
+          sessionId: ctx.session.id,
+        });
+        ctx.cancel("Workspace credentials are unavailable.");
+      }
+    },
+  },
+});
+```
+
+The event's other handlers still run. Then eve cancels the turn as [`session.cancel()`](./client/streaming) does:
+
+- eve stops model and tool work in progress.
+- eve cancels child turns the turn delegated to.
+- The turn ends with `outcome: "cancelled"` and `cause: { hook }` naming the hook, and eve records no failure.
+
+A cancel from `turn.started` or `model.requested` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
+
+Rules for `ctx.cancel()`:
+
+- It returns `void`, because the turn stops after the hook returns.
+- Call it before the handler's promise resolves. A call from work the handler didn't await throws.
+- A handler that calls `ctx.cancel()` and then throws fails the turn instead.
+- It targets the current turn, including while eve still accepts the turn's input. Between turns with no incoming turn, it does nothing.
+- Repeated calls cancel that turn once and never a later turn.
+- `ctx.compact` and `ctx.once` aren't available in hooks.
+
+A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Only the turn's own sender can answer by text; anyone else's text waits and runs as its own turn. The answer updates the claims on `ctx.session.auth.current` for that event's hooks and the rest of the turn, as a follow-up message does. Calling `ctx.cancel()` from that event's hook cancels the turn: the question ends as `interrupted`, and the waiting tool call never gets the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
 
 ## Scope side effects to a channel
 
-A hook under `agent/hooks/` observes matching events from every channel on the root agent. `defineHook` has no channel filter. Use a channel's `events` configuration when a handler assumes a specific platform or should run only for sessions owned by that channel:
+A hook under `agent/hooks/` sees matching events from every channel on the root agent. To run a handler only for sessions from one channel, put it in that channel's `events` configuration:
 
 ```ts title="agent/channels/github.ts"
 import { githubChannel } from "eve/channels/github";
 
 export default githubChannel({
   events: {
-    async "turn.completed"(event, channel, ctx) {
-      console.info("GitHub turn completed", {
-        repository: channel.repository.fullName,
+    async "turn.settled"(event, ctx) {
+      console.info("GitHub turn settled", {
+        outcome: event.data.outcome,
+        repository: ctx.channel.repository.fullName,
         sessionId: ctx.session.id,
-        turnId: event.turnId,
+        turnId: event.data.turnId,
       });
     },
   },
 });
 ```
 
-A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer's handler keeps Slack's default by calling `next()` and replaces it by skipping `next`.
+On a built-in channel, your handler replaces the channel's default handler for the same event key. Check the channel page before you override events that send replies, progress, errors, or prompts for human input. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer keeps Slack's default by calling `next()` and replaces it by skipping `next`.
 
-Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For a channel with event handlers, such as `githubChannel`, `slackChannel`, and the other built-ins, the kind is the path-derived identity. `agent/channels/github.ts` reports `channel:github`, so `ctx.channel.kind === "github"` never matches. Import the channel definition and compare it with `isChannel` from `eve/channels`:
+To check the channel inside a global hook, use `isChannel` from `eve/channels`, not `ctx.channel.kind`. The kind comes from the file path: `agent/channels/github.ts` reports `channel:github`, so `ctx.channel.kind === "github"` never matches. `isChannel` works for every channel, including route-only channels without event handlers:
 
 ```ts title="agent/hooks/github-only.ts"
 import { isChannel } from "eve/channels";
@@ -68,201 +260,67 @@ export default defineHook({
 });
 ```
 
-A route-only `defineChannel` with no event handlers keeps the kind `"http"`, so `isChannel` does not match it in a hook. Compare `ctx.channel.kind === "http"` for those channels instead.
+Use `isChannel` the same way to get typed channel metadata in dynamic functions or instrumentation; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
 
-For typed channel metadata in dynamic resolvers or instrumentation, narrow with `isChannel` the same way; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
+## Continue a turn from a hook
 
-## Hook structure and context
+Call `ctx.continue(message, options?)` from a `turn.settled` handler to start the session's next turn. This hook keeps the agent working until the tests pass, for at most ten more turns:
 
-Every handler receives the same `HookContext`, including the shared session
-helpers documented in [Session context](./session-context):
-
-```ts
-interface HookContext extends SessionContext {
-  readonly agent: { readonly name: string; readonly nodeId?: string };
-  readonly channel: { readonly kind?: string; readonly continuationToken?: string };
-  cancel(): void;
-}
-```
-
-That means a hook can access the current sandbox and release its backing
-compute at an application-defined boundary:
-
-```ts title="agent/hooks/stop-after-turn.ts"
+```ts title="agent/hooks/until-green.ts"
+import { defineState } from "eve/context";
 import { defineHook } from "eve/hooks";
+
+const attempts = defineState("until-green.attempts", () => 0);
 
 export default defineHook({
   events: {
-    async "turn.completed"(_event, ctx) {
+    async "turn.settled"(event, ctx) {
+      if (event.data.outcome !== "completed") return;
       const sandbox = await ctx.getSandbox();
-      await sandbox.stop();
-    },
-  },
-});
-```
-
-Every built-in backend stops its underlying compute while preserving the
-durable session and filesystem for the next callback. On Vercel, the current
-handle can also automatically resume on later I/O. A hook failure, including a
-failed stop, follows the normal
-[hook failure behavior](#what-happens-when-a-hook-throws).
-
-For `task.started`, `task.settled`, and `agent.started`, `ctx.session.id`
-identifies the session that started the task or opened the subagent session.
-Typed handlers and `*` handlers receive this context even when the event
-arrives between turns. These hooks can use `ctx.getSandbox()` against that
-session. Session state and sandbox changes they make are kept for the
-session's next turn. `agent.started` appears when the child session opens, or
-when the parent's current model step ends if one is running.
-
-### Narrowing tool results
-
-`toolResultFrom` narrows an `action.result` event to a specific authored tool or connection (MCP or OpenAPI) and returns typed output. Import it from `eve/tools`:
-
-```ts
-import { defineHook } from "eve/hooks";
-import { toolResultFrom } from "eve/tools";
-import getWeather from "../tools/get-weather";
-import linear from "../connections/linear";
-
-export default defineHook({
-  events: {
-    "action.result"(event) {
-      // Authored tool: output is typed as the tool's return type
-      const weather = toolResultFrom(event.data.result, getWeather);
-      if (weather) {
-        console.log(weather.output.temperature);
+      const test = await sandbox.run({ command: "pnpm test --reporter=dot" });
+      if (test.exitCode === 0 || attempts.get() >= 10) {
+        attempts.update(() => 0);
+        return;
       }
-
-      // Connection: output is unknown, toolName is qualified
-      const linearResult = toolResultFrom(event.data.result, linear);
-      if (linearResult) {
-        console.log(linearResult.connectionToolName, linearResult.output);
-      }
-    },
-  },
-});
-```
-
-Returns `undefined` when the result doesn't match, or when `isError` is `true`. For authored tools the return includes `{ output, toolName, callId }` with `output` typed as the tool's `TOutput`. For connections it includes `{ output, toolName, connectionToolName, callId }` with `output` as `unknown`.
-
-This works for a mounted extension's tools too — import the tool from the extension's `./tools` export and pass it. `toolResultFrom` matches the namespaced result (`crm__search`) because it keys off the tool definition, not the name:
-
-```ts
-import { search } from "@acme/crm/tools";
-
-// inside "action.result":
-const crmSearch = toolResultFrom(event.data.result, search); // typed; matches crm__search
-```
-
-When one definition is mounted under more than one tool name, for example when a subagent re-exports an extension tool, `toolResultFrom` matches results from every mounted name.
-
-### Persist events to your own database
-
-Every event carries a `meta` envelope with `meta.id`, a unique, sortable identifier for that event. It makes a natural primary key for an events table:
-
-```ts title="agent/hooks/persist.ts"
-import { defineHook } from "eve/hooks";
-
-export default defineHook({
-  events: {
-    async "*"(event, ctx) {
-      await db.query(
-        `insert into agent_events (id, session_id, type, data, emitted_at)
-         values ($1, $2, $3, $4, $5)
-         on conflict (id) do nothing`,
-        [
-          event.meta.id,
-          ctx.session.id,
-          event.type,
-          "data" in event ? event.data : null,
-          event.meta.at,
-        ],
+      attempts.update((n) => n + 1);
+      ctx.continue(
+        `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
       );
     },
   },
 });
 ```
 
-`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. It is not a retry guard for the hook itself: if a step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one.
+Only `turn.settled` and `*` handlers receive `ctx.continue`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the continuation names no sender and the turn runs as the session's current identity.
 
-What to key on instead depends on what you are protecting:
+The continuation waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or ended, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and a note in the turn's history tells the model no person wrote it. Like other hook effects, a continuation is lost if the step that settled the turn is interrupted before it's saved. Bound loops yourself, as the example does.
 
-- **A side effect that must happen once per turn or step** — a charge, an email, a ticket — keys well on the coordinates in `event.data` (`turnId`, `stepIndex`, `sequence`). A retry restores those from the step's input, so the second attempt computes the same key and your gate holds.
-- **Stored content should not key on those coordinates.** The retry re-invokes the model, so one coordinate can carry different text on each attempt. `on conflict (turn_id, step_index, sequence) do nothing` would keep the abandoned attempt and drop the one that finished. Key on `meta.id`, and accept that an interrupted turn leaves both attempts in the table.
+A turn can be continued when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and continue with a correction. When several hooks continue the same turn, their messages share the next turn.
 
-Behind that split is an asymmetry worth knowing: durable history keeps only the attempt that completed, while the event stream keeps every attempt, and no field marks which is which. Hooks are at-least-once, and no key collapses a retry.
-
-See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract.
-
-## Execution order
-
-When a session publishes a stream event while it runs, the step that owns the session does four things in order:
-
-1. Channel delivery. The channel adapter handler runs.
-2. Write. The event is stamped with its `meta` envelope, then written to the durable stream.
-3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-4. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
-
-Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
-
-## What happens when a hook throws
-
-eve logs a thrown or rejected handler with the hook slug, subscription, event type, event ID, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `step.started`, and failure events. Throwing from a hook does not reject work or veto a turn. To stop the running turn, call [`ctx.cancel()`](#cancel-the-running-turn-from-a-hook).
-
-A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.settled`, or `agent.started` event fails, the workflow runtime retries the publishing step, which can publish the event again.
-
-## Cancel the running turn from a hook
-
-Call `ctx.cancel()` when a hook finds that the turn cannot proceed. For example, a `turn.started` hook that cannot load the caller's credentials can stop the turn before the model runs, instead of letting every tool call fail:
-
-```ts title="agent/hooks/require-credentials.ts"
-import { defineHook } from "eve/hooks";
-import { loadWorkspaceCredentials } from "../lib/credentials";
-
-export default defineHook({
-  events: {
-    async "turn.started"(_event, ctx) {
-      try {
-        await loadWorkspaceCredentials(ctx.session.auth.current);
-      } catch (error) {
-        console.warn("cancelling turn: workspace credentials unavailable", {
-          error,
-          sessionId: ctx.session.id,
-        });
-        ctx.cancel();
-      }
-    },
-  },
-});
-```
-
-The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
-
-A plain-text message that answers a pending question, such as one from `ask_question`, is recorded as `message.received` before eve delivers it. Calling `ctx.cancel()` from that event's hook cancels the turn instead: the question resolves as `cancelled`, and the waiting tool call never receives the text.
-
-The same goes for the `action.partial` a workflow tool reports while the turn waits on it: `ctx.cancel()` from its hook cancels the turn, and the run's result never reaches the model.
-
-`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
-
-`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, `task.started`, `task.settled`, and `agent.started`, and during clear or compact requests.
+`ctx.continue()` returns `{ queued: true }`, or `{ queued: false, reason }` when it can't continue the turn: `not-completed`, `already-queued`, `auth-conflict` (another hook's continuation acts for a different sender), or `not-settled` (a `*` handler on another event).
 
 ## Subagent isolation
 
-Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
+A subagent can have its own `agent/hooks/` directory. Its hooks run only for the subagent's turns and see only its context. Parent hooks don't run for subagent turns.
 
-Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. A proxied `input.requested` also carries `event.data.callId`, the parent call that waits on it. The parent follows a proxied `input.requested` or `authorization.required` with `turn.waiting` for its own open turn, which stays open until the running call finishes. A proxied `authorization.completed` is not followed by a parent turn event. These parent events also invoke parent hooks; they do not resolve pending input requests.
+A subagent's approvals, questions, and sign-ins appear on the parent stream as the parent's own `interaction.opened` events. Parent hooks see them with the parent's session, agent, and channel context. In a relayed request:
+
+- `subject` names the parent call that waits on it.
+- `origin` names the child session and request, and `origin.call` names the child's call.
+
+While the parent's turn waits on that child, the relayed request makes it wait for the person too. When the child's request ends, the parent stream records `interaction.settled`.
 
 ## Hook vs tool vs provider
 
-| Need                                              | Use                                            |
-| ------------------------------------------------- | ---------------------------------------------- |
-| Observe runtime events (audit, metrics, alerting) | `events.<type>` (or a channel adapter handler) |
-| Provide structured input to the model on demand   | a tool                                         |
-| Make a value available across the entire step     | a context provider                             |
-| Subscribe to platform-specific events             | a channel adapter handler                      |
+| Need                                            | Use                                            |
+| ----------------------------------------------- | ---------------------------------------------- |
+| Watch runtime events (audit, metrics, alerting) | `events.<type>` (or a channel handler)         |
+| Start the next turn after one finishes          | `ctx.continue()` from `events["turn.settled"]` |
+| Give the model structured input on demand       | a tool                                         |
+| Add model context at runtime                    | `defineDynamic` with `defineInstructions`      |
+| Subscribe to platform-specific events           | a channel handler                              |
 
-Stream-event hooks and channel adapter event handlers are structurally identical. Choose the channel adapter handler when you are authoring adapter-specific behavior, and choose `events.*` when you are authoring agent-level behavior that should fire across every channel. Both fire when both are registered.
+Hooks and channel event handlers have the same shape. When both handle an event, both run.
 
 ## What to read next
 

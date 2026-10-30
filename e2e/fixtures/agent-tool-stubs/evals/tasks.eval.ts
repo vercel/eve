@@ -65,8 +65,8 @@ export default defineEval({
     t.judge(
       "The response identifies Walk dog and Pay rent as the only remaining open tasks. " +
         "It may acknowledge that Buy milk was completed, but must not present Buy milk as still open.",
-      { on: second.message },
+      { on: second.reply },
     ).gate(0.8);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

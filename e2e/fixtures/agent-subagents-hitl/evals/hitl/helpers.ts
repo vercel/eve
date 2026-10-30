@@ -1,19 +1,20 @@
-import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
+import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
+import type { Interaction } from "eve/events";
 
 /**
- * Follows the parent session, turn by turn, until a child's request matching
- * `toolName` is pending on it. A child asks after its own model call, so the
+ * Follows the parent session, turn by turn, until a child's request about `toolName` (or, for a
+ * request about no call, such as the budget prompt, of that kind) is pending on it. A child asks after its own model call, so the
  * request may land a turn or two after the delegation.
  */
 export async function waitForRelayed(
   t: EveEvalContext,
   initial: EveEvalSession,
   toolName: string,
-): Promise<{ readonly request: InputRequest; readonly session: EveEvalSession }> {
+): Promise<{ readonly request: Interaction; readonly session: EveEvalSession }> {
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const request = session.pendingInputRequests.find(
-      (pending) => pending.action.toolName === toolName,
+    const request = session.pendingInteractions.find(
+      (pending) => (pending.call?.name ?? pending.request.kind) === toolName,
     );
     if (request !== undefined) return { request, session };
     session = (await next(t, session)).session;
@@ -30,7 +31,7 @@ export async function waitForReply(
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const turn = await next(t, session);
-    if (turn.message?.includes(marker) === true) return turn;
+    if (turn.reply?.includes(marker) === true) return turn;
     session = turn.session;
   }
   throw new Error(`No parent reply contained ${marker} after five turns.`);
@@ -38,5 +39,5 @@ export async function waitForReply(
 
 /** The parent's events from its current cursor to the next turn boundary. */
 export function next(t: EveEvalContext, session: EveEvalSession): Promise<EveEvalTurn> {
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex }).result();
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch().result();
 }
