@@ -487,6 +487,7 @@ export class ModelCaller {
         excludedActionToolNames,
         held: step.finalReplyOnly && workingTaskIds(step.session).length > 0,
         finalReplyOnly: step.finalReplyOnly,
+        sessionCall: (callId) => step.view().projection.view.calls[callId],
         tools: catalog,
         interruptSignal: generation.signal,
       },

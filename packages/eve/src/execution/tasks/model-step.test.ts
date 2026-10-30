@@ -65,7 +65,12 @@ describe("text beside a task wait", () => {
         }),
         { runId: "run_0", sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
         stream(),
-        { excludedActionToolNames: new Set(), finalReplyOnly, tools: new Map() },
+        {
+          excludedActionToolNames: new Set(),
+          finalReplyOnly,
+          sessionCall: () => undefined,
+          tools: new Map(),
+        },
       );
 
       expect(events.filter((event) => event.type === "content.completed")).toEqual([

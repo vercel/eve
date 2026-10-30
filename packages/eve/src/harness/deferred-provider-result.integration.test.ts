@@ -100,8 +100,22 @@ const reply: StreamPart[] = [
 describe("a provider result that arrives a step late", () => {
   // Anthropic can end a response with a server tool call it hasn't answered yet, beside a local
   // call, and open the next response with that call's result.
-  it.fails("settles the call the earlier step introduced", async () => {
+  it("settles the call the earlier step introduced", async () => {
     const { searchFacts, violations } = await runLateResult([[searchResult, ...reply]]);
+
+    expect(violations).toEqual([]);
+    expect(searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
+  });
+
+  it("settles it once when the step's first attempt fails after the result", async () => {
+    const overloaded: StreamPart = {
+      error: { message: "Overloaded", type: "overloaded_error" },
+      type: "error",
+    };
+    const { searchFacts, violations } = await runLateResult([
+      [searchResult, overloaded],
+      [searchResult, ...reply],
+    ]);
 
     expect(violations).toEqual([]);
     expect(searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
