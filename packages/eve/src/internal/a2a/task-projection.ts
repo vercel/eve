@@ -232,7 +232,7 @@ function latest(times: readonly string[]): string | undefined {
 }
 
 /** The turn's open prompts no admitted answer covers yet, oldest first. */
-function openPromptsForTurn(view: SessionView, turnId: string): readonly InteractionRow[] {
+export function openPromptsForTurn(view: SessionView, turnId: string): readonly InteractionRow[] {
   const answered = answeredInteractionIds(view);
   return [...openRequests(view), ...openSignIns(view)]
     .filter(
@@ -297,7 +297,10 @@ function replyArtifacts(view: SessionView, turnId: string): readonly Artifact[] 
   ];
 }
 
-/** The task's user messages, the deliveries that joined its turn, newest last. */
+/**
+ * The task's user messages, newest last: the deliveries that joined its turn, and the answers
+ * given to its prompts.
+ */
 function taskHistory(
   view: SessionView,
   ref: TaskRef,
@@ -306,12 +309,17 @@ function taskHistory(
 ): readonly Message[] | undefined {
   if (historyLength === 0) return undefined;
   const taskId = encodeTaskId(ref);
-  const rows = Object.values(view.deliveries)
-    .filter((row) =>
-      turnId === undefined ? row.deliveryId === ref.deliveryId : row.turnId === turnId,
-    )
-    .sort((a, b) => a.introducedAt - b.introducedAt);
-  const messages = rows.flatMap((row): Message[] => {
+  const userMessage = (deliveryId: string, parts: readonly Part[]): Message => ({
+    contextId: ref.sessionId,
+    messageId: messageIdOfDelivery(deliveryId) ?? deliveryId,
+    parts,
+    role: "ROLE_USER",
+    taskId,
+  });
+  const entries: { readonly at: number; readonly message: Message }[] = [];
+  const listed = new Set<string>();
+  for (const row of Object.values(view.deliveries)) {
+    if (turnId === undefined ? row.deliveryId !== ref.deliveryId : row.turnId !== turnId) continue;
     const parts = (row.parts ?? []).flatMap((part): Part[] =>
       part.kind === "text"
         ? [{ mediaType: "text/plain", text: part.text }]
@@ -319,19 +327,39 @@ function taskHistory(
           ? []
           : [{ filename: part.filename, mediaType: part.mediaType, url: part.url }],
     );
-    return parts.length === 0
-      ? []
-      : [
-          {
-            contextId: ref.sessionId,
-            messageId: messageIdOfDelivery(row.deliveryId) ?? row.deliveryId,
-            parts,
-            role: "ROLE_USER",
-            taskId,
-          },
-        ];
-  });
+    if (parts.length === 0) continue;
+    listed.add(row.deliveryId);
+    entries.push({ at: row.introducedAt, message: userMessage(row.deliveryId, parts) });
+  }
+  if (turnId !== undefined) {
+    for (const response of Object.values(view.responses)) {
+      // A typed answer that arrived as a message is listed already, with what was typed.
+      if (listed.has(response.deliveryId)) continue;
+      if (interaction(view, response.interactionId)?.turnId !== turnId) continue;
+      const text = answerText(view, response.interactionId, response.value);
+      if (text === undefined) continue;
+      entries.push({
+        at: response.introducedAt,
+        message: userMessage(response.deliveryId, [{ mediaType: "text/plain", text }]),
+      });
+    }
+  }
+  const messages = entries.sort((a, b) => a.at - b.at).map((entry) => entry.message);
   return historyLength === undefined ? messages : messages.slice(-historyLength);
+}
+
+/** An answer as the text a person would have typed: what they wrote, or the option's label. */
+function answerText(
+  view: SessionView,
+  interactionId: string,
+  value: { readonly optionId?: string; readonly text?: string } | undefined,
+): string | undefined {
+  if (value?.text !== undefined) return value.text;
+  if (value?.optionId === undefined) return undefined;
+  const option = view.interactions[interactionId]?.request.options?.find(
+    (candidate) => candidate.id === value.optionId,
+  );
+  return option?.label ?? value.optionId;
 }
 
 /** One task of a context with its `ListTasks` sort key. */
@@ -388,6 +416,33 @@ export function hasRead(view: SessionView, deliveryId: string): boolean {
   const row = view.deliveries[deliveryId];
   if (row !== undefined) return row.status !== "admitted";
   return Object.values(view.responses).some((response) => response.deliveryId === deliveryId);
+}
+
+/**
+ * Whether the session turned down an answer `deliveryId` carried (an approval's response policy
+ * refused its responder, say): its prompt stays open, so waiting for the status to move is futile.
+ */
+export function answerTurnedDown(view: SessionView, deliveryId: string): boolean {
+  return Object.values(view.responses).some(
+    (response) =>
+      response.deliveryId === deliveryId &&
+      response.status === "settled" &&
+      response.outcome !== undefined &&
+      response.outcome !== "applied",
+  );
+}
+
+/**
+ * The task a follow-up reached. A follow-up joins its task's turn, but one that arrives as that
+ * turn ends starts a turn of its own: a new task, named by the follow-up itself.
+ */
+export function reachedTask(view: SessionView, task: TaskRef, deliveryId: string): TaskRef {
+  if (deliveryId === task.deliveryId) return task;
+  const reached = view.deliveries[deliveryId]?.turnId;
+  const own = view.deliveries[task.deliveryId]?.turnId;
+  return reached === undefined || reached === own
+    ? task
+    : { deliveryId, sessionId: task.sessionId };
 }
 
 /** Whether `deliveryId` reached the session at all. */
