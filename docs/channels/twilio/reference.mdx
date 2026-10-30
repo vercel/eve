@@ -6,7 +6,7 @@ type: reference
 
 This page documents every part of `twilioChannel` from `eve/channels/twilio`. For setup and common tasks, start with [Twilio](/docs/channels/twilio).
 
-The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve verifies each request before dispatch, using `X-Twilio-Signature` unless you configure a forwarded-webhook verifier. See [Channels](/docs/channels/overview) for what every channel shares.
+The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve verifies each request before dispatch, using `X-Twilio-Signature` or your configured forwarded-webhook verifier. See [Channels](/docs/channels/overview) for what every channel shares.
 
 ## Add the channel
 
@@ -34,7 +34,7 @@ Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at
 
 ## Forwarded webhooks
 
-Set `credentials.webhookVerifier` when a trusted integration verifies and forwards Twilio requests. It receives the request and raw body. Return a falsy value to reject, a string to accept that body, or another truthy value to accept the original body. Without a verifier, eve checks the native Twilio signature.
+Set `credentials.webhookVerifier` when a trusted integration verifies and forwards Twilio requests. It receives the request and raw body. Return a string to accept that body, or another truthy value to accept the original body. Requests the verifier rejects or throws on must pass native Twilio signature verification. This keeps direct speech transcription callbacks working: Twilio sends those callbacks to the URL in the generated `<Gather action>`, even when the initial call arrives through Connect. Without a verifier, eve checks the native signature only.
 
 Connect's `connectTwilioCredentials` helper supplies a verifier and resolves the account Auth Token at runtime. Pass the matching account SID to the helper. An OAuth access token cannot replace the Auth Token. The manifest declares separate messaging, voice, and transcription destinations; it does not configure provider callbacks by itself.
 

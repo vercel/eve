@@ -18,8 +18,9 @@ export interface TwilioVerifiedRequest {
 }
 
 /**
- * Verifies a forwarded webhook. A falsy result rejects it; a string supplies
- * the verified body; another truthy result accepts the original body.
+ * Verifies a forwarded webhook. A string supplies the verified body; another
+ * truthy result accepts the original body. Rejected requests must pass native
+ * Twilio signature verification, which also covers direct Gather callbacks.
  */
 export type TwilioWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
 
@@ -55,14 +56,24 @@ export async function verifyTwilioRequest(
   options: TwilioVerifyOptions,
 ): Promise<TwilioVerifiedRequest> {
   if (options.webhookVerifier !== undefined) {
-    const originalBody = await request.text();
-    const result = await options.webhookVerifier(request, originalBody);
-    if (!result) throw new Error("twilioChannel: inbound webhook verifier rejected the request.");
-    const body = typeof result === "string" ? result : originalBody;
-    const params = new URLSearchParams(
-      request.method === "GET" ? new URL(request.url).search : body,
-    );
-    return { body, params };
+    // Gather actions also receive direct Twilio callbacks. Keep the request
+    // unread for native signature verification if the forwarder rejects it.
+    const originalBody = await request.clone().text();
+    let result: unknown;
+    try {
+      result = await options.webhookVerifier(request, originalBody);
+    } catch (error) {
+      if (!request.headers.has("x-twilio-signature")) throw error;
+    }
+    if (result) {
+      const body = typeof result === "string" ? result : originalBody;
+      const params = new URLSearchParams(
+        request.method === "GET" ? new URL(request.url).search : body,
+      );
+      return { body, params };
+    }
+    if (!request.headers.has("x-twilio-signature"))
+      throw new Error("twilioChannel: inbound webhook verifier rejected the request.");
   }
   const signature = request.headers.get("x-twilio-signature");
   if (!signature) {

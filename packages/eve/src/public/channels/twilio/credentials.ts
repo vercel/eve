@@ -5,6 +5,6 @@ import type { TwilioAuthToken, TwilioWebhookVerifier } from "#public/channels/tw
 export interface TwilioChannelCredentials {
   readonly accountSid?: TwilioAccountSid;
   readonly authToken?: TwilioAuthToken;
-  /** Verify forwarded webhooks instead of the native Twilio signature. */
+  /** Accept verified forwarded webhooks in addition to native Twilio signatures. */
   readonly webhookVerifier?: TwilioWebhookVerifier;
 }
