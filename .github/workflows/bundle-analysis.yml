@@ -24,6 +24,7 @@ on:
       - "packages/eve-code/extension/**"
       - "packages/eve-computer-use/extension/**"
       - "packages/eve-git/extension/**"
+      - "packages/eve-todo/extension/**"
       - "packages/tracing/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
