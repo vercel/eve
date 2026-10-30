@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Register workflow step functions again in host builds on Windows.
+Register workflow step functions in host builds on Windows.
