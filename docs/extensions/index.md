@@ -5,7 +5,7 @@ description: "Package reusable eve capabilities and mount them from npm or a mon
 
 An extension is a package of eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
 
-To add a ready-made extension with `eve add`, see [Add Integrations](./install-integrations).
+To add a ready-made extension with `eve add`, see [Add Integrations](/docs/install-integrations).
 
 ## Author: create an extension
 
@@ -40,10 +40,10 @@ Each directory accepts the same static and dynamic forms as in an agent. For exa
 Names come from paths, so call the tool `search`, not `crm_search`. The agent's mount adds a prefix such as `crm__`; see [Mount it](#mount-it).
 
 The extension root can't declare agent configuration, instrumentation,
-[memory](./memory), a sandbox, or nested extensions, because the agent that
+[memory](/docs/memory), a sandbox, or nested extensions, because the agent that
 mounts the extension decides those. A subagent under `extension/subagents/` has
 its own agent configuration, memory, and sandbox like any other
-[declared subagent](./subagents).
+[declared subagent](/docs/subagents).
 
 ### Add configuration and contributions
 
@@ -85,7 +85,7 @@ If no configuration is needed, export `defineExtension()` and let agents re-expo
 
 ### Add a subagent
 
-Author a subagent under `extension/subagents/<id>/` with the same files as an agent's [declared subagent](./subagents). Mounting the extension as `crm` exposes `extension/subagents/reviewer/` as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents stay inside it and keep their path-derived names. The subagent uses the extension's mount path for its state keys, but keeps its own state.
+Author a subagent under `extension/subagents/<id>/` with the same files as an agent's [declared subagent](/docs/subagents). Mounting the extension as `crm` exposes `extension/subagents/reviewer/` as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents stay inside it and keep their path-derived names. The subagent uses the extension's mount path for its state keys, but keeps its own state.
 
 Files inside the subagent can import the extension handle. A tool under `extension/subagents/reviewer/tools/` reads the configuration from the agent's `agent/extensions/crm.ts` mount. The subagent can also mount another extension under `extension/subagents/<id>/extensions/`, with configuration taken from its own extension's configuration:
 
@@ -359,7 +359,7 @@ export default defineHook({
 
 ### Bundled development extensions
 
-Local `eve dev` mounts the bundled self-modification extension by default, without a file under `agent/extensions/`. Production builds don't include it. See [Self-Modification](./guides/self-modification).
+Local `eve dev` mounts the bundled self-modification extension by default, without a file under `agent/extensions/`. Production builds don't include it. See [Self-Modification](/docs/guides/self-modification).
 
 ### Compatibility
 

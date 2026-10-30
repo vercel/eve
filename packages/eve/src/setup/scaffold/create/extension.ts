@@ -136,9 +136,9 @@ connections, skills, schedules, subagents, hooks, and instruction fragments that
 mounts under \`agent/extensions/\`.
 
 Before writing code, read the Extensions guide from the installed eve package
-docs. In most installs, those docs are at \`node_modules/eve/docs/extensions.md\`.
+docs. In most installs, those docs are at \`node_modules/eve/docs/extensions/index.md\`.
 In workspaces or local package installs, resolve the installed \`eve\` package
-location first and read its \`docs/extensions.md\`. If package docs are
+location first and read its \`docs/extensions/index.md\`. If package docs are
 unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 ## Authoring
