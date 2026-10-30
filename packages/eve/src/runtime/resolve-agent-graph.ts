@@ -19,7 +19,7 @@ import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
+import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type {
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
@@ -422,13 +422,9 @@ function attachInheritedSandboxWorkspaceResources(input: {
       nodeId: owner.nodeId,
       workspaceResourceRoot: owner.sandboxRegistry.sandbox.workspaceResourceRoot,
     };
-    const workspacePrompt = createWorkspacePromptSection(owner.agent.workspaceSpec);
-    if (workspacePrompt !== undefined) {
-      (node.turnAgent as { instructions: readonly string[] }).instructions = [
-        ...node.turnAgent.instructions,
-        workspacePrompt,
-      ];
-    }
+    // The subagent works in its owner's sandbox, so its prompt describes that workspace.
+    (node.turnAgent as { workspaceSpec: WorkspaceRuntimeSpec }).workspaceSpec =
+      owner.agent.workspaceSpec;
   }
 }
 

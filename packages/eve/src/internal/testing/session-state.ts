@@ -19,7 +19,6 @@ export function createTestSessionState(
     version: DURABLE_SESSION_VERSION,
     snapshot: {
       session: {
-        agent: { system: "" },
         continuationToken: overrides.continuationToken ?? "test-token",
         sessionId: overrides.sessionId ?? "test-session",
         ...(position !== undefined && { state: positionState(position) }),

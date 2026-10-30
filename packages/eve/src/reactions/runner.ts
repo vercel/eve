@@ -12,7 +12,9 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { bundleReactions } from "./bundle.js";
 import { sessionFrameOf } from "./frame.js";
 import { reportReactionFailure, takeIntents } from "./intents.js";
-import { effectiveModelId } from "./kinds/model.js";
+import { HARNESS_INSTRUCTIONS } from "./kinds/instructions.js";
+import { effectiveModelId, HARNESS_MODEL_ID } from "./kinds/model.js";
+import { HARNESS_TOOLS } from "./kinds/tool.js";
 import type {
   BundleReactions,
   CommitReaction,
@@ -129,7 +131,7 @@ export async function evaluateValues(
 ): Promise<void> {
   const { reactions, effects } = await bundleReactions(ctx);
   const changed = new Set<Reaction["kind"]>();
-  for (const reaction of values(reactions)) {
+  const run = async (reaction: ValueReaction) => {
     const started = Date.now();
     let result: { readonly changed: boolean };
     try {
@@ -143,8 +145,79 @@ export async function evaluateValues(
       durationMs: Date.now() - started,
       reaction: reaction.label,
     });
+  };
+  const lazy = values(reactions).filter((reaction) => reaction.declared === true);
+  const applied = new Set<Reaction["kind"]>();
+  let declared: Promise<void> | undefined;
+  const ensure = () =>
+    (declared ??= (async () => {
+      for (const reaction of lazy) await run(reaction);
+      // What the harness reads next, such as the connections it offers, includes what they install.
+      for (const kind of changed) {
+        await effects[kind]?.(ctx);
+        applied.add(kind);
+      }
+    })());
+  pendingDeclared.set(ctx, ensure);
+  try {
+    for (const reaction of values(reactions)) {
+      if (reaction.declared !== true) await run(reaction);
+    }
+    if (lazy.length > 0 && leftToEve(ctx)) await ensure();
+  } finally {
+    pendingDeclared.delete(ctx);
   }
-  for (const kind of changed) await effects[kind]?.(ctx);
+  for (const kind of changed) if (!applied.has(kind)) await effects[kind]?.(ctx);
+}
+
+/**
+ * What the agent's files declare, while the step's values evaluate: once, when first asked.
+ * Process-wide, since an agent's bundled code holds its own copy of this module.
+ */
+const pendingDeclared: WeakMap<ContextContainer, () => Promise<void>> = ((
+  globalThis as Record<symbol, unknown>
+)[Symbol.for("eve.reactions.pendingDeclared")] ??= new WeakMap()) as never;
+
+/**
+ * Evaluates what the agent's files declare, where a harness asks for it while the step's values
+ * evaluate. Elsewhere, the slots hold what the latest evaluation left.
+ */
+export async function evaluateDeclared(ctx: ContextContainer): Promise<void> {
+  await pendingDeclared.get(ctx)?.();
+}
+
+/** Contexts whose harness is choosing its model now. */
+const choosingModel: WeakSet<ContextContainer> = ((globalThis as Record<symbol, unknown>)[
+  Symbol.for("eve.reactions.choosingModel")
+] ??= new WeakSet()) as never;
+
+/** Runs the harness's `agent.model` field, which may read the agent's own model. */
+export async function whileChoosingModel<T>(
+  ctx: ContextContainer,
+  fn: () => Promise<T>,
+): Promise<T> {
+  choosingModel.add(ctx);
+  try {
+    return await fn();
+  } finally {
+    choosingModel.delete(ctx);
+  }
+}
+
+/**
+ * Whether the harness is choosing its model now: what it chose last time is no guide, since it
+ * may be about to return the agent's own.
+ */
+export function harnessChoosingModel(ctx: ContextContainer): boolean {
+  return choosingModel.has(ctx);
+}
+
+/** A harness field left to eve needs what the agent's files declare. */
+function leftToEve(ctx: ContextContainer): boolean {
+  const { slots } = readReactionsState(ctx);
+  return [HARNESS_MODEL_ID, HARNESS_TOOLS, HARNESS_INSTRUCTIONS].some(
+    (id) => slots[id] === undefined || slots[id].value === null,
+  );
 }
 
 function failed(reaction: Reaction, error: unknown): ReactionFailedError {
@@ -210,7 +283,7 @@ function dropRemovedSlots(ctx: ContextContainer, reactions: readonly Reaction[])
   const ids = new Set(reactions.map(({ id }) => id));
   const removed = Object.keys(state.slots).filter((id) => !ids.has(id));
   const removedMemos = Object.keys(state.memos ?? {}).filter(
-    (scope) => !ids.has(scope.split("#")[0]!),
+    (scope) => !POLICY_SCOPES.has(scope) && !ids.has(scope.split("#")[0]!),
   );
   if (removed.length === 0 && removedMemos.length === 0) return;
   const slots = { ...state.slots };
@@ -253,28 +326,14 @@ async function evaluate(
   },
 ): Promise<{ readonly changed: boolean }> {
   const abortSignal = run.abortSignal ?? neverAborted;
-  const sessionId = sessionIdOf(ctx);
-  const kept = readReactionsState(ctx).memos?.[reaction.id];
-  const memos = openMemos({
-    abortSignal,
-    kept,
-    label: reaction.label,
-    scope: reaction.id,
-    sessionId,
-    afterDeployment: discardedByDeployment(ctx, reaction.id),
-  });
-  let contribution: Awaited<ReturnType<ValueReaction["contribute"]>>;
-  try {
-    const context = internalContext(ctx, reaction, { ...run, abortSignal, memo: memos.memo });
-    contribution = await reaction.contribute(await reaction.evaluate(context), context);
-  } catch (error) {
-    mergeMemos(ctx, reaction.id, memos.used());
-    throw error;
-  } finally {
-    memos.close();
-  }
-  const used = memos.used();
-  keepMemos(ctx, reaction.id, used);
+  const { result: contribution, used } = await withMemos(
+    ctx,
+    { abortSignal, label: reaction.label, scope: reaction.id },
+    async (memo) => {
+      const context = internalContext(ctx, reaction, { ...run, abortSignal, memo });
+      return await reaction.contribute(await reaction.evaluate(context), context);
+    },
+  );
   const value = parseJsonValue(contribution.value ?? null);
   const digest = digestOf(value);
   // In development, evaluate again with the memos fixed: a value that changes anyway depends on
@@ -302,6 +361,46 @@ async function evaluate(
   else writeLive(ctx, reaction.id, slot, contribution.live);
   return { changed: !unchanged || contribution.live !== undefined };
 }
+
+/**
+ * Runs `fn` with `scope`'s memos. When it succeeds, the scope keeps what this run used; when it
+ * fails, what ran joins what the scope had.
+ */
+export async function withMemos<T>(
+  ctx: ContextContainer,
+  input: { readonly scope: string; readonly label: string; readonly abortSignal?: AbortSignal },
+  fn: (memo: InternalContext["memo"]) => Promise<T>,
+): Promise<{ readonly result: T; readonly used: Readonly<Record<string, JsonValue>> }> {
+  const memos = openMemos({
+    abortSignal: input.abortSignal ?? neverAborted,
+    afterDeployment: discardedByDeployment(ctx, input.scope),
+    kept: readReactionsState(ctx).memos?.[input.scope],
+    label: input.label,
+    scope: input.scope,
+    sessionId: sessionIdOf(ctx),
+  });
+  let result: T;
+  try {
+    result = await fn(memos.memo);
+  } catch (error) {
+    mergeMemos(ctx, input.scope, memos.used());
+    throw error;
+  } finally {
+    memos.close();
+  }
+  const used = memos.used();
+  keepMemos(ctx, input.scope, used);
+  return { result, used };
+}
+
+/** The memo scope of one of the harness policy's decisions, which no definition owns. */
+export function policyScope(decision: "history" | "next"): string {
+  // `@` starts no reaction id, so these never share a definition's memos.
+  return `@policy:${decision}`;
+}
+
+/** The policy's own scopes, which outlive every definition the agent removes. */
+const POLICY_SCOPES: ReadonlySet<string> = new Set([policyScope("history"), policyScope("next")]);
 
 /** Evaluates `reaction` again with its memos fixed, and reports a value that differs. */
 async function checkStable(

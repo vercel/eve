@@ -22,7 +22,6 @@ function createHarnessSession(): HarnessSession {
   return {
     agent: {
       modelReference: { id: "openai/gpt-5.4" },
-      system: "",
       tools: [],
     },
     compaction: {

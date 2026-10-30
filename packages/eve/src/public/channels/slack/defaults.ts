@@ -487,7 +487,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { channel } = ctx;
     if (data.kind === "reasoning") {
       const stream = streamByState.get(channel.state);
-      if (stream?.runId !== data.runId || typeof data.value !== "string") return;
+      if (stream === undefined || stream.runId !== data.runId || typeof data.value !== "string")
+        return;
       stream.reasoning = data.value;
       await showReasoning(channel, stream, { complete: true });
       stream.reasoning = "";
@@ -495,6 +496,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     }
     if (data.kind !== "text") return;
     const text = typeof data.value === "string" ? data.value : "";
+    // The harness decides the turn's reply, which posts on its own.
+    if (data.phase === "draft") return;
     if (contentPhase(data.phase) === "narration") {
       channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
       return;

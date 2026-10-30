@@ -110,6 +110,8 @@ for await (const event of response.stream()) {
 
 After reconnecting without local state, don't append a later delta to an empty value. Replay the earlier lines, or wait for the part's `content.completed`, which carries its whole value.
 
+Under an experimental [`agent/harness.ts`](../../experimental/harness), the model's text can be a draft the harness replaces. Every text part's first `content.delta` then carries `draft: true`: the part may become a draft, and which it is comes with its `content.completed`. Phase `"draft"` means the harness didn't keep it as is, and the turn's reply arrives as its own part. Phase `"narration"` or `"reply"` means it's shown like any other part. A surface that posts replies should hold flagged parts until they complete. eve's client does: it shows a flagged part once it completes, not while it streams.
+
 The client checks the stream version on every connection and accepts only version 27; a missing or different version fails the read.
 
 ## Handle event types

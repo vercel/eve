@@ -186,6 +186,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
 
     async "content.completed"({ data }, { channel }) {
       if (data.kind !== "text" || typeof data.value !== "string") return;
+      // The harness decides the turn's reply, which posts on its own.
+      if (data.phase === "draft") return;
       // Narration before calls posts as a thought with the next call.
       if (contentPhase(data.phase) === "narration") {
         channel.state.pendingToolCallMessage = data.value

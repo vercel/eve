@@ -111,7 +111,9 @@ export interface RunRow extends Introduced, Ended {
 
 export interface PartRow extends Introduced {
   readonly partId: string;
-  readonly runId: string;
+  /** The run that wrote it; absent for a part its turn holds without one. */
+  readonly runId?: string;
+  readonly turnId?: string;
   readonly kind: ContentKind;
   readonly phase: ContentPhase;
   readonly value?: JsonValue;
@@ -240,6 +242,8 @@ export interface PartPreview {
   readonly runId?: string;
   readonly kind: string;
   readonly text: string;
+  /** The part may become a draft the agent's harness doesn't keep: its phase comes when it completes. */
+  readonly draft?: true;
 }
 
 export interface CallPreview {

@@ -19,21 +19,6 @@ export type ReactionKind =
   | "skill"
   | "instructions";
 
-/**
- * The order reactions run in. Hooks run after each commit, before dynamic values; the model is
- * chosen first among values, so every later kind can read it.
- */
-export const REACTION_ORDER: readonly ReactionKind[] = [
-  "hook",
-  "memory",
-  "model",
-  "connection",
-  "subagent",
-  "tool",
-  "skill",
-  "instructions",
-];
-
 /** What a dynamic value contributes: its JSON form, and the code that form can't carry. */
 export interface Contribution {
   readonly value: JsonValue;
@@ -78,6 +63,11 @@ interface ReactionBase {
 /** A dynamic value: a function of the session, evaluated in each step that needs it. */
 export interface ValueReaction extends ReactionBase {
   readonly timing?: never;
+  /**
+   * What the agent's files declare, under a harness: evaluated only when the harness asks for it,
+   * or leaves a field to eve.
+   */
+  readonly declared?: true;
   /** Runs the definition. Its memos keep what it learns from outside. */
   readonly evaluate: (ctx: InternalContext) => unknown;
   /** Validates and names the value. Throws on a value the kind can't read. */

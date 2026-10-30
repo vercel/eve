@@ -11,7 +11,9 @@ import {
   SessionPredecessorKey,
 } from "#context/keys.js";
 import { takeTurnFailure } from "#reactions/intents.js";
-import { takeUserInstructionMessages } from "#reactions/kinds/instructions.js";
+import { harnessInstructions, takeUserInstructionMessages } from "#reactions/kinds/instructions.js";
+import { type RenderFacts, withRenderFacts } from "#harness/policy/agent.js";
+import { sessionOffersTasks } from "#execution/catalog/step-catalog.js";
 import { isDynamicModelSelectionError } from "#reactions/kinds/model.js";
 import { evaluateValues, isReactionFailedError } from "#reactions/runner.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
@@ -167,17 +169,28 @@ export async function prepareModelCall(
   const ctx = step.ctx as ContextContainer | undefined;
   if (ctx === undefined) return undefined;
   throwIfTurnAborted(step.config.abortSignal);
+  const conversation = validateHarnessModelMessages(withClientContext(preview));
+  const facts: RenderFacts = {
+    finalReplyOnly: step.finalReplyOnly,
+    offersTasks: sessionOffersTasks({
+      agentTools: step.config.tools,
+      ctx,
+      session: step.session,
+    }),
+  };
   try {
-    await evaluateValues(ctx, {
-      abortSignal: step.config.abortSignal,
-      conversation: validateHarnessModelMessages(withClientContext(preview)),
-    });
+    await withRenderFacts(ctx, facts, () =>
+      evaluateValues(ctx, { abortSignal: step.config.abortSignal, conversation }),
+    );
   } catch (error) {
     if (!isReactionFailedError(error)) throw error;
     return failTurn(step, error, "REACTION_FAILED");
   }
-  const instructionMessages = takeUserInstructionMessages(ctx);
-  step.session = changeHistory(step.session, { append: instructionMessages });
+  // A harness that gives the system prompt decides what the agent's instructions say, and where.
+  if (harnessInstructions(ctx) === undefined) {
+    const instructionMessages = takeUserInstructionMessages(ctx);
+    step.session = changeHistory(step.session, { append: instructionMessages });
+  }
   return undefined;
 }
 

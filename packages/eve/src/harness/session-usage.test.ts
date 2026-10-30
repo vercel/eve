@@ -16,7 +16,7 @@ import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js
 
 function makeSession(): HarnessSession {
   return {
-    agent: { modelReference: { id: "model_x" }, system: "", tools: [] },
+    agent: { modelReference: { id: "model_x" }, tools: [] },
     compaction: { recentWindowSize: 4, threshold: 1_000_000 },
     continuationToken: "ct_test",
     history: [],
