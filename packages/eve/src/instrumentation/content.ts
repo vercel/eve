@@ -1,4 +1,5 @@
 import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
+import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 import { readGatewayRouting } from "#shared/gateway-routing.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
@@ -37,6 +38,7 @@ export function withInstrumentationDecision(
         ...event,
         error: decision.recordOutputs ? event.error : undefined,
         answer: decision.recordInputs ? event.answer : undefined,
+        responder: applyPrincipalTraceDecision(event.responder, decision),
       });
     case "call.settled":
       return decision.recordOutputs

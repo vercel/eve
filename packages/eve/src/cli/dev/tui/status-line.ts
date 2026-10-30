@@ -4,7 +4,7 @@ import type { LogDisplayMode } from "./log-display-mode.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { remoteHost } from "./target.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
-import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+import type { AgentInfoResult } from "#client/index.js";
 import { formatModelSummary } from "#shared/model-summary.js";
 
 export interface DevBuildStatus {
@@ -40,7 +40,7 @@ interface StatusLineInput {
    */
   logLevel?: LogDisplayMode;
   /** Model endpoint readiness: external, or AI Gateway connected/not-connected. */
-  endpoint?: ModelEndpointStatus;
+  endpoint?: AgentInfoResult["agent"]["model"]["endpoint"];
   /** Workspace-scoped Vercel state; identity absent while unlinked or still resolving. */
   vercel?: VercelStatusSnapshot;
   /** Remote server identity and its current connection/authentication state. */
@@ -108,6 +108,8 @@ function renderEndpoint(
         return c.yellow(`${g.warning} chatgpt-sub login · /login`);
       case "unavailable":
         return c.yellow(`${g.warning} chatgpt-sub unavailable`);
+      case "unrecognized":
+        return c.dim("chatgpt-sub");
     }
   }
   if (!input.endpoint.connected) {
@@ -116,6 +118,7 @@ function renderEndpoint(
   if (input.endpoint.credential === "api-key") {
     return clause("ai-gateway", "(api-key)");
   }
+  if (input.endpoint.credential === "unrecognized") return c.dim("ai-gateway");
   if (input.endpoint.credential === "oauth") {
     const slug = input.vercel?.modelTeamSlug;
     return c.dim(slug ? `Vercel · ${slug}` : "Vercel");

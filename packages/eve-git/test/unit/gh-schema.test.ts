@@ -4,39 +4,29 @@ import { z } from "zod";
 
 import { githubShellInputSchema } from "../../extension/lib/github-shell-schema.ts";
 
-const permission = {
-  provider: "github",
-  repositories: ["vercel/eve"],
-  access: "write",
-};
 const input = {
   command: "gh pr view 1 --repo vercel/eve",
   description: "Read the pull request",
-  permissions: [permission],
+  repository: "vercel/eve",
 };
 
-test("gh permission schemas use homogeneous array items for provider compatibility", () => {
-  const schema = z.toJSONSchema(githubShellInputSchema, { target: "draft-7" });
-  const permissions = schema.properties?.permissions;
-  assert.ok(permissions && typeof permissions === "object");
-  assert.equal(permissions.type, "array");
-  assert.equal(permissions.minItems, 1);
-  assert.equal(permissions.maxItems, 1);
-  assert.ok(permissions.items && typeof permissions.items === "object");
-  assert.equal(Array.isArray(permissions.items), false);
+test("gh input is a flat object with an optional repository", () => {
+  const schema = z.toJSONSchema(githubShellInputSchema, { io: "input", target: "draft-7" });
+  assert.equal(schema.type, "object");
+  assert.deepEqual(schema.required, ["command", "description"]);
+  assert.equal("permissions" in (schema.properties ?? {}), false);
 });
 
-test("gh still requires exactly one permission and one repository", () => {
+test("gh accepts an owner/name, an owner, or no repository", () => {
   assert.deepEqual(githubShellInputSchema.parse(input), input);
-  for (const permissions of [
-    [],
-    [permission, permission],
-    [{ ...permission, repositories: [] }],
-    [{ ...permission, repositories: ["vercel/eve", "vercel/other"] }],
-    [{ ...permission, repositories: ["not-a-repository"] }],
-    [{ ...permission, provider: "other" }],
-    [{ ...permission, access: "read" }],
-  ]) {
-    assert.equal(githubShellInputSchema.safeParse({ ...input, permissions }).success, false);
+  assert.equal(githubShellInputSchema.safeParse({ ...input, repository: "vercel" }).success, true);
+  const { repository: _repository, ...unscoped } = input;
+  assert.equal(githubShellInputSchema.safeParse(unscoped).success, true);
+  for (const repository of ["", "vercel/eve/extra", "-vercel", "vercel/"]) {
+    assert.equal(
+      githubShellInputSchema.safeParse({ ...input, repository }).success,
+      false,
+      repository,
+    );
   }
 });

@@ -98,7 +98,7 @@ A workflow tool body receives its signals from its context or, in a `serve` body
 `receive()` resolves:
 
 - **`abortSignal`** aborts when the call's work should stop: by `eve__task_cancel`, `session.cancel()`,
-  a cancelled or failed turn, or the end of the session, and, for an `execute` call, by a steering
+  `session.clear()`, a cancelled or failed turn, or the end of the session, and, for an `execute` call, by a steering
   message that arrives while the turn waits on it. `execute` and `task` bodies read it as
   `ctx.abortSignal`. In a `serve` body, each call from `receive()` carries its own `abortSignal`;
   every call in one stretch of work shares one signal, and the next stretch gets a new one. Pass it
@@ -230,6 +230,8 @@ correct an agent by calling it again with its `taskId`, or stop a task with `eve
 - **`eve__task_cancel`** stops one task's current work.
 - **`session.cancel()`** cancels the turn, the `execute` calls it waits on, and every working task
   in the session.
+- **`session.clear()`** cancels the running turn and every working task in the session, then clears
+  history.
 - **A failed turn** cancels every working task.
 - **The end of the session** ends every task.
 

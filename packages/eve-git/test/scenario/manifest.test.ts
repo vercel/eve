@@ -79,7 +79,7 @@ test("built extension mounts as git with only session-resolved GitHub contributi
 test("git__gh resolves an executable tool when GitHub is configured", async () => {
   const { appRoot, manifest } = await compileConsumer(
     "git-gh-consumer",
-    '{ github: { connector: "github/acme-bot", org: "acme", async broker() {} } }',
+    '{ github: { connector: "github/acme-bot", authorize: () => true, async broker() {}, principalType: "app" } }',
   );
   const resolver = manifest.dynamicTools.find((entry) => entry.slug === "git__gh");
   assert.ok(resolver);
@@ -98,7 +98,7 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
   const input = tool.inputSchema.parse({
     command: "gh repo view acme/project",
     description: "Read the project metadata.",
-    permissions: [{ provider: "github", repositories: ["acme/project"], access: "write" }],
+    repository: "acme/project",
   });
   assert.equal(tool.approval({ toolInput: input }), "not-applicable");
   assert.equal(typeof tool.execute, "function");

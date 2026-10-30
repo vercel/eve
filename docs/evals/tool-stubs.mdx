@@ -156,15 +156,15 @@ Parallel calls consume responses in arrival order, which can vary. Use separate 
 
 ## Permit tool replacement
 
-Tool replacement is denied by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), put the permission on the eval runner's verified subject:
+Tool replacement is denied by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), use `eveVercelOidc` and put the permission on the eval runner's verified subject:
 
 ```ts title="agent/channels/eve.ts"
-import { vercelOidc, vercelSubject } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { vercelSubject } from "eve/channels/auth";
+import { eveChannel, eveVercelOidc } from "eve/channels/eve";
 
 export default eveChannel({
   auth: [
-    vercelOidc({
+    eveVercelOidc({
       subjects: [
         vercelSubject({ teamSlug: "acme", projectName: "app" }),
         {

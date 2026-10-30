@@ -22,13 +22,17 @@ import { eventsOf } from "#harness/publication.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { currentView, enteredView } from "#harness/session-machine/current.js";
 import { isTerminalType } from "#protocol/session-events/catalog.js";
-import { askedCall, decidingAnswer } from "#protocol/session-projection/reader.js";
+import { askedCall, decidingAnswer, responderOf } from "#protocol/session-projection/reader.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { copyView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { Cause } from "#protocol/session-events/envelope.js";
+import { instrumentationPrincipal } from "#instrumentation/principal-summary.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import type { ConversationEnvironment } from "#shared/conversation-context.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly deliveryInput?: DeliverHookPayload;
@@ -38,6 +42,8 @@ export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
+  /** With `channelAudience`, whether principal ids may be recorded; absent counts as production. */
+  readonly environment?: ConversationEnvironment;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
   readonly parentLineage?: InstrumentationParentLineage;
@@ -84,6 +90,8 @@ interface Line {
   readonly attemptScope: (place: AttemptPlace) => InstrumentationScope;
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
+  /** Principal ids follow the turn principal's rule: content both ways, and a public or dev audience. */
+  readonly capturesPrincipalIds: boolean;
   readonly settledAtMs?: Readonly<Record<string, number>>;
   readonly startedAtMs: number;
   readonly view?: SessionView;
@@ -128,10 +136,19 @@ export function createInstrumentationHandleEvent(
     if (view !== undefined)
       for (const event of committed)
         foldReceivedEvent(view, { ...event, meta: { endOfLine: false } });
+    const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent ?? false;
+    const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent ?? false;
     const line: Line = {
       attemptScope: (place) => attemptScopeOf(input, place),
-      capturesInputs: hooks.capturesInputs ?? hooks.capturesContent ?? false,
-      capturesOutputs: hooks.capturesOutputs ?? hooks.capturesContent ?? false,
+      capturesInputs,
+      capturesOutputs,
+      capturesPrincipalIds:
+        capturesInputs &&
+        capturesOutputs &&
+        shouldCaptureInstrumentationContent({
+          audience: normalizeChannelAudience(input.channelAudience),
+          environment: input.environment ?? "production",
+        }),
       settledAtMs: ctx?.get(RuntimeActionSettlementTimesKey),
       startedAtMs,
       view: view ?? (ctx === undefined ? undefined : currentView(ctx)),
@@ -349,6 +366,7 @@ function instrumentationEventsOf(
           interactionId: row.interactionId,
           kind: row.request.kind,
           outcome: event.data.outcome,
+          responder: responderSummary(line.view!, event.data.cause, line.capturesPrincipalIds),
           scope,
           type: "interaction.settled",
         },
@@ -357,6 +375,15 @@ function instrumentationEventsOf(
     default:
       return [];
   }
+}
+
+/** Who decided a request: the principal of the delivery that carried the deciding response. */
+function responderSummary(view: SessionView, cause: Cause | undefined, keepsId: boolean) {
+  if (cause === undefined || !("responseId" in cause)) return undefined;
+  const principal = responderOf(view, cause.responseId);
+  return principal === undefined
+    ? undefined
+    : instrumentationPrincipal(principal.type, keepsId ? principal.id : undefined);
 }
 
 /** A turn's run's current attempt; a context change's run is no step of a turn. */

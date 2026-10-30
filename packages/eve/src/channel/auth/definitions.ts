@@ -5,7 +5,6 @@
  * helpers are lower-level pure functions for custom `fetch` handlers.
  */
 
-import { areTokenClaimMatchersSatisfied } from "#channel/auth/token-claims.js";
 import { decodeJwt } from "#compiled/jose/index.js";
 
 import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
@@ -517,13 +516,8 @@ export class ForbiddenError extends Error {
   }
 }
 
-export interface AuthResult extends SessionAuthContext {
-  /**
-   * Set to true to let this authenticated caller create sessions with tool stubs.
-   * Callers without this permission cannot supply stubs.
-   */
-  readonly allowToolStubs?: boolean;
-}
+/** Verified identity returned by a shared HTTP authenticator. */
+export type AuthResult = SessionAuthContext;
 
 /**
  * Route auth callback. Returned value semantics inside {@link routeAuth}:
@@ -536,9 +530,9 @@ export interface AuthResult extends SessionAuthContext {
  * {@link UnauthenticatedError} or {@link ForbiddenError}. To accept anonymous
  * traffic, include {@link none} as the final entry.
  */
-export type AuthFn<TEvent = Request> = (
+export type AuthFn<TEvent = Request, TResult extends AuthResult = AuthResult> = (
   event: TEvent,
-) => AuthResult | null | undefined | Promise<AuthResult | null | undefined>;
+) => TResult | null | undefined | Promise<TResult | null | undefined>;
 
 /**
  * OAuth protected-resource metadata attached to an inbound auth policy.
@@ -658,11 +652,11 @@ const AUTH_CHALLENGES_SYMBOL = Symbol.for("eve.channels.auth.challenges");
  * );
  * ```
  */
-export function withAuthChallenges<TEvent>(
-  fn: AuthFn<TEvent>,
+export function withAuthChallenges<TEvent, TResult extends AuthResult = AuthResult>(
+  fn: AuthFn<TEvent, TResult>,
   challenges: readonly UnauthorizedChallenge[],
-): AuthFn<TEvent> {
-  const wrapped: AuthFn<TEvent> = (event) => fn(event);
+): AuthFn<TEvent, TResult> {
+  const wrapped: AuthFn<TEvent, TResult> = (event) => fn(event);
   Object.defineProperty(wrapped, AUTH_CHALLENGES_SYMBOL, {
     value: challenges,
   });
@@ -716,13 +710,13 @@ function collectDeclaredChallenges(
  * a custom `defineChannel` route handler) should call `routeAuth` rather than
  * re-implement the walk.
  */
-export async function routeAuth(
+export async function routeAuth<TResult extends AuthResult = AuthResult>(
   request: Request,
-  auth: AuthFn<Request> | readonly AuthFn<Request>[],
-): Promise<AuthResult | Response> {
-  const list: readonly AuthFn<Request>[] = Array.isArray(auth)
-    ? (auth as readonly AuthFn<Request>[])
-    : [auth as AuthFn<Request>];
+  auth: AuthFn<Request, TResult> | readonly AuthFn<Request, TResult>[],
+): Promise<TResult | Response> {
+  const list: readonly AuthFn<Request, TResult>[] = Array.isArray(auth)
+    ? (auth as readonly AuthFn<Request, TResult>[])
+    : [auth as AuthFn<Request, TResult>];
 
   try {
     for (const fn of list) {
@@ -826,6 +820,9 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
   return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
 }
 
+/** Marks functions {@link localDev} returns so channels can tell the author configured it. */
+const LOCAL_DEV_AUTH_SYMBOL = Symbol.for("eve.channels.auth.localDev");
+
 /**
  * Returns an {@link AuthFn} that authenticates a synthetic `local-dev`
  * principal while the process is a local development server, and returns
@@ -855,10 +852,19 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * behind an authenticator that runs before `localDev()`.
  */
 export function localDev(): AuthFn<Request> {
-  return (request) =>
+  const authenticate: AuthFn<Request> = (request) =>
     isLocalDevelopmentServer() && !isCrossSiteBrowserRequest(request) && !isFromRemotePeer(request)
       ? LOCAL_DEV_SESSION_AUTH_CONTEXT
       : null;
+  Object.defineProperty(authenticate, LOCAL_DEV_AUTH_SYMBOL, { value: true });
+  return authenticate;
+}
+
+/** @internal Whether `fn` is a function {@link localDev} returned. */
+export function isLocalDevAuth(fn: AuthFn<never>): boolean {
+  return (
+    (fn as Partial<Record<typeof LOCAL_DEV_AUTH_SYMBOL, true>>)[LOCAL_DEV_AUTH_SYMBOL] === true
+  );
 }
 
 function isCrossSiteBrowserRequest(request: Request): boolean {
@@ -1122,19 +1128,8 @@ function assertVercelSubjectSegment(field: "teamSlug" | "projectName", value: st
   }
 }
 
-export interface VercelOidcOptions extends Omit<VerifyVercelOidcOptions, "subjects"> {
-  /**
-   * Additional token subjects allowed to authenticate.
-   * To allow stubs, use { subject, allowToolStubs: true } for that subject.
-   */
-  readonly subjects?: readonly (
-    | string
-    | {
-        readonly subject: string;
-        readonly allowToolStubs?: boolean;
-      }
-  )[];
-}
+/** Verification options for the Vercel OIDC route authenticator. */
+export type VercelOidcOptions = VerifyVercelOidcOptions;
 
 /**
  * Returns an HTTP route auth callback backed by Vercel OIDC. See
@@ -1143,11 +1138,12 @@ export interface VercelOidcOptions extends Omit<VerifyVercelOidcOptions, "subjec
  * `Bearer` {@link withAuthChallenges} challenge for {@link routeAuth}'s 401.
  */
 export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
-  const { subjects, ...verification } = opts;
-  const verifyOptions = {
-    ...verification,
-    subjects: subjects?.map((entry) => (typeof entry === "string" ? entry : entry.subject)),
-  };
+  // JavaScript callers can pass eveVercelOidc's object entries, which would otherwise never match.
+  if (opts.subjects?.some((entry: unknown) => typeof entry !== "string")) {
+    throw new TypeError(
+      'vercelOidc: every subjects entry must be a string. For entries such as { subject, allowToolStubs: true }, use eveVercelOidc from "eve/channels/eve".',
+    );
+  }
   return withAuthChallenges(
     async (request) => {
       const token = extractBearerToken(request.headers.get("authorization"));
@@ -1158,21 +1154,10 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
           : undefined);
       const result = await verifyVercelOidc(
         token,
-        currentVercelProject === undefined
-          ? verifyOptions
-          : { ...verifyOptions, currentVercelProject },
+        currentVercelProject === undefined ? opts : { ...opts, currentVercelProject },
       );
       if (!result.ok) return null;
-      const auth = result.sessionAuth;
-      const allowed =
-        (auth.principalType === "service" || auth.principalType === "runtime") &&
-        subjects?.some(
-          (entry) =>
-            typeof entry !== "string" &&
-            entry.allowToolStubs === true &&
-            areTokenClaimMatchersSatisfied({ sub: auth.subject }, { subjects: [entry.subject] }),
-        );
-      return allowed ? { ...auth, allowToolStubs: true } : auth;
+      return result.sessionAuth;
     },
     [{ scheme: "Bearer" }],
   );

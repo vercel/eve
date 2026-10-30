@@ -108,7 +108,7 @@ has completed. Idle preparation preserves the session ID, stream, history, and e
 active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
 for client usage and deployment routing.
 
-`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
+`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy, then serves only operator principals: `service` and `runtime` principals and, when the channel's auth includes `localDev()`, any caller it admits on a development server. Other callers the channel admits, such as `user` or `anonymous` principals, get `403` with code `info_forbidden`, because the payload includes authored instructions, skill and schedule markdown, and server paths. The route returns agent-info version 5. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
 
 ### Request validation
 
@@ -254,7 +254,7 @@ See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-t
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+Post to `/eve/v1/session/:sessionId/clear` to cancel a running turn and every working task, then remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ### Compact context
 
@@ -305,7 +305,7 @@ export default eveChannel({
 
 ## Authentication
 
-The `auth` option decides who can call `/eve/v1/info` and the session routes. The built-in helpers cover development and trusted infrastructure:
+The `auth` option decides who can call `/eve/v1/info` and the session routes. `/eve/v1/info` additionally requires an operator principal (`service`, `runtime`, or `local-dev`). The built-in helpers cover development and trusted infrastructure:
 
 - `localDev()` accepts requests during local development.
 - `vercelOidc()` lets the local CLI reach a deployed agent, and lets other internal deployments from your team call it.
@@ -313,6 +313,8 @@ The `auth` option decides who can call `/eve/v1/info` and the session routes. Th
 Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, your own OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`). Vercel OIDC is optional; use it only when Vercel-issued deployment tokens are part of your trust model.
 
 `eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve selects its default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
+
+To let your own operator credential read `/eve/v1/info`, have its `AuthFn` return `principalType: "service"` (as `jwtHmac()` and `jwtEcdsa()` do), or return `allowAgentInfo: true` from an `EveAuthFn`; see [Agent info access](../guides/auth-and-route-protection#agent-info-access). Keep end-user strategies returning `"user"` without the grant so they cannot read it.
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
@@ -450,13 +452,13 @@ export default defineChannel({
 
 The client then resumes that session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when a session already owned the address, or another `create()` or `send()` claimed it first. That session comes back unchanged and your `history` was not added, so check `created` before treating the session as seeded. Use a new address for each new conversation or branch.
 
-When the session at the address is [stranded](../guides/deployment/self-hosting#recover-a-stranded-session), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `end()` on the address, then `create()` again.
+When the session at the address is [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `end()` on the address, then `create()` again.
 
 `create()` returns once the new session claims its address, so a `send()` right after it reaches that session. It throws if no session claims the address within 15 seconds.
 
 `send()` accepts the same `history` option. The entries are added right before that message and its `context`, whether the send creates the session or continues it. The eve channel's `onMessage` can return `history` the same way. It applies to every message it is returned for, so return it only when the message should carry those turns.
 
-Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, that names the entry and the rule it broke. eve doesn't cap how many entries or how much text one call carries. Your route decides how much stored conversation to load, so trim long conversations there, for example to the newest messages. Tool calls, files, and reasoning are not supported.
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. An entry with any other field is rejected, not dropped, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, that names the entry and the rule it broke. eve doesn't cap how many entries or how much text one call carries. Your route decides how much stored conversation to load, so trim long conversations there, for example to the newest messages. Tool calls, files, and reasoning are not supported.
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 

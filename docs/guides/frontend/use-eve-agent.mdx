@@ -11,7 +11,7 @@ React, [Vue](./use-eve-agent-vue), and [Svelte](./use-eve-agent-svelte) share th
 
 | Field              | What it is                                                                     |
 | ------------------ | ------------------------------------------------------------------------------ |
-| `messages`         | Messages to render, including your submitted messages before eve confirms them |
+| `messages`         | The current conversation, and your submitted messages before eve confirms them |
 | `status`           | Outstanding work: `"idle"`, `"busy"`, or `"resuming"`. See [Status](#status)   |
 | `error`            | The latest session creation, stream, resume, or turn failure                   |
 | `view`             | Immutable session snapshot. Query it with functions from `eve/events`          |

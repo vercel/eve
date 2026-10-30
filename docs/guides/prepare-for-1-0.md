@@ -78,6 +78,22 @@ Every connection must use the helper for its protocol. A plain object is no long
 
 Use `defineOpenAPIConnection` for OpenAPI connections. Keep the helper inside the dynamic factory when authoring a dynamic connection. See [Connections](../connections).
 
+## Move tool replacement grants to `eveVercelOidc`
+
+`vercelOidc` from `eve/channels/auth` now only authenticates. If a `subjects` entry sets `allowToolStubs`, switch to `eveVercelOidc`, which takes the same options:
+
+```diff
+-import { vercelOidc } from "eve/channels/auth";
++import { eveVercelOidc } from "eve/channels/eve";
+
+-vercelOidc({
++eveVercelOidc({
+   subjects: [{ subject: evalRunner, allowToolStubs: true }],
+ });
+```
+
+If a custom callback returns `allowToolStubs`, type it as `EveAuthFn` (or its result as `EveAuthResult`) from `eve/channels/eve` instead of `AuthFn` / `AuthResult`.
+
 ## Choose one sandbox layout
 
 If both `agent/sandbox.ts` and `agent/sandbox/` exist, move the definition to `agent/sandbox/sandbox.ts`. The combination now fails discovery instead of silently ignoring the root definition.
@@ -154,6 +170,12 @@ Every error `eve/client` throws now extends `EveError` and carries a stable snak
 `SessionNotActiveError.code` is `session_not_ready` (with `retryable: true`) while a session is still starting, otherwise `session_not_active`; `EVE_SESSION_NOT_ACTIVE` is gone. `ClientError.code` is now `http_error` instead of `undefined` when the response carried no code.
 
 `session.snapshot()` now returns the full `ClientSessionState`, including the opaque `inbox` value, instead of only `sessionId` and `streamIndex`. Persist it as is and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](./client/overview#faster-sends-with-inbox).
+
+## Read agent info with an operator credential
+
+`GET /eve/v1/info` and `client.info()` now serve only operators: `service` and `runtime` principals, such as Vercel OIDC, `jwtHmac()`, or `jwtEcdsa()` callers, and local development through a configured `localDev()`. Other callers, including web chat end users, get `403` with code `info_forbidden`. If a browser app calls `client.info()`, move that call to your server or hardcode what it shows. To give another credential access, return `principalType: "service"` or `allowAgentInfo: true` from its eve-channel authenticator; `allowAgentInfo: false` denies a caller that would otherwise qualify. See [Agent info access](./auth-and-route-protection#agent-info-access). `eve eval` against a deployment needs such a credential too; `eve remote` connects without one but omits the agent details.
+
+The response is still agent-info version 5. The client now ignores unknown fields and reads unknown enum values as `"unrecognized"`; handle that value when you switch on fields such as `mode` or `sourceKind`. `kind` discriminants, such as a model endpoint's or an owner's `kind`, stay closed: a new variant comes with a version bump. See [Inspect an agent](./client/overview#inspect-an-agent).
 
 ## Update Workflow imports
 
@@ -250,6 +272,6 @@ Model-effort `--reasoning` on `eve init` and `eve set model` is unchanged. `--as
 
 ## Check the resulting project
 
-Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it. Test any proactive Slack messages and durable workflow waits your project defines.
+Run your project's typecheck and `eve build`, then check the workflows you use: create a conversation, send a message, end it, and start another. Restore a saved session state and send to it, and call `client.info()` with an operator credential if your tooling uses it. Test any proactive Slack messages and durable workflow waits your project defines.
 
 Review [run-data retention](../agent-config#run-data-retention) before depending on a completed transcript remaining readable. This cleanup does not change the retention default: outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends. Backend support determines whether deletion occurs; the current override remains experimental.

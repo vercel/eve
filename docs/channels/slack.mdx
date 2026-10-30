@@ -139,9 +139,76 @@ export default slackChannel({
 });
 ```
 
-The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
+Each model-visible `<slack_message>` groups its metadata into blocks: `<sender>` with the sender's `type` and `id`, `<bot>` with the receiving app's `id` and the `mentioned` value from `ctx.isBotMentioned()` (inbound messages only), and `<thread>` with `team_id`, `channel_id`, `thread_ts`, and `message_ts`:
+
+```text
+<slack_message>
+<sender>
+type: user
+id: U01234567
+</sender>
+<bot>
+id: U07654321
+mentioned: true
+</bot>
+<thread>
+team_id: T01234567
+channel_id: C01234567
+thread_ts: 1700000000.000001
+message_ts: 1700000000.000004
+</thread>
+<content>
+<@U07654321> Who owns the deploy?
+</content>
+</slack_message>
+```
+
+Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
 When a Slack message includes a link preview, eve includes its attachment text in `<content>` alongside the sender's message, including when the link has words around it. Shared Slack messages work the same way: eve extracts the forwarded message body from Slack's message-unfurl attachment and keeps any top-level comment.
+
+#### Add sender names and emails
+
+Slack user ids identify every sender without a lookup. When the agent should also know who someone is, enable `messageContext.users`:
+
+```ts
+import { slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  messageContext: { users: { email: true } },
+});
+```
+
+eve looks up each human sender with `users.info` and adds `display_name` and `real_name` to their `<sender>` block, plus `email` with `email: true`. Set `name: false` with `email: true` to add emails only. Thread context replies get the same fields. The triggering author is also written to `message.author` (`fullName`, `displayName`, `email`) and to the `full_name` and `email` attributes of [`defaultSlackAuth`](#restrict-who-can-invoke-the-agent), so a hook can gate on them. Mentions and DMs are looked up before `onAppMention` or `onDirectMessage` runs. Other channel messages are looked up only once a hook delivers them, so their hooks see the unresolved author.
+
+`users: true` adds names only. Results are cached in memory per workspace and user for an hour, and a failed lookup is retried after a minute. A lookup that fails or takes longer than two seconds is left out, and the message is still delivered. To use your own cache, pass `resolve`; `next()` is eve's uncached `users.info` call:
+
+```ts
+import { slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { profileCache } from "../lib/profile-cache";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  messageContext: {
+    users: {
+      email: true,
+      resolve: async ({ userId, teamId }, next) => {
+        const key = `${teamId}:${userId}`;
+        const cached = await profileCache.get(key);
+        if (cached) return cached;
+        const profile = await next();
+        await profileCache.set(key, profile);
+        return profile;
+      },
+    },
+  },
+});
+```
+
+`teamId` is the workspace whose installation received the message, so key caches on it. `messageContext.users` adds the `users:read` scope to the app manifest, and `users:read.email` with `email: true`; reinstall the Slack app after enabling it. It is off by default because names and emails then reach model context, session history, and traces.
 
 #### Restrict who can invoke the agent
 

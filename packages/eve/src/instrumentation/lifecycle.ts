@@ -227,6 +227,11 @@ export interface InstrumentationInteractionSettledEvent {
   readonly outcome: InstrumentationInteractionOutcome;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly answer?: InstrumentationAnswer;
+  /**
+   * Who decided the request, as their response's delivery was admitted. Absent when no response
+   * decided it. Its `id` is absent unless this provider's trace policy records both directions.
+   */
+  readonly responder?: InstrumentationPrincipalSummary;
   readonly scope: InstrumentationScope;
 }
 

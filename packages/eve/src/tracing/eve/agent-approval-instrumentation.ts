@@ -54,8 +54,21 @@ export function createAgentApprovalInstrumentation(input: {
     const { callId, sessionId, turnId } = stored as Record<string, unknown>;
     if (typeof callId !== "string" || typeof sessionId !== "string" || typeof turnId !== "string")
       return;
-    const approval = (await toolFor(sessionId, turnId, callId))?.findApproval(event.interactionId);
-    if (approval === undefined) return;
+    const tool = await toolFor(sessionId, turnId, callId);
+    const approval = tool?.findApproval(event.interactionId);
+    if (tool === undefined || approval === undefined) return;
+    if (event.responder !== undefined) {
+      approval.attributes({
+        "agent.approval.responder.type": event.responder.type,
+        "agent.approval.responder.id": event.responder.id,
+      });
+      // The call still runs as the requester, but the tool can act for its approver.
+      if (event.outcome === "accepted")
+        tool.attributes({
+          "agent.tool.approver.type": event.responder.type,
+          "agent.tool.approver.id": event.responder.id,
+        });
+    }
     if (event.outcome === "failed") await approval.fail(event.error);
     else
       await approval.complete({

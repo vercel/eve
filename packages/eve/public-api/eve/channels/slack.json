@@ -105,6 +105,7 @@
   "SlackTransportOptions",
   "SlackUploadFilesOptions",
   "SlackUploadFilesResult",
+  "SlackUserInfo",
   "SlackWebhookVerifier",
   "SlackWorkspaceHandle",
   "Table",

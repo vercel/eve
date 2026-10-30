@@ -695,6 +695,10 @@ export class EveTUIRunner {
         }
       }
     }
+    const remote = this.#remoteConnection?.current().connection;
+    if (startupOutcome === undefined && remote?.state === "ready" && remote.warning !== undefined) {
+      startupOutcome = { message: remote.warning };
+    }
     if (initialAgentOnboarding) {
       this.#renderer.setStartupPhase?.("connecting");
       startupOutcome = await this.#runInitialAgentOnboarding(title);
