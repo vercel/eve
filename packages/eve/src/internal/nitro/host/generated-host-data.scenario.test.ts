@@ -86,6 +86,10 @@ describe("hosted output carries eve-generated data verbatim", () => {
     handbook = (await response.json()) as typeof handbook;
   }, 120_000);
 
+  it("keeps manifest text that names a Nitro build constant", () => {
+    expect(handbook.description).toBe("Describes import.meta.dev without evaluating it.");
+  });
+
   it("serves every skill file byte for byte", () => {
     expect(handbook.bytes).toEqual(
       Object.fromEntries(

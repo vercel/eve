@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,16 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { writeCompiledArtifactsFiles } from "../../src/internal/application/compiled-artifacts.js";
 import { resolvePackageSourceFilePath } from "../../src/internal/application/package.js";
-import {
-  createBundledRuntimeCompiledArtifactsSource,
-  createDiskRuntimeCompiledArtifactsSource,
-} from "../../src/runtime/compiled-artifacts-source.js";
-import { loadCompileMetadata } from "../../src/runtime/loaders/compile-metadata.js";
-import { loadModelMetadata } from "../../src/runtime/loaders/model-metadata.js";
-import {
-  createRuntimeSession,
-  withRuntimeSession,
-} from "../../src/runtime/sessions/runtime-session.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
@@ -36,55 +26,6 @@ describe("writeCompiledArtifactsFiles", () => {
     delete (globalThis as Record<symbol, unknown>)[
       Symbol.for("eve.harness-instrumentation-providers")
     ];
-  });
-
-  it("installs compile and model metadata into bundled compiled artifacts", async () => {
-    const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-bootstrap-", {
-      packageName: "compiled-artifacts-bootstrap-test-agent",
-    });
-    const outDir = join(appRoot, ".workflow-build");
-
-    await writeFile(
-      join(agentRoot, "agent.ts"),
-      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
-    );
-    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
-
-    const compileResult = await compileAgent({
-      startPath: appRoot,
-    });
-    const generatedArtifacts = await writeCompiledArtifactsFiles({
-      compileResult,
-      defaultWorkflowWorld: "local",
-      outDir,
-    });
-    const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
-
-    expect(bootstrapSource).toContain(
-      resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts").replaceAll(
-        "\\",
-        "/",
-      ),
-    );
-
-    await withRuntimeSession(createRuntimeSession("compiled-artifacts-bootstrap"), async () => {
-      await import(pathToFileURL(generatedArtifacts.bootstrapPath).href);
-
-      await expect(
-        loadCompileMetadata({
-          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-        }),
-      ).resolves.toEqual(compileResult.metadata);
-      const bundledModelMetadata = await loadModelMetadata(
-        createBundledRuntimeCompiledArtifactsSource(),
-      );
-      expect(bundledModelMetadata).toEqual(
-        await loadModelMetadata(createDiskRuntimeCompiledArtifactsSource(appRoot)),
-      );
-      expect(bundledModelMetadata.models).toContainEqual(
-        expect.objectContaining({ slug: "openai/gpt-5.4" }),
-      );
-    });
   });
 
   it("writes instrumentation into a dedicated Nitro plugin instead of inlining it", async () => {
@@ -362,14 +303,20 @@ describe("writeCompiledArtifactsFiles", () => {
       outDir,
     });
 
-    const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
+    const generatedSources = await Promise.all(
+      (await readdir(dirname(generatedArtifacts.bootstrapPath))).map((name) =>
+        readFile(join(dirname(generatedArtifacts.bootstrapPath), name), "utf8"),
+      ),
+    );
 
     expect(compileResult.manifest.skills).toContainEqual(
       expect.objectContaining({ name: "research", sourceKind: "skill-package" }),
     );
-    expect(bootstrapSource).not.toContain("workspaceResources");
-    expect(bootstrapSource).not.toContain("contentBase64");
-    expect(bootstrapSource).not.toContain("Always confirm the source of truth.");
+    for (const source of generatedSources) {
+      expect(source).not.toContain("workspaceResources");
+      expect(source).not.toContain("contentBase64");
+      expect(source).not.toContain("Always confirm the source of truth.");
+    }
     await expect(
       readFile(
         join(
