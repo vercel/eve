@@ -30,6 +30,7 @@ export function defaultTeamsAuth(
     activity_id: message.id,
     conversation_id: message.conversation.id,
     scope: message.scope,
+    service_url: message.serviceUrl,
     user_id: message.from.id,
   };
   if (message.from.name !== undefined) attributes.user_name = message.from.name;
