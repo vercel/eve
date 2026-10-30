@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CommitLine, ProgressLine, ValueReference } from "./envelope.js";
 import { encodeLineBytes, MAX_SESSION_LINE_BYTES } from "./envelope.js";
-import { exceedsLineLimit, previewOf, referenceLargeValues } from "./large-values.js";
+import { prepareLine, previewOf } from "./large-values.js";
 
 type Fact = { readonly type: string; readonly data: Record<string, unknown> };
 
@@ -32,14 +32,18 @@ function recordingStore() {
   return { staged, stage };
 }
 
-describe("referenceLargeValues", () => {
+describe("prepareLine", () => {
   it("leaves a line that already fits untouched", async () => {
     const { stage } = recordingStore();
     const line = commit([
       { type: "call.settled", data: { callId: "c1", outcome: "completed", output: "small" } },
     ]);
 
-    await expect(referenceLargeValues(line, stage)).resolves.toBe(line);
+    const prepared = await prepareLine(line, stage);
+    expect(prepared.line).toBe(line);
+    expect(prepared.oversized).toBe(false);
+    // The encode the caller needed anyway is the only cost on this path.
+    expect(prepared.bytes).toEqual(encodeLineBytes(line));
     expect(stage).not.toHaveBeenCalled();
   });
 
@@ -50,8 +54,9 @@ describe("referenceLargeValues", () => {
       { type: "call.settled", data: { callId: "c1", outcome: "completed", output } },
     ]);
 
-    const rewritten = (await referenceLargeValues(line, stage)) as CommitLine<Fact>;
+    const { bytes, line: rewritten, oversized } = await prepareLine(line, stage);
 
+    expect(oversized).toBe(false);
     expect(staged).toEqual([output]);
     expect(factData(rewritten, 0)).toEqual({
       callId: "c1",
@@ -63,8 +68,8 @@ describe("referenceLargeValues", () => {
         preview: previewOf(output),
       },
     });
-    // The whole point: the rewritten line is writable.
-    expect(() => encodeLineBytes(rewritten)).not.toThrow();
+    // The whole point: the rewritten line is writable, and its bytes come back ready.
+    expect(bytes).toEqual(encodeLineBytes(rewritten));
   });
 
   it("moves the largest value first, and stops once the line fits", async () => {
@@ -79,7 +84,7 @@ describe("referenceLargeValues", () => {
       },
     ]);
 
-    const rewritten = (await referenceLargeValues(line, stage)) as CommitLine<Fact>;
+    const { line: rewritten } = await prepareLine(line, stage);
 
     expect(stage).toHaveBeenCalledOnce();
     expect(staged[0]).toHaveLength(MAX_SESSION_LINE_BYTES);
@@ -102,7 +107,7 @@ describe("referenceLargeValues", () => {
       },
     ]);
 
-    const rewritten = (await referenceLargeValues(line, stage)) as CommitLine<Fact>;
+    const { line: rewritten } = await prepareLine(line, stage);
 
     expect(stage).toHaveBeenCalledTimes(2);
     expect(
@@ -128,7 +133,7 @@ describe("referenceLargeValues", () => {
       },
     ]);
 
-    const rewritten = (await referenceLargeValues(line, stage)) as CommitLine<Fact>;
+    const { line: rewritten } = await prepareLine(line, stage);
 
     expect(factData(rewritten, 0)).not.toHaveProperty("value");
     expect(factData(rewritten, 0)).toHaveProperty("valueRef");
@@ -149,12 +154,12 @@ describe("referenceLargeValues", () => {
       },
     ]);
 
-    const rewritten = await referenceLargeValues(line, stage);
+    const { line: rewritten, oversized } = await prepareLine(line, stage);
 
     expect(stage).not.toHaveBeenCalled();
     // Nothing left to move, so the line is returned as it stands and the caller's encode
     // refuses it — the honest outcome, not a silent truncation.
-    expect(exceedsLineLimit(rewritten)).toBe(true);
+    expect(oversized).toBe(true);
     expect(() => encodeLineBytes(rewritten)).toThrow(/Session commit is/);
   });
 
@@ -164,7 +169,9 @@ describe("referenceLargeValues", () => {
       { type: "call.progress", data: { callId: "c1", output: valueOf(MAX_SESSION_LINE_BYTES) } },
     ]);
 
-    expect(await referenceLargeValues(line, stage)).toBe(line);
+    const prepared = await prepareLine(line, stage);
+    expect(prepared.line).toBe(line);
+    expect(prepared.oversized).toBe(true);
     expect(stage).not.toHaveBeenCalled();
   });
 
@@ -179,8 +186,9 @@ describe("referenceLargeValues", () => {
       },
     };
 
-    expect(await referenceLargeValues(line, stage)).toBe(line);
-    expect(exceedsLineLimit(line)).toBe(true);
+    const prepared = await prepareLine(line, stage);
+    expect(prepared.line).toBe(line);
+    expect(prepared.oversized).toBe(true);
     expect(stage).not.toHaveBeenCalled();
   });
 });

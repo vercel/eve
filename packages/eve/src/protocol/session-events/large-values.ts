@@ -23,7 +23,7 @@ export type StageValue = (value: JsonValue, size: number) => Promise<ValueRefere
  *
  * A progress record has no `…Ref` slot and needs none: it is a preview a later fact completes, and
  * the envelope says any progress record may be missing, so an oversized one is dropped rather
- * than referenced (see {@link exceedsLineLimit}).
+ * than referenced: {@link prepareLine} reports it `oversized` and the publisher drops it.
  */
 const REFERENCEABLE_FIELDS: Readonly<Record<string, readonly [inline: string, ref: string]>> = {
   "call.requested": ["input", "inputRef"],
@@ -47,8 +47,8 @@ type AnyStoredLine = StoredLine<unknown, unknown>;
 
 const lineEncoder = new TextEncoder();
 
-function encodedSize(line: AnyStoredLine): number {
-  return lineEncoder.encode(encodeLine(line)).byteLength;
+function encodeBytes(line: AnyStoredLine): Uint8Array {
+  return lineEncoder.encode(encodeLine(line));
 }
 
 function jsonSize(value: unknown): number {
@@ -97,23 +97,35 @@ function withReference<TLine extends AnyStoredLine>(
   return { ...line, facts } as TLine;
 }
 
+/** A line as it will be written, with the bytes the caller writes and whether they fit. */
+export interface PreparedLine<TLine> {
+  readonly line: TLine;
+  readonly bytes: Uint8Array;
+  /** The bytes are still over {@link MAX_SESSION_LINE_BYTES}; nothing is left to move. */
+  readonly oversized: boolean;
+}
+
 /**
- * Rewrites `line` so it fits a stored line, moving its largest values out of line one at a time
- * until it does. Returns the line unchanged when it already fits, which is every commit but a
- * rare one, so the common path costs one encode.
+ * Encodes `line`, moving its largest values out of line one at a time until the result fits.
  *
- * Largest first because each move has to earn the round trip to the store: one 9 MiB tool result
- * is the whole problem, and moving a 200-byte label beside it would not have helped.
+ * The common path is one encode and no store access, which is what the encode the caller needed
+ * anyway would have cost: a line that already fits is returned with those exact bytes. Only a
+ * line over the limit pays for a move, and only for as many moves as it takes — largest first,
+ * because each has to earn its round trip to the store, and one 9 MiB tool result is the whole
+ * problem while a 200-byte label beside it would not have helped.
  *
- * A line still too large once every referenceable value has moved is returned as it stands; the
- * caller's encode then refuses it, as it did before. That is the honest outcome — the remaining
- * bulk is in fields the envelope has no reference slot for, so there is nothing left to move.
+ * A line still too large once every referenceable value has moved comes back `oversized`. That is
+ * the honest outcome: the remaining bulk is in fields the envelope has no reference slot for, so
+ * there is nothing left to move and the caller has to refuse it.
  */
-export async function referenceLargeValues<TLine extends AnyStoredLine>(
+export async function prepareLine<TLine extends AnyStoredLine>(
   line: TLine,
   stage: StageValue,
-): Promise<TLine> {
-  if (!exceedsLineLimit(line)) return line;
+): Promise<PreparedLine<TLine>> {
+  let bytes = encodeBytes(line);
+  if (bytes.byteLength <= MAX_SESSION_LINE_BYTES) {
+    return { line, bytes, oversized: false };
+  }
 
   let rewritten = line;
   for (const candidate of candidatesOf(line)) {
@@ -122,12 +134,10 @@ export async function referenceLargeValues<TLine extends AnyStoredLine>(
       size: candidate.size,
       preview: previewOf(candidate.value),
     });
-    if (!exceedsLineLimit(rewritten)) break;
+    bytes = encodeBytes(rewritten);
+    if (bytes.byteLength <= MAX_SESSION_LINE_BYTES) {
+      return { line: rewritten, bytes, oversized: false };
+    }
   }
-  return rewritten;
-}
-
-/** Whether `line` is too large for one stored line. */
-export function exceedsLineLimit(line: AnyStoredLine): boolean {
-  return encodedSize(line) > MAX_SESSION_LINE_BYTES;
+  return { line: rewritten, bytes, oversized: true };
 }

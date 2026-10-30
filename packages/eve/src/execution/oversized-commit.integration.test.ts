@@ -158,6 +158,32 @@ describe("committing a turn whose call returned an oversized result", () => {
     expect(written.lines.filter((line) => "progress" in line)).toHaveLength(1);
   });
 
+  it("still refuses a commit whose bulk is in a field with no reference slot", async () => {
+    // The honest outcome once there is nothing left to move: the commit is
+    // refused as it was before, and the error says why.
+    const written = capture();
+    const sandbox = mockSandbox();
+    const publisher = publisherFor(written, sandbox);
+
+    await expect(
+      publisher.emit([
+        ...turnFacts(undefined),
+        {
+          type: "content.completed",
+          data: {
+            partId: "p1",
+            runId: "r1",
+            kind: "text",
+            phase: "reply",
+            value: "ok",
+            fallbackText: "z".repeat(MAX_SESSION_LINE_BYTES),
+          },
+        },
+      ] as SessionEvent[]),
+    ).rejects.toThrow(/no reference slot/);
+    expect(written.lines).toHaveLength(0);
+  });
+
   it("leaves a commit that already fits byte for byte", async () => {
     const withSandbox = capture();
     const sandbox = mockSandbox();

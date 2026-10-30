@@ -59,9 +59,10 @@ import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.j
 import {
   encodeLineBytes,
   type FactPosition,
+  SessionLineTooLargeError,
   type StoredLine,
 } from "#protocol/session-events/envelope.js";
-import { exceedsLineLimit, referenceLargeValues } from "#protocol/session-events/large-values.js";
+import { prepareLine } from "#protocol/session-events/large-values.js";
 import { createSessionValueStore } from "#execution/session-value-store.js";
 import { FACT_CATALOG, isFactType } from "#protocol/session-events/catalog.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
@@ -569,12 +570,15 @@ export function openSessionEventPublisher(input: {
     // missing — so an oversized one is dropped instead, which keeps the facts around it writable.
     const lines: { line: StoredLine<SessionEvent, SessionEvent>; bytes: Uint8Array }[] = [];
     for (const original of linesOf(events, at)) {
-      const line = await referenceLargeValues(original, stageValue);
-      if ("progress" in line && exceedsLineLimit(line)) {
-        log.warn("dropping an oversized progress record", { type: progressTypeOf(line) });
-        continue;
+      const { bytes, line, oversized } = await prepareLine(original, stageValue);
+      if (oversized) {
+        if ("progress" in line) {
+          log.warn("dropping an oversized progress record", { type: progressTypeOf(line) });
+          continue;
+        }
+        throw new SessionLineTooLargeError(bytes.byteLength);
       }
-      lines.push({ line, bytes: encodeLineBytes(line) });
+      lines.push({ line, bytes });
     }
     lines.forEach(({ line }, index) => {
       const violations = checker?.check(line, nextLinePosition(ctx) + index);
