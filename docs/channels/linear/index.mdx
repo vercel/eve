@@ -56,9 +56,11 @@ Enable Agent Session events, subscribe to the `AgentSessionEvent` webhook catego
 
 The channel handles Agent Sessions but doesn't give the agent tools for Linear data. To let it search and edit issues, also add the Linear connection with `eve add connection/linear`.
 
-## Show progress in Linear
+## Default channel behavior
 
-When a turn starts, the session shows a `thought`. Each tool call shows an `action`, the final reply posts as a `response`, and failures post as an `error`. Questions and approvals post as an `elicitation`, and the person's reply answers them.
+The agent takes every Agent Session it's delegated or mentioned in. When a turn starts, the session shows a `thought`. Each tool call shows an `action`, the final reply posts as a `response`, and failures post as an `error`. Questions and approvals post as an `elicitation`, and the person's reply answers them.
+
+To choose which sessions start a turn, or post different activities, see [Custom hooks](/docs/channels/linear/reference#custom-hooks) and [Delivery](/docs/channels/linear/reference#delivery).
 
 ## Filter Agent Sessions
 

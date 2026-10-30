@@ -52,9 +52,11 @@ After deploying, create a Linq webhook for `https://your-agent.example/eve/v1/li
 </TabContent>
 </TabsWithChildren>
 
-## Respond to messages
+## Default channel behavior
 
-Every message continues the conversation's session, so the agent keeps the context of earlier messages. Images and other files people send reach the agent as files.
+The agent answers every message, as the person who sent it, and marks it as read. Messages in a conversation share one session, so the agent keeps the context of earlier messages. Images and other files people send reach the agent as files.
+
+To change which messages start a turn, see [Message hook](/docs/channels/linq/reference#message-hook). For how messages that arrive mid-turn are handled, see [Inbound messages](/docs/channels/linq/reference#inbound-messages).
 
 ## Filter messages
 

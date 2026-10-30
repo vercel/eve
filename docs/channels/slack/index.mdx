@@ -55,11 +55,15 @@ Portable credentials also work on Vercel when you manage the Slack app yourself.
 </TabContent>
 </TabsWithChildren>
 
-## Answer mentions and DMs
+## Default channel behavior
 
-With the generated channel file, the agent answers `@mentions` in any channel it has joined. To answer DMs too, add the `message.im` event and `im:history` scope to the Slack app and reinstall it. It replies in a thread under the message. Each thread is one session, so people continue the conversation by mentioning the agent again in that thread.
+With the generated channel file, the agent:
 
-While the agent works, the thread status shows what it's doing.
+- Answers `@mentions` in any channel it has joined, replying in a thread under the message. Each thread is one session, so people continue the conversation by mentioning the agent again in that thread.
+- Answers DMs once the Slack app has the `message.im` event and `im:history` scope.
+- Shows what it's doing in the thread status while it works.
+
+To change which messages start a turn, see [Message hooks](/docs/channels/slack/reference#message-hooks). To change the thread status and replies, see [Delivery](/docs/channels/slack/reference#delivery) and [Customize rendering](/docs/channels/slack/reference#customize-rendering).
 
 ## Reply without a mention
 

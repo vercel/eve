@@ -58,9 +58,11 @@ Point the App's webhook URL at `https://your-agent.example/eve/v1/github`, subsc
 </TabContent>
 </TabsWithChildren>
 
-## Respond to comments
+## Default channel behavior
 
 A new comment that includes `@my-agent` starts a turn. The token is plain text, not a GitHub mention, so GitHub may not autocomplete or link it. The agent reacts with 👀 when it starts, then replies on the issue or PR timeline, or in the review thread. Each later comment in that thread that includes `@my-agent` continues the same session.
+
+To change which comments start a turn, see [Dispatch](/docs/channels/github/reference#dispatch). To turn off the reaction or change how replies are posted, see [Delivery](/docs/channels/github/reference#delivery).
 
 ## Trigger on issues, pull requests, and CI
 

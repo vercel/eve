@@ -55,9 +55,15 @@ Point the bot's messaging endpoint at `https://your-agent.example/eve/v1/teams`.
 </TabContent>
 </TabsWithChildren>
 
+## Default channel behavior
+
+By default, the bot answers personal chats, and messages that mention it in group chats and channels. Each channel or group-chat thread is its own session, and replies post as Markdown in the conversation.
+
+To change which messages start a turn, see [Dispatch](/docs/channels/teams/reference#dispatch). To change how replies are sent, see [Delivery](/docs/channels/teams/reference#delivery).
+
 ## Reply without a mention
 
-By default, group chats and channels need a mention on every message. This `onMessage` also answers any conversation the agent is already part of:
+Group chats and channels need a mention on every message. This `onMessage` also answers any conversation the agent is already part of:
 
 ```ts title="agent/channels/teams.ts"
 import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
