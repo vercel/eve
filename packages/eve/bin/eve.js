@@ -3,7 +3,8 @@
 import { spawn } from "node:child_process";
 import { access, readdir, realpath, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { constants as osConstants } from "node:os";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -193,10 +194,50 @@ async function assertSupportedNodeVersion(
   throw new Error(
     [
       `eve requires Node.js ${requiredRange}.`,
-      `You are running ${version}.`,
-      "Please install a compatible Node.js version and try again.",
+      process.versions.bun === undefined
+        ? `You are running ${version}.`
+        : `Bun ${process.versions.bun} implements Node.js ${version}.`,
+      process.versions.bun === undefined
+        ? "Please install a compatible Node.js version and try again."
+        : "Please upgrade Bun and try again.",
     ].join(" "),
   );
+}
+
+/**
+ * Returns the Bun executable that launched this bin under Node, if any.
+ *
+ * `bunx eve` and `bun run` honor the `#!/usr/bin/env node` shebang, so a
+ * Bun-launched CLI would otherwise run in Node whenever Node is installed.
+ * Bun identifies itself through the npm-compatible launcher environment.
+ */
+export function resolveBunLauncher(env = process.env, versions = process.versions) {
+  if (versions.bun !== undefined) return undefined;
+  if (!env.npm_config_user_agent?.startsWith("bun/")) return undefined;
+  const execPath = env.npm_execpath;
+  return execPath !== undefined && /^bunx?(?:\.exe)?$/i.test(basename(execPath)) ? execPath : "bun";
+}
+
+/** Re-runs this bin in Bun and resolves with the exit code to mirror. */
+async function runInBun(bunExecutable, argv) {
+  const child = spawn(bunExecutable, [fileURLToPath(import.meta.url), ...argv], {
+    stdio: "inherit",
+  });
+  // The terminal delivers Ctrl-C to the whole process group; Bun owns shutdown.
+  const ignoreSignal = () => {};
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, ignoreSignal);
+  return await new Promise((resolveExit, rejectExit) => {
+    child.once("error", (error) =>
+      rejectExit(
+        new Error(`Failed to start eve with Bun at "${bunExecutable}": ${error.message}`, {
+          cause: error,
+        }),
+      ),
+    );
+    child.once("exit", (code, signal) =>
+      resolveExit(code ?? (signal === null ? 1 : 128 + (osConstants.signals[signal] ?? 0))),
+    );
+  });
 }
 
 function resolveTscCliPath({ tscCliPath }) {
@@ -351,7 +392,12 @@ async function isDirectExecution() {
 
 if (await isDirectExecution()) {
   try {
-    await runEveCli();
+    const bunLauncher = resolveBunLauncher();
+    if (bunLauncher === undefined) {
+      await runEveCli();
+    } else {
+      process.exitCode = await runInBun(bunLauncher, process.argv.slice(2));
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);

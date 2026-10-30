@@ -71,6 +71,15 @@ export function ensureBuiltCli(
 ): Promise<string>;
 
 /**
+ * Returns the Bun executable that launched this bin under Node (for example
+ * `bunx eve` honoring the `node` shebang), or `undefined` when no handoff is needed.
+ */
+export function resolveBunLauncher(
+  env?: Record<string, string | undefined>,
+  versions?: Record<string, string | undefined>,
+): string | undefined;
+
+/**
  * Runs the compiled eve CLI, building the workspace package on demand when needed.
  */
 export function runEveCli(

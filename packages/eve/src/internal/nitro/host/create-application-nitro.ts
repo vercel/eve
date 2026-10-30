@@ -11,6 +11,7 @@ import {
   hasVercelScheduleCollections,
   usesLocalVercelSchedules,
 } from "#internal/schedules/consumer-route.js";
+import { configureDevelopmentServerEntry } from "#internal/nitro/host/dev-server-entry.js";
 import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
@@ -786,6 +787,7 @@ export async function createDevelopmentApplicationNitro(
   await writeEveVersionedCacheMetadata(nitroBuildDir);
 
   const stepEntrypointPath = join(nitro.options.buildDir, "workflow", "steps.mjs");
+  configureDevelopmentServerEntry(nitro);
   configureSharedApplicationNitro(nitro, preparedHost);
   const clearStepTransformCaches = configureNitroStepPlugins(nitro, stepEntrypointPath);
   nitro.hooks.hook("dev:reload", () => {

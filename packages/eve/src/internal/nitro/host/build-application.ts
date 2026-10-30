@@ -57,6 +57,9 @@ import { isObject } from "#shared/guards.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
+/** Nitro picks `bun` over `node-server` when `eve build` runs in Bun; both are self-hosted servers. */
+const SELF_HOSTED_SERVER_PRESETS = new Set(["bun", "node-server"]);
+
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
 }
@@ -423,12 +426,11 @@ async function buildApplicationInWorkspace(
     await measureBuildPhase(profiler, "nitro.close", () => nitro.close());
   }
 
-  const deploymentId =
-    nitro.options.preset === "node-server"
-      ? await measureBuildPhase(profiler, "id.compute", () =>
-          stageBuildDeploymentId(workspace.publication.output.stagedDir),
-        )
-      : undefined;
+  const deploymentId = SELF_HOSTED_SERVER_PRESETS.has(nitro.options.preset)
+    ? await measureBuildPhase(profiler, "id.compute", () =>
+        stageBuildDeploymentId(workspace.publication.output.stagedDir),
+      )
+    : undefined;
 
   await measureBuildPhase(profiler, "output.publish", () =>
     publishCompletedApplicationBuild(workspace),

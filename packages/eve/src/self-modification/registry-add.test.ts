@@ -5,14 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LocalDevCapability } from "#public/local-dev.js";
 
-const { findPackageJSON, readFile } = vi.hoisted(() => ({
-  findPackageJSON: vi.fn(),
+const { findInstalledPackageJsonPath, readFile } = vi.hoisted(() => ({
+  findInstalledPackageJsonPath: vi.fn(),
   readFile: vi.fn(),
 }));
 
-vi.mock("node:module", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:module")>()),
-  findPackageJSON,
+vi.mock("#internal/application/optional-package-import.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/application/optional-package-import.js")>()),
+  findInstalledPackageJsonPath,
 }));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
@@ -127,7 +127,7 @@ beforeEach(() => {
     vi.fn(async () => new Response(JSON.stringify(INDEX), { status: 200 })),
   );
   // The eve bin is resolved from the app's own dependency graph, never PATH.
-  findPackageJSON.mockReturnValue(`${APP_ROOT}/node_modules/eve/package.json`);
+  findInstalledPackageJsonPath.mockReturnValue(`${APP_ROOT}/node_modules/eve/package.json`);
   readFile.mockResolvedValue(JSON.stringify({ name: "eve", bin: { eve: "./bin/eve.js" } }));
 });
 

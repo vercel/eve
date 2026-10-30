@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ensureBuiltCli, runEveCli } from "../bin/eve.js";
+import { ensureBuiltCli, resolveBunLauncher, runEveCli } from "../bin/eve.js";
 
 const bootstrapOptions = {
   cliEntrypointPath: "/workspace/packages/eve/dist/src/cli/run.js",
@@ -248,5 +248,40 @@ describe("eve CLI bootstrap", () => {
         runCommand,
       }),
     ).rejects.toThrow(`Building eve did not produce ${bootstrapOptions.cliEntrypointPath}.`);
+  });
+
+  it.each([
+    {
+      name: "hands bunx off to the Bun binary that launched it",
+      env: {
+        npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0",
+        npm_execpath: "/u/.bun/bin/bun",
+      },
+      versions: {},
+      expected: "/u/.bun/bin/bun",
+    },
+    {
+      name: "falls back to bun on PATH when the launcher path is not Bun",
+      env: { npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0", npm_execpath: "/u/pnpm.cjs" },
+      versions: {},
+      expected: "bun",
+    },
+    {
+      name: "stays put when already running in Bun",
+      env: {
+        npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0",
+        npm_execpath: "/u/.bun/bin/bun",
+      },
+      versions: { bun: "1.4.4" },
+      expected: undefined,
+    },
+    {
+      name: "stays in Node for other package managers",
+      env: { npm_config_user_agent: "npm/11.0.0 node/v24.0.0", npm_execpath: "/u/npm-cli.js" },
+      versions: {},
+      expected: undefined,
+    },
+  ])("$name", ({ env, versions, expected }) => {
+    expect(resolveBunLauncher(env, versions)).toBe(expected);
   });
 });

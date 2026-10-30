@@ -18,6 +18,12 @@ The build writes the Nitro server under `.output/`. `eve start` serves that outp
 
 Run this process under the same process manager or container platform you use for other Node web services. Configure Transport Layer Security (TLS), scaling, restarts, and log collection in that platform.
 
+### Run with Bun
+
+eve runs in the runtime that launches it. `bunx eve dev`, `bunx eve build`, `bunx eve start`, and `bun run` scripts that call `eve` run the CLI, dev server, and built server in Bun; you don't need `--bun`.
+
+When `eve build` runs in Bun, it writes Nitro's Bun server output, which serves requests with `Bun.serve`. Start that output with Bun, and build with Node when you deploy to a Node host.
+
 ## Configure model access and route auth
 
 Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.

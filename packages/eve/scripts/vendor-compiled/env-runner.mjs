@@ -7,7 +7,7 @@ const EVE_SHUTDOWN_SOURCE =
 const ENV_RUNNER_EXIT_SOURCE = 'parentPort?.postMessage({ event: "exit" });';
 const EVE_EXIT_SOURCE = `${ENV_RUNNER_EXIT_SOURCE}\n      parentPort?.close();`;
 
-function createGracefulNodeWorkerShutdownPlugin() {
+export function createGracefulNodeWorkerShutdownPlugin() {
   let patched = false;
 
   return {

@@ -1,10 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { findPackageJSON } from "node:module";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { z } from "#compiled/zod/index.js";
+import { findInstalledPackageJsonPath } from "#internal/application/optional-package-import.js";
 import { createProcessOutputBuffer } from "#setup/primitives/process-output.js";
 import type { Prompter, PrompterValue } from "#setup/prompter.js";
 import {
@@ -197,10 +196,7 @@ export async function runRegistrySetupCommand(
   item: string,
   options?: RegistrySetupCommandOptions,
 ): Promise<RegistrySetupCommandResult> {
-  const packageJsonPath = findPackageJSON(
-    setup.package,
-    pathToFileURL(resolve(appRoot, "package.json")),
-  );
+  const packageJsonPath = findInstalledPackageJsonPath({ appRoot, packageName: setup.package });
   if (packageJsonPath === undefined) {
     throw new Error(
       `Setup package "${setup.package}" is not installed. Run \`eve add ${item}\` first.`,

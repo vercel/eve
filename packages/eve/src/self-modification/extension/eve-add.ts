@@ -1,8 +1,8 @@
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { findPackageJSON } from "node:module";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+
+import { findInstalledPackageJsonPath } from "#internal/application/optional-package-import.js";
 
 /**
  * An install runs the project's package manager, which is slow but not
@@ -81,7 +81,7 @@ function isChildTreeAlive(child: ReturnType<SpawnLike>): boolean {
  * never a `PATH` lookup. A `PATH` hit could be any version, or not eve at all.
  */
 export async function resolveEveExecutable(appRoot: string): Promise<string> {
-  const packageJsonPath = findPackageJSON("eve", pathToFileURL(resolve(appRoot, "package.json")));
+  const packageJsonPath = findInstalledPackageJsonPath({ appRoot, packageName: "eve" });
   if (packageJsonPath === undefined) {
     throw new Error(
       `The "eve" package is not installed under ${appRoot}, so registry items cannot be installed from here.`,

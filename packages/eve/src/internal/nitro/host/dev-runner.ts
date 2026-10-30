@@ -37,7 +37,11 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
   #workerHasExited = false;
 
   constructor(input: DevelopmentRunnerInput) {
-    const workerEntry = resolvePackageCompiledFilePath("src/compiled/env-runner/node-worker.js");
+    const workerEntry = resolvePackageCompiledFilePath(
+      process.versions.bun === undefined
+        ? "src/compiled/env-runner/node-worker.js"
+        : "src/compiled/env-runner-bun-worker/index.js",
+    );
     super({
       data: {
         entry: input.entry,

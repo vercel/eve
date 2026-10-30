@@ -47,6 +47,7 @@ import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
+import envRunnerBunWorker from "./env-runner-bun-worker.mjs";
 import jose from "./jose.mjs";
 import jsYaml from "./js-yaml.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
@@ -74,6 +75,7 @@ export const MODULES = [
   commander,
   eventsourceParserStream,
   envRunner,
+  envRunnerBunWorker,
   eveCatalog,
   google,
   jose,

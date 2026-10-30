@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Imports an optional engine from the application without installing it. */
@@ -69,23 +69,36 @@ function findInstalledPackageRoot(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): string {
+  const packageJsonPath = findInstalledPackageJsonPath(input);
+  if (packageJsonPath === undefined) {
+    throw new Error(
+      `Could not find installed optional dependency "${input.packageName}" in any node_modules directory from ${input.appRoot} upward.`,
+    );
+  }
+  return dirname(packageJsonPath);
+}
+
+/**
+ * Finds an installed package's `package.json` by walking `node_modules` from
+ * `appRoot` upward. Unlike `require.resolve("<name>/package.json")`, this works
+ * for packages whose `exports` map hides `package.json`, and unlike
+ * `module.findPackageJSON` it works in every supported runtime, including Bun.
+ */
+export function findInstalledPackageJsonPath(input: {
+  readonly appRoot: string;
+  readonly packageName: string;
+}): string | undefined {
   const packagePathSegments = input.packageName.split("/");
-  const checkedPaths: string[] = [];
-  let current = input.appRoot;
+  let current = resolve(input.appRoot);
 
   for (;;) {
-    const packageRoot = join(current, "node_modules", ...packagePathSegments);
-    checkedPaths.push(packageRoot);
-    if (existsSync(join(packageRoot, "package.json"))) {
-      return packageRoot;
+    const packageJsonPath = join(current, "node_modules", ...packagePathSegments, "package.json");
+    if (existsSync(packageJsonPath)) {
+      return packageJsonPath;
     }
 
     const parent = dirname(current);
-    if (parent === current) {
-      throw new Error(
-        `Could not find installed optional dependency "${input.packageName}". Checked: ${checkedPaths.join(", ")}`,
-      );
-    }
+    if (parent === current) return undefined;
     current = parent;
   }
 }

@@ -8,14 +8,16 @@ import type { Prompter } from "#setup/prompter.js";
 import { REGISTRY_SETUP_PROTOCOL_VERSION } from "#setup/registry-setup-protocol.js";
 import { runRegistrySetupCommand } from "./registry-setup-command.js";
 
-const { findPackageJSON, readFile, spawn } = vi.hoisted(() => ({
-  findPackageJSON: vi.fn(),
+const { findInstalledPackageJsonPath, readFile, spawn } = vi.hoisted(() => ({
+  findInstalledPackageJsonPath: vi.fn(),
   readFile: vi.fn(),
   spawn: vi.fn(),
 }));
 
 vi.mock("node:fs/promises", () => ({ readFile }));
-vi.mock("node:module", () => ({ findPackageJSON }));
+vi.mock("#internal/application/optional-package-import.js", () => ({
+  findInstalledPackageJsonPath,
+}));
 vi.mock("node:child_process", () => ({ spawn }));
 
 function createPrompter(): Prompter {
@@ -57,7 +59,7 @@ const options = () => ({ prompter: createPrompter() });
 describe("runRegistrySetupCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    findPackageJSON.mockReturnValue("/project/node_modules/@acme/slack/package.json");
+    findInstalledPackageJsonPath.mockReturnValue("/project/node_modules/@acme/slack/package.json");
     readFile.mockResolvedValue(
       JSON.stringify({
         name: "@acme/slack",
@@ -340,7 +342,7 @@ describe("runRegistrySetupCommand", () => {
   });
 
   it("does not download a missing setup package", async () => {
-    findPackageJSON.mockReturnValue(undefined);
+    findInstalledPackageJsonPath.mockReturnValue(undefined);
 
     await expect(
       runRegistrySetupCommand(
