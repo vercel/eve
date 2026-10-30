@@ -3,14 +3,17 @@
  *
  * Mapping (see research/a2a-channel.md):
  * - no `contextId`, no `taskId`  -> create an owner-bound session (a new context) and its first task
- * - `contextId` only             -> a new task in that session, queued behind any running turn
- * - `taskId` of a live task      -> join the task's turn: steer it while working, answer it while
- *                                  interrupted (typed text, or eve's interactions data part)
+ * - `contextId` only             -> a new task in that session: a turn of its own, queued behind any
+ *                                  running turn and never merged into one
+ * - `taskId` of a working task   -> steer the task's turn, and only that turn
+ * - `taskId` of an input-required task -> answer the task's first open question, matched here
  *
  * Every message is delivered under an idempotency key derived from its owner and `messageId`, and
- * as a delivery ID derived from that key, so a retried message is the same delivery and the same
- * task, never a second one.
+ * as a delivery ID that encodes the `messageId`, so a retried message is the same delivery and the
+ * same task, never a second one.
  */
+import { answerFromText } from "#channel/resolve-text.js";
+import type { InternalChannelAddressDeliveryOptions } from "#channel/channel-address.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
@@ -25,6 +28,8 @@ import {
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import { parseAnswer } from "#shared/input.js";
 import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
 import {
@@ -51,12 +56,15 @@ import {
   type Task,
 } from "./protocol.js";
 import {
+  answerTurnedDown,
   compareContextTasks,
   contextTasks,
   followSessionView,
   hasDelivery,
   hasRead,
+  openPromptsForTurn,
   projectTask,
+  reachedTask,
   readSessionView,
   type ProjectTaskOptions,
 } from "./task-projection.js";
@@ -301,8 +309,11 @@ export class A2aTaskExecution {
     await this.#options.from(token).send(this.#content(message), {
       ...delivery,
       auth: call.auth,
-      // A new task waits for the running one instead of steering into it.
+      // A new task waits for the running one instead of steering into it, and runs as a turn of
+      // its own: eve otherwise merges one person's queued messages into one turn, and lets a
+      // message steer a turn that waits on that person.
       turnPolicy: "queue",
+      turnTarget: null,
     } as DeliveryOptions);
     return sent;
   }
@@ -316,7 +327,7 @@ export class A2aTaskExecution {
     if (message.contextId !== undefined && message.contextId !== ref.sessionId) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "contextId does not match taskId.");
     }
-    const sent = { deliveryId: delivery.deliveryId, ref };
+    const sent: SentDelivery = { deliveryId: delivery.deliveryId, followUp: true, ref };
     const view = await readSessionView(ref.sessionId);
     if (hasDelivery(view, delivery.deliveryId)) return sent;
     const task = projectTask(view, ref, { historyLength: 0 });
@@ -327,18 +338,66 @@ export class A2aTaskExecution {
       );
     }
     if (isEndedRun(run.status)) throw contextEnded();
+    const turnId = view.deliveries[ref.deliveryId]?.turnId;
+    // Queued behind another task, this one has no turn yet: steering now would reach the other
+    // task's turn instead.
+    if (turnId === undefined) {
+      throw new A2aError(
+        A2A_JSON_RPC_ERRORS.unsupportedOperation,
+        "Task hasn't started yet; send follow-ups once it is working.",
+      );
+    }
     const answering = isSettledForBlocking(task.status.state)
       ? { ...sent, answering: statusKey(task) }
       : sent;
 
-    // Working: refine the running turn. Interrupted: eve's typed-answer intake resolves the text
-    // against the first open prompt (option id, label, or number), as on any text channel.
+    if (task.status.state === "TASK_STATE_INPUT_REQUIRED") {
+      // Answer this task's own first question. eve's typed-answer intake would match the text
+      // against the session's first open prompt, which can belong to another turn, and would
+      // pass text that matches no option through as a message the waiting turn never reads.
+      const answer = this.#answerFor(view, turnId, message);
+      await this.#options.from(token).respond([parseAnswer(answer)], {
+        ...delivery,
+        auth: call.auth,
+      } as RespondOptions);
+      return answering;
+    }
+
+    // Working, or waiting on a sign-in: refine the task's turn. `turnTarget` keeps the message out
+    // of any other turn: if this one ends first, the message starts a task of its own.
     await this.#options.from(token).send(this.#content(message), {
       ...delivery,
       auth: call.auth,
       turnPolicy: "steer",
+      turnTarget: turnId,
     } as DeliveryOptions);
     return answering;
+  }
+
+  /** The answer a typed message gives the first question `turnId` waits on. */
+  #answerFor(view: SessionView, turnId: string, message: Message) {
+    const prompt = openPromptsForTurn(view, turnId).find((row) => row.request.kind !== "sign-in");
+    if (prompt === undefined) {
+      throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "Task has no open question.");
+    }
+    if (message.parts.some((part) => part.text === undefined)) {
+      throw new A2aError(
+        A2A_JSON_RPC_ERRORS.invalidParams,
+        "Answer an open question with text parts only.",
+      );
+    }
+    const text = message.parts.map((part) => part.text).join("\n");
+    const answer = answerFromText(text, prompt);
+    if (answer === undefined) {
+      const options = (prompt.request.options ?? []).map(
+        (option, index) => `${index + 1}. ${option.label}`,
+      );
+      throw new A2aError(
+        A2A_JSON_RPC_ERRORS.invalidParams,
+        `The answer matches none of the question's options. Reply with one of: ${options.join(", ")}.`,
+      );
+    }
+    return answer;
   }
 
   async #ownedTask(taskId: string, auth: SessionAuthContext | null) {
@@ -373,12 +432,18 @@ export class A2aTaskExecution {
   ): AsyncGenerator<{ readonly task: Task; readonly read: boolean }, void, undefined> {
     try {
       for await (const view of followSessionView(sent.ref.sessionId, signal)) {
-        const task = projectTask(view, sent.ref, options);
+        const ref =
+          sent.followUp === true ? reachedTask(view, sent.ref, sent.deliveryId) : sent.ref;
+        const task = projectTask(view, ref, options);
         // A message can be consumed a line before the prompt it answers settles: until the
-        // status moves past that prompt, the session hasn't acted on the message yet.
+        // status moves past that prompt, the session hasn't acted on the message yet. An answer
+        // the session turned down leaves the prompt open, so it counts as read once settled.
         const read =
           hasRead(view, sent.deliveryId) &&
-          (sent.answering === undefined || statusKey(task) !== sent.answering);
+          (sent.answering === undefined ||
+            ref !== sent.ref ||
+            statusKey(task) !== sent.answering ||
+            answerTurnedDown(view, sent.deliveryId));
         yield { read, task };
       }
     } catch (error) {
@@ -400,9 +465,12 @@ export class A2aTaskExecution {
   ): AsyncGenerator<StreamResponse, void, undefined> {
     const contextId = sent.ref.sessionId;
     let last: string | undefined;
+    let taskId: string | undefined;
     for await (const { read, task } of this.#follow(sent, options, signal)) {
       const key = statusKey(task);
-      if (last === undefined) {
+      // A follow-up that started a task of its own streams that task from its snapshot.
+      if (last === undefined || task.id !== taskId) {
+        taskId = task.id;
         yield { task };
       } else if (key !== last) {
         if (task.status.state === "TASK_STATE_COMPLETED") {
@@ -431,12 +499,18 @@ interface DeliveryKeys {
 interface SentDelivery {
   readonly ref: TaskRef;
   readonly deliveryId: string;
+  /** It continued `ref` from outside: it may have started a task of its own instead. */
+  readonly followUp?: boolean;
   /** The interrupted status (`statusKey`) the message answers, when it continued one. */
   readonly answering?: string;
 }
 
-/** `from().send()` options plus the delivery ID only framework channels pass. */
-type DeliveryOptions = Parameters<ReturnType<ChannelFrom>["send"]>[1];
+/** `from().send()` options plus the ones only framework channels pass. */
+type DeliveryOptions = Parameters<ReturnType<ChannelFrom>["send"]>[1] &
+  InternalChannelAddressDeliveryOptions;
+/** `from().respond()` options plus the delivery ID only framework channels pass. */
+type RespondOptions = Parameters<ReturnType<ChannelFrom>["respond"]>[1] &
+  InternalChannelAddressDeliveryOptions;
 
 function refFor(sessionId: string, delivery: DeliveryKeys): TaskRef {
   return { deliveryId: delivery.deliveryId, sessionId };
