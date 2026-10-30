@@ -79,7 +79,15 @@ export function mergeSnapshot(existing, section, generatedAt) {
 }
 
 /** GraphQL body for a GitHub-signed commit of the snapshot onto `expectedHeadOid`. */
-export function commitPayload({ repository, branch, expectedHeadOid, path, contents, runUrl }) {
+export function commitPayload({
+  repository,
+  branch,
+  expectedHeadOid,
+  path,
+  contents,
+  runUrl,
+  headline = "docs: refresh eve-code benchmark results",
+}) {
   return {
     query:
       "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { url } } }",
@@ -88,7 +96,7 @@ export function commitPayload({ repository, branch, expectedHeadOid, path, conte
         branch: { repositoryNameWithOwner: repository, branchName: branch },
         expectedHeadOid,
         message: {
-          headline: "docs: refresh eve-code benchmark results",
+          headline,
           body: `From ${runUrl}\n\nSigned-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`,
         },
         fileChanges: { additions: [{ path, contents: Buffer.from(contents).toString("base64") }] },
@@ -99,15 +107,18 @@ export function commitPayload({ repository, branch, expectedHeadOid, path, conte
 
 async function main(args) {
   if (args[0] === "--commit-payload") {
-    const path = args[1];
+    // The Authoring Benchmark site job reuses this with its own headline and
+    // BRANCH, a PR branch.
+    const [, path, headline] = args;
     const env = process.env;
     const payload = commitPayload({
       repository: env.GITHUB_REPOSITORY,
-      branch: "main",
+      branch: env.BRANCH || "main",
       expectedHeadOid: env.HEAD_OID,
       path,
       contents: await readFile(path),
       runUrl: `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
+      headline,
     });
     process.stdout.write(JSON.stringify(payload));
     return;
