@@ -30,7 +30,7 @@ Keep the generated `app/_components/agent-chat.tsx` and `agent-message.tsx` comp
 
 The generated UI displays tool results and errors, authorization links, approval buttons, and question forms. The spend approval from [Guard the spend](./guard-the-spend) needs those controls to resume a waiting turn, so a component that renders only text leaves it stuck.
 
-Run `npm run dev`, open the local web URL the server prints, and ask for an unfiltered revenue query. Confirm that the approval appears and that approving it lets the query finish. To customize the UI afterward, see [Frontend](../guides/frontend/overview).
+Run `npm run dev`, open the local web URL the server prints, and ask for an unfiltered revenue query. Confirm that the approval appears and that approving it lets the query finish. To customize the UI afterward, see [Frontend](/docs/guides/frontend).
 
 ## Replace `placeholderAuth`
 
@@ -105,7 +105,7 @@ npx vercel@latest env add ANALYTICS_USERNAME preview
 npx vercel@latest env add ANALYTICS_PASSWORD preview
 ```
 
-Before deploying, configure your model credential in the project's Preview environment, because deployment doesn't upload local `.env` values. If you used a local ChatGPT subscription, which stays on your laptop, switch `agent/agent.ts` to an AI Gateway model and configure `AI_GATEWAY_API_KEY`. See [Deployment](../guides/deployment/overview) for model and runtime configuration.
+Before deploying, configure your model credential in the project's Preview environment, because deployment doesn't upload local `.env` values. If you used a local ChatGPT subscription, which stays on your laptop, switch `agent/agent.ts` to an AI Gateway model and configure `AI_GATEWAY_API_KEY`. See [Deployment](/docs/guides/deployment) for model and runtime configuration.
 
 ```bash
 npx vercel@latest deploy
@@ -143,4 +143,4 @@ Across the eight steps you built and shipped one agent using:
 - [Dynamic capabilities](../guides/dynamic-capabilities) for schema-derived dynamic tools, a read-only analyst subagent, and model-authored report workflows on this same example.
 - [Authentication](../guides/auth-and-route-protection) for production auth patterns.
 
-Learn more: [Frontend](../guides/frontend/overview) · [Authentication](../guides/auth-and-route-protection) · [Deployment](../guides/deployment/overview)
+Learn more: [Frontend](/docs/guides/frontend) · [Authentication](../guides/auth-and-route-protection) · [Deployment](/docs/guides/deployment)

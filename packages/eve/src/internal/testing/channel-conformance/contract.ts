@@ -1136,7 +1136,7 @@ const callerRules = [
 const attachmentRules = [
   {
     rule: "an image a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     variesByConversation: true,
     async run(conversation) {
@@ -1145,7 +1145,7 @@ const attachmentRules = [
   },
   {
     rule: "a PDF a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       await expectFileReachesAgent(conversation, REPORT);
@@ -1168,7 +1168,7 @@ const attachmentRules = [
   },
   {
     rule: "a file sent earlier in the conversation is still there on a later message",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       const text = `Alice attached ${DIAGRAM.name}.`;

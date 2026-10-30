@@ -324,9 +324,9 @@ An answered `ctx.ask()` returns `responder`, when available: the signed-in respo
 
 ## Answering from a client or channel
 
-Every [channel](/docs/channels/overview) turns requests into native UI and sends the user's choice back as the answer. Slack, for example, shows approvals as buttons and questions as select menus.
+Every [channel](/docs/channels) turns requests into native UI and sends the user's choice back as the answer. Slack, for example, shows approvals as buttons and questions as select menus.
 
-In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. A request stays `open` until its `interaction.settled` event, and you can answer while other work runs. See [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts).
+In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. A request stays `open` until its `interaction.settled` event, and you can answer while other work runs. See [Building a frontend](/docs/guides/frontend#human-in-the-loop-prompts).
 
 ## How pause and resume works
 
@@ -386,5 +386,5 @@ Text-only channels show one request at a time, in this order, so a reply answers
 - [Tools](/docs/tools): define the typed actions an approval gates
 - [Built-in tools](/docs/concepts/built-in-tools): the default tools and opt-in tools such as `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
-- [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
+- [Building a frontend](/docs/guides/frontend): render and answer requests from your own UI
 - [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools

@@ -23,7 +23,7 @@ Eval assertions match v27 events and read session state from `view`. Rename the 
 | Action matchers                                                  | `turn.waitForToolCall()`                                      |
 | `remoteUrl` field and matcher                                    | Removed                                                       |
 
-See [Evals](/docs/evals/overview).
+See [Evals](/docs/evals).
 
 ## CLI
 

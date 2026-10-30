@@ -196,7 +196,7 @@ const answers = parseAnswers(decodedResponses);
 await source.respond(answers, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](./overview#overlapping-messages). A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
@@ -656,7 +656,7 @@ Keep each route's `method` and `path` unless you mean to move the endpoint.
 
 ## What to read next
 
-- [Channels overview](./overview)
+- [Channels overview](/docs/channels)
 - [Dynamic capabilities](../guides/dynamic-capabilities)
 - [Auth & route protection](../guides/auth-and-route-protection)
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn

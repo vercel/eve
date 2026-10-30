@@ -470,7 +470,7 @@ Without `--url`, `eve eval` starts its own local server on a free port with stat
 | `--keep-state`           | flag   | off     | Keep the local eval server's state after the run (not `--url`) |
 | `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout            |
 
-See [Evals](/docs/evals/overview) for authoring evals.
+See [Evals](/docs/evals) for authoring evals.
 
 ## Recommended loop
 
@@ -484,4 +484,4 @@ See [Evals](/docs/evals/overview) for authoring evals.
 
 - [Agent Files](/docs/reference/agent-files): what `eve info` discovers
 - [Instrumentation](/docs/observability/instrumentation): tracing and the error catalog
-- [Deployment](/docs/guides/deployment/overview): `eve build` and `eve start` in production
+- [Deployment](/docs/guides/deployment): `eve build` and `eve start` in production

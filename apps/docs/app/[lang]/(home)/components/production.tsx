@@ -303,7 +303,7 @@ const PRIMARY: {
   {
     title: "Agent chat on every channel",
     text: "Multiplayer and single-player chat across Slack, Teams, iMessage, WhatsApp, and the web. Channels are a framework primitive.",
-    href: "/docs/channels/overview",
+    href: "/docs/channels",
     icon: <IconMessage aria-hidden size={16} />,
     visual: <ChannelRadar />,
   },
@@ -346,7 +346,7 @@ const SECONDARY: { title: string; text: string; href: string; icon: ReactNode }[
     title: "Evals",
     icon: <IconCheck size={16} />,
     text: "Test agent behavior before and after every change.",
-    href: "/docs/evals/overview",
+    href: "/docs/evals",
   },
   {
     title: "Connections & subagents",

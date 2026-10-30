@@ -298,7 +298,7 @@ function checkRepositoryMarkdownLinks(absPath) {
 }
 
 function checkChannelHubLinks(rootDir) {
-  const hubPath = resolve(rootDir, "channels/overview.mdx");
+  const hubPath = resolve(rootDir, "channels/index.mdx");
   const source = readFileSync(hubPath, "utf8");
   const linkedRoutes = new Set();
   const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
@@ -307,18 +307,18 @@ function checkChannelHubLinks(rootDir) {
   while ((match = linkRe.exec(source)) !== null) {
     const target = match[1].trim().split("#")[0].split("?")[0];
     if (!target || (!target.startsWith("./") && !target.startsWith("/docs/"))) continue;
-    linkedRoutes.add(new URL(target, "https://eve.dev/docs/channels/overview").pathname);
+    linkedRoutes.add(new URL(target, "https://eve.dev/docs/channels").pathname);
   }
 
   const meta = loadMetaJson(resolve(rootDir, "channels"));
   for (const slug of meta?.pages ?? []) {
-    if (typeof slug !== "string" || slug === "overview") continue;
+    if (typeof slug !== "string") continue;
     const expected = `/docs/channels/${slug}`;
     if (linkedRoutes.has(expected)) continue;
 
     failures.push({
       root: "docs",
-      file: "channels/overview.mdx",
+      file: "channels/index.mdx",
       issue: `channel hub does not link to canonical child route \`${expected}\``,
     });
   }
